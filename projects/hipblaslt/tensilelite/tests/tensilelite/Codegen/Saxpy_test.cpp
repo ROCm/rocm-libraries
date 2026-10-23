@@ -19,40 +19,45 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace {
-
 using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
-constexpr int workgroupSize = 256;
-constexpr int elementCount = 4099;
-constexpr int padding = 64;
-constexpr float scale = 2.5f;
-constexpr float sentinel = -1234.5f;
-constexpr const char *kernelName = "codegen_saxpy";
+static constexpr int32_t workgroupSize = 256;
+static constexpr int32_t elementCount = 4099;
+static constexpr int32_t padding = 64;
+static constexpr float scale = 2.5f;
+static constexpr float sentinel = -1234.5f;
+static constexpr const char *kernelName = "codegen_saxpy";
+
+namespace {
 
 // Byte offsets of the arguments in the kernarg segment.
 struct SaxpyOffsets {
-  int x;
-  int y;
-  int a;
-  int n;
+  int32_t x;
+  int32_t y;
+  int32_t a;
+  int32_t n;
 };
 
-SaxpyOffsets declareArguments(KernelSignature &signature) {
-  int x = signature.addPointer("x");
-  int y = signature.addPointer("y");
-  int a = signature.addScalar("a", 4);
-  int n = signature.addScalar("n", 4);
+} // namespace
+
+static SaxpyOffsets declareArguments(KernelSignature &signature) {
+  int32_t x = signature.addPointer("x");
+  int32_t y = signature.addPointer("y");
+  int32_t a = signature.addScalar("a", 4);
+  int32_t n = signature.addScalar("n", 4);
   return {x, y, a, n};
 }
+
+namespace {
 
 // Kernel arguments loaded into SGPRs.
 struct SaxpyArguments {
@@ -60,7 +65,9 @@ struct SaxpyArguments {
   RegisterRange scalars;  // a, then n.
 };
 
-SaxpyArguments loadArguments(Kernel &kernel, const SaxpyOffsets &offsets) {
+} // namespace
+
+static SaxpyArguments loadArguments(Kernel &kernel, SaxpyOffsets offsets) {
   // One wide load per group relies on the arguments being adjacent.
   if (offsets.y != offsets.x + 8 || offsets.n != offsets.a + 4)
     throw std::logic_error("saxpy arguments are not contiguous");
@@ -76,8 +83,8 @@ SaxpyArguments loadArguments(Kernel &kernel, const SaxpyOffsets &offsets) {
   return SaxpyArguments{std::move(pointers), std::move(scalars)};
 }
 
-void emitElementUpdate(Kernel &kernel, const SaxpyArguments &args,
-                       const RegisterRange &globalId) {
+static void emitElementUpdate(Kernel &kernel, const SaxpyArguments &args,
+                              const RegisterRange &globalId) {
   IRBuilder &builder = kernel.builder();
   RegisterRange byteOffset = builder.allocateVgpr(1);
   RegisterRange vx = builder.allocateVgpr(1);
@@ -96,7 +103,7 @@ void emitElementUpdate(Kernel &kernel, const SaxpyArguments &args,
                                          args.pointers.sub(2, 2));
 }
 
-void buildSaxpy(Kernel &kernel, const SaxpyOffsets &offsets) {
+static void buildSaxpy(Kernel &kernel, SaxpyOffsets offsets) {
   IRBuilder &builder = kernel.builder();
   SaxpyArguments args = loadArguments(kernel, offsets);
   RegisterRange globalId = computeGlobalId(kernel);
@@ -115,33 +122,34 @@ void buildSaxpy(Kernel &kernel, const SaxpyOffsets &offsets) {
   builder.createEndProgram();
 }
 
-std::vector<float> makeX(int n) {
+static std::vector<float> makeX(int32_t n) {
   std::vector<float> x(n);
-  for (int i = 0; i < n; ++i)
+  for (int32_t i = 0; i < n; ++i)
     x[i] = 0.25f * static_cast<float>(i % 97) - 3.0f +
            1.0f / static_cast<float>(i + 1);
   return x;
 }
 
 // Elements past n are sentinels that the kernel must leave untouched.
-std::vector<float> makeY(int n, int paddingCount) {
+static std::vector<float> makeY(int32_t n, int32_t paddingCount) {
   std::vector<float> y(n + paddingCount, sentinel);
-  for (int i = 0; i < n; ++i)
+  for (int32_t i = 0; i < n; ++i)
     y[i] = 1.5f - 0.125f * static_cast<float>(i % 31) +
            1.0f / static_cast<float>(i + 3);
   return y;
 }
 
-std::vector<float> computeExpected(const std::vector<float> &x,
-                                   const std::vector<float> &y) {
+static std::vector<float> computeExpected(const std::vector<float> &x,
+                                          const std::vector<float> &y) {
   std::vector<float> expected = y;
-  for (int i = 0; i < std::ssize(x); ++i)
+  for (int32_t i = 0; i < std::ssize(x); ++i)
     expected[i] = std::fma(scale, x[i], y[i]);
   return expected;
 }
 
-std::vector<std::byte> makeKernarg(int segmentSize, const SaxpyOffsets &offsets,
-                                   const void *x, const void *y) {
+static std::vector<std::byte> makeKernarg(int32_t segmentSize,
+                                          SaxpyOffsets offsets, const void *x,
+                                          const void *y) {
   std::vector<std::byte> kernarg(segmentSize);
   writeArgument(kernarg, offsets.x, x);
   writeArgument(kernarg, offsets.y, y);
@@ -151,9 +159,9 @@ std::vector<std::byte> makeKernarg(int segmentSize, const SaxpyOffsets &offsets,
 }
 
 // Uploads the inputs, launches the kernel and downloads y.
-void runSaxpy(const std::vector<uint8_t> &hsaco, const SaxpyOffsets &offsets,
-              int segmentSize, const std::vector<float> &x,
-              std::vector<float> &y) {
+static void runSaxpy(const std::vector<uint8_t> &hsaco, SaxpyOffsets offsets,
+                     int32_t segmentSize, const std::vector<float> &x,
+                     std::vector<float> &y) {
   ModulePtr module;
   hipFunction_t function = nullptr;
   loadKernel(hsaco, kernelName, module, function);
@@ -165,7 +173,7 @@ void runSaxpy(const std::vector<uint8_t> &hsaco, const SaxpyOffsets &offsets,
 
   std::vector<std::byte> kernarg =
       makeKernarg(segmentSize, offsets, deviceX.get(), deviceY.get());
-  int groups = (elementCount + workgroupSize - 1) / workgroupSize;
+  int32_t groups = (elementCount + workgroupSize - 1) / workgroupSize;
   launchWithKernarg(function, groups, workgroupSize, kernarg);
   ASSERT_FALSE(testing::Test::HasFatalFailure());
   download(deviceY, y);
@@ -207,8 +215,6 @@ TEST(Saxpy, MatchesHostReferenceOnDevice) {
     return;
 
   ASSERT_EQ(y.size(), expected.size());
-  for (int i = 0; i < std::ssize(y); ++i)
+  for (int32_t i = 0; i < std::ssize(y); ++i)
     ASSERT_EQ(y[i], expected[i]) << "element " << i;
 }
-
-} // namespace

@@ -7,11 +7,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <stdexcept>
 #include <thread>
 #include <vector>
-
-namespace {
 
 using rocm::tensilelite::codegen::Target;
 
@@ -44,16 +43,14 @@ TEST(Target, SelectsCurrentThreadKernel) {
 }
 
 TEST(Target, ConcurrentGetIsSafe) {
-  constexpr int numThreads = 4;
-  std::vector<int> maxVgprs(numThreads, 0);
+  constexpr int32_t numThreads = 4;
+  std::vector<int32_t> maxVgprs(numThreads, 0);
   std::vector<std::thread> threads;
-  for (int i = 0; i < numThreads; ++i)
+  for (int32_t i = 0; i < numThreads; ++i)
     threads.emplace_back(
         [&maxVgprs, i] { maxVgprs[i] = Target::get("gfx950").maxVgpr(); });
   for (std::thread &thread : threads)
     thread.join();
-  for (int maxVgpr : maxVgprs)
+  for (int32_t maxVgpr : maxVgprs)
     EXPECT_EQ(maxVgpr, 256);
 }
-
-} // namespace

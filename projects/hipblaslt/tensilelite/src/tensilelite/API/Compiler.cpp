@@ -121,9 +121,9 @@ static void codegen(amd_comgr_action_kind_t kind, std::string_view actionName,
 
   // COMGR defaults to -O0, so the level is always passed explicitly.
   std::vector<std::string> args = {
-      "-O" + std::to_string(static_cast<int>(options.optLevel)),
+      "-O" + std::to_string(static_cast<int32_t>(options.optLevel)),
       "-mcode-object-version=" +
-          std::to_string(static_cast<int>(options.codeObjectVersion))};
+          std::to_string(static_cast<int32_t>(options.codeObjectVersion))};
   // Extra options go last so callers can override the generated ones.
   args.insert(args.end(), options.extraOptions.begin(),
               options.extraOptions.end());

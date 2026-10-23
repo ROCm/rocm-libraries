@@ -5,14 +5,15 @@
 
 #include "base.hpp"
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 using namespace rocm::tensilelite::codegen;
 
-Target::Target(IsaVersion isa, int wavefront, int xcds, std::string_view arch,
-               std::string_view isaFullName)
+Target::Target(IsaVersion isa, int32_t wavefront, int32_t xcds,
+               std::string_view arch, std::string_view isaFullName)
     : isa(isa), wavefront(wavefront), xcds(xcds), arch(arch),
       isaFullName(isaFullName) {
   rocisa::rocIsa &rocIsa = rocisa::rocIsa::getInstance();

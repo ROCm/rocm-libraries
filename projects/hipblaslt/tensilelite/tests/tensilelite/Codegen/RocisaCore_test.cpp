@@ -10,23 +10,22 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace {
-
-constexpr IsaVersion gfx950 = {9, 5, 0};
-constexpr int wavefrontSize = 64;
+static constexpr IsaVersion gfx950 = {9, 5, 0};
+static constexpr int32_t wavefrontSize = 64;
 
 // rocIsa keeps the selected kernel per thread, so each test selects it.
-void selectGfx950() {
+static void selectGfx950() {
   rocisa::rocIsa &isa = rocisa::rocIsa::getInstance();
   isa.init(gfx950, ROCISA_CORE_TEST_ASSEMBLER);
   isa.setKernel(gfx950, wavefrontSize);
 }
 
-void expectContains(std::string_view text, std::string_view needle) {
+static void expectContains(std::string_view text, std::string_view needle) {
   EXPECT_NE(text.find(needle), std::string_view::npos)
       << "missing '" << needle << "' in:\n"
       << text;
@@ -71,10 +70,10 @@ TEST(RocisaCore, EmitsScaledPackedFp8ToBf16Convert) {
 
 // Builds the cross-lane reduction forms: full bank mask and optional
 // bound_ctrl.
-rocisa::DPPModifiers reductionDpp(int rowBcast,
-                                  const std::vector<int> &quadPerm,
-                                  bool rowMirror, bool rowHalfMirror,
-                                  int rowMask, int boundCtrl) {
+static rocisa::DPPModifiers reductionDpp(int32_t rowBcast,
+                                         const std::vector<int32_t> &quadPerm,
+                                         bool rowMirror, bool rowHalfMirror,
+                                         int32_t rowMask, int32_t boundCtrl) {
   return rocisa::DPPModifiers(-1, rowBcast, boundCtrl, quadPerm, -1, rowMirror,
                               rowHalfMirror, rowMask, 0xf);
 }
@@ -119,5 +118,3 @@ TEST(RocisaCore, EmitsDppCrossLaneReduction) {
   expectContains(text, "v_add_f32 v0, v0, v0 row_bcast:31 row_mask:0xf "
                        "bank_mask:0xf bound_ctrl:1");
 }
-
-} // namespace

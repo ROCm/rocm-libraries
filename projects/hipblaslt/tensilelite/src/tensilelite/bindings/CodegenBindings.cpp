@@ -7,6 +7,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 
+#include <cstdint>
 #include <string>
 
 namespace nb = nanobind;
@@ -30,9 +31,10 @@ NB_MODULE(tensilelite_codegen, m) {
       "selects a persistent 1-D launch).")
       .def(
           "__init__",
-          [](SkinnyGEMMConfig *self, int bm, int tn, int lanesK, int waves,
-             int prefetch, int upIters, int partialSteps, int group,
-             int numXcds, bool grid3d) {
+          [](SkinnyGEMMConfig *self, int32_t bm, int32_t tn, int32_t lanesK,
+             int32_t waves, int32_t prefetch, int32_t upIters,
+             int32_t partialSteps, int32_t group, int32_t numXcds,
+             bool grid3d) {
             new (self) SkinnyGEMMConfig{bm,       tn,      lanesK,       waves,
                                         prefetch, upIters, partialSteps, group,
                                         numXcds,  grid3d};

@@ -38,22 +38,22 @@ using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
-constexpr RegisterKind sgpr = RegisterKind::sgpr;
-constexpr RegisterKind vgpr = RegisterKind::vgpr;
-constexpr RegisterKind agpr = RegisterKind::agpr;
-constexpr InputKind lane = InputKind::lane;
-constexpr InputKind uniform = InputKind::uniform;
+static constexpr RegisterKind sgpr = RegisterKind::sgpr;
+static constexpr RegisterKind vgpr = RegisterKind::vgpr;
+static constexpr RegisterKind agpr = RegisterKind::agpr;
+static constexpr InputKind lane = InputKind::lane;
+static constexpr InputKind uniform = InputKind::uniform;
 
-constexpr int32_t literalA = 0x12345;
-constexpr int32_t literalB = 0x54321;
-constexpr const char *literalAText = "74565";
-constexpr const char *literalBText = "344865";
-constexpr int32_t literal32 = 0x12345678;
-constexpr const char *literal32Text = "305419896";
-constexpr int randomPairs = 1024;
+static constexpr int32_t literalA = 0x12345;
+static constexpr int32_t literalB = 0x54321;
+static constexpr const char *literalAText = "74565";
+static constexpr const char *literalBText = "344865";
+static constexpr int32_t literal32 = 0x12345678;
+static constexpr const char *literal32Text = "305419896";
+static constexpr int32_t randomPairs = 1024;
 
 // A pair immediate is sign-extended to 64 bits.
-constexpr int32_t immediates64[] = {
+static constexpr int32_t immediates64[] = {
     0, 1, -1, 64, 65, -16, -17, INT32_MIN, INT32_MAX, 0x12345678, -0x12345678};
 
 using Inputs = std::vector<Words>;
@@ -87,9 +87,9 @@ static RegisterRange allocateKind(IRBuilder &builder, RegisterKind kind,
 }
 
 static void addInput(KernelInputs &inputs, InputKind kind, const Words &source,
-                     size_t laneCount, size_t groupCount) {
+                     int64_t laneCount, int64_t groupCount) {
   inputs.kinds.push_back(kind);
-  size_t count = kind == lane ? laneCount : groupCount;
+  int64_t count = kind == lane ? laneCount : groupCount;
   inputs.words.emplace_back(source.begin(), source.begin() + count);
 }
 
@@ -277,15 +277,15 @@ protected:
   std::string emitMov64(RegisterRef dst, Operand src) {
     return emitted([&](IRBuilder &local) { local.movb64(dst, src); });
   }
-  int moveInstructionCount(const std::string &out) {
+  int32_t moveInstructionCount(const std::string &out) {
     return countLinesContaining(out, "_mov_") +
            countLinesContaining(out, "accvgpr");
   }
 };
 
 struct PlacementCounts {
-  int assembled = 0;
-  int rejected = 0;
+  int32_t assembled = 0;
+  int32_t rejected = 0;
 };
 
 } // namespace
@@ -459,11 +459,12 @@ TEST_F(MoveTest, Movb64InvalidOperandsThrowWithoutEmitting) {
   EXPECT_EQ(body.toString(), "");
 }
 
-constexpr int32_t moveImmediates32[] = {0, -1, 64, 65, INT32_MIN, 0x12345678};
+static constexpr int32_t moveImmediates32[] = {0,  -1,        64,
+                                               65, INT32_MIN, 0x12345678};
 
 using MoveDevice = DeviceTest;
 
-static RegisterRef halfOf(RegisterRef pair, int index) {
+static RegisterRef halfOf(RegisterRef pair, int32_t index) {
   return RegisterRef{pair.kind, pair.start + index, 1};
 }
 
@@ -482,7 +483,7 @@ TEST_F(MoveDevice, Movb32LaneThroughVgpr) {
 
 TEST_F(MoveDevice, Movb32UniformToVgprAndSgpr) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = static_cast<int>(pairs.a.size());
+  int32_t groups = static_cast<int32_t>(pairs.a.size());
   ArithEmitter copy = [](IRBuilder &builder, RegisterRef dst,
                          const std::vector<RegisterRef> &inputs) {
     builder.movb32(dst, inputs[0]);
@@ -509,7 +510,7 @@ TEST_F(MoveDevice, Movb32Immediates) {
 
 TEST_F(MoveDevice, Movb32ThroughAccumulator) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = static_cast<int>(pairs.a.size());
+  int32_t groups = static_cast<int32_t>(pairs.a.size());
   ArithEmitter viaAgpr = [](IRBuilder &builder, RegisterRef dst,
                             const std::vector<RegisterRef> &inputs) {
     RegisterRange acc = builder.allocateAgpr(1);
@@ -540,11 +541,11 @@ using PairEmitter = std::function<PairRegisters(
 // A 64-bit value is checked through two runs, one storing each half.
 static void expectPairResults(const std::vector<InputKind> &kinds,
                               RegisterKind result, const PairEmitter &emit,
-                              int workgroupCount,
+                              int32_t workgroupCount,
                               const std::vector<std::vector<uint32_t>> &inputs,
                               const std::vector<uint32_t> &low,
                               const std::vector<uint32_t> &high) {
-  for (int half = 0; half < 2; ++half) {
+  for (int32_t half = 0; half < 2; ++half) {
     SCOPED_TRACE(half == 0 ? "low half" : "high half");
     ArithEmitter storeHalf = [&emit, half](IRBuilder &builder, RegisterRef dst,
                                            const std::vector<RegisterRef> &in) {
@@ -573,7 +574,7 @@ TEST_F(MoveDevice, Movb64Immediates) {
       int64_t extended = immediate;
       uint32_t low = static_cast<uint32_t>(extended);
       uint32_t high = static_cast<uint32_t>(extended >> 32);
-      size_t words = kind == sgpr ? 3 : 2 * arithWorkgroupSize;
+      int32_t words = kind == sgpr ? 3 : 2 * arithWorkgroupSize;
       expectPairResults({}, kind, emit, kind == sgpr ? 3 : 2, {},
                         std::vector<uint32_t>(words, low),
                         std::vector<uint32_t>(words, high));
@@ -592,7 +593,7 @@ static RegisterRange fillPair(IRBuilder &builder, RegisterKind kind,
 
 TEST_F(MoveDevice, Movb64VgprPairsAlignedAndMisaligned) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = laneGroupCount(pairs.a);
+  int32_t groups = laneGroupCount(pairs.a);
   std::vector<InputKind> kinds{InputKind::lane, InputKind::lane};
   SCOPED_TRACE("aligned to aligned");
   expectPairResults(
@@ -633,7 +634,7 @@ TEST_F(MoveDevice, Movb64VgprPairsAlignedAndMisaligned) {
 
 TEST_F(MoveDevice, Movb64OverlappingMisalignedCopies) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = laneGroupCount(pairs.a);
+  int32_t groups = laneGroupCount(pairs.a);
   std::vector<InputKind> kinds{InputKind::lane, InputKind::lane};
   SCOPED_TRACE("copy up by one register");
   expectPairResults(
@@ -663,7 +664,7 @@ TEST_F(MoveDevice, Movb64OverlappingMisalignedCopies) {
 
 TEST_F(MoveDevice, Movb64ScalarPairs) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = static_cast<int>(pairs.a.size());
+  int32_t groups = static_cast<int32_t>(pairs.a.size());
   std::vector<InputKind> kinds{InputKind::uniform, InputKind::uniform};
   SCOPED_TRACE("sgpr pair to sgpr pair");
   expectPairResults(
@@ -692,7 +693,7 @@ TEST_F(MoveDevice, Movb64ScalarPairs) {
 // Placements of a source, checked by the assembler alone.
 static Operand registerSource(RegisterKind kind, RegisterRange &sgprs,
                               RegisterRange &vgprs, RegisterRange &agprs,
-                              int width, int offset) {
+                              int32_t width, int32_t offset) {
   RegisterRange &range = kind == sgpr ? sgprs : kind == vgpr ? vgprs : agprs;
   return range.ref(offset, width);
 }
@@ -700,7 +701,7 @@ static Operand registerSource(RegisterKind kind, RegisterRange &sgprs,
 // Emits dst = src in a fresh kernel and assembles it. A combination the
 // builder rejects is counted and skipped.
 static void
-assemblePlacement(RegisterKind dstKind, int width, int dstOffset,
+assemblePlacement(RegisterKind dstKind, int32_t width, int32_t dstOffset,
                   const std::function<Operand(RegisterRange &, RegisterRange &,
                                               RegisterRange &)> &makeSource,
                   PlacementCounts &counts) {
@@ -734,10 +735,10 @@ assemblePlacement(RegisterKind dstKind, int width, int dstOffset,
 TEST(MoveAssembly, AllPlacementsAssemble) {
   PlacementCounts counts;
   for (RegisterKind dstKind : {sgpr, vgpr, agpr}) {
-    for (int width : {1, 2}) {
-      for (int offset : {0, 1}) {
+    for (int32_t width : {1, 2}) {
+      for (int32_t offset : {0, 1}) {
         for (RegisterKind srcKind : {sgpr, vgpr, agpr})
-          for (int srcOffset : {0, 1})
+          for (int32_t srcOffset : {0, 1})
             assemblePlacement(
                 dstKind, width, offset,
                 [=](RegisterRange &s, RegisterRange &v, RegisterRange &a) {
@@ -809,7 +810,7 @@ struct PlacementRegisters {
 
 } // namespace
 
-constexpr OpCase32 opCases32[] = {
+static constexpr OpCase32 opCases32[] = {
     {"addi32", &IRBuilder::addi32, "v_add_u32", "s_add_u32",
      [](uint32_t a, uint32_t b) { return a + b; }},
     {"subi32", &IRBuilder::subi32, "v_sub_u32", "s_sub_u32",
@@ -902,7 +903,7 @@ TEST_F(ArithTest, InlineConstantsNeedNoCopy) {
   struct Case {
     int32_t value;
     std::string printed;
-    int copies;
+    int32_t copies;
   };
   for (const Case &current :
        {Case{64, "64", 0}, Case{-16, "-16", 0}, Case{-1, "-1", 0},
@@ -1021,7 +1022,7 @@ TEST_F(ArithTest, BoundaryImmediatesAreAccepted) {
 }
 
 // Immediates that cover inline constants, their edges, literals and wrapping.
-constexpr int32_t arithImmediates[] = {
+static constexpr int32_t arithImmediates[] = {
     0, 1, -1, 64, 65, -16, -17, INT32_MIN, INT32_MAX, 0x12345678};
 
 using ArithDevice = DeviceTest;
@@ -1068,7 +1069,7 @@ TEST_F(ArithDevice, ValuLaneOperands) {
   for (const OpCase32 &op : opCases32) {
     SCOPED_TRACE(op.name);
     std::vector<uint32_t> expected;
-    for (size_t i = 0; i < pairs.a.size(); ++i)
+    for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
       expected.push_back(op.host(pairs.a[i], pairs.b[i]));
     expectArithResults(
         binarySpec(op.op, InputKind::lane, InputKind::lane, RegisterKind::vgpr),
@@ -1081,11 +1082,11 @@ TEST_F(ArithDevice, SaluUniformOperands) {
   for (const OpCase32 &op : opCases32) {
     SCOPED_TRACE(op.name);
     std::vector<uint32_t> expected;
-    for (size_t i = 0; i < pairs.a.size(); ++i)
+    for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
       expected.push_back(op.host(pairs.a[i], pairs.b[i]));
     expectArithResults(binarySpec(op.op, InputKind::uniform, InputKind::uniform,
                                   RegisterKind::sgpr),
-                       static_cast<int>(pairs.a.size()), {pairs.a, pairs.b},
+                       static_cast<int32_t>(pairs.a.size()), {pairs.a, pairs.b},
                        expected);
   }
 }
@@ -1095,27 +1096,27 @@ TEST_F(ArithDevice, ScalarsIntoVgpr) {
   for (const OpCase32 &op : opCases32) {
     SCOPED_TRACE(op.name);
     std::vector<uint32_t> perGroup;
-    for (size_t i = 0; i < pairs.a.size(); ++i)
+    for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
       perGroup.push_back(op.host(pairs.a[i], pairs.b[i]));
     expectArithResults(binarySpec(op.op, InputKind::uniform, InputKind::uniform,
                                   RegisterKind::vgpr),
-                       static_cast<int>(pairs.a.size()), {pairs.a, pairs.b},
+                       static_cast<int32_t>(pairs.a.size()), {pairs.a, pairs.b},
                        perLane(perGroup));
   }
 }
 
 TEST_F(ArithDevice, MixedScalarAndVector) {
   WordPairs pairs = makeArithPairs(4096);
-  int groups = laneGroupCount(pairs.a);
+  int32_t groups = laneGroupCount(pairs.a);
   std::vector<uint32_t> edges = arithEdgeValues();
   std::vector<uint32_t> uniformWords;
-  for (int g = 0; g < groups; ++g)
+  for (int32_t g = 0; g < groups; ++g)
     uniformWords.push_back(edges[g % edges.size()]);
   for (const OpCase32 &op : opCases32) {
     SCOPED_TRACE(op.name);
     std::vector<uint32_t> uniformFirst;
     std::vector<uint32_t> uniformSecond;
-    for (size_t i = 0; i < pairs.b.size(); ++i) {
+    for (int64_t i = 0; i < std::ssize(pairs.b); ++i) {
       uint32_t scalar = uniformWords[i / arithWorkgroupSize];
       uniformFirst.push_back(op.host(scalar, pairs.b[i]));
       uniformSecond.push_back(op.host(pairs.b[i], scalar));
@@ -1131,8 +1132,8 @@ TEST_F(ArithDevice, MixedScalarAndVector) {
 
 TEST_F(ArithDevice, ImmediateOperands) {
   WordPairs pairs = makeArithPairs(0);
-  int groups = laneGroupCount(pairs.a);
-  int scalarGroups = static_cast<int>(pairs.a.size());
+  int32_t groups = laneGroupCount(pairs.a);
+  int32_t scalarGroups = static_cast<int32_t>(pairs.a.size());
   for (const OpCase32 &op : opCases32) {
     for (int32_t immediate : arithImmediates) {
       SCOPED_TRACE(std::string(op.name) + " immediate " +
@@ -1161,12 +1162,12 @@ TEST_F(ArithDevice, ImmediateOperands) {
 // Each emitter writes into an input register and then moves it to dst.
 TEST_F(ArithDevice, DestinationAliasesOperand) {
   WordPairs pairs = makeArithPairs(256);
-  int groups = laneGroupCount(pairs.a);
-  int scalarGroups = static_cast<int>(pairs.a.size());
+  int32_t groups = laneGroupCount(pairs.a);
+  int32_t scalarGroups = static_cast<int32_t>(pairs.a.size());
   std::vector<uint32_t> expected;
 
   SCOPED_TRACE("vgpr subi32 into second input");
-  for (size_t i = 0; i < pairs.a.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
     expected.push_back(pairs.a[i] - pairs.b[i]);
   expectArithResults({{InputKind::lane, InputKind::lane},
                       RegisterKind::vgpr,
@@ -1193,7 +1194,7 @@ TEST_F(ArithDevice, DestinationAliasesOperand) {
   SCOPED_TRACE("vgpr addi32 of scalar and lane into lane");
   std::vector<uint32_t> uniformWords(pairs.a.begin(), pairs.a.begin() + groups);
   expected.clear();
-  for (size_t i = 0; i < pairs.b.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(pairs.b); ++i)
     expected.push_back(uniformWords[i / arithWorkgroupSize] + pairs.b[i]);
   expectArithResults({{InputKind::uniform, InputKind::lane},
                       RegisterKind::vgpr,
@@ -1206,7 +1207,7 @@ TEST_F(ArithDevice, DestinationAliasesOperand) {
 
   SCOPED_TRACE("sgpr subi32 into first input");
   expected.clear();
-  for (size_t i = 0; i < pairs.a.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
     expected.push_back(pairs.a[i] - pairs.b[i]);
   expectArithResults({{InputKind::uniform, InputKind::uniform},
                       RegisterKind::sgpr,
@@ -1218,9 +1219,9 @@ TEST_F(ArithDevice, DestinationAliasesOperand) {
                      scalarGroups, {pairs.a, pairs.b}, expected);
 }
 
-constexpr int32_t inlineA = 7;
-constexpr int32_t inlineB = -5;
-constexpr int32_t negativeLiteralB = -100;
+static constexpr int32_t inlineA = 7;
+static constexpr int32_t inlineB = -5;
+static constexpr int32_t negativeLiteralB = -100;
 
 static const char *placementName(APlacement placement) {
   switch (placement) {
@@ -1432,7 +1433,7 @@ struct Arith64PlacementRegisters {
 } // namespace
 
 // The host arithmetic wraps modulo 2^64 like the device.
-constexpr OpCase64 opCases64[] = {
+static constexpr OpCase64 opCases64[] = {
     {"addi64", &IRBuilder::addi64,
      [](uint64_t a, uint64_t b) { return a + b; }},
     {"subi64", &IRBuilder::subi64,
@@ -1441,13 +1442,13 @@ constexpr OpCase64 opCases64[] = {
      [](uint64_t a, uint64_t b) { return a * b; }},
 };
 
-constexpr int32_t otherLiteral = 0x0FEDCBA9;
+static constexpr int32_t otherLiteral = 0x0FEDCBA9;
 
 // Builds "mnemonic op0, op1, ...".
 static std::string inst(std::string_view mnemonic,
                         const std::vector<std::string> &operands) {
   std::string result(mnemonic);
-  for (size_t i = 0; i < operands.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(operands); ++i)
     result += (i == 0 ? " " : ", ") + operands[i];
   return result;
 }
@@ -1458,7 +1459,7 @@ static void expectInstructions(const std::string &text,
                                const std::vector<std::string> &expected) {
   std::vector<std::string> lines = instructionsOf(text);
   ASSERT_EQ(lines.size(), expected.size()) << text;
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (int64_t i = 0; i < std::ssize(expected); ++i) {
     const std::string &actual = lines[i];
     bool matches = actual.rfind(expected[i], 0) == 0 &&
                    (actual.size() == expected[i].size() ||
@@ -1468,11 +1469,11 @@ static void expectInstructions(const std::string &text,
   }
 }
 
-static int instructionCount(const std::string &text) {
-  return static_cast<int>(instructionsOf(text).size());
+static int32_t instructionCount(const std::string &text) {
+  return static_cast<int32_t>(instructionsOf(text).size());
 }
 
-static std::string half(RegisterRef pair, int index) {
+static std::string half(RegisterRef pair, int32_t index) {
   return text(pair.slice(index));
 }
 
@@ -1840,21 +1841,21 @@ TEST_F(Arith64Test, InvalidOperandsThrowWithoutEmitting) {
 
 // Immediates are int32 values sign-extended to 64 bits: inline constants,
 // positive and negative literals, and the extremes.
-constexpr int32_t arith64Immediates[] = {
+static constexpr int32_t arith64Immediates[] = {
     0,   1,    -1,        64,        65,         -16,
     -17, -100, INT32_MIN, INT32_MAX, 0x12345678, -0x12345678};
 
 using Arith64Device = DeviceTest;
 
-static Data64 makeData(int randomCount) {
+static Data64 makeData(int32_t randomCount) {
   WordQuads quads = makeArithPairs64(randomCount);
   return {join(quads.aLo, quads.aHi), join(quads.bLo, quads.bHi)};
 }
 
 // Reads an operand: an immediate, or a pair built from two inputs.
 static Operand makeSource(IRBuilder &builder, const Case64 &spec,
-                          const std::optional<int32_t> &immediate,
-                          const std::vector<RegisterRef> &in, size_t &next,
+                          std::optional<int32_t> immediate,
+                          const std::vector<RegisterRef> &in, int64_t &next,
                           std::vector<RegisterRange> &owners) {
   if (immediate)
     return *immediate;
@@ -1868,12 +1869,12 @@ static Operand makeSource(IRBuilder &builder, const Case64 &spec,
 static Emitted emitArith64Separate(IRBuilder &builder, const Case64 &spec,
                                    const std::vector<RegisterRef> &in) {
   Emitted emitted{{}, RegisterRef{}};
-  size_t next = 0;
+  int64_t next = 0;
   Operand a = makeSource(builder, spec, spec.a, in, next, emitted.owners);
   Operand b = spec.placement == Arith64Placement::sameOperand
                   ? a
                   : makeSource(builder, spec, spec.b, in, next, emitted.owners);
-  int count = spec.dstMisaligned ? 3 : 2;
+  int32_t count = spec.dstMisaligned ? 3 : 2;
   RegisterRange range = allocateKind(builder, spec.dstKind, count);
   RegisterRef dst = range.ref(count - 2, 2);
   (builder.*spec.op.op)(dst, a, b);
@@ -1885,7 +1886,7 @@ static Emitted emitArith64Separate(IRBuilder &builder, const Case64 &spec,
 static Emitted emitArith64InPlace(IRBuilder &builder, const Case64 &spec,
                                   const std::vector<RegisterRef> &in) {
   Emitted emitted{{}, RegisterRef{}};
-  size_t next = 0;
+  int64_t next = 0;
   Operand a = makeSource(builder, spec, spec.a, in, next, emitted.owners);
   Operand b = makeSource(builder, spec, spec.b, in, next, emitted.owners);
   RegisterRef dst =
@@ -1906,7 +1907,7 @@ static Emitted emitArith64Overlapping(IRBuilder &builder, const Case64 &spec,
   RegisterRef dst = range.ref(lowIsAHigh ? 1 : 0, 2);
   builder.movb32(a.slice(0), in[0]);
   builder.movb32(a.slice(1), in[1]);
-  size_t next = 2;
+  int64_t next = 2;
   Operand b = makeSource(builder, spec, spec.b, in, next, emitted.owners);
   (builder.*spec.op.op)(dst, a, b);
   emitted.owners.push_back(std::move(range));
@@ -1931,25 +1932,24 @@ static Emitted emitArith64Case(IRBuilder &builder, const Case64 &spec,
 }
 
 // A result is one lane of a vgpr result or one workgroup of an sgpr result.
-static size_t arith64InputIndex(const Case64 &spec, InputKind kind,
-                                size_t result) {
+static int64_t arith64InputIndex(const Case64 &spec, InputKind kind,
+                                 int64_t result) {
   bool perResult = spec.dstKind == sgpr || kind == lane;
   return perResult ? result : result / arithWorkgroupSize;
 }
 
 static uint64_t arith64OperandValue(const Case64 &spec,
-                                    const std::optional<int32_t> &imm,
-                                    InputKind kind, const Values &values,
-                                    size_t result) {
+                                    std::optional<int32_t> imm, InputKind kind,
+                                    const Values &values, int64_t result) {
   if (imm)
     return static_cast<uint64_t>(int64_t{*imm});
   return values[arith64InputIndex(spec, kind, result)];
 }
 
 static Values arith64ExpectedValues(const Case64 &spec, const Data64 &data,
-                                    size_t results) {
+                                    int64_t results) {
   Values expected;
-  for (size_t i = 0; i < results; ++i) {
+  for (int64_t i = 0; i < results; ++i) {
     uint64_t a = arith64OperandValue(spec, spec.a, spec.aKind, data.a, i);
     bool same = spec.placement == Arith64Placement::sameOperand;
     uint64_t b =
@@ -1960,15 +1960,15 @@ static Values arith64ExpectedValues(const Case64 &spec, const Data64 &data,
 }
 
 static void addPairInputs(KernelInputs &inputs, InputKind kind,
-                          const Values &values, size_t laneCount,
-                          size_t groupCount) {
+                          const Values &values, int64_t laneCount,
+                          int64_t groupCount) {
   addInput(inputs, kind, lowWords(values), laneCount, groupCount);
   addInput(inputs, kind, highWords(values), laneCount, groupCount);
 }
 
 static KernelInputs makeArith64Inputs(const Case64 &spec, const Data64 &data,
-                                      size_t groupCount) {
-  size_t laneCount = data.a.size();
+                                      int64_t groupCount) {
+  int64_t laneCount = std::ssize(data.a);
   KernelInputs inputs;
   if (!spec.a)
     addPairInputs(inputs, spec.aKind, data.a, laneCount, groupCount);
@@ -1979,12 +1979,12 @@ static KernelInputs makeArith64Inputs(const Case64 &spec, const Data64 &data,
 
 // Runs the op and checks it, through two runs that each store one half.
 static void expectCase(const Case64 &spec, const Data64 &data) {
-  size_t lanes = data.a.size();
-  size_t groups = spec.dstKind == sgpr ? lanes : lanes / arithWorkgroupSize;
-  size_t results = spec.dstKind == sgpr ? groups : lanes;
+  int64_t lanes = std::ssize(data.a);
+  int64_t groups = spec.dstKind == sgpr ? lanes : lanes / arithWorkgroupSize;
+  int64_t results = spec.dstKind == sgpr ? groups : lanes;
   KernelInputs inputs = makeArith64Inputs(spec, data, groups);
   Values expected = arith64ExpectedValues(spec, data, results);
-  for (int half = 0; half < 2; ++half) {
+  for (int32_t half = 0; half < 2; ++half) {
     SCOPED_TRACE(std::string(spec.op.name) +
                  (half == 0 ? " low half" : " high half"));
     ArithKernelSpec kernel{inputs.kinds, spec.dstKind,
@@ -1995,7 +1995,8 @@ static void expectCase(const Case64 &spec, const Data64 &data) {
                              builder.movb32(dst, emitted.value.slice(half));
                            }};
     Words words = half == 0 ? lowWords(expected) : highWords(expected);
-    expectArithResults(kernel, static_cast<int>(groups), inputs.words, words);
+    expectArithResults(kernel, static_cast<int32_t>(groups), inputs.words,
+                       words);
   }
 }
 
@@ -2078,7 +2079,7 @@ TEST_F(Arith64Device, DestinationAliasing) {
           Arith64Placement::lowIsAHigh, Arith64Placement::highIsALow,
           Arith64Placement::sameOperand}) {
       SCOPED_TRACE(std::string(op.name) + " placement " +
-                   std::to_string(static_cast<int>(placement)));
+                   std::to_string(static_cast<int32_t>(placement)));
       for (Case64 spec : {makeArith64Case(op, vgpr, lane, lane),
                           makeArith64Case(op, sgpr, uniform, uniform)}) {
         spec.placement = placement;
@@ -2179,7 +2180,7 @@ protected:
     return emitDiv(regs.dst.ref(), regs.a, regs.b, useIEEE);
   }
 
-  int nextFreeIndex(RegisterKind kind) { return allocate(kind).start(); }
+  int32_t nextFreeIndex(RegisterKind kind) { return allocate(kind).start(); }
 };
 
 } // namespace
@@ -2230,23 +2231,23 @@ static std::vector<std::string> sourcesOf(const std::string &instruction) {
   return sources;
 }
 
-static int occurrences(const std::string &text, std::string_view needle) {
-  int count = 0;
+static int32_t occurrences(const std::string &text, std::string_view needle) {
+  int32_t count = 0;
   for (size_t at = text.find(needle); at != std::string::npos;
        at = text.find(needle, at + needle.size()))
     ++count;
   return count;
 }
 
-static int indexOfMnemonic(const std::vector<std::string> &instructions,
-                           std::string_view mnemonic, int from = 0) {
-  for (int i = from; i < static_cast<int>(instructions.size()); ++i)
+static int32_t indexOfMnemonic(const std::vector<std::string> &instructions,
+                               std::string_view mnemonic, int32_t from = 0) {
+  for (int32_t i = from; i < std::ssize(instructions); ++i)
     if (mnemonicOf(instructions[i]) == mnemonic)
       return i;
   return -1;
 }
 
-constexpr Form allForms[] = {Form::scalar, Form::vector, Form::mixed};
+static constexpr Form allForms[] = {Form::scalar, Form::vector, Form::mixed};
 
 static const char *formName(Form form) {
   switch (form) {
@@ -2344,7 +2345,7 @@ TEST_F(DivTest, FastValuForVectorDestination) {
     EXPECT_EQ(countLinesContaining(out, "abs("), 1);
     EXPECT_EQ(countLinesContaining(out, "v_readfirstlane"), 0);
     std::vector<std::string> instructions = instructionsOf(out);
-    int fma = indexOfMnemonic(instructions, "v_fma_f32");
+    int32_t fma = indexOfMnemonic(instructions, "v_fma_f32");
     ASSERT_GE(fma, 0);
     EXPECT_NE(instructions[fma].find(", -v"), std::string::npos);
   }
@@ -2371,9 +2372,9 @@ TEST_F(DivTest, NeverWritesExecOrVcc) {
 // result needs a wait state.
 static void
 expectReciprocalHazardCovered(const std::vector<std::string> &instructions) {
-  int rcp = indexOfMnemonic(instructions, "v_rcp_iflag_f32");
+  int32_t rcp = indexOfMnemonic(instructions, "v_rcp_iflag_f32");
   ASSERT_GE(rcp, 0);
-  ASSERT_LT(rcp + 1, static_cast<int>(instructions.size()));
+  ASSERT_LT(rcp + 1, std::ssize(instructions));
   const std::string &next = instructions[rcp + 1];
   EXPECT_NE(mnemonicOf(next), "s_nop") << next;
   std::string reciprocal = destinationOf(instructions[rcp]);
@@ -2383,11 +2384,11 @@ expectReciprocalHazardCovered(const std::vector<std::string> &instructions) {
 
 static void
 expectMaskNopBeforeCndmask(const std::vector<std::string> &instructions) {
-  int checked = 0;
-  for (int i = 0; i < static_cast<int>(instructions.size()); ++i) {
+  int32_t checked = 0;
+  for (int32_t i = 0; i < std::ssize(instructions); ++i) {
     if (mnemonicOf(instructions[i]).rfind("v_cmp_", 0) != 0)
       continue;
-    ASSERT_LT(i + 1, static_cast<int>(instructions.size()));
+    ASSERT_LT(i + 1, std::ssize(instructions));
     EXPECT_EQ(instructions[i + 1].rfind("s_nop 1", 0), 0u) << instructions[i];
     EXPECT_GE(indexOfMnemonic(instructions, "v_cndmask_b32", i + 1), 0);
     ++checked;
@@ -2407,13 +2408,13 @@ TEST_F(DivTest, HazardWaitStates) {
         expectMaskNopBeforeCndmask(instructions);
         continue;
       }
-      int readLane = indexOfMnemonic(instructions, "v_readfirstlane_b32");
+      int32_t readLane = indexOfMnemonic(instructions, "v_readfirstlane_b32");
       ASSERT_GT(readLane, 0);
       if (useIEEE) {
         EXPECT_EQ(instructions[readLane - 1].rfind("s_nop 0", 0), 0u);
         continue;
       }
-      int convert = indexOfMnemonic(instructions, "v_cvt_i32_f32");
+      int32_t convert = indexOfMnemonic(instructions, "v_cvt_i32_f32");
       ASSERT_GE(convert, 0);
       EXPECT_GT(readLane - convert, 1);
       EXPECT_EQ(sourcesOf(instructions[readLane]).front(),
@@ -2470,8 +2471,8 @@ TEST_F(DivTest, ImmediateOperandsInFastScalarForm) {
   RegisterRange value = builder.allocateSgpr(1);
   std::string out = emitDiv(dst.ref(), value, literalA, false);
   EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 0);
-  int convertsWithLiteral = 0;
-  int xorsWithLiteral = 0;
+  int32_t convertsWithLiteral = 0;
+  int32_t xorsWithLiteral = 0;
   for (const std::string &instruction : instructionsOf(out)) {
     bool hasLiteral = instruction.find(literalAText) != std::string::npos;
     if (mnemonicOf(instruction) == "v_cvt_f32_i32" && hasLiteral)
@@ -2485,7 +2486,7 @@ TEST_F(DivTest, ImmediateOperandsInFastScalarForm) {
   out = emitDiv(dst.ref(), literalA, literalB, false);
   EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 1);
   std::vector<std::string> instructions = instructionsOf(out);
-  int copy = indexOfMnemonic(instructions, "s_mov_b32");
+  int32_t copy = indexOfMnemonic(instructions, "s_mov_b32");
   ASSERT_GE(copy, 0);
   EXPECT_NE(instructions[copy].find(literalBText), std::string::npos);
 }
@@ -2503,7 +2504,7 @@ TEST_F(DivTest, DestinationAliasesOperand) {
             instructionsOf(emitDiv(dst, regs.a, regs.b, useIEEE));
         ASSERT_FALSE(instructions.empty());
         EXPECT_EQ(destinationOf(instructions.back()), text(dst));
-        for (size_t i = 0; i + 1 < instructions.size(); ++i)
+        for (int64_t i = 0; i + 1 < std::ssize(instructions); ++i)
           EXPECT_NE(destinationOf(instructions[i]), text(dst))
               << instructions[i];
       }
@@ -2551,8 +2552,8 @@ TEST_F(DivTest, ReleasesTemporaries) {
       SCOPED_TRACE(std::string(formName(form)) +
                    (useIEEE ? " exact" : " fast"));
       DivRegisters regs = makeRegisters(form);
-      int vgprsBefore = nextFreeIndex(RegisterKind::vgpr);
-      int sgprsBefore = nextFreeIndex(RegisterKind::sgpr);
+      int32_t vgprsBefore = nextFreeIndex(RegisterKind::vgpr);
+      int32_t sgprsBefore = nextFreeIndex(RegisterKind::sgpr);
       emitDiv(regs.dst.ref(), regs.a, regs.b, useIEEE);
       EXPECT_EQ(nextFreeIndex(RegisterKind::vgpr), vgprsBefore);
       EXPECT_EQ(nextFreeIndex(RegisterKind::sgpr), sgprsBefore);
@@ -2563,13 +2564,13 @@ TEST_F(DivTest, ReleasesTemporaries) {
     }
 }
 
-constexpr uint32_t divRandomSeed = 20240607;
+static constexpr uint32_t divRandomSeed = 20240607;
 // The fast path is exact for magnitudes below this bound, LLVM's signed 24-bit
 // criterion.
-constexpr int64_t fastBound = int64_t{1} << 23;
-constexpr int exactRandomCount = 131072;
-constexpr int fastBoundaryCount = 262144;
-constexpr int fastRandomCount = 1048576;
+static constexpr int64_t fastBound = int64_t{1} << 23;
+static constexpr int32_t exactRandomCount = 131072;
+static constexpr int32_t fastBoundaryCount = 262144;
+static constexpr int32_t fastRandomCount = 1048576;
 
 using DivDevice = DeviceTest;
 
@@ -2589,7 +2590,7 @@ static void addPair(WordPairs &pairs, int64_t a, int64_t b) {
 }
 
 // A value with 0 to maxBits - 1 low bits kept, so that every magnitude occurs.
-static uint32_t randomMagnitude(std::mt19937 &engine, int maxBits) {
+static uint32_t randomMagnitude(std::mt19937 &engine, int32_t maxBits) {
   uint32_t mask = maxBits == 32 ? ~0u : (1u << maxBits) - 1;
   return (engine() & mask) >> (engine() % maxBits);
 }
@@ -2600,7 +2601,7 @@ static int64_t withRandomSign(std::mt19937 &engine, int64_t magnitude) {
 
 // Pads with random pairs to whole workgroups of lanes.
 static void padToWorkgroups(WordPairs &pairs, std::mt19937 &engine,
-                            int maxBits) {
+                            int32_t maxBits) {
   while (pairs.a.size() % arithWorkgroupSize != 0)
     addPair(pairs, withRandomSign(engine, randomMagnitude(engine, maxBits)),
             withRandomSign(engine, randomMagnitude(engine, maxBits)));
@@ -2615,7 +2616,7 @@ static std::vector<int64_t> exactEdges() {
                                 INT32_MAX,  INT32_MIN + 1,
                                 0x12345678, static_cast<int32_t>(0x9E3779B9),
                                 0x7FFFFFFE, -0x7FFFFFFE};
-  for (int bit = 2; bit <= 30; ++bit) {
+  for (int32_t bit = 2; bit <= 30; ++bit) {
     edges.push_back(int64_t{1} << bit);
     edges.push_back(-(int64_t{1} << bit));
   }
@@ -2650,8 +2651,8 @@ static void addExactEdgePairs(WordPairs &pairs) {
 
 // Random 32-bit pairs, then a random with a small divisor, then both shifted.
 static void addExactRandomPairs(WordPairs &pairs, std::mt19937 &engine,
-                                int count) {
-  for (int i = 0; i < count; ++i) {
+                                int32_t count) {
+  for (int32_t i = 0; i < count; ++i) {
     switch (i % 3) {
     case 0:
       addPair(pairs, static_cast<int32_t>(engine()),
@@ -2717,8 +2718,8 @@ static void addFastEdgePairs(WordPairs &pairs) {
 // WordPairs a = k * b + d for d in {-1, 0, 1}, where the exact quotient
 // changes.
 static void addBoundaryPairs(WordPairs &pairs, std::mt19937 &engine,
-                             int count) {
-  for (int i = 0; i < count; ++i) {
+                             int32_t count) {
+  for (int32_t i = 0; i < count; ++i) {
     int64_t b = 1 + randomMagnitude(engine, 23) % (fastBound - 1);
     int64_t k = engine() % ((fastBound - 2) / b + 1);
     int64_t delta = static_cast<int64_t>(engine() % 3) - 1;
@@ -2731,8 +2732,8 @@ static void addBoundaryPairs(WordPairs &pairs, std::mt19937 &engine,
 
 // Uniform 23-bit magnitudes, alternating with shifted ones.
 static void addFastRandomPairs(WordPairs &pairs, std::mt19937 &engine,
-                               int count) {
-  for (int i = 0; i < count; ++i) {
+                               int32_t count) {
+  for (int32_t i = 0; i < count; ++i) {
     bool shifted = (i & 1) != 0;
     uint32_t a = shifted ? randomMagnitude(engine, 23) : engine() & 0x7FFFFF;
     uint32_t b = shifted ? randomMagnitude(engine, 23) : engine() & 0x7FFFFF;
@@ -2760,10 +2761,10 @@ static const WordPairs &pairsFor(bool useIEEE) {
 static const char *pathName(bool useIEEE) { return useIEEE ? "exact" : "fast"; }
 
 // Every stride-th pair, so that a small sample still spans the whole set.
-static WordPairs sample(const WordPairs &pairs, size_t count) {
+static WordPairs sample(const WordPairs &pairs, int64_t count) {
   WordPairs result;
-  size_t stride = std::max<size_t>(1, pairs.a.size() / count);
-  for (size_t i = 0; i < pairs.a.size() && result.a.size() < count;
+  int64_t stride = std::max<int64_t>(1, std::ssize(pairs.a) / count);
+  for (int64_t i = 0; i < std::ssize(pairs.a) && std::ssize(result.a) < count;
        i += stride) {
     result.a.push_back(pairs.a[i]);
     result.b.push_back(pairs.b[i]);
@@ -2773,7 +2774,7 @@ static WordPairs sample(const WordPairs &pairs, size_t count) {
 
 static std::vector<uint32_t> quotients(const WordPairs &pairs) {
   std::vector<uint32_t> expected;
-  for (size_t i = 0; i < pairs.a.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(pairs.a); ++i)
     expected.push_back(hostDiv(pairs.a[i], pairs.b[i]));
   return expected;
 }
@@ -2804,7 +2805,7 @@ TEST_F(DivDevice, SaluUniformOperands) {
     WordPairs pairs = sample(pairsFor(useIEEE), 32768);
     expectArithResults(divSpec(InputKind::uniform, InputKind::uniform,
                                RegisterKind::sgpr, useIEEE),
-                       static_cast<int>(pairs.a.size()), {pairs.a, pairs.b},
+                       static_cast<int32_t>(pairs.a.size()), {pairs.a, pairs.b},
                        quotients(pairs));
   }
 }
@@ -2815,7 +2816,7 @@ TEST_F(DivDevice, ScalarsIntoVgpr) {
     WordPairs pairs = sample(pairsFor(useIEEE), 16384);
     expectArithResults(divSpec(InputKind::uniform, InputKind::uniform,
                                RegisterKind::vgpr, useIEEE),
-                       static_cast<int>(pairs.a.size()), {pairs.a, pairs.b},
+                       static_cast<int32_t>(pairs.a.size()), {pairs.a, pairs.b},
                        perLane(quotients(pairs)));
   }
 }
@@ -2824,7 +2825,7 @@ TEST_F(DivDevice, ScalarsIntoVgpr) {
 static std::vector<uint32_t>
 firstLanes(const std::vector<uint32_t> &laneWords) {
   std::vector<uint32_t> firstWords;
-  for (size_t i = 0; i < laneWords.size(); i += arithWorkgroupSize)
+  for (int64_t i = 0; i < std::ssize(laneWords); i += arithWorkgroupSize)
     firstWords.push_back(laneWords[i]);
   return firstWords;
 }
@@ -2833,13 +2834,13 @@ TEST_F(DivDevice, MixedScalarAndVector) {
   for (bool useIEEE : {true, false}) {
     SCOPED_TRACE(pathName(useIEEE));
     WordPairs pairs = sample(pairsFor(useIEEE), 65536);
-    int groups = laneGroupCount(pairs.a);
+    int32_t groups = laneGroupCount(pairs.a);
     std::vector<uint32_t> uniformA = firstLanes(pairs.a);
     std::vector<uint32_t> uniformB = firstLanes(pairs.b);
     std::vector<uint32_t> uniformFirst;
     std::vector<uint32_t> uniformSecond;
-    for (size_t i = 0; i < pairs.a.size(); ++i) {
-      size_t group = i / arithWorkgroupSize;
+    for (int64_t i = 0; i < std::ssize(pairs.a); ++i) {
+      int64_t group = i / arithWorkgroupSize;
       uniformFirst.push_back(hostDiv(uniformA[group], pairs.b[i]));
       uniformSecond.push_back(hostDiv(pairs.a[i], uniformB[group]));
     }
@@ -2903,10 +2904,10 @@ static void expectImmediateForms(const std::vector<uint32_t> &words,
                      laneGroupCount(words), {words}, expected);
   expectArithResults(divImmediateSpec(InputKind::uniform, RegisterKind::sgpr,
                                       immediate, immediateIsDividend, useIEEE),
-                     static_cast<int>(words.size()), {words}, expected);
+                     static_cast<int32_t>(words.size()), {words}, expected);
   expectArithResults(divImmediateSpec(InputKind::uniform, RegisterKind::vgpr,
                                       immediate, immediateIsDividend, useIEEE),
-                     static_cast<int>(words.size()), {words},
+                     static_cast<int32_t>(words.size()), {words},
                      perLane(expected));
 }
 
@@ -2929,7 +2930,7 @@ TEST_F(DivDevice, DestinationAliasesOperand) {
     SCOPED_TRACE(pathName(useIEEE));
     WordPairs pairs = sample(pairsFor(useIEEE), 4096);
     std::vector<uint32_t> expected = quotients(pairs);
-    for (int aliased : {0, 1}) {
+    for (int32_t aliased : {0, 1}) {
       SCOPED_TRACE("alias input " + std::to_string(aliased));
       auto emit = [=](IRBuilder &builder, RegisterRef dst,
                       const std::vector<RegisterRef> &inputs) {
@@ -2941,7 +2942,7 @@ TEST_F(DivDevice, DestinationAliasesOperand) {
           laneGroupCount(pairs.a), {pairs.a, pairs.b}, expected);
       expectArithResults(
           {{InputKind::uniform, InputKind::uniform}, RegisterKind::sgpr, emit},
-          static_cast<int>(pairs.a.size()), {pairs.a, pairs.b}, expected);
+          static_cast<int32_t>(pairs.a.size()), {pairs.a, pairs.b}, expected);
     }
   }
 }
@@ -2972,7 +2973,7 @@ TEST_F(DivDevice, DivisionByZeroCompletes) {
            builder.divsi32(tmp.ref(), inputs[0], inputs[1], useIEEE);
            builder.muli32(dst, tmp, 0);
          }},
-        static_cast<int>(pairs.a.size()), {pairs.a, zeros}, zeros);
+        static_cast<int32_t>(pairs.a.size()), {pairs.a, zeros}, zeros);
   }
 }
 
@@ -2987,10 +2988,10 @@ TEST_F(DivDevice, ExactPathHandlesPairsAboveFastBound) {
       {16777215, 16777214}, {16777215, 105},      {-16777215, 16777214},
       {0xFFFFFE, 7},        {16777217, 105},      {-16777217, 105},
       {16777217, 16777215}};
-  for (const auto &pair : above)
-    addPair(pairs, pair[0], pair[1]);
+  for (const auto &[dividend, divisor] : above)
+    addPair(pairs, dividend, divisor);
   std::mt19937 engine(divRandomSeed + 2);
-  for (int i = 0; i < 4096; ++i)
+  for (int32_t i = 0; i < 4096; ++i)
     addPair(pairs, withRandomSign(engine, fastBound + engine() % fastBound),
             withRandomSign(engine, 1 + randomMagnitude(engine, 24)));
   padToWorkgroups(pairs, engine, 24);
@@ -3000,7 +3001,7 @@ TEST_F(DivDevice, ExactPathHandlesPairsAboveFastBound) {
   WordPairs scalar = sample(pairs, 1024);
   expectArithResults(
       divSpec(InputKind::uniform, InputKind::uniform, RegisterKind::sgpr, true),
-      static_cast<int>(scalar.a.size()), {scalar.a, scalar.b},
+      static_cast<int32_t>(scalar.a.size()), {scalar.a, scalar.b},
       quotients(scalar));
 }
 
@@ -3053,9 +3054,9 @@ struct Operands {
 
 } // namespace
 
-constexpr const char *signBitText = "-2147483648";
+static constexpr const char *signBitText = "-2147483648";
 
-constexpr PredicateCase predicateCases[] = {
+static constexpr PredicateCase predicateCases[] = {
     {Predicate::eq, "eq", "s_cmp_eq_u32", "v_cmp_eq_u32", "v_cmp_eq_u64"},
     {Predicate::ne, "ne", "s_cmp_lg_u32", "v_cmp_ne_u32", "v_cmp_ne_u64"},
     {Predicate::slt, "slt", "s_cmp_lt_i32", "v_cmp_lt_i32", "v_cmp_lt_i64"},
@@ -3399,13 +3400,13 @@ TEST_F(CmpTest, BoundaryImmediatesAreAccepted) {
 }
 
 // Index step that walks the edge values of the cross product in a pair vector.
-constexpr int edgeStride32 = 17;
-constexpr int edgeStride64 = 18;
+static constexpr int32_t edgeStride32 = 17;
+static constexpr int32_t edgeStride64 = 18;
 
 // Immediates are int32 values; a 64-bit comparison sign-extends them.
-constexpr int32_t negativeLiteral = -0x12345678;
-constexpr int32_t inlineImmediate = -16;
-constexpr int32_t nearMin32 = INT32_MIN + 5;
+static constexpr int32_t negativeLiteral = -0x12345678;
+static constexpr int32_t inlineImmediate = -16;
+static constexpr int32_t nearMin32 = INT32_MIN + 5;
 
 using CmpDevice = DeviceTest;
 
@@ -3442,10 +3443,10 @@ static bool compareAs(Predicate pred, uint64_t x, uint64_t y) {
 }
 
 // Expected 0/1 words, one per pair of values.
-static Words expectedBits(int bits, Predicate pred, const Values &a,
+static Words expectedBits(int32_t bits, Predicate pred, const Values &a,
                           const Values &b) {
   Words expected;
-  for (size_t i = 0; i < a.size(); ++i) {
+  for (int64_t i = 0; i < std::ssize(a); ++i) {
     bool holds = bits == 32 ? compareAs<int32_t, uint32_t>(pred, a[i], b[i])
                             : compareAs<int64_t, uint64_t>(pred, a[i], b[i]);
     expected.push_back(holds ? 1 : 0);
@@ -3455,10 +3456,10 @@ static Words expectedBits(int bits, Predicate pred, const Values &a,
 
 // Every stride-th element, which gives one value per workgroup.
 template <typename T>
-static std::vector<T> everyNth(const std::vector<T> &values, int stride,
-                               size_t count) {
+static std::vector<T> everyNth(const std::vector<T> &values, int32_t stride,
+                               int64_t count) {
   std::vector<T> picked;
-  for (size_t i = 0; i < count; ++i)
+  for (int64_t i = 0; i < count; ++i)
     picked.push_back(values[i * stride]);
   return picked;
 }
@@ -3512,7 +3513,7 @@ static OperandMaker pair64WithImmediate(int32_t immediate, bool immediateFirst,
 static void expectMaskResults(CompareFn compare, Predicate pred,
                               std::vector<InputKind> kinds,
                               const OperandMaker &make, const Inputs &inputs,
-                              int groups, const Words &expected) {
+                              int32_t groups, const Words &expected) {
   ArithKernelSpec spec{std::move(kinds), vgpr,
                        [=](IRBuilder &builder, RegisterRef dst,
                            const std::vector<RegisterRef> &in) {
@@ -3529,7 +3530,7 @@ static void expectMaskResults(CompareFn compare, Predicate pred,
 static void expectBoolResults(CompareFn compare, Predicate pred,
                               std::vector<InputKind> kinds,
                               const OperandMaker &make, const Inputs &inputs,
-                              int groups, const Words &expected) {
+                              int32_t groups, const Words &expected) {
   ArithKernelSpec spec{std::move(kinds), sgpr,
                        [=](IRBuilder &builder, RegisterRef dst,
                            const std::vector<RegisterRef> &in) {
@@ -3556,7 +3557,7 @@ TEST_F(CmpDevice, UniformOperandsToBoolI32) {
     SCOPED_TRACE(current.name);
     expectBoolResults(
         &IRBuilder::cmpi32, current.pred, {uniform, uniform}, words32(),
-        {pairs.a, pairs.b}, static_cast<int>(pairs.a.size()),
+        {pairs.a, pairs.b}, static_cast<int32_t>(pairs.a.size()),
         expectedBits(32, current.pred, widen(pairs.a), widen(pairs.b)));
   }
 }
@@ -3567,7 +3568,7 @@ TEST_F(CmpDevice, UniformOperandsToMaskI32) {
     SCOPED_TRACE(current.name);
     expectMaskResults(&IRBuilder::cmpi32, current.pred, {uniform, uniform},
                       words32(), {pairs.a, pairs.b},
-                      static_cast<int>(pairs.a.size()),
+                      static_cast<int32_t>(pairs.a.size()),
                       perLane(expectedBits(32, current.pred, widen(pairs.a),
                                            widen(pairs.b))));
   }
@@ -3575,7 +3576,7 @@ TEST_F(CmpDevice, UniformOperandsToMaskI32) {
 
 TEST_F(CmpDevice, MixedUniformAndLaneI32) {
   WordPairs pairs = makeArithPairs(randomPairs);
-  int groups = laneGroupCount(pairs.a);
+  int32_t groups = laneGroupCount(pairs.a);
   Words uniformWords = everyNth(pairs.a, edgeStride32, groups);
   Values uniformLanes = widen(perLane(uniformWords));
   for (const PredicateCase &current : predicateCases) {
@@ -3619,7 +3620,7 @@ TEST_F(CmpDevice, UniformAgainstImmediateI32) {
     Values constant(pairs.a.size(), static_cast<uint32_t>(literal32));
     expectBoolResults(&IRBuilder::cmpi32, current.pred, {uniform},
                       word32WithImmediate(literal32, false), {pairs.a},
-                      static_cast<int>(pairs.a.size()),
+                      static_cast<int32_t>(pairs.a.size()),
                       expectedBits(32, current.pred, widen(pairs.a), constant));
   }
 }
@@ -3636,7 +3637,7 @@ TEST_F(CmpDevice, DestinationMayAliasAnOperandI32) {
                            builder.cmpi32(pred, in[0], in[0], in[1]);
                            builder.movb32(dst, in[0]);
                          }};
-    expectArithResults(spec, static_cast<int>(pairs.a.size()),
+    expectArithResults(spec, static_cast<int32_t>(pairs.a.size()),
                        {pairs.a, pairs.b},
                        expectedBits(32, pred, widen(pairs.a), widen(pairs.b)));
   }
@@ -3668,7 +3669,7 @@ TEST_F(CmpDevice, UniformOperandsToBoolI64) {
   WordQuads quads = makeArithPairs64(randomPairs);
   Values a = join(quads.aLo, quads.aHi);
   Values b = join(quads.bLo, quads.bHi);
-  int groups = static_cast<int>(a.size());
+  int32_t groups = static_cast<int32_t>(a.size());
   std::vector<InputKind> kinds{uniform, uniform, uniform, uniform};
   for (const PredicateCase &current : predicateCases) {
     SCOPED_TRACE(current.name);
@@ -3689,14 +3690,14 @@ TEST_F(CmpDevice, UniformOperandsToMaskI64) {
     SCOPED_TRACE(current.name);
     expectMaskResults(&IRBuilder::cmpi64, current.pred,
                       {uniform, uniform, uniform, uniform}, pairs64(),
-                      laneInputs(quads), static_cast<int>(a.size()),
+                      laneInputs(quads), static_cast<int32_t>(a.size()),
                       perLane(expectedBits(64, current.pred, a, b)));
   }
 }
 
 TEST_F(CmpDevice, MixedUniformAndLaneI64) {
   WordQuads quads = makeArithPairs64(randomPairs);
-  int groups = laneGroupCount(quads.aLo);
+  int32_t groups = laneGroupCount(quads.aLo);
   Words uniformLo = everyNth(quads.aLo, edgeStride64, groups);
   Words uniformHi = everyNth(quads.aHi, edgeStride64, groups);
   Values uniformLanes = perLane(join(uniformLo, uniformHi));
@@ -3755,7 +3756,7 @@ TEST_F(CmpDevice, UniformAgainstImmediateI64) {
         expectBoolResults(
             &IRBuilder::cmpi64, current.pred, {uniform, uniform},
             pair64WithImmediate(immediate, immediateFirst, false),
-            {quads.aLo, quads.aHi}, static_cast<int>(values.size()),
+            {quads.aLo, quads.aHi}, static_cast<int32_t>(values.size()),
             immediateFirst ? expectedBits(64, current.pred, constant, values)
                            : expectedBits(64, current.pred, values, constant));
       }
@@ -3779,14 +3780,14 @@ TEST_F(CmpDevice, DestinationMayAliasAnOperandI64) {
                            builder.cmpi64(pred, x.pair, x.pair, y.pair);
                            builder.selectb32(dst, x.pair, 1, 0);
                          }};
-    expectArithResults(spec, static_cast<int>(a.size()), laneInputs(quads),
+    expectArithResults(spec, static_cast<int32_t>(a.size()), laneInputs(quads),
                        perLane(expectedBits(64, pred, a, b)));
   }
 }
 
 TEST_F(CmpDevice, VectorDestinationMayAliasAnSgprOperandI64) {
   WordQuads quads = makeArithPairs64(randomPairs);
-  int groups = laneGroupCount(quads.aLo);
+  int32_t groups = laneGroupCount(quads.aLo);
   Words uniformLo = everyNth(quads.aLo, edgeStride64, groups);
   Words uniformHi = everyNth(quads.aHi, edgeStride64, groups);
   Values uniformLanes = perLane(join(uniformLo, uniformHi));
@@ -3866,7 +3867,7 @@ enum class SelectPlacement {
 };
 
 struct SelectCase {
-  int width;
+  int32_t width;
   RegisterKind dstKind;
   InputKind condKind;
   InputKind operandKind;
@@ -4149,17 +4150,18 @@ TEST_F(SelectVectorTest, BoundaryImmediatesAreAccepted) {
 }
 
 // Immediates that cover inline constants, literals and negative values.
-constexpr int32_t selectImmediates32[] = {5, -16, 0x12345678, -0x65432110, 64};
+static constexpr int32_t selectImmediates32[] = {5, -16, 0x12345678,
+                                                 -0x65432110, 64};
 
 using SelectDevice = DeviceTest;
 
 // Condition words with zero, one, other small values, the sign bit, all ones
 // and pseudo-random words, so that "nonzero is true" is exercised.
-static Words makeConds(size_t count) {
+static Words makeConds(int64_t count) {
   const Words edges{0, 1, 2, 0x80000000u, 0xFFFFFFFFu};
   Words conds;
-  for (size_t i = 0; i < count; ++i)
-    conds.push_back(i % 7 < edges.size()
+  for (int64_t i = 0; i < count; ++i)
+    conds.push_back(i % 7 < std::ssize(edges)
                         ? edges[i % 7]
                         : static_cast<uint32_t>(i) * 2654435761u);
   return conds;
@@ -4167,12 +4169,12 @@ static Words makeConds(size_t count) {
 
 static SelectData makeData32() {
   WordPairs pairs = makeArithPairs(randomPairs);
-  return {makeConds(pairs.a.size()), widen(pairs.a), widen(pairs.b)};
+  return {makeConds(std::ssize(pairs.a)), widen(pairs.a), widen(pairs.b)};
 }
 
 static SelectData makeData64() {
   WordQuads quads = makeArithPairs64(randomPairs);
-  return {makeConds(quads.aLo.size()), join(quads.aLo, quads.aHi),
+  return {makeConds(std::ssize(quads.aLo)), join(quads.aLo, quads.aHi),
           join(quads.bLo, quads.bHi)};
 }
 
@@ -4189,8 +4191,8 @@ static Condition makeCondition(IRBuilder &builder, InputKind kind,
 // Reads an operand: an immediate, one input register, or a pair built from two
 // inputs.
 static Operand makeOperand(IRBuilder &builder, const SelectCase &spec,
-                           const std::optional<int32_t> &immediate,
-                           const std::vector<RegisterRef> &in, size_t &next,
+                           std::optional<int32_t> immediate,
+                           const std::vector<RegisterRef> &in, int64_t &next,
                            std::vector<RegisterRange> &owners) {
   if (immediate)
     return *immediate;
@@ -4203,7 +4205,7 @@ static Operand makeOperand(IRBuilder &builder, const SelectCase &spec,
   return pair.pair;
 }
 
-static void emitSelect(IRBuilder &builder, int width, RegisterRef dst,
+static void emitSelect(IRBuilder &builder, int32_t width, RegisterRef dst,
                        RegisterRef cond, Operand a, Operand b) {
   if (width == 1)
     builder.selectb32(dst, cond, a, b);
@@ -4215,11 +4217,11 @@ static PairRegisters emitSelectSeparate(IRBuilder &builder,
                                         const SelectCase &spec,
                                         RegisterRef cond,
                                         const std::vector<RegisterRef> &in) {
-  size_t next = 1;
+  int64_t next = 1;
   std::vector<RegisterRange> owners;
   Operand a = makeOperand(builder, spec, spec.a, in, next, owners);
   Operand b = makeOperand(builder, spec, spec.b, in, next, owners);
-  int count = spec.width == 1 ? 1 : spec.dstMisaligned ? 3 : 2;
+  int32_t count = spec.width == 1 ? 1 : spec.dstMisaligned ? 3 : 2;
   RegisterRange range = allocateKind(builder, spec.dstKind, count);
   RegisterRef dst = range.ref(count - spec.width, spec.width);
   emitSelect(builder, spec.width, dst, cond, a, b);
@@ -4244,9 +4246,8 @@ static PairRegisters emitSelectOverlapping(IRBuilder &builder,
   if (spec.placement == SelectPlacement::lowFirst) {
     dst = first;
     a = second;
-  } else if (spec.placement == SelectPlacement::copied) {
+  } else if (spec.placement == SelectPlacement::copied)
     b = third;
-  }
   builder.movb32(a.slice(0), in[1]);
   builder.movb32(a.slice(1), in[2]);
   if (spec.placement == SelectPlacement::copied) {
@@ -4266,15 +4267,15 @@ static PairRegisters emitSelectCase(IRBuilder &builder, const SelectCase &spec,
 }
 
 // A result is one lane of a vgpr result or one workgroup of an sgpr result.
-static size_t selectInputIndex(const SelectCase &spec, InputKind kind,
-                               size_t result) {
+static int64_t selectInputIndex(const SelectCase &spec, InputKind kind,
+                                int64_t result) {
   bool perResult = spec.dstKind == sgpr || kind == lane;
   return perResult ? result : result / arithWorkgroupSize;
 }
 
 static uint64_t selectOperandValue(const SelectCase &spec,
-                                   const std::optional<int32_t> &immediate,
-                                   const Values &values, size_t result) {
+                                   std::optional<int32_t> immediate,
+                                   const Values &values, int64_t result) {
   uint64_t value =
       immediate ? static_cast<uint64_t>(int64_t{*immediate})
                 : values[selectInputIndex(spec, spec.operandKind, result)];
@@ -4282,9 +4283,9 @@ static uint64_t selectOperandValue(const SelectCase &spec,
 }
 
 static Values selectExpectedValues(const SelectCase &spec,
-                                   const SelectData &data, size_t results) {
+                                   const SelectData &data, int64_t results) {
   Values expected;
-  for (size_t i = 0; i < results; ++i) {
+  for (int64_t i = 0; i < results; ++i) {
     bool holds = data.conds[selectInputIndex(spec, spec.condKind, i)] != 0;
     expected.push_back(selectOperandValue(spec, holds ? spec.a : spec.b,
                                           holds ? data.a : data.b, i));
@@ -4293,9 +4294,9 @@ static Values selectExpectedValues(const SelectCase &spec,
 }
 
 static void addOperandInputs(KernelInputs &inputs, const SelectCase &spec,
-                             const std::optional<int32_t> &immediate,
-                             const Values &values, size_t laneCount,
-                             size_t groupCount) {
+                             std::optional<int32_t> immediate,
+                             const Values &values, int64_t laneCount,
+                             int64_t groupCount) {
   if (immediate)
     return;
   addInput(inputs, spec.operandKind, lowWords(values), laneCount, groupCount);
@@ -4306,8 +4307,8 @@ static void addOperandInputs(KernelInputs &inputs, const SelectCase &spec,
 
 static KernelInputs makeSelectInputs(const SelectCase &spec,
                                      const SelectData &data,
-                                     size_t groupCount) {
-  size_t laneCount = data.conds.size();
+                                     int64_t groupCount) {
+  int64_t laneCount = std::ssize(data.conds);
   KernelInputs inputs;
   addInput(inputs, spec.condKind, data.conds, laneCount, groupCount);
   addOperandInputs(inputs, spec, spec.a, data.a, laneCount, groupCount);
@@ -4319,12 +4320,13 @@ static KernelInputs makeSelectInputs(const SelectCase &spec,
 // store one half.
 static void expectSelectResults(const SelectCase &spec,
                                 const SelectData &data) {
-  size_t results = data.conds.size();
-  size_t groups = spec.dstKind == sgpr ? results : results / arithWorkgroupSize;
-  size_t expectedCount = spec.dstKind == sgpr ? groups : results;
+  int64_t results = std::ssize(data.conds);
+  int64_t groups =
+      spec.dstKind == sgpr ? results : results / arithWorkgroupSize;
+  int64_t expectedCount = spec.dstKind == sgpr ? groups : results;
   KernelInputs inputs = makeSelectInputs(spec, data, groups);
   Values expected = selectExpectedValues(spec, data, expectedCount);
-  for (int half = 0; half < spec.width; ++half) {
+  for (int32_t half = 0; half < spec.width; ++half) {
     SCOPED_TRACE(spec.width == 1 ? "word"
                  : half == 0     ? "low half"
                                  : "high half");
@@ -4336,7 +4338,8 @@ static void expectSelectResults(const SelectCase &spec,
                              builder.movb32(dst, value.pair.slice(half));
                            }};
     Words words = half == 0 ? lowWords(expected) : highWords(expected);
-    expectArithResults(kernel, static_cast<int>(groups), inputs.words, words);
+    expectArithResults(kernel, static_cast<int32_t>(groups), inputs.words,
+                       words);
   }
 }
 
@@ -4414,9 +4417,9 @@ TEST_F(SelectDevice, ScalarPairs) {
 
 TEST_F(SelectDevice, ScalarPairImmediates) {
   SelectData data = makeData64();
-  const int count = static_cast<int>(std::size(immediates64));
+  const int32_t count = static_cast<int32_t>(std::size(immediates64));
   for (bool dstMisaligned : {false, true}) {
-    for (int i = 0; i < count; ++i) {
+    for (int32_t i = 0; i < count; ++i) {
       int32_t immediate = immediates64[i];
       SCOPED_TRACE("immediate " + std::to_string(immediate) +
                    (dstMisaligned ? " to misaligned dst" : " to aligned dst"));
@@ -4456,10 +4459,10 @@ TEST_F(SelectDevice, VectorPairs) {
 
 TEST_F(SelectDevice, VectorPairImmediates) {
   SelectData data = makeData64();
-  const int count = static_cast<int>(std::size(immediates64));
+  const int32_t count = static_cast<int32_t>(std::size(immediates64));
   for (InputKind condKind : {lane, uniform}) {
     for (bool dstMisaligned : {false, true}) {
-      for (int i = 0; i < count; ++i) {
+      for (int32_t i = 0; i < count; ++i) {
         int32_t immediate = immediates64[i];
         SCOPED_TRACE(
             "immediate " + std::to_string(immediate) +
@@ -4490,7 +4493,8 @@ TEST_F(SelectDevice, OverlappingDestinationOrdering) {
          {SelectPlacement::highFirst, SelectPlacement::lowFirst,
           SelectPlacement::copied}) {
       SCOPED_TRACE(std::string(dstKind == sgpr ? "sgpr" : "vgpr") +
-                   " placement " + std::to_string(static_cast<int>(placement)));
+                   " placement " +
+                   std::to_string(static_cast<int32_t>(placement)));
       SelectCase spec = case64(dstKind, kind, kind);
       spec.placement = placement;
       expectSelectResults(spec, data);
@@ -4508,7 +4512,7 @@ protected:
     return emitted(
         [&](IRBuilder &local) { local.makeRsrc(dst, pointer, size); });
   }
-  int movCount(const std::string &out) {
+  int32_t movCount(const std::string &out) {
     return countLinesContaining(out, "_mov_");
   }
   std::string errorOf(RegisterRef dst, Operand pointer, Operand size) {
@@ -4525,23 +4529,23 @@ enum class SizeSource { sgpr, immediate };
 
 // Byte offsets of the arguments in the kernarg segment.
 struct CopyOffsets {
-  int in;
-  int out;
-  int inBytes;
-  int outBytes;
+  int32_t in;
+  int32_t out;
+  int32_t inBytes;
+  int32_t outBytes;
 };
 
 } // namespace
 
 // The upper word 0x00020000 as rocisa prints a decimal immediate.
-const std::string upperWord = "131072";
+static const std::string upperWord = "131072";
 
 // Literal placements that the allocator never hands out in these tests.
-const RegisterRef dstRef{sgpr, 40, 4};
-const RegisterRef pointerRef{sgpr, 20, 2};
-const RegisterRef sizeRef{sgpr, 30, 1};
+static const RegisterRef dstRef{sgpr, 40, 4};
+static const RegisterRef pointerRef{sgpr, 20, 2};
+static const RegisterRef sizeRef{sgpr, 30, 1};
 
-static RegisterRef word(int index) {
+static RegisterRef word(int32_t index) {
   return RegisterRef{sgpr, dstRef.start + index, 1};
 }
 
@@ -4652,7 +4656,7 @@ TEST_F(RsrcTest, SizeInWord1NeedsNoTemporaryWhenPointerStaysInPlace) {
 
 TEST_F(RsrcTest, TemporaryIsReleasedAfterwards) {
   RegisterRange probe = builder.allocateSgpr(1);
-  int expected = probe.ref().start;
+  int32_t expected = probe.ref().start;
   probe.release();
   emitRsrc(dstRef, pointerRef, word(0));
   RegisterRange after = builder.allocateSgpr(1);
@@ -4696,7 +4700,7 @@ TEST_F(RsrcTest, InvalidOperandsThrowWithoutEmitting) {
 
 TEST_F(RsrcTest, FailureWhereTemporaryWouldBeNeededAllocatesAndEmitsNothing) {
   RegisterRange probe = builder.allocateSgpr(1);
-  int expected = probe.ref().start;
+  int32_t expected = probe.ref().start;
   probe.release();
   EXPECT_THROW(builder.makeRsrc(dstRef, RegisterRef{vgpr, 2, 2}, word(0)),
                std::invalid_argument);
@@ -4716,28 +4720,27 @@ TEST_F(RsrcTest, ErrorMessagesNameTheOperation) {
             std::string::npos);
 }
 
-constexpr int copyWorkgroupSize = 64;
-constexpr int copyGroupCount = 2;
-constexpr int copyLaneCount = copyWorkgroupSize * copyGroupCount;
+static constexpr int32_t copyWorkgroupSize = 64;
+static constexpr int32_t copyGroupCount = 2;
+static constexpr int32_t copyLaneCount = copyWorkgroupSize * copyGroupCount;
 // The input is shorter than the output, and both are shorter than the lane
 // count, so lanes run past each descriptor's end.
-constexpr int inWords = 77;
-constexpr int outWords = 101;
-constexpr int copyPadding = 64;
-constexpr uint32_t copySentinel = 0xDEADBEEFu;
-constexpr const char *copyKernelName = "codegen_buffer_copy";
+static constexpr int32_t inWords = 77;
+static constexpr int32_t outWords = 101;
+static constexpr int32_t copyPadding = 64;
+static constexpr uint32_t copySentinel = 0xDEADBEEFu;
+static constexpr const char *copyKernelName = "codegen_buffer_copy";
 
 static CopyOffsets declareArguments(KernelSignature &signature) {
-  int in = signature.addPointer("in");
-  int out = signature.addPointer("out");
-  int inBytes = signature.addScalar("inBytes", 4);
-  int outBytes = signature.addScalar("outBytes", 4);
+  int32_t in = signature.addPointer("in");
+  int32_t out = signature.addPointer("out");
+  int32_t inBytes = signature.addScalar("inBytes", 4);
+  int32_t outBytes = signature.addScalar("outBytes", 4);
   return {in, out, inBytes, outBytes};
 }
 
 // The pointers and sizes sit in SGPRs apart from the descriptors.
-static void buildDescriptorsFromSgprs(Kernel &kernel,
-                                      const CopyOffsets &offsets,
+static void buildDescriptorsFromSgprs(Kernel &kernel, CopyOffsets offsets,
                                       const RegisterRange &inRsrc,
                                       const RegisterRange &outRsrc) {
   IRBuilder &builder = kernel.builder();
@@ -4760,7 +4763,7 @@ static void buildDescriptorsFromSgprs(Kernel &kernel,
 
 // The pointers are loaded straight into the descriptors, so makeRsrc skips
 // copying them and the sizes are immediates.
-static void buildDescriptorsInPlace(Kernel &kernel, const CopyOffsets &offsets,
+static void buildDescriptorsInPlace(Kernel &kernel, CopyOffsets offsets,
                                     const RegisterRange &inRsrc,
                                     const RegisterRange &outRsrc) {
   IRBuilder &builder = kernel.builder();
@@ -4791,8 +4794,7 @@ static RegisterRange computeByteOffset(Kernel &kernel) {
 }
 
 // Every lane accesses memory, so the descriptor bounds do all the clipping.
-static void buildCopy(Kernel &kernel, SizeSource source,
-                      const CopyOffsets &offsets) {
+static void buildCopy(Kernel &kernel, SizeSource source, CopyOffsets offsets) {
   IRBuilder &builder = kernel.builder();
   RegisterRange inRsrc = builder.allocateSgpr(4, 4);
   RegisterRange outRsrc = builder.allocateSgpr(4, 4);
@@ -4817,21 +4819,21 @@ static void buildCopy(Kernel &kernel, SizeSource source,
 // not clipped to zero shows up in the output.
 static std::vector<uint32_t> makeInput() {
   std::vector<uint32_t> in(copyLaneCount + copyPadding);
-  for (int i = 0; i < std::ssize(in); ++i)
+  for (int32_t i = 0; i < std::ssize(in); ++i)
     in[i] = (0x01000000u + static_cast<uint32_t>(i) * 2654435761u) | 1u;
   return in;
 }
 
 static std::vector<uint32_t> computeExpected(const std::vector<uint32_t> &in) {
   std::vector<uint32_t> expected(copyLaneCount + copyPadding, copySentinel);
-  for (int i = 0; i < outWords; ++i)
+  for (int32_t i = 0; i < outWords; ++i)
     expected[i] = i < inWords ? in[i] : 0u;
   return expected;
 }
 
-static std::vector<std::byte> makeKernarg(int segmentSize,
-                                          const CopyOffsets &offsets,
-                                          const void *in, const void *out) {
+static std::vector<std::byte> makeKernarg(int32_t segmentSize,
+                                          CopyOffsets offsets, const void *in,
+                                          const void *out) {
   std::vector<std::byte> kernarg(segmentSize);
   writeArgument(kernarg, offsets.in, in);
   writeArgument(kernarg, offsets.out, out);
@@ -4843,9 +4845,8 @@ static std::vector<std::byte> makeKernarg(int segmentSize,
 }
 
 // Uploads the buffers, launches the kernel and downloads out.
-static void runCopy(const std::vector<uint8_t> &hsaco,
-                    const CopyOffsets &offsets, int segmentSize,
-                    const std::vector<uint32_t> &in,
+static void runCopy(const std::vector<uint8_t> &hsaco, CopyOffsets offsets,
+                    int32_t segmentSize, const std::vector<uint32_t> &in,
                     std::vector<uint32_t> &out) {
   ModulePtr module;
   hipFunction_t function = nullptr;
@@ -4898,7 +4899,7 @@ static void runBufferCopyTest(SizeSource source) {
     return;
 
   ASSERT_EQ(out.size(), expected.size());
-  for (int i = 0; i < std::ssize(out); ++i)
+  for (int32_t i = 0; i < std::ssize(out); ++i)
     ASSERT_EQ(out[i], expected[i]) << "word " << i;
 }
 

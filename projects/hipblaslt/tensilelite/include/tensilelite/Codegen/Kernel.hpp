@@ -12,6 +12,7 @@
 #include "code.hpp"
 #include "instruction/mem.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -43,9 +44,9 @@ struct KernelArgument {
   std::string name;
   KernelArgumentKind kind;
   /// Size in bytes.
-  int size;
+  int32_t size;
   /// Byte offset from the start of the kernarg segment.
-  int offset;
+  int32_t offset;
 };
 
 /// Ordered kernel arguments laid out in the kernarg segment with natural
@@ -53,31 +54,32 @@ struct KernelArgument {
 class KernelSignature {
 public:
   /// Alignment of the kernarg segment, and the granule its size is rounded to.
-  static constexpr int segmentAlignment = 8;
+  static constexpr int32_t segmentAlignment = 8;
 
   /// Appends a global pointer argument and returns its offset, which the
   /// kernel body loads it from with s_load. Throws std::invalid_argument if
   /// name is not an identifier or is already used.
-  int addPointer(std::string_view name);
+  int32_t addPointer(std::string_view name);
   /// Appends a by-value scalar of size 4 or 8 bytes and returns its offset.
   /// Throws std::invalid_argument for other sizes and for bad names, as
   /// addPointer does.
-  int addScalar(std::string_view name, int size);
+  int32_t addScalar(std::string_view name, int32_t size);
   /// Appends a hidden argument, which the runtime fills, and returns its
   /// offset. Block counts take 4 bytes; group sizes take 2 bytes as LLVM emits
   /// them, or 4; with a 4-byte slot only the low 16 bits are defined. Throws
   /// std::invalid_argument if kind is not hidden, size is not allowed for it,
   /// or kind was already added.
-  int addHidden(KernelArgumentKind kind, int size);
+  int32_t addHidden(KernelArgumentKind kind, int32_t size);
 
   const std::vector<KernelArgument> &arguments() const { return args; }
   /// End of the last argument rounded up to segmentAlignment; 0 without
   /// arguments.
-  int segmentSize() const;
+  int32_t segmentSize() const;
 
 private:
-  int addExplicit(std::string_view name, KernelArgumentKind kind, int size);
-  int append(std::string name, KernelArgumentKind kind, int size);
+  int32_t addExplicit(std::string_view name, KernelArgumentKind kind,
+                      int32_t size);
+  int32_t append(std::string name, KernelArgumentKind kind, int32_t size);
 
   std::vector<KernelArgument> args;
 };
@@ -97,14 +99,14 @@ public:
   /// ABI registers before anything else is allocated. Throws
   /// std::invalid_argument if name is not an identifier, workgroupSize is not
   /// in [1, 1024], or codeObjectVersion is not v4, v5 or v6.
-  Kernel(const Target &target, std::string_view name, int workgroupSize,
+  Kernel(const Target &target, std::string_view name, int32_t workgroupSize,
          CodeObjectVersion codeObjectVersion = CodeObjectVersion::v6);
   Kernel(const Kernel &) = delete;
   Kernel &operator=(const Kernel &) = delete;
 
   const Target &target() const { return kernelTarget; }
   std::string_view name() const { return kernelName; }
-  int workgroupSize() const { return maxWorkgroupSize; }
+  int32_t workgroupSize() const { return maxWorkgroupSize; }
   CodeObjectVersion codeObjectVersion() const { return version; }
   KernelSignature &signature() { return kernelSignature; }
   const KernelSignature &signature() const { return kernelSignature; }
@@ -134,15 +136,15 @@ public:
   /// Sets the LDS bytes the kernel allocates (group_segment_fixed_size); 0 by
   /// default. Throws std::invalid_argument unless 0 <= bytes <=
   /// target().maxLdsSize().
-  void setLdsSize(int bytes);
-  int ldsSize() const { return ldsBytes; }
+  void setLdsSize(int32_t bytes);
+  int32_t ldsSize() const { return ldsBytes; }
 
   /// Emits an s_load of dst.count dwords (1, 2 or 4) from the kernarg segment
   /// at byte offset, such as one returned by the signature. The caller emits
   /// the wait. Throws std::invalid_argument if dst is not SGPRs aligned to its
   /// count, or the load is misaligned or outside the segment.
   std::shared_ptr<rocisa::SMemLoadInstruction> loadArgument(RegisterRef dst,
-                                                            int offset);
+                                                            int32_t offset);
 
   /// Returns the complete assembly file: target and code object version
   /// directives, the kernel symbol and body, the kernel descriptor and the
@@ -155,8 +157,8 @@ private:
   // the body before the builder that points into it.
   Target kernelTarget;
   std::string kernelName;
-  int maxWorkgroupSize;
-  int ldsBytes = 0;
+  int32_t maxWorkgroupSize;
+  int32_t ldsBytes = 0;
   bool workgroupIdsEnabled = false;
   CodeObjectVersion version;
   KernelSignature kernelSignature;

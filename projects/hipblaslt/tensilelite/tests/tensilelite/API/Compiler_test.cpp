@@ -24,18 +24,19 @@
 
 using namespace rocm::tensilelite;
 
-constexpr int64_t blockSize = 64;
-constexpr int64_t gridSize = 4;
-constexpr int64_t elementCount = blockSize * gridSize;
-constexpr const char *kernelName = "jit_compiler_kernel";
-constexpr std::string_view targetPrefix = "amdgcn-amd-amdhsa--";
-constexpr std::string_view directivePrefix =
+static constexpr int64_t blockSize = 64;
+static constexpr int64_t gridSize = 4;
+static constexpr int64_t elementCount = blockSize * gridSize;
+static constexpr const char *kernelName = "jit_compiler_kernel";
+static constexpr std::string_view targetPrefix = "amdgcn-amd-amdhsa--";
+static constexpr std::string_view directivePrefix =
     ".amdgcn_target \"amdgcn-amd-amdhsa-";
 
 // The global id is computed from a block size fixed at compile time, which
 // avoids reading the dispatch packet. The attribute makes the runtime reject a
 // launch with a different block size.
-constexpr std::string_view kernelIR = R"(target triple = "amdgcn-amd-amdhsa"
+static constexpr std::string_view kernelIR =
+    R"(target triple = "amdgcn-amd-amdhsa"
 
 declare i32 @llvm.amdgcn.workitem.id.x()
 declare i32 @llvm.amdgcn.workgroup.id.x()
@@ -83,8 +84,8 @@ static void launchAndVerify(const std::vector<uint8_t> &hsaco) {
   ASSERT_HIP_SUCCESS(hipMemset(out, 0xff, static_cast<size_t>(bytes)));
   void *args[] = {&out};
   ASSERT_HIP_SUCCESS(hipModuleLaunchKernel(
-      function, static_cast<unsigned int>(gridSize), 1, 1,
-      static_cast<unsigned int>(blockSize), 1, 1, 0, nullptr, args, nullptr));
+      function, static_cast<uint32_t>(gridSize), 1, 1,
+      static_cast<uint32_t>(blockSize), 1, 1, 0, nullptr, args, nullptr));
   ASSERT_HIP_SUCCESS(hipDeviceSynchronize());
 
   std::vector<int32_t> result(elementCount);
@@ -110,23 +111,14 @@ static std::string targetDirective(std::string_view assembly) {
   return std::string(assembly.substr(begin, end - begin));
 }
 
-static bool startsWith(std::string_view text, std::string_view prefix) {
-  return text.substr(0, prefix.size()) == prefix;
-}
-
-static bool endsWith(std::string_view text, std::string_view suffix) {
-  return text.size() >= suffix.size() &&
-         text.substr(text.size() - suffix.size()) == suffix;
-}
-
 TEST(JitCompiler, CompilesAssemblesAndLaunches) {
-  int deviceCount = 0;
+  int32_t deviceCount = 0;
   bool hasDevice =
       hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
   // Without a device the ASM checks still run against a fixed processor.
   std::string processor = "gfx950";
   if (hasDevice) {
-    int device = 0;
+    int32_t device = 0;
     ASSERT_HIP_SUCCESS(hipGetDevice(&device));
     hipDeviceProp_t properties;
     ASSERT_HIP_SUCCESS(hipGetDeviceProperties(&properties, device));
@@ -139,8 +131,8 @@ TEST(JitCompiler, CompilesAssemblesAndLaunches) {
   // LLVM spells the triple's empty environment differently across versions
   // (amdgcn-amd-amdhsa--gfx950 or amdgcn-amd-amdhsa-unknown-gfx950).
   std::string directive = targetDirective(assembly);
-  EXPECT_TRUE(startsWith(directive, directivePrefix)) << directive;
-  EXPECT_TRUE(endsWith(directive, "-" + processor + "\"")) << directive;
+  EXPECT_TRUE(directive.starts_with(directivePrefix)) << directive;
+  EXPECT_TRUE(directive.ends_with("-" + processor + "\"")) << directive;
   EXPECT_NE(assembly.find(kernelName), std::string::npos);
   EXPECT_NE(assembly.find("s_endpgm"), std::string::npos);
 

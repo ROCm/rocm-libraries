@@ -6,6 +6,7 @@
 
 #include "helper.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -32,48 +33,48 @@ public:
   /// ISA version as rocisa identifies it, such as {9, 5, 0}.
   IsaVersion isaVersion() const { return isa; }
   /// Number of lanes in a wavefront.
-  int wavefrontSize() const { return wavefront; }
+  int32_t wavefrontSize() const { return wavefront; }
   /// Architecture name, such as gfx950.
   std::string_view archName() const { return arch; }
   /// Full ISA name for .amdgcn_target and the assembler, such as
   /// amdgcn-amd-amdhsa--gfx950 (no feature suffixes).
   std::string_view isaName() const { return isaFullName; }
   /// Maximum number of arch VGPRs a kernel may use.
-  int maxVgpr() const { return maxVgprs; }
+  int32_t maxVgpr() const { return maxVgprs; }
   /// Maximum number of SGPRs a kernel may use.
-  int maxSgpr() const { return maxSgprs; }
+  int32_t maxSgpr() const { return maxSgprs; }
   /// Maximum number of AGPRs a kernel may use: the unified register file
   /// minus the arch VGPRs, as the Python kernel writer computes it.
-  int maxAgpr() const { return maxAgprs; }
+  int32_t maxAgpr() const { return maxAgprs; }
   /// Size of the unified register file that a kernel's arch VGPRs, rounded up
   /// to the accum offset, and its AGPRs share.
-  int maxUnifiedVgpr() const { return maxUnifiedVgprs; }
+  int32_t maxUnifiedVgpr() const { return maxUnifiedVgprs; }
   /// Largest LDS allocation per workgroup in bytes (rocisa's DeviceLDS).
-  int maxLdsSize() const { return maxLdsBytes; }
+  int32_t maxLdsSize() const { return maxLdsBytes; }
   /// Largest vmcnt an s_waitcnt can encode.
-  int maxVmcnt() const { return maxVmcnts; }
+  int32_t maxVmcnt() const { return maxVmcnts; }
   /// Largest lgkmcnt an s_waitcnt can encode.
-  int maxLgkmcnt() const { return maxLgkmcnts; }
+  int32_t maxLgkmcnt() const { return maxLgkmcnts; }
   /// Number of XCDs; the dispatcher assigns workgroup L (x fastest over the
   /// grid) to XCD L mod xcdCount().
-  int xcdCount() const { return xcds; }
+  int32_t xcdCount() const { return xcds; }
 
 private:
-  Target(IsaVersion isa, int wavefront, int xcds, std::string_view arch,
+  Target(IsaVersion isa, int32_t wavefront, int32_t xcds, std::string_view arch,
          std::string_view isaFullName);
 
   IsaVersion isa;
-  int wavefront;
-  int xcds;
+  int32_t wavefront;
+  int32_t xcds;
   std::string arch;
   std::string isaFullName;
-  int maxVgprs = 0;
-  int maxSgprs = 0;
-  int maxAgprs = 0;
-  int maxUnifiedVgprs = 0;
-  int maxLdsBytes = 0;
-  int maxVmcnts = 0;
-  int maxLgkmcnts = 0;
+  int32_t maxVgprs = 0;
+  int32_t maxSgprs = 0;
+  int32_t maxAgprs = 0;
+  int32_t maxUnifiedVgprs = 0;
+  int32_t maxLdsBytes = 0;
+  int32_t maxVmcnts = 0;
+  int32_t maxLgkmcnts = 0;
 };
 
 } // namespace rocm::tensilelite::codegen

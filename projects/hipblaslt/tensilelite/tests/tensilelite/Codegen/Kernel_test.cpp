@@ -14,7 +14,6 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -461,7 +460,7 @@ TEST_F(KernelTest, LoadsArguments) {
   EXPECT_THROW(kernel.loadArgument(regs.ref(1, 2), 0), std::invalid_argument);
   EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), 2), std::invalid_argument);
   EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), -4), std::invalid_argument);
-  int end = signature.segmentSize();
+  int32_t end = signature.segmentSize();
   EXPECT_NO_THROW(kernel.loadArgument(regs.ref(0, 1), end - 4));
   EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), end), std::invalid_argument);
   EXPECT_THROW(kernel.loadArgument(regs.ref(0, 2), end - 4),
@@ -492,10 +491,11 @@ TEST(KernelLaunch, EmptyKernelAssemblesLoadsAndLaunches) {
   launchWithParams(function, 4, 256, args);
 }
 
-constexpr int roundTripGroupSize = 256;
-constexpr int roundTripGroups = 4;
-constexpr int roundTripElements = roundTripGroupSize * roundTripGroups;
-constexpr const char *roundTripName = "codegen_agpr_round_trip";
+static constexpr int32_t roundTripGroupSize = 256;
+static constexpr int32_t roundTripGroups = 4;
+static constexpr int32_t roundTripElements =
+    roundTripGroupSize * roundTripGroups;
+static constexpr const char *roundTripName = "codegen_agpr_round_trip";
 
 // Loads the in and out pointers from the kernarg segment into s[4:7].
 static RegisterRange loadRoundTripPointers(Kernel &kernel) {
@@ -539,7 +539,7 @@ static void buildAgprRoundTrip(Kernel &kernel) {
 
 // Uploads in, launches the kernel and downloads the result into out.
 static void runRoundTrip(const std::vector<uint8_t> &hsaco, const char *name,
-                         int groups, int groupSize,
+                         int32_t groups, int32_t groupSize,
                          const std::vector<int32_t> &in,
                          std::vector<int32_t> &out) {
   ModulePtr module;
@@ -580,7 +580,7 @@ TEST(KernelLaunch, AgprRoundTripOnDevice) {
     GTEST_SKIP() << "no HIP device";
 
   std::vector<int32_t> in(roundTripElements);
-  for (int i = 0; i < roundTripElements; ++i)
+  for (int32_t i = 0; i < roundTripElements; ++i)
     in[i] = i * 7919 + 1;
   std::vector<int32_t> out(roundTripElements, -1);
   runRoundTrip(hsaco, roundTripName, roundTripGroups, roundTripGroupSize, in,
@@ -588,17 +588,17 @@ TEST(KernelLaunch, AgprRoundTripOnDevice) {
   if (testing::Test::HasFatalFailure())
     return;
 
-  for (int i = 0; i < roundTripElements; ++i)
+  for (int32_t i = 0; i < roundTripElements; ++i)
     ASSERT_EQ(out[i], in[i]) << "element " << i;
 }
 
-constexpr const char *idsName = "codegen_ids_hidden";
-constexpr int idsGrid[3] = {3, 4, 5};
-constexpr int idsBlock[3] = {8, 2, 2};
-constexpr int idsGroups = idsGrid[0] * idsGrid[1] * idsGrid[2];
-constexpr int idsBlockSize = idsBlock[0] * idsBlock[1] * idsBlock[2];
+static constexpr const char *idsName = "codegen_ids_hidden";
+static constexpr int32_t idsGrid[3] = {3, 4, 5};
+static constexpr int32_t idsBlock[3] = {8, 2, 2};
+static constexpr int32_t idsGroups = idsGrid[0] * idsGrid[1] * idsGrid[2];
+static constexpr int32_t idsBlockSize = idsBlock[0] * idsBlock[1] * idsBlock[2];
 // Workgroup ids x, y, z, group sizes x, y, z and block counts x, y, z.
-constexpr int idsDwords = 9;
+static constexpr int32_t idsDwords = 9;
 
 // Mimics the reference kernel: the hidden arguments start at offset 12, which
 // is not 8-aligned, and follow the explicit ones.
@@ -621,14 +621,14 @@ static void loadIdsAndHiddenArguments(Kernel &kernel,
   IRBuilder &builder = kernel.builder();
   const RegisterRange *ids[] = {&kernel.workgroupIdX(), &kernel.workgroupIdY(),
                                 &kernel.workgroupIdZ()};
-  for (int i = 0; i < 3; ++i)
+  for (int32_t i = 0; i < 3; ++i)
     builder.create<rocisa::SMovB32>(values.sub(i), ids[i]->container());
-  for (int i = 0; i < 6; ++i)
+  for (int32_t i = 0; i < 6; ++i)
     kernel.loadArgument(values.ref(3 + i), 12 + 4 * i);
   builder.createWaitCnt({.scalarMemory = 0});
   // The runtime writes only the low 2 bytes of a group size (LLVM's width), so
   // the upper half of a 4-byte slot is undefined.
-  for (int i = 3; i < 6; ++i)
+  for (int32_t i = 3; i < 6; ++i)
     builder.create<rocisa::SAndB32>(values.sub(i), values.sub(i), 0xffff);
 }
 
@@ -668,7 +668,7 @@ static void buildIdsAndHiddenKernel(Kernel &kernel) {
   builder.create<rocisa::SMovB64>(std::make_shared<rocisa::EXEC>(), 1);
   RegisterRange address = builder.allocateVgpr(1);
   RegisterRange data = builder.allocateVgpr(1);
-  for (int i = 0; i < idsDwords; ++i) {
+  for (int32_t i = 0; i < idsDwords; ++i) {
     builder.create<rocisa::VAddU32>(address.container(), 4 * i,
                                     base.container());
     builder.create<rocisa::VMovB32>(data.container(), values.sub(i));
@@ -720,26 +720,26 @@ TEST(KernelLaunch, WorkgroupIdsAndHiddenArgumentsOnDevice) {
   if (testing::Test::HasFatalFailure())
     return;
 
-  for (int z = 0; z < idsGrid[2]; ++z)
-    for (int y = 0; y < idsGrid[1]; ++y)
-      for (int x = 0; x < idsGrid[0]; ++x) {
-        int linear = x + idsGrid[0] * (y + idsGrid[1] * z);
+  for (int32_t z = 0; z < idsGrid[2]; ++z)
+    for (int32_t y = 0; y < idsGrid[1]; ++y)
+      for (int32_t x = 0; x < idsGrid[0]; ++x) {
+        int32_t linear = x + idsGrid[0] * (y + idsGrid[1] * z);
         const int32_t expected[idsDwords] = {
             x,           y,          z,          idsBlock[0], idsBlock[1],
             idsBlock[2], idsGrid[0], idsGrid[1], idsGrid[2]};
-        for (int i = 0; i < idsDwords; ++i)
+        for (int32_t i = 0; i < idsDwords; ++i)
           ASSERT_EQ(records[linear * idsDwords + i], expected[i])
               << "group (" << x << ", " << y << ", " << z << ") word " << i;
       }
 }
 
-constexpr const char *ldsName = "codegen_lds_round_trip";
-constexpr int ldsGroupSize = 256;
-constexpr int ldsGroups = 4;
-constexpr int ldsElements = ldsGroupSize * ldsGroups;
+static constexpr const char *ldsName = "codegen_lds_round_trip";
+static constexpr int32_t ldsGroupSize = 256;
+static constexpr int32_t ldsGroups = 4;
+static constexpr int32_t ldsElements = ldsGroupSize * ldsGroups;
 
 // Returns the LDS byte address of lane (tid + delta) % ldsGroupSize.
-static RegisterRange computeLdsAddress(Kernel &kernel, int delta) {
+static RegisterRange computeLdsAddress(Kernel &kernel, int32_t delta) {
   IRBuilder &builder = kernel.builder();
   RegisterRange address = builder.allocateVgpr(1);
   builder.create<rocisa::VAddU32>(address.container(), delta,
@@ -807,15 +807,15 @@ TEST(KernelLaunch, LdsRoundTripOnDevice) {
     GTEST_SKIP() << "no HIP device";
 
   std::vector<int32_t> in(ldsElements);
-  for (int i = 0; i < ldsElements; ++i)
+  for (int32_t i = 0; i < ldsElements; ++i)
     in[i] = i * 7919 + 1;
   std::vector<int32_t> out(ldsElements, -1);
   runRoundTrip(hsaco, ldsName, ldsGroups, ldsGroupSize, in, out);
   if (testing::Test::HasFatalFailure())
     return;
 
-  for (int g = 0; g < ldsGroups; ++g)
-    for (int t = 0; t < ldsGroupSize; ++t)
+  for (int32_t g = 0; g < ldsGroups; ++g)
+    for (int32_t t = 0; t < ldsGroupSize; ++t)
       ASSERT_EQ(out[g * ldsGroupSize + t],
                 in[g * ldsGroupSize + (t + 1) % ldsGroupSize])
           << "group " << g << " lane " << t;

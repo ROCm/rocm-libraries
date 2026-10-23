@@ -37,16 +37,16 @@ namespace {
 
 /// Kernarg offsets of the GEMM kernel's arguments.
 struct SkinnyArguments {
-  int d, a, b, scalesA, scalesB, ws;
-  int ldD, ldA, ldB, m, n, k, spk;
-  int blocksX, blocksY, blocksZ;
+  int32_t d, a, b, scalesA, scalesB, ws;
+  int32_t ldD, ldA, ldB, m, n, k, spk;
+  int32_t blocksX, blocksY, blocksZ;
 };
 
 /// A ds address register and the offset field that, together, name base +
 /// offset.
 struct LdsAddress {
   RegisterRef base;
-  int offset;
+  int32_t offset;
 };
 
 /// Constants derived from the knobs, named after the MLIR values.
@@ -54,80 +54,80 @@ struct SkinnyDims {
   explicit SkinnyDims(const SkinnyGEMMConfig &config);
 
   /// Chunks per iteration; every lane loads 4 dwordx4 per column.
-  static constexpr int chunks = 4;
+  static constexpr int32_t chunks = 4;
 
-  int bm, tn, lanesK, waves, prefetch;
+  int32_t bm, tn, lanesK, waves, prefetch;
   /// GRID_3D; group and numXcds only apply to the persistent launch.
   bool grid3d;
-  int group, numXcds;
+  int32_t group, numXcds;
   /// Whether the persistent launch reorders the tiles (GROUP or NUM_XCDS not
   /// 1), which changes the key of the K rotation.
   bool reordered;
   /// UP_ITERS up-front scale entries per split, 0 for ring scales.
-  int upIters;
+  int32_t upIters;
   /// PARTIAL_STEPS: 0, 1 (tail step only) or 2 (head and tail steps).
-  int partialSteps;
+  int32_t partialSteps;
   /// NC = BM + TN columns per lane.
-  int columns;
+  int32_t columns;
   /// P = BM * TN accumulators per lane.
-  int accumulators;
+  int32_t accumulators;
   /// CG = 64 / LANES_K column groups per wave.
-  int columnGroups;
+  int32_t columnGroups;
   /// BN = WAVES * CG * TN wide columns per tile.
-  int tileWide;
+  int32_t tileWide;
   /// G: consecutive wide tiles that share their scale lines and so run on one
   /// XCD in the 3-D launch; 1 when BN is not a power of two below 32.
-  int xcdRun;
+  int32_t xcdRun;
   /// Wide columns of a scale row group, which share every 128-byte scale line.
-  static constexpr int scaleRowColumns = 32;
+  static constexpr int32_t scaleRowColumns = 32;
   /// KI = 64 * LANES_K elements per iteration.
-  int ki;
+  int32_t ki;
   /// S = min(LANES_K, 8) lanes per subgroup.
-  int subgroupLanes;
-  int halfSubgroup;
-  int log2LanesK, log2ColumnGroups, log2Subgroup, log2Half, log2Ki;
+  int32_t subgroupLanes;
+  int32_t halfSubgroup;
+  int32_t log2LanesK, log2ColumnGroups, log2Subgroup, log2Half, log2Ki;
   /// max(PF, 1) ring slots.
-  int slots;
+  int32_t slots;
   /// Whether the up-front scales go through LDS (@scales_shared): several
   /// waves and CG < 4.
   bool scalesShared;
   /// R row slots of the scale load role domain: the block when shared, else
   /// the wave.
-  int roleSlots;
+  int32_t roleSlots;
   /// Ring scale dwords per slot, NC with ring scales and 0 with up-front
   /// scales.
-  int scaleLoads;
+  int32_t scaleLoads;
   /// L loads per ring slot: the scale dwords of a ring-scale slot (scaleLoads
   /// of them, NC), then 4 chunks of NC.
-  int loadsPerSlot;
+  int32_t loadsPerSlot;
   /// Bytes of LDS holding the shared up-front scales, UP * NC * WAVES * 256.
-  int ldsBytes;
+  int32_t ldsBytes;
   /// Bytes between the chunks of a lane, 16 * S.
-  int chunkStride;
+  int32_t chunkStride;
 };
 
 /// Multiplier and shift of LLVM's signed division by a positive constant.
 struct SignedMagic {
   int32_t multiplier;
-  int shift;
+  int32_t shift;
 };
 
 /// Loads that stay in flight at a point of the schedule, counted in issue
 /// order so that an in-order vmcnt wait can name them.
 struct SlotLoadPosition {
   /// Position of the load among the loads of its slot.
-  int position;
+  int32_t position;
   /// Full ring slots issued after the slot of the load.
-  int groupsAfter;
+  int32_t groupsAfter;
   /// Loads of the slot's own refill that were issued before the consumer.
-  int ownRefill;
+  int32_t ownRefill;
 };
 
 /// A slot of the prefetch ring being consumed.
 struct SlotContext {
-  int slot;
+  int32_t slot;
   /// Full ring slots issued after this slot's group of loads.
-  int groupsAfter;
+  int32_t groupsAfter;
   /// Physical iteration to refill the slot with, an SGPR; empty without
   /// refill.
   std::optional<RegisterRef> refillIteration;
@@ -210,18 +210,18 @@ private:
   struct RedLayout {
     bool runs;
     bool skinnyContiguous;
-    int stride;
-    int total;
+    int32_t stride;
+    int32_t total;
   };
 
   // The control of one DPP add of the reduction.
   struct DppStep {
-    int rowBcast;
-    std::vector<int> quadPerm;
+    int32_t rowBcast;
+    std::vector<int32_t> quadPerm;
     bool rowMirror;
     bool rowHalfMirror;
-    int rowMask;
-    int boundCtrl;
+    int32_t rowMask;
+    int32_t boundCtrl;
   };
 
   // Registers and flags of one epilogue variant.
@@ -275,7 +275,7 @@ private:
                       RegisterRef w0Load);
   void fillSelectors();
   void zeroAccumulators();
-  RegisterRef selector(int column) const;
+  RegisterRef selector(int32_t column) const;
   void selectorValue(RegisterRef dst, RegisterRef col);
 
   // Persistent launch.
@@ -290,40 +290,44 @@ private:
   void runPrefetchedLoop();
   void emitPrologue();
   void emitSteadyLoop(RegisterRef steadyEnd);
-  void emitRemainderArm(RegisterRef left, RegisterRef steadyEnd, int remaining);
+  void emitRemainderArm(RegisterRef left, RegisterRef steadyEnd,
+                        int32_t remaining);
   void hoistChunkBases();
-  void ensureChunkBase(int chunk);
+  void ensureChunkBase(int32_t chunk);
   void wrapIteration(RegisterRef dst, RegisterRef sum);
   void issueScales(RegisterRef raw, RegisterRef soffset,
                    std::optional<RegisterRef> neg = std::nullopt);
-  void issueChunk(int slot, int chunk, RegisterRef soffset,
+  void issueChunk(int32_t slot, int32_t chunk, RegisterRef soffset,
                   std::optional<RegisterRef> neg = std::nullopt);
   void refillOffset(const SlotContext &context, RegisterRef soffset);
   void startRefill(const SlotContext &context, RegisterRef soffset);
-  void refillChunk(const SlotContext &context, int chunk, RegisterRef soffset);
-  void waitForVectorLoads(int outstanding);
-  void gatherSlotScales(RegisterRef raw, RegisterRef lo, int firstOutstanding);
+  void refillChunk(const SlotContext &context, int32_t chunk,
+                   RegisterRef soffset);
+  void waitForVectorLoads(int32_t outstanding);
+  void gatherSlotScales(RegisterRef raw, RegisterRef lo,
+                        int32_t firstOutstanding);
   void permSlotScales(RegisterRef hi, RegisterRef lo, RegisterRef out);
-  void decodeScales(RegisterRef dst, RegisterRef packed, int chunk);
-  void waitBeforeFirstUse(const SlotContext &context, int chunk, int column,
-                          int ownRefill);
-  void computeChunk(const SlotContext &context, int chunk, RegisterRef scales);
+  void decodeScales(RegisterRef dst, RegisterRef packed, int32_t chunk);
+  void waitBeforeFirstUse(const SlotContext &context, int32_t chunk,
+                          int32_t column, int32_t ownRefill);
+  void computeChunk(const SlotContext &context, int32_t chunk,
+                    RegisterRef scales);
   void processSlot(const SlotContext &context);
   void processDecodeFirst(const SlotContext &context, RegisterRange &packed);
   void processUpFront(const SlotContext &context,
                       std::optional<RegisterRange> &packed);
-  RegisterRef dataChunk(int slot, int chunk, int column) const;
-  RegisterRef rawScales(int slot) const;
-  RegisterRef dataRsrc(int column) const;
+  RegisterRef dataChunk(int32_t slot, int32_t chunk, int32_t column) const;
+  RegisterRef rawScales(int32_t slot) const;
+  RegisterRef dataRsrc(int32_t column) const;
 
   // Up-front scales.
   void issueUpFrontScales();
   void packScaleVectors();
   void stageScalesInLds();
-  void readSharedEntry(int entry);
+  void readSharedEntry(int32_t entry);
   std::optional<RegisterRange> selectScales(const SlotContext &context);
   void decodeHoistedScales();
-  int upFrontLoadsAfter(int index) const;
+  int32_t upFrontLoadsAfter(int32_t index) const;
   RegisterRef vectorEntry(RegisterRef physical,
                           std::optional<RegisterRange> &storage);
 
@@ -351,41 +355,42 @@ private:
   void issueScalesWithinK(RegisterRef raw, RegisterRef soffset,
                           RegisterRef kAvail);
   void straddlesInChunk(RegisterRef dst, RegisterRef bound);
-  void loadStepChunk(const PartialStep &step, int chunk,
+  void loadStepChunk(const PartialStep &step, int32_t chunk,
                      RegisterRef partialChunks);
-  void loadTailDwords(int chunk, RegisterRef soffset, RegisterRef laneRem,
+  void loadTailDwords(int32_t chunk, RegisterRef soffset, RegisterRef laneRem,
                       std::optional<RegisterRef> laneLo);
-  void loadMaskedDword(int chunk, int column, int dword, RegisterRef voffset,
-                       RegisterRef steer, RegisterRef soffset,
-                       RegisterRef mask);
+  void loadMaskedDword(int32_t chunk, int32_t column, int32_t dword,
+                       RegisterRef voffset, RegisterRef steer,
+                       RegisterRef soffset, RegisterRef mask);
 
   // Epilogue.
   void emitEpilogue();
   void emitEpilogueVariant(bool skinnyContiguous);
   RedLayout redLayout(bool skinnyContiguous) const;
-  int runLength(bool skinnyContiguous) const;
-  int redIndex(const RedLayout &layout, int r, int t) const;
+  int32_t runLength(bool skinnyContiguous) const;
+  int32_t redIndex(RedLayout layout, int32_t r, int32_t t) const;
   void waitForPrologueLoads(const std::vector<RegisterRef> &written,
-                            int issuedSince);
+                            int32_t issuedSince);
   void reduceAccumulators(const EpilogueState &state);
   void emitDpp(RegisterRef dst, RegisterRef src, const DppStep &step);
-  void emitNops(int count);
+  void emitNops(int32_t count);
   void computeTileFull(RegisterRef tileFull);
   void storeTile(const EpilogueState &state, const StoreTarget &target);
   StoreScalars makeStoreScalars(const EpilogueState &state,
                                 const StoreTarget &target);
   void storeMasked(const EpilogueState &state, const StoreTarget &target);
   void storeRun(const EpilogueState &state, const StoreTarget &target,
-                const StoreScalars &scalars, int r, int t, int length);
+                const StoreScalars &scalars, int32_t r, int32_t t,
+                int32_t length);
   void storeChunk(const EpilogueState &state, const StoreTarget &target,
-                  const StoreScalars &scalars, int r, int t, int first,
-                  int elements);
+                  const StoreScalars &scalars, int32_t r, int32_t t,
+                  int32_t first, int32_t elements);
   void computeOffset(const EpilogueState &state, const StoreTarget &target,
-                     const StoreScalars &scalars, int r, int t);
+                     const StoreScalars &scalars, int32_t r, int32_t t);
   bool hasVector(bool skinnyContiguous, bool bf16) const;
 
-  RegisterRange sgpr(int count = 1, int alignment = 1);
-  RegisterRange vgpr(int count = 1, int alignment = 1);
+  RegisterRange sgpr(int32_t count = 1, int32_t alignment = 1);
+  RegisterRange vgpr(int32_t count = 1, int32_t alignment = 1);
   bool uniformWide() const;
 
   Kernel &kernel;
@@ -448,7 +453,7 @@ private:
 
 // Shared helpers.
 
-static constexpr int outOfRange = -1;
+static constexpr int32_t outOfRange = -1;
 
 // The modifiers of a buffer load or store addressed with a voffset.
 static rocisa::MUBUFModifiers offen() {
@@ -458,15 +463,15 @@ static rocisa::MUBUFModifiers offen() {
 static bool isScalar(RegisterRef ref) { return ref.kind == RegisterKind::sgpr; }
 
 // Returns whether value is a positive power of two.
-static bool isPowerOfTwo(int value) {
+static bool isPowerOfTwo(int32_t value) {
   return value > 0 && (value & (value - 1)) == 0;
 }
 
 // Returns log2 of a power of two.
-static int log2Exact(int value) {
+static int32_t log2Exact(int32_t value) {
   if (!isPowerOfTwo(value))
     throw std::logic_error("value is not a power of two");
-  int log = 0;
+  int32_t log = 0;
   while ((1 << log) < value)
     ++log;
   return log;
@@ -479,7 +484,7 @@ static SignedMagic signedMagic(int32_t d) {
   uint32_t ad = static_cast<uint32_t>(d);
   uint32_t t = two31;
   uint32_t anc = t - 1 - t % ad;
-  int p = 31;
+  int32_t p = 31;
   uint32_t q1 = two31 / anc;
   uint32_t r1 = two31 - q1 * anc;
   uint32_t q2 = two31 / ad;
@@ -507,7 +512,7 @@ static SignedMagic signedMagic(int32_t d) {
 // 32-bit ALU shorthands that pick the SALU or VALU instruction from the kind
 // of dst, which must not be an AGPR. A VALU src must be a VGPR.
 static void shiftLeft(IRBuilder &builder, RegisterRef dst, RegisterRef src,
-                      int amount) {
+                      int32_t amount) {
   if (amount == 0) {
     if (dst != src)
       builder.movb32(dst, src);
@@ -522,7 +527,7 @@ static void shiftLeft(IRBuilder &builder, RegisterRef dst, RegisterRef src,
 }
 
 static void shiftRight(IRBuilder &builder, RegisterRef dst, RegisterRef src,
-                       int amount) {
+                       int32_t amount) {
   if (amount == 0) {
     if (dst != src)
       builder.movb32(dst, src);
@@ -537,7 +542,7 @@ static void shiftRight(IRBuilder &builder, RegisterRef dst, RegisterRef src,
 }
 
 static void bitAnd(IRBuilder &builder, RegisterRef dst, RegisterRef src,
-                   int mask) {
+                   int32_t mask) {
   if (isScalar(dst))
     builder.create<rocisa::SAndB32>(dst.container(), mask, src.container());
   else
@@ -546,7 +551,7 @@ static void bitAnd(IRBuilder &builder, RegisterRef dst, RegisterRef src,
 
 // dst = src * factor, a shift when factor is a power of two.
 static void multiplyBy(IRBuilder &builder, RegisterRef dst, RegisterRef src,
-                       int factor) {
+                       int32_t factor) {
   if (isPowerOfTwo(factor)) {
     shiftLeft(builder, dst, src, log2Exact(factor));
     return;
@@ -557,7 +562,7 @@ static void multiplyBy(IRBuilder &builder, RegisterRef dst, RegisterRef src,
 // Emits quotient = dividend / divisor for a non-negative SGPR dividend and a
 // divisor >= 2 that is not a power of two, as LLVM expands the division.
 static void divideByConstant(IRBuilder &builder, RegisterRef quotient,
-                             RegisterRef dividend, int divisor) {
+                             RegisterRef dividend, int32_t divisor) {
   SignedMagic magic = signedMagic(divisor);
   RegisterRange sign = builder.allocateSgpr(1);
   builder.create<rocisa::SMulHII32>(quotient.container(), dividend.container(),
@@ -573,8 +578,9 @@ static void divideByConstant(IRBuilder &builder, RegisterRef quotient,
 
 // Number of vector memory loads issued after the load at where; the count a
 // vmcnt wait must allow so that it is complete.
-static int loadsIssuedAfter(const SkinnyDims &dims, SlotLoadPosition where) {
-  int sameSlot = dims.loadsPerSlot - 1 - where.position;
+static int32_t loadsIssuedAfter(const SkinnyDims &dims,
+                                SlotLoadPosition where) {
+  int32_t sameSlot = dims.loadsPerSlot - 1 - where.position;
   return sameSlot + where.groupsAfter * dims.loadsPerSlot + where.ownRefill;
 }
 
@@ -610,7 +616,7 @@ SkinnyDims::SkinnyDims(const SkinnyGEMMConfig &config)
 
 // Setup.
 
-static constexpr int selectorMaskStep = 0x01010101;
+static constexpr int32_t selectorMaskStep = 0x01010101;
 
 // Bytes of an operand of cols columns: (cols - 1) * ld + alignUp(k, 4), as
 // the last column is padded to 4 bytes, not to ld.
@@ -710,11 +716,11 @@ SkinnyGEMMEmitter::SkinnyGEMMEmitter(Kernel &kernel,
       chunkBase(sgpr(4)), chunkBaseReady(4, false),
       sValid(sgpr(2 * dims.bm, 2)), wValid(sgpr(2 * dims.tn, 2)) {}
 
-RegisterRange SkinnyGEMMEmitter::sgpr(int count, int alignment) {
+RegisterRange SkinnyGEMMEmitter::sgpr(int32_t count, int32_t alignment) {
   return builder.allocateSgpr(count, alignment);
 }
 
-RegisterRange SkinnyGEMMEmitter::vgpr(int count, int alignment) {
+RegisterRange SkinnyGEMMEmitter::vgpr(int32_t count, int32_t alignment) {
   return builder.allocateVgpr(count, alignment);
 }
 
@@ -949,8 +955,8 @@ void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars,
 // tile is (x mod X) * xcdRun + (x / X) mod xcdRun; the tail of the grid keeps
 // the identity so that every tile still runs exactly once.
 void SkinnyGEMMEmitter::groupTilesPerXcd(const SetupScalars &scalars) {
-  int xcds = kernel.target().xcdCount();
-  int span = xcds * dims.xcdRun;
+  int32_t xcds = kernel.target().xcdCount();
+  int32_t span = xcds * dims.xcdRun;
   RegisterRange logical = sgpr();
   RegisterRange term = sgpr();
   shiftRight(builder, logical.ref(), tile.tx, log2Exact(xcds));
@@ -1122,9 +1128,9 @@ RegisterRange SkinnyGEMMEmitter::computeScaleOffset(
     RegisterRef lane, const std::optional<RegisterRange> &sharedRoleJ) {
   std::optional<RegisterRange> roleStorage;
   RegisterRef roleJ = lane;
-  if (sharedRoleJ) {
+  if (sharedRoleJ)
     roleJ = sharedRoleJ->ref();
-  } else if (dims.columnGroups > 1) {
+  else if (dims.columnGroups > 1) {
     roleStorage = vgpr();
     shiftRight(builder, roleStorage->ref(), lane, dims.log2ColumnGroups);
     roleJ = roleStorage->ref();
@@ -1153,9 +1159,9 @@ void SkinnyGEMMEmitter::computeWideLoadSlot(
     const std::optional<RegisterRange> &sharedRoleJ) {
   if (sharedRoleJ) {
     // slot = tid mod R given roleJ = tid / R.
-    if (isPowerOfTwo(dims.roleSlots)) {
+    if (isPowerOfTwo(dims.roleSlots))
       bitAnd(builder, slot, tid, dims.roleSlots - 1);
-    } else {
+    else {
       builder.muli32(slot, sharedRoleJ->ref(), dims.roleSlots);
       builder.subi32(slot, tid, slot);
     }
@@ -1196,9 +1202,9 @@ SkinnyGEMMEmitter::LaneValues SkinnyGEMMEmitter::computeLaneValues() {
     klv = klStorage->ref();
   }
   std::optional<RegisterRange> w0Lane;
-  if (dims.grid3d && uniformWide()) {
+  if (dims.grid3d && uniformWide())
     builder.muli32(w0.ref(), tile.tx, dims.tileWide);
-  } else if (dims.grid3d) {
+  else if (dims.grid3d) {
     computeLaneWideBase(w0.ref());
     addTileBase(w0.ref());
   } else if (!uniformWide()) {
@@ -1237,7 +1243,7 @@ SkinnyGEMMEmitter::LaneValues SkinnyGEMMEmitter::computeLaneValues() {
 // stores.
 void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
                                       LaneValues &lane) {
-  for (int r = 0; r < dims.bm; ++r) {
+  for (int32_t r = 0; r < dims.bm; ++r) {
     RegisterRange col = sgpr();
     builder.addi32(col.ref(), s0.ref(), r);
     builder.cmpi32(Predicate::ult, sValid.ref(2 * r, 2), col.ref(),
@@ -1247,7 +1253,7 @@ void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
     builder.selectb32(dBase.ref(r), sValid.ref(2 * r, 2), dBase.ref(r),
                       outOfRange);
   }
-  for (int t = 0; t < dims.tn; ++t) {
+  for (int32_t t = 0; t < dims.tn; ++t) {
     RegisterRef base = dBase.ref(dims.bm + t);
     RegisterRef valid = wValid.ref(2 * t, 2);
     RegisterRange col = uniformWide() ? sgpr() : vgpr();
@@ -1269,7 +1275,7 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
                                        RegisterRef w0Load) {
   if (scaleGroup)
     bitAnd(builder, scaleGroup->ref(), lane.sclOff.ref(), -256);
-  for (int r = 0; r < dims.bm; ++r) {
+  for (int32_t r = 0; r < dims.bm; ++r) {
     RegisterRange col = sgpr();
     RegisterRange row = sgpr();
     builder.addi32(col.ref(), s0.ref(), r);
@@ -1278,7 +1284,7 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
     builder.selectb32(sBase.ref(r), sValid.ref(2 * r, 2), sBase.ref(r),
                       outOfRange);
   }
-  for (int t = 0; t < dims.tn; ++t) {
+  for (int32_t t = 0; t < dims.tn; ++t) {
     RegisterRef base = sBase.ref(dims.bm + t);
     RegisterRange valid = sgpr(2, 2);
     RegisterRange col = uniformWide() ? sgpr() : vgpr();
@@ -1293,11 +1299,11 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
 
 // The selector of the column group of a row: all rows of a 16-row half share
 // one when BM or TN divides 16, since s0 and w0 are multiples of them.
-RegisterRef SkinnyGEMMEmitter::selector(int column) const {
+RegisterRef SkinnyGEMMEmitter::selector(int32_t column) const {
   bool skinny = column < dims.bm;
   bool skinnyShared = 16 % dims.bm == 0;
   bool wideShared = 16 % dims.tn == 0;
-  int skinnyCount = skinnyShared ? 1 : dims.bm;
+  int32_t skinnyCount = skinnyShared ? 1 : dims.bm;
   if (skinny)
     return selectors.ref(skinnyShared ? 0 : column);
   return selectors.ref(skinnyCount + (wideShared ? 0 : column - dims.bm));
@@ -1307,7 +1313,7 @@ RegisterRef SkinnyGEMMEmitter::selector(int column) const {
 // that packs the two scale dwords of a column whose row is in the lower or
 // upper 16 rows of its 32-row group.
 void SkinnyGEMMEmitter::selectorValue(RegisterRef dst, RegisterRef col) {
-  int selectorBase = dims.subgroupLanes == 8 ? 0x06040200 : 0x06020400;
+  int32_t selectorBase = dims.subgroupLanes == 8 ? 0x06040200 : 0x06020400;
   // A scalar column is computed in an SGPR and then copied to dst.
   std::optional<RegisterRange> value;
   RegisterRef work = dst;
@@ -1324,10 +1330,10 @@ void SkinnyGEMMEmitter::selectorValue(RegisterRef dst, RegisterRef col) {
 }
 
 void SkinnyGEMMEmitter::fillSelectors() {
-  if (16 % dims.bm == 0) {
+  if (16 % dims.bm == 0)
     selectorValue(selector(0), s0.ref());
-  } else {
-    for (int r = 0; r < dims.bm; ++r) {
+  else {
+    for (int32_t r = 0; r < dims.bm; ++r) {
       RegisterRange col = sgpr();
       builder.addi32(col.ref(), s0.ref(), r);
       selectorValue(selector(r), col.ref());
@@ -1337,7 +1343,7 @@ void SkinnyGEMMEmitter::fillSelectors() {
     selectorValue(selector(dims.bm), w0.ref());
     return;
   }
-  for (int t = 0; t < dims.tn; ++t) {
+  for (int32_t t = 0; t < dims.tn; ++t) {
     RegisterRange col = uniformWide() ? sgpr() : vgpr();
     builder.addi32(col.ref(), w0.ref(), t);
     selectorValue(selector(dims.bm + t), col.ref());
@@ -1345,19 +1351,20 @@ void SkinnyGEMMEmitter::fillSelectors() {
 }
 
 void SkinnyGEMMEmitter::zeroAccumulators() {
-  for (int p = 0; p < dims.accumulators; ++p)
+  for (int32_t p = 0; p < dims.accumulators; ++p)
     builder.movb32(acc.ref(p), 0);
 }
 
 // Up-front scales.
 
 // The largest value of the 16-bit offset field of a ds instruction.
-static constexpr int maxDsOffset = 65535;
+static constexpr int32_t maxDsOffset = 65535;
 
 // Names base + offset, adding an offset beyond the field to base in scratch,
 // which the address of every ds instruction of the caller can share since a ds
 // instruction reads its address when it issues.
-static LdsAddress ldsAddress(IRBuilder &builder, RegisterRef base, int offset,
+static LdsAddress ldsAddress(IRBuilder &builder, RegisterRef base,
+                             int32_t offset,
                              std::optional<RegisterRange> &scratch) {
   if (offset <= maxDsOffset)
     return {base, offset};
@@ -1383,10 +1390,9 @@ void SkinnyGEMMEmitter::issueUpFrontScales() {
     headBase = sgpr();
     shiftLeft(builder, headBase->ref(), baseIter, dims.log2Ki);
     baseOffset = headBase->ref();
-  } else {
+  } else
     ensureChunkBase(0);
-  }
-  for (int entry = 0; entry < dims.upIters; ++entry) {
+  for (int32_t entry = 0; entry < dims.upIters; ++entry) {
     RegisterRef soffset = baseOffset;
     std::optional<RegisterRange> entryOffset;
     if (entry > 0) {
@@ -1396,9 +1402,8 @@ void SkinnyGEMMEmitter::issueUpFrontScales() {
     if (entry == 1) {
       builder.addi32(soffset, baseIter, 1);
       shiftLeft(builder, soffset, soffset, dims.log2Ki);
-    } else if (entry > 1) {
+    } else if (entry > 1)
       builder.addi32(soffset, baseOffset, entry * dims.ki);
-    }
     RegisterRef raw = scaleVector->ref(entry * dims.columns, dims.columns);
     if (dims.partialSteps == 0) {
       issueScales(raw, soffset);
@@ -1428,7 +1433,7 @@ SkinnyGEMMEmitter::vectorEntry(RegisterRef physical,
 
 // Loads issued after the up-front load at index: the later up-front loads and
 // the PF slots of the prologue.
-int SkinnyGEMMEmitter::upFrontLoadsAfter(int index) const {
+int32_t SkinnyGEMMEmitter::upFrontLoadsAfter(int32_t index) const {
   return dims.upIters * dims.columns - 1 - index +
          dims.prefetch * dims.loadsPerSlot;
 }
@@ -1442,13 +1447,13 @@ void SkinnyGEMMEmitter::packScaleVectors() {
     stageScalesInLds();
     if (dims.grid3d)
       ldsStage.reset();
-    for (int entry = 0; entry < dims.upIters; ++entry)
+    for (int32_t entry = 0; entry < dims.upIters; ++entry)
       readSharedEntry(entry);
   } else {
     // An entry is packed in two phases, the 2 * NC fetches back to back and
     // then the permutes, and the entries stay in sequence: fetching all of them
     // first would keep two dwords per column and entry live.
-    for (int entry = 0; entry < dims.upIters; ++entry) {
+    for (int32_t entry = 0; entry < dims.upIters; ++entry) {
       RegisterRange lo = vgpr(dims.columns);
       RegisterRef raw = scaleVector->ref(entry * dims.columns, dims.columns);
       gatherSlotScales(raw, lo.ref(), upFrontLoadsAfter(entry * dims.columns));
@@ -1467,8 +1472,8 @@ void SkinnyGEMMEmitter::packScaleVectors() {
 // prologue data loads stay in flight.
 void SkinnyGEMMEmitter::stageScalesInLds() {
   std::optional<RegisterRange> scratch;
-  int dwords = dims.upIters * dims.columns;
-  for (int index = 0; index < dwords; ++index) {
+  int32_t dwords = dims.upIters * dims.columns;
+  for (int32_t index = 0; index < dwords; ++index) {
     builder.createWaitCnt(
         WaitCounts{.vectorLoads = std::min(upFrontLoadsAfter(index),
                                            kernel.target().maxVmcnt())});
@@ -1484,13 +1489,13 @@ void SkinnyGEMMEmitter::stageScalesInLds() {
 
 // The lane reads the dwords d = 0 and 1 of every column of the entry at the
 // byte offsets of its address, the second 4 * R * S / 2 bytes after the first.
-void SkinnyGEMMEmitter::readSharedEntry(int entry) {
+void SkinnyGEMMEmitter::readSharedEntry(int32_t entry) {
   std::optional<RegisterRange> scratch;
   RegisterRange hi = vgpr(dims.columns);
   RegisterRef lo = scaleVector->ref(entry * dims.columns, dims.columns);
-  int hiDelta = 4 * dims.roleSlots * dims.halfSubgroup;
-  for (int c = 0; c < dims.columns; ++c) {
-    int offset = (entry * dims.columns + c) * dims.waves * 256;
+  int32_t hiDelta = 4 * dims.roleSlots * dims.halfSubgroup;
+  for (int32_t c = 0; c < dims.columns; ++c) {
+    int32_t offset = (entry * dims.columns + c) * dims.waves * 256;
     LdsAddress first = ldsAddress(builder, addresses.ref(), offset, scratch);
     builder.create<rocisa::DSLoadB32>(lo.slice(c).container(),
                                       first.base.container(),
@@ -1512,10 +1517,10 @@ SkinnyGEMMEmitter::selectScales(const SlotContext &context) {
   if (dims.upIters == 1)
     return std::nullopt;
   RegisterRange packed = vgpr(dims.columns);
-  for (int entry = 1; entry < dims.upIters; ++entry) {
+  for (int32_t entry = 1; entry < dims.upIters; ++entry) {
     builder.create<rocisa::SCmpEQI32>(context.vectorIndex->container(), entry);
     builder.create<rocisa::SCSelectB64>(std::make_shared<rocisa::VCC>(), -1, 0);
-    for (int c = 0; c < dims.columns; ++c) {
+    for (int32_t c = 0; c < dims.columns; ++c) {
       // The first select reads entry 0 itself instead of a copy of it.
       std::shared_ptr<rocisa::RegisterContainer> current =
           entry == 1 ? scaleVector->sub(c) : packed.sub(c);
@@ -1530,7 +1535,7 @@ SkinnyGEMMEmitter::selectScales(const SlotContext &context) {
 // The single entry has a loop-invariant scale per chunk, which the loop reads
 // instead of decoding it every iteration.
 void SkinnyGEMMEmitter::decodeHoistedScales() {
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
     hoistedScales.push_back(vgpr(dims.columns));
     decodeScales(hoistedScales.back().ref(), scaleVector->ref(0, dims.columns),
                  chunk);
@@ -1540,19 +1545,20 @@ void SkinnyGEMMEmitter::decodeHoistedScales() {
 
 // K loop.
 
-static constexpr int exponentMask = 0x7F800000;
+static constexpr int32_t exponentMask = 0x7F800000;
 
-RegisterRef SkinnyGEMMEmitter::dataChunk(int slot, int chunk,
-                                         int column) const {
-  int index = ((slot * SkinnyDims::chunks + chunk) * dims.columns + column) * 4;
+RegisterRef SkinnyGEMMEmitter::dataChunk(int32_t slot, int32_t chunk,
+                                         int32_t column) const {
+  int32_t index =
+      ((slot * SkinnyDims::chunks + chunk) * dims.columns + column) * 4;
   return ringData.ref(index, 4);
 }
 
-RegisterRef SkinnyGEMMEmitter::rawScales(int slot) const {
+RegisterRef SkinnyGEMMEmitter::rawScales(int32_t slot) const {
   return ringRaw->ref(slot * dims.columns, dims.columns);
 }
 
-RegisterRef SkinnyGEMMEmitter::dataRsrc(int column) const {
+RegisterRef SkinnyGEMMEmitter::dataRsrc(int32_t column) const {
   return column < dims.bm ? sRsrc.ref() : wRsrc.ref();
 }
 
@@ -1591,7 +1597,7 @@ void SkinnyGEMMEmitter::wrapIteration(RegisterRef dst, RegisterRef sum) {
 
 // chunkBase[u] = (kBaseIter << log2KI) + u * 16 * S, the part of the chunk
 // soffsets that does not depend on the iteration.
-void SkinnyGEMMEmitter::ensureChunkBase(int chunk) {
+void SkinnyGEMMEmitter::ensureChunkBase(int32_t chunk) {
   if (!chunkBaseReady[0]) {
     shiftLeft(builder, chunkBase.ref(0), kBaseIter.ref(), dims.log2Ki);
     chunkBaseReady[0] = true;
@@ -1604,7 +1610,7 @@ void SkinnyGEMMEmitter::ensureChunkBase(int chunk) {
 }
 
 void SkinnyGEMMEmitter::hoistChunkBases() {
-  for (int chunk = 1; chunk < SkinnyDims::chunks; ++chunk)
+  for (int32_t chunk = 1; chunk < SkinnyDims::chunks; ++chunk)
     ensureChunkBase(chunk);
 }
 
@@ -1617,7 +1623,7 @@ void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset,
   std::optional<RegisterRange> steered;
   if (neg)
     steered = vgpr();
-  for (int c = 0; c < dims.columns; ++c) {
+  for (int32_t c = 0; c < dims.columns; ++c) {
     RegisterRef dst = raw.slice(c);
     std::shared_ptr<rocisa::RegisterContainer> voffset = sBase.sub(c);
     if (neg) {
@@ -1637,12 +1643,13 @@ void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset,
 // Loads chunk u of every column of the ring slot, steered by neg as the scales
 // are. The steered voffset never goes into the destination registers, which
 // may still have a prologue load in flight.
-void SkinnyGEMMEmitter::issueChunk(int slot, int chunk, RegisterRef soffset,
+void SkinnyGEMMEmitter::issueChunk(int32_t slot, int32_t chunk,
+                                   RegisterRef soffset,
                                    std::optional<RegisterRef> neg) {
   std::optional<RegisterRange> steered;
   if (neg)
     steered = vgpr();
-  for (int c = 0; c < dims.columns; ++c) {
+  for (int32_t c = 0; c < dims.columns; ++c) {
     RegisterRef dst = dataChunk(slot, chunk, c);
     std::shared_ptr<rocisa::RegisterContainer> voffset = dBase.sub(c);
     if (neg) {
@@ -1678,7 +1685,7 @@ void SkinnyGEMMEmitter::startRefill(const SlotContext &context,
 // Chunk u >= 1 is at chunkBase[u] + (iteration << log2KI) in the loops, whose
 // chunk bases are hoisted, and at the iteration's soffset plus u * 16 * S
 // elsewhere. The shifted iteration replaces the unshifted one on first use.
-void SkinnyGEMMEmitter::refillChunk(const SlotContext &context, int chunk,
+void SkinnyGEMMEmitter::refillChunk(const SlotContext &context, int32_t chunk,
                                     RegisterRef soffset) {
   if (chunk == 0) {
     issueChunk(context.slot, 0, soffset);
@@ -1691,15 +1698,14 @@ void SkinnyGEMMEmitter::refillChunk(const SlotContext &context, int chunk,
     if (chunk == 1)
       shiftLeft(builder, iteration, iteration, dims.log2Ki);
     builder.addi32(chunkOffset.ref(), chunkBase.ref(chunk), iteration);
-  } else {
+  } else
     builder.addi32(chunkOffset.ref(), soffset, chunk * dims.chunkStride);
-  }
   issueChunk(context.slot, chunk, chunkOffset.ref());
 }
 
 // Waits until at most outstanding vector memory loads are in flight, capped at
 // the counter's range.
-void SkinnyGEMMEmitter::waitForVectorLoads(int outstanding) {
+void SkinnyGEMMEmitter::waitForVectorLoads(int32_t outstanding) {
   builder.createWaitCnt(WaitCounts{
       .vectorLoads = std::min(outstanding, kernel.target().maxVmcnt())});
 }
@@ -1709,8 +1715,8 @@ void SkinnyGEMMEmitter::waitForVectorLoads(int outstanding) {
 // which is dead once both permutes have issued. The raw dword of the first
 // column has firstOutstanding vector loads issued after it.
 void SkinnyGEMMEmitter::gatherSlotScales(RegisterRef raw, RegisterRef lo,
-                                         int firstOutstanding) {
-  for (int c = 0; c < dims.columns; ++c) {
+                                         int32_t firstOutstanding) {
+  for (int32_t c = 0; c < dims.columns; ++c) {
     waitForVectorLoads(firstOutstanding - c);
     RegisterRef dword = raw.slice(c);
     builder.create<rocisa::DSBPermuteB32>(lo.slice(c).container(),
@@ -1724,8 +1730,8 @@ void SkinnyGEMMEmitter::gatherSlotScales(RegisterRef raw, RegisterRef lo,
 // chunk u. Permute c is the (NC - 1 - c)-th newest of the 2 * NC in flight.
 void SkinnyGEMMEmitter::permSlotScales(RegisterRef hi, RegisterRef lo,
                                        RegisterRef out) {
-  for (int c = 0; c < dims.columns; ++c) {
-    int outstanding = 2 * (dims.columns - 1 - c);
+  for (int32_t c = 0; c < dims.columns; ++c) {
+    int32_t outstanding = 2 * (dims.columns - 1 - c);
     builder.createWaitCnt(
         WaitCounts{.lds = std::min(outstanding, kernel.target().maxLgkmcnt())});
     builder.create<rocisa::VPermB32>(
@@ -1737,8 +1743,8 @@ void SkinnyGEMMEmitter::permSlotScales(RegisterRef hi, RegisterRef lo,
 // Decodes the E8M0 scale of chunk u to an f32: (dword << (23 - 8u)) &
 // 0x7F800000, or a shift right by 1 for u = 3.
 void SkinnyGEMMEmitter::decodeScales(RegisterRef dst, RegisterRef packed,
-                                     int chunk) {
-  for (int c = 0; c < dims.columns; ++c) {
+                                     int32_t chunk) {
+  for (int32_t c = 0; c < dims.columns; ++c) {
     RegisterRef scale = dst.slice(c);
     if (chunk < SkinnyDims::chunks - 1)
       shiftLeft(builder, scale, packed.slice(c), 23 - 8 * chunk);
@@ -1753,8 +1759,8 @@ void SkinnyGEMMEmitter::decodeScales(RegisterRef dst, RegisterRef packed,
 // itself are certain to be in flight; with ring scales the gather already
 // waited for every load, as the chunk loads follow the scale loads.
 void SkinnyGEMMEmitter::waitBeforeFirstUse(const SlotContext &context,
-                                           int chunk, int column,
-                                           int ownRefill) {
+                                           int32_t chunk, int32_t column,
+                                           int32_t ownRefill) {
   if (!context.partialStep) {
     // The load is complete once at most the loads issued after it are
     // outstanding, as vmcnt counts the loads of a wave in issue order.
@@ -1769,17 +1775,17 @@ void SkinnyGEMMEmitter::waitBeforeFirstUse(const SlotContext &context,
 
 // Consumes chunk u of the slot: 4 dwords of 2 fp8 pairs per column, converted
 // with the decoded scale and accumulated with v_dot2_f32_bf16.
-void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
+void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int32_t chunk,
                                      RegisterRef scales) {
   RegisterRange pairs = vgpr(dims.columns);
-  int ownRefill =
+  int32_t ownRefill =
       context.refillIteration ? dims.scaleLoads + chunk * dims.columns : 0;
-  for (int dword = 0; dword < 4; ++dword) {
-    for (int word = 0; word < 2; ++word) {
+  for (int32_t dword = 0; dword < 4; ++dword) {
+    for (int32_t word = 0; word < 2; ++word) {
       std::optional<rocisa::VOP3PModifiers> highWord;
       if (word == 1)
         highWord = rocisa::VOP3PModifiers({1, 0, 0});
-      for (int c = 0; c < dims.columns; ++c) {
+      for (int32_t c = 0; c < dims.columns; ++c) {
         if (dword == 0 && word == 0)
           waitBeforeFirstUse(context, chunk, c, ownRefill);
         builder.create<rocisa::VCvtScalePkFP8toBF16>(
@@ -1787,8 +1793,8 @@ void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
             dataChunk(context.slot, chunk, c).slice(dword).container(),
             scales.slice(c).container(), std::nullopt, highWord);
       }
-      for (int r = 0; r < dims.bm; ++r) {
-        for (int t = 0; t < dims.tn; ++t) {
+      for (int32_t r = 0; r < dims.bm; ++r) {
+        for (int32_t t = 0; t < dims.tn; ++t) {
           RegisterRef total = acc.ref(r * dims.tn + t);
           builder.create<rocisa::VDot2F32BF16>(total.container(), pairs.sub(r),
                                                pairs.sub(dims.bm + t),
@@ -1808,9 +1814,9 @@ void SkinnyGEMMEmitter::processDecodeFirst(const SlotContext &context,
                                            RegisterRange &packed) {
   std::vector<RegisterRange> scales;
   std::vector<RegisterRef> chunkScales;
-  int separate =
+  int32_t separate =
       context.partialStep ? SkinnyDims::chunks - 1 : SkinnyDims::chunks;
-  for (int chunk = 0; chunk < separate; ++chunk) {
+  for (int32_t chunk = 0; chunk < separate; ++chunk) {
     scales.push_back(vgpr(dims.columns));
     chunkScales.push_back(scales.back().ref());
     decodeScales(chunkScales.back(), packed.ref(), chunk);
@@ -1818,13 +1824,12 @@ void SkinnyGEMMEmitter::processDecodeFirst(const SlotContext &context,
   if (context.partialStep) {
     decodeScales(packed.ref(), packed.ref(), SkinnyDims::chunks - 1);
     chunkScales.push_back(packed.ref());
-  } else {
+  } else
     packed.release();
-  }
   RegisterRange soffset = sgpr();
   if (context.refillIteration)
     startRefill(context, soffset.ref());
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
     computeChunk(context, chunk, chunkScales[chunk]);
     if (chunk < separate)
       scales[chunk].release();
@@ -1842,12 +1847,12 @@ void SkinnyGEMMEmitter::processDecodeFirst(const SlotContext &context,
 void SkinnyGEMMEmitter::processUpFront(const SlotContext &context,
                                        std::optional<RegisterRange> &packed) {
   RegisterRange soffset = sgpr();
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
     std::optional<RegisterRange> decoded;
     RegisterRef scales;
-    if (!packed) {
+    if (!packed)
       scales = hoistedScales[chunk].ref();
-    } else if (chunk == SkinnyDims::chunks - 1) {
+    else if (chunk == SkinnyDims::chunks - 1) {
       decodeScales(packed->ref(), packed->ref(), chunk);
       scales = packed->ref();
     } else {
@@ -1873,7 +1878,7 @@ void SkinnyGEMMEmitter::processSlot(const SlotContext &context) {
   RegisterRange packed = vgpr(dims.columns);
   // A step issues only its own scale loads on every path: its chunk loads may
   // all be skipped.
-  int firstOutstanding =
+  int32_t firstOutstanding =
       context.partialStep
           ? dims.columns - 1
           : loadsIssuedAfter(dims, {0, context.groupsAfter, /*ownRefill=*/0});
@@ -1895,7 +1900,7 @@ void SkinnyGEMMEmitter::processSlot(const SlotContext &context) {
   RegisterRange soffset = sgpr();
   if (context.refillIteration)
     startRefill(context, soffset.ref());
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
     RegisterRange scales = vgpr(dims.columns);
     decodeScales(scales.ref(), packed.ref(), chunk);
     computeChunk(context, chunk, scales.ref());
@@ -1930,9 +1935,8 @@ void SkinnyGEMMEmitter::runNoPrefetchLoop() {
   if (fitRot) {
     builder.addi32(physical.ref(), iteration.ref(), fitRot->ref());
     wrapIteration(physical.ref(), physical.ref());
-  } else {
+  } else
     wrapIteration(physical.ref(), iteration.ref());
-  }
   // The select precedes the loads so that its VALU work hides their latency.
   std::optional<RegisterRange> packed;
   std::optional<RegisterRange> entry;
@@ -1942,7 +1946,7 @@ void SkinnyGEMMEmitter::runNoPrefetchLoop() {
   RegisterRange soffset = sgpr();
   SlotContext loads{0, 0, physical.ref()};
   startRefill(loads, soffset.ref());
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
     refillChunk(loads, chunk, soffset.ref());
   SlotContext consume{0, 0, std::nullopt};
   if (dims.upIters > 0)
@@ -1963,11 +1967,11 @@ void SkinnyGEMMEmitter::runPrefetchedLoop() {
   // steadyEnd = max((NIfull / PF - 1) * PF, 0), so every refill of the steady
   // loop targets an iteration below NIfull.
   RegisterRange steadyEnd = sgpr();
-  int pf = dims.prefetch;
-  if (pf == 1) {
+  int32_t pf = dims.prefetch;
+  if (pf == 1)
     builder.addi32(steadyEnd.ref(), nIterFull.ref(), -1);
-  } else if (isPowerOfTwo(pf)) {
-    int log2Pf = log2Exact(pf);
+  else if (isPowerOfTwo(pf)) {
+    int32_t log2Pf = log2Exact(pf);
     builder.create<rocisa::SAShiftRightI32>(steadyEnd.container(), log2Pf,
                                             nIterFull.container());
     shiftLeft(builder, steadyEnd.ref(), steadyEnd.ref(), log2Pf);
@@ -1986,7 +1990,7 @@ void SkinnyGEMMEmitter::runPrefetchedLoop() {
   // the arm of a chain of independent ifs on left.
   RegisterRange left = sgpr();
   builder.subi32(left.ref(), nIterFull.ref(), steadyEnd.ref());
-  for (int remaining = 1; remaining < 2 * pf; ++remaining)
+  for (int32_t remaining = 1; remaining < 2 * pf; ++remaining)
     emitRemainderArm(left.ref(), steadyEnd.ref(), remaining);
 }
 
@@ -2005,7 +2009,7 @@ void SkinnyGEMMEmitter::emitPrologue() {
   }
   // LLVM hoists the chunk bases out of the prologue from PF = 4 on.
   bool hoisted = dims.prefetch >= 4;
-  for (int slot = 0; slot < dims.prefetch; ++slot) {
+  for (int32_t slot = 0; slot < dims.prefetch; ++slot) {
     RegisterRange physical = sgpr();
     if (slot > 0) {
       builder.create<rocisa::SMinU32>(physical.container(),
@@ -2013,9 +2017,9 @@ void SkinnyGEMMEmitter::emitPrologue() {
       if (fitRot)
         builder.addi32(physical.ref(), physical.ref(), fitRot->ref());
       wrapIteration(physical.ref(), physical.ref());
-    } else if (fitRot) {
+    } else if (fitRot)
       wrapIteration(physical.ref(), fitRot->ref());
-    } else {
+    else {
       // The wrapped physical iteration of the logical iteration 0 without
       // rotation.
       RegisterRange wrapped = sgpr();
@@ -2027,7 +2031,7 @@ void SkinnyGEMMEmitter::emitPrologue() {
     SlotContext context{slot, 0, physical.ref(), hoisted};
     RegisterRange soffset = sgpr();
     startRefill(context, soffset.ref());
-    for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
+    for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
       refillChunk(context, chunk, soffset.ref());
   }
   recordLoads = false;
@@ -2039,7 +2043,7 @@ void SkinnyGEMMEmitter::emitPrologue() {
 // bases fold the rotation: refillBase[p] = fitRot + PF + p and physBase[p] =
 // fitRot + p. Without rotation they are the literals.
 void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
-  int pf = dims.prefetch;
+  int32_t pf = dims.prefetch;
   bool vectorized = dims.upIters >= 2;
   std::optional<RegisterRange> refillBase;
   std::optional<RegisterRange> physBase;
@@ -2050,7 +2054,7 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
   hoistChunkBases();
   if (vectorized)
     physBase = sgpr(pf);
-  for (int slot = 1; fitRot && slot < pf; ++slot) {
+  for (int32_t slot = 1; fitRot && slot < pf; ++slot) {
     builder.addi32(refillBase->ref(slot), fitRot->ref(), pf + slot);
     if (vectorized)
       builder.addi32(physBase->ref(slot), fitRot->ref(), slot);
@@ -2062,7 +2066,7 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
   builder.movb32(iteration.ref(), 0);
   builder.create<rocisa::SCBranchSCC0>(exit->getLabelName());
   builder.insert(body);
-  for (int slot = 0; slot < pf; ++slot) {
+  for (int32_t slot = 0; slot < pf; ++slot) {
     RegisterRange refill = sgpr();
     if (refillBase)
       builder.addi32(refill.ref(), iteration.ref(), refillBase->ref(slot));
@@ -2096,8 +2100,9 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
 // With several up-front entries it also selects the scales of its physical
 // iteration, which is the refill iteration of i - PF from i = PF on.
 void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
-                                         RegisterRef steadyEnd, int remaining) {
-  int pf = dims.prefetch;
+                                         RegisterRef steadyEnd,
+                                         int32_t remaining) {
+  int32_t pf = dims.prefetch;
   bool vectorized = dims.upIters >= 2;
   std::shared_ptr<rocisa::Label> next = builder.createLabel("arm_end");
   builder.create<rocisa::SCmpEQI32>(left.container(), remaining);
@@ -2105,8 +2110,8 @@ void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
   // The logical iteration of a refill is fitRot + steadyEnd + i + PF.
   std::optional<RegisterRange> base;
   std::vector<RegisterRange> keptRefills;
-  for (int i = 0; i < remaining; ++i) {
-    int refilled = std::clamp(remaining - pf, 0, i);
+  for (int32_t i = 0; i < remaining; ++i) {
+    int32_t refilled = std::clamp(remaining - pf, 0, i);
     SlotContext context{i % pf, pf - 1 + refilled - i, std::nullopt, false};
     RegisterRange refill = sgpr();
     bool hasRefill = i + pf < remaining;
@@ -2122,9 +2127,9 @@ void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
     }
     std::optional<RegisterRange> physical;
     std::optional<RegisterRange> entry;
-    if (vectorized && i >= pf) {
+    if (vectorized && i >= pf)
       context.vectorIndex = vectorEntry(keptRefills[i - pf].ref(), entry);
-    } else if (vectorized) {
+    else if (vectorized) {
       physical = sgpr();
       if (i > 0)
         builder.addi32(physical->ref(), baseRef, i);
@@ -2140,12 +2145,12 @@ void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
 
 // Partial K steps.
 
-static constexpr int dwordBytes = 4;
-static constexpr int dwordsPerChunk = 4;
-static constexpr int partBytes = dwordBytes * dwordsPerChunk;
+static constexpr int32_t dwordBytes = 4;
+static constexpr int32_t dwordsPerChunk = 4;
+static constexpr int32_t partBytes = dwordBytes * dwordsPerChunk;
 // The largest byte shift of a dword mask: a 32-bit shift is poison in the MLIR,
 // and a dword that needs a shift of 4 bytes is steered anyway.
-static constexpr int maxMaskBytes = 3;
+static constexpr int32_t maxMaskBytes = 3;
 
 // The register of an optional range, if any.
 static std::optional<RegisterRef>
@@ -2157,14 +2162,14 @@ optionalRef(const std::optional<RegisterRange> &range) {
 
 // dst = -1 when src + delta is negative, else 0.
 static void signOfSum(IRBuilder &builder, RegisterRef dst, RegisterRef src,
-                      int delta) {
+                      int32_t delta) {
   builder.addi32(dst, src, delta);
   builder.create<rocisa::VAShiftRightI32>(dst.container(), 31, dst.container(),
                                           "");
 }
 
 // dst = -1 when delta - src is negative, else 0.
-static void signOfDifference(IRBuilder &builder, RegisterRef dst, int delta,
+static void signOfDifference(IRBuilder &builder, RegisterRef dst, int32_t delta,
                              RegisterRef src) {
   builder.subi32(dst, delta, src);
   builder.create<rocisa::VAShiftRightI32>(dst.container(), 31, dst.container(),
@@ -2343,7 +2348,7 @@ void SkinnyGEMMEmitter::loadPartialStep(const PartialStep &step) {
                                    partialChunks.container(),
                                    loChunks.container());
   }
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
+  for (int32_t chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
     loadStepChunk(step, chunk, partialChunks.ref());
   partialChunks.release();
 }
@@ -2358,9 +2363,9 @@ void SkinnyGEMMEmitter::computePartialStep(const PartialStep &step) {
 // dwords (@load_tail_dwords). In every other chunk each lane lies fully inside
 // or outside [lo, hi), so steering the voffset of the outside lanes to -1
 // suffices, and a chunk with no live lane is zeroed.
-void SkinnyGEMMEmitter::loadStepChunk(const PartialStep &step, int chunk,
+void SkinnyGEMMEmitter::loadStepChunk(const PartialStep &step, int32_t chunk,
                                       RegisterRef partialChunks) {
-  int offset = chunk * dims.chunkStride;
+  int32_t offset = chunk * dims.chunkStride;
   // All SALU first: s_add writes SCC, which the branches read.
   std::optional<RegisterRange> soffsetStorage;
   std::optional<RegisterRange> hiStorage;
@@ -2405,7 +2410,7 @@ void SkinnyGEMMEmitter::loadStepChunk(const PartialStep &step, int chunk,
   builder.create<rocisa::SCmpGeI32>(chunkHi.container(), partBytes);
   builder.create<rocisa::SCBranchSCC0>(zero->getLabelName());
   if (step.lo) {
-    int chunkLast = dims.ki - 3 * dims.chunkStride + offset - partBytes;
+    int32_t chunkLast = dims.ki - 3 * dims.chunkStride + offset - partBytes;
     builder.create<rocisa::SCmpLeI32>(step.lo->container(), chunkLast);
     builder.create<rocisa::SCBranchSCC0>(zero->getLabelName());
   }
@@ -2428,8 +2433,8 @@ void SkinnyGEMMEmitter::loadStepChunk(const PartialStep &step, int chunk,
   waitForPrologueLoads({ringData.ref(chunk * dims.columns * dwordsPerChunk,
                                      dims.columns * dwordsPerChunk)},
                        dims.scaleLoads);
-  for (int column = 0; column < dims.columns; ++column)
-    for (int dword = 0; dword < dwordsPerChunk; ++dword)
+  for (int32_t column = 0; column < dims.columns; ++column)
+    for (int32_t dword = 0; dword < dwordsPerChunk; ++dword)
       builder.movb32(dataChunk(0, chunk, column).slice(dword), 0);
   builder.insert(chunkEnd);
 }
@@ -2443,12 +2448,12 @@ void SkinnyGEMMEmitter::loadStepChunk(const PartialStep &step, int chunk,
 // belong to another split or to the padding. The steering, mask and soffset of
 // a dword do not depend on the column, so the loop over d is outermost and
 // only one steering and mask pair is live.
-void SkinnyGEMMEmitter::loadTailDwords(int chunk, RegisterRef soffset,
+void SkinnyGEMMEmitter::loadTailDwords(int32_t chunk, RegisterRef soffset,
                                        RegisterRef laneRem,
                                        std::optional<RegisterRef> laneLo) {
   RegisterRange voffset = vgpr();
-  for (int d = 0; d < dwordsPerChunk; ++d) {
-    int start = d * dwordBytes;
+  for (int32_t d = 0; d < dwordsPerChunk; ++d) {
+    int32_t start = d * dwordBytes;
     RegisterRange steer = vgpr();
     RegisterRange mask = vgpr();
     // Only a step with a lower bound needs a second temporary.
@@ -2489,7 +2494,7 @@ void SkinnyGEMMEmitter::loadTailDwords(int chunk, RegisterRef soffset,
       dwordSoffset = dwordOffset->ref();
       builder.addi32(dwordSoffset, soffset, start);
     }
-    for (int column = 0; column < dims.columns; ++column)
+    for (int32_t column = 0; column < dims.columns; ++column)
       loadMaskedDword(chunk, column, d, voffset.ref(), steer.ref(),
                       dwordSoffset, mask.ref());
   }
@@ -2497,9 +2502,10 @@ void SkinnyGEMMEmitter::loadTailDwords(int chunk, RegisterRef soffset,
 
 // Loads one dword of a column, steered, and clears the bytes outside [lo, hi).
 // The AND consumes the load just issued, so nothing may stay in flight.
-void SkinnyGEMMEmitter::loadMaskedDword(int chunk, int column, int dword,
-                                        RegisterRef voffset, RegisterRef steer,
-                                        RegisterRef soffset, RegisterRef mask) {
+void SkinnyGEMMEmitter::loadMaskedDword(int32_t chunk, int32_t column,
+                                        int32_t dword, RegisterRef voffset,
+                                        RegisterRef steer, RegisterRef soffset,
+                                        RegisterRef mask) {
   RegisterRef dst = dataChunk(0, chunk, column).slice(dword);
   builder.create<rocisa::VOrB32>(voffset.container(), dBase.sub(column),
                                  steer.container());
@@ -2527,7 +2533,7 @@ void SkinnyGEMMEmitter::loadMaskedDword(int chunk, int column, int dword,
 // dst = src - quotient * divisor, the remainder of a non-negative src.
 static void remainderByLiteral(IRBuilder &builder, RegisterRef dst,
                                RegisterRef src, RegisterRef quotient,
-                               int divisor) {
+                               int32_t divisor) {
   if (isPowerOfTwo(divisor)) {
     bitAnd(builder, dst, src, divisor - 1);
     return;
@@ -2538,7 +2544,7 @@ static void remainderByLiteral(IRBuilder &builder, RegisterRef dst,
 
 // dst = ceilDiv(src, divisor) for a non-negative src. dst must not alias src.
 static void ceilDivByLiteral(IRBuilder &builder, RegisterRef dst,
-                             RegisterRef src, int divisor) {
+                             RegisterRef src, int32_t divisor) {
   if (isPowerOfTwo(divisor)) {
     builder.addi32(dst, src, divisor - 1);
     shiftRight(builder, dst, dst, log2Exact(divisor));
@@ -2587,9 +2593,9 @@ SkinnyGEMMEmitter::computeTileLoop(SetupScalars &scalars) {
     loop.tall = sgpr();
     RegisterRange last = sgpr();
     builder.addi32(last.ref(), loop.numTiles.ref(), -1);
-    if (isPowerOfTwo(dims.numXcds)) {
+    if (isPowerOfTwo(dims.numXcds))
       bitAnd(builder, loop.tall->ref(), last.ref(), dims.numXcds - 1);
-    } else {
+    else {
       RegisterRange quotient = sgpr();
       divideByConstant(builder, quotient.ref(), last.ref(), dims.numXcds);
       remainderByLiteral(builder, loop.tall->ref(), last.ref(), quotient.ref(),
@@ -2637,9 +2643,8 @@ void SkinnyGEMMEmitter::runPersistentTile(const SetupScalars &scalars,
       builder.addi32(slab.ref(), slab.ref(), tile.tx);
       blockRotation(slabRot->ref(), slab.ref(), loop.ni->ref());
       rotation = slabRot->ref();
-    } else if (loop.blockRot) {
+    } else if (loop.blockRot)
       rotation = loop.blockRot->ref();
-    }
     computeTile(scalars, rotation);
   }
   // The persistent launch adds the tile's part to the lane part of the wide
@@ -2647,9 +2652,9 @@ void SkinnyGEMMEmitter::runPersistentTile(const SetupScalars &scalars,
   // temporary w0Load = lane.w0Load + tx * BN, absent when the wide column is
   // uniform and w0 itself serves.
   std::optional<RegisterRange> w0Load;
-  if (uniformWide()) {
+  if (uniformWide())
     builder.muli32(w0.ref(), tile.tx, dims.tileWide);
-  } else {
+  else {
     RegisterRange tileBase = sgpr();
     builder.muli32(tileBase.ref(), tile.tx, dims.tileWide);
     builder.addi32(w0.ref(), lane.w0Lane->ref(), tileBase.ref());
@@ -2728,41 +2733,42 @@ void SkinnyGEMMEmitter::decodeTile(const TileLoop &loop) {
 
 // Wait states between a v_dot2 write and a DPP read of its result (LLVM's
 // DotWriteDifferentVALURead) and between a VALU write and a DPP read of it.
-static constexpr int dotToDppWaitStates = 3;
-static constexpr int valuToDppWaitStates = 2;
+static constexpr int32_t dotToDppWaitStates = 3;
+static constexpr int32_t valuToDppWaitStates = 2;
 // Wait states of v_readlane_b32 after a VALU wrote its source, and of a VALU
 // read of the SGPR that v_readlane_b32 wrote (gfx940, per LLVM's hazard
 // recognizer; the reference omits the second).
-static constexpr int valuToReadlaneWaitStates = 1;
-static constexpr int readlaneToValuWaitStates = 2;
-static constexpr int bankMaskAll = 0xf;
+static constexpr int32_t valuToReadlaneWaitStates = 1;
+static constexpr int32_t readlaneToValuWaitStates = 2;
+static constexpr int32_t bankMaskAll = 0xf;
 
 // An orientation stores runs of consecutive elements: the BM skinny elements
 // of a wide column when the skinny dimension is contiguous in the output, the
 // TN wide elements of a skinny column otherwise.
-int SkinnyGEMMEmitter::runLength(bool skinnyContiguous) const {
+int32_t SkinnyGEMMEmitter::runLength(bool skinnyContiguous) const {
   return skinnyContiguous ? dims.bm : dims.tn;
 }
 
 // A chunk must start dword aligned: an f32 run of at least 2 elements or an
 // even bf16 run.
 bool SkinnyGEMMEmitter::hasVector(bool skinnyContiguous, bool bf16) const {
-  int length = runLength(skinnyContiguous);
+  int32_t length = runLength(skinnyContiguous);
   return bf16 ? length % 2 == 0 : length >= 2;
 }
 
 SkinnyGEMMEmitter::RedLayout
 SkinnyGEMMEmitter::redLayout(bool skinnyContiguous) const {
-  int length = runLength(skinnyContiguous);
+  int32_t length = runLength(skinnyContiguous);
   if (length < 2)
     return RedLayout{false, skinnyContiguous, 0, dims.accumulators};
   // Every run starts at an even register, as the x2 and x4 stores need.
-  int stride = (length + 1) & ~1;
-  int runs = skinnyContiguous ? dims.tn : dims.bm;
+  int32_t stride = (length + 1) & ~1;
+  int32_t runs = skinnyContiguous ? dims.tn : dims.bm;
   return RedLayout{true, skinnyContiguous, stride, runs * stride};
 }
 
-int SkinnyGEMMEmitter::redIndex(const RedLayout &layout, int r, int t) const {
+int32_t SkinnyGEMMEmitter::redIndex(RedLayout layout, int32_t r,
+                                    int32_t t) const {
   if (!layout.runs)
     return r * dims.tn + t;
   return layout.skinnyContiguous ? t * layout.stride + r
@@ -2844,9 +2850,9 @@ void SkinnyGEMMEmitter::emitEpilogueVariant(bool skinnyContiguous) {
 // so the wait allows the later prologue loads and the issuedSince loads that
 // every path issued after the prologue.
 void SkinnyGEMMEmitter::waitForPrologueLoads(
-    const std::vector<RegisterRef> &written, int issuedSince) {
-  int count = static_cast<int>(prologueLoads.size());
-  for (int newest = count - 1; newest >= 0; --newest) {
+    const std::vector<RegisterRef> &written, int32_t issuedSince) {
+  int32_t count = static_cast<int32_t>(prologueLoads.size());
+  for (int32_t newest = count - 1; newest >= 0; --newest) {
     bool conflict =
         std::any_of(written.begin(), written.end(), [&](RegisterRef reg) {
           RegisterRef load = prologueLoads[newest];
@@ -2862,7 +2868,7 @@ void SkinnyGEMMEmitter::waitForPrologueLoads(
   }
 }
 
-void SkinnyGEMMEmitter::emitNops(int count) {
+void SkinnyGEMMEmitter::emitNops(int32_t count) {
   if (count > 0)
     builder.create<rocisa::VNop>(count);
 }
@@ -2894,11 +2900,11 @@ void SkinnyGEMMEmitter::reduceAccumulators(const EpilogueState &state) {
     steps.push_back({15, {}, false, false, 0xa, -1});
     steps.push_back({31, {}, false, false, 0xf, 1});
   }
-  int valuSinceReduce = 0;
-  for (int p = 0; p < dims.accumulators; ++p) {
+  int32_t valuSinceReduce = 0;
+  for (int32_t p = 0; p < dims.accumulators; ++p) {
     // The last chunk ends with the dots of all accumulators in order, so p has
     // P - 1 - p VALU instructions after its last dot.
-    int sinceDot = dims.accumulators - 1 - p + valuSinceReduce;
+    int32_t sinceDot = dims.accumulators - 1 - p + valuSinceReduce;
     emitNops(dotToDppWaitStates - sinceDot);
     valuSinceReduce += std::max(0, dotToDppWaitStates - sinceDot);
     RegisterRef dst =
@@ -2962,8 +2968,8 @@ void SkinnyGEMMEmitter::storeTile(const EpilogueState &state,
   builder.insert(vectorPath);
   StoreScalars scalars = makeStoreScalars(state, target);
   bool skinnyContiguous = state.layout.skinnyContiguous;
-  int runs = skinnyContiguous ? dims.tn : dims.bm;
-  for (int run = 0; run < runs; ++run) {
+  int32_t runs = skinnyContiguous ? dims.tn : dims.bm;
+  for (int32_t run = 0; run < runs; ++run) {
     if (skinnyContiguous)
       storeRun(state, target, scalars, 0, run, dims.bm);
     else
@@ -2995,9 +3001,9 @@ SkinnyGEMMEmitter::makeStoreScalars(const EpilogueState &state,
 // strideS + (w0 + t) * strideW + sliceBase) * elementBytes.
 void SkinnyGEMMEmitter::computeOffset(const EpilogueState &state,
                                       const StoreTarget &target,
-                                      const StoreScalars &scalars, int r,
-                                      int t) {
-  int log2Element = target.bf16 ? 1 : 2;
+                                      const StoreScalars &scalars, int32_t r,
+                                      int32_t t) {
+  int32_t log2Element = target.bf16 ? 1 : 2;
   RegisterRef uniform = scalars.base.ref();
   if (r != 0 || t != 0) {
     uniform = scalars.offset.ref();
@@ -3027,8 +3033,8 @@ void SkinnyGEMMEmitter::storeMasked(const EpilogueState &state,
                                     const StoreTarget &target) {
   StoreScalars scalars = makeStoreScalars(state, target);
   RegisterRange mask = sgpr(2, 2);
-  for (int r = 0; r < dims.bm; ++r) {
-    for (int t = 0; t < dims.tn; ++t) {
+  for (int32_t r = 0; r < dims.bm; ++r) {
+    for (int32_t t = 0; t < dims.tn; ++t) {
       RegisterRef value = state.red.slice(redIndex(state.layout, r, t));
       if (target.bf16)
         shiftRight(builder, value, value, 16);
@@ -3054,11 +3060,11 @@ void SkinnyGEMMEmitter::storeMasked(const EpilogueState &state,
 // chunks first: dwordx4, dwordx2, dword. A bf16 run has an even length.
 void SkinnyGEMMEmitter::storeRun(const EpilogueState &state,
                                  const StoreTarget &target,
-                                 const StoreScalars &scalars, int r, int t,
-                                 int length) {
-  int per16 = target.bf16 ? 8 : 4;
-  int first = 0;
-  for (int chunk : {per16, per16 / 2, per16 / 4}) {
+                                 const StoreScalars &scalars, int32_t r,
+                                 int32_t t, int32_t length) {
+  int32_t per16 = target.bf16 ? 8 : 4;
+  int32_t first = 0;
+  for (int32_t chunk : {per16, per16 / 2, per16 / 4}) {
     for (; length - first >= chunk; first += chunk)
       storeChunk(state, target, scalars, r, t, first, chunk);
   }
@@ -3068,24 +3074,24 @@ void SkinnyGEMMEmitter::storeRun(const EpilogueState &state,
 // Stores elements [first, first + elements) of the run that starts at (r, t).
 void SkinnyGEMMEmitter::storeChunk(const EpilogueState &state,
                                    const StoreTarget &target,
-                                   const StoreScalars &scalars, int r, int t,
-                                   int first, int elements) {
+                                   const StoreScalars &scalars, int32_t r,
+                                   int32_t t, int32_t first, int32_t elements) {
   bool skinnyContiguous = state.layout.skinnyContiguous;
-  int rc = skinnyContiguous ? r + first : r;
-  int tc = skinnyContiguous ? t : t + first;
+  int32_t rc = skinnyContiguous ? r + first : r;
+  int32_t tc = skinnyContiguous ? t : t + first;
   computeOffset(state, target, scalars, rc, tc);
   builder.selectb32(state.off, state.leader, state.off, outOfRange);
-  int start = redIndex(state.layout, rc, tc);
-  int dwords = elements;
+  int32_t start = redIndex(state.layout, rc, tc);
+  int32_t dwords = elements;
   if (target.bf16) {
     // Pack pairs of truncated values in place; dword k reads the registers
     // 2k and 2k + 1, which no earlier dword has overwritten.
     dwords = elements / 2;
-    for (int j = 0; j < elements; ++j) {
+    for (int32_t j = 0; j < elements; ++j) {
       RegisterRef value = state.red.slice(start + j);
       shiftRight(builder, value, value, 16);
     }
-    for (int k = 0; k < dwords; ++k)
+    for (int32_t k = 0; k < dwords; ++k)
       builder.create<rocisa::VPackF16toB32>(
           state.red.slice(start + k).container(),
           state.red.slice(start + 2 * k).container(),
@@ -3112,17 +3118,17 @@ void SkinnyGEMMEmitter::storeChunk(const EpilogueState &state,
 // Split-K reduce.
 
 // Matches #red_row and the gpu.block_dims of the MLIR.
-static constexpr int reduceBlock = 256;
+static constexpr int32_t reduceBlock = 256;
 
 namespace {
 
 struct ReduceArguments {
-  int d;
-  int ws;
-  int ldD;
-  int m;
-  int n;
-  int splits;
+  int32_t d;
+  int32_t ws;
+  int32_t ldD;
+  int32_t m;
+  int32_t n;
+  int32_t splits;
 };
 
 // Emits @splitk_reduce of the MLIR reference, one method per part of it.
@@ -3253,7 +3259,7 @@ private:
 
 // Public entry points.
 
-static void require(bool condition, const char *knob, int value,
+static void require(bool condition, const char *knob, int32_t value,
                     const char *rule) {
   if (condition)
     return;

@@ -4,6 +4,7 @@
 #include <tensilelite/Codegen/Kernel.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -13,23 +14,25 @@
 using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
 
-namespace {
-
 // gfx9 reserves VCC, FLAT_SCRATCH and XNACK_MASK after the numbered SGPRs, and
 // LLVM counts them in the metadata .sgpr_count of every gfx950 kernel.
-constexpr int gfx9ExtraSgprs = 6;
-constexpr int maxWorkgroupSizeLimit = 1024;
+static constexpr int32_t gfx9ExtraSgprs = 6;
+static constexpr int32_t maxWorkgroupSizeLimit = 1024;
+
+namespace {
 
 struct RegisterCounts {
-  int nextFreeVgpr;
-  int accumOffset;
-  int agprCount;
-  int nextFreeSgpr;
-  int metadataSgprCount;
+  int32_t nextFreeVgpr;
+  int32_t accumOffset;
+  int32_t agprCount;
+  int32_t nextFreeSgpr;
+  int32_t metadataSgprCount;
 };
 
+} // namespace
+
 // Kernel and argument names end up unquoted in symbols and YAML.
-bool isIdentifier(std::string_view text) {
+static bool isIdentifier(std::string_view text) {
   if (text.empty())
     return false;
   auto isAlpha = [](char c) {
@@ -43,12 +46,12 @@ bool isIdentifier(std::string_view text) {
   return true;
 }
 
-bool isHidden(KernelArgumentKind kind) {
+static bool isHidden(KernelArgumentKind kind) {
   return kind != KernelArgumentKind::globalPointer &&
          kind != KernelArgumentKind::byValue;
 }
 
-std::string_view valueKindName(KernelArgumentKind kind) {
+static std::string_view valueKindName(KernelArgumentKind kind) {
   switch (kind) {
   case KernelArgumentKind::globalPointer:
     return "global_buffer";
@@ -70,17 +73,17 @@ std::string_view valueKindName(KernelArgumentKind kind) {
   throw std::invalid_argument("unknown kernel argument kind");
 }
 
-bool isGroupSize(KernelArgumentKind kind) {
+static bool isGroupSize(KernelArgumentKind kind) {
   return kind == KernelArgumentKind::hiddenGroupSizeX ||
          kind == KernelArgumentKind::hiddenGroupSizeY ||
          kind == KernelArgumentKind::hiddenGroupSizeZ;
 }
 
-int roundUp(int value, int multiple) {
+static int32_t roundUp(int32_t value, int32_t multiple) {
   return (value + multiple - 1) / multiple * multiple;
 }
 
-int metadataVersionMinor(CodeObjectVersion version) {
+static int32_t metadataVersionMinor(CodeObjectVersion version) {
   switch (version) {
   case CodeObjectVersion::v4:
     return 1;
@@ -93,26 +96,26 @@ int metadataVersionMinor(CodeObjectVersion version) {
   throw std::invalid_argument("unsupported code object version");
 }
 
-std::string validatedName(std::string_view name) {
+static std::string validatedName(std::string_view name) {
   if (!isIdentifier(name))
     throw std::invalid_argument("invalid kernel name: '" + std::string(name) +
                                 "'");
   return std::string(name);
 }
 
-int validatedWorkgroupSize(int size) {
+static int32_t validatedWorkgroupSize(int32_t size) {
   if (size < 1 || size > maxWorkgroupSizeLimit)
     throw std::invalid_argument("workgroup size must be in [1, 1024]");
   return size;
 }
 
-CodeObjectVersion validatedVersion(CodeObjectVersion version) {
+static CodeObjectVersion validatedVersion(CodeObjectVersion version) {
   // Throws for unsupported versions; the minor version itself is unused here.
   (void)metadataVersionMinor(version);
   return version;
 }
 
-RegisterCounts countRegisters(const RegisterAllocator &registers) {
+static RegisterCounts countRegisters(const RegisterAllocator &registers) {
   RegisterCounts counts;
   counts.accumOffset = registers.accumOffset();
   // AGPRs follow the arch VGPRs in the unified register file, as in rocisa's
@@ -125,12 +128,12 @@ RegisterCounts countRegisters(const RegisterAllocator &registers) {
   return counts;
 }
 
-std::string emitHeader(const Kernel &kernel) {
+static std::string emitHeader(const Kernel &kernel) {
   std::string name(kernel.name());
   std::ostringstream out;
   out << ".amdgcn_target \"" << kernel.target().isaName() << "\"\n"
       << ".amdhsa_code_object_version "
-      << static_cast<int>(kernel.codeObjectVersion()) << "\n"
+      << static_cast<int32_t>(kernel.codeObjectVersion()) << "\n"
       << ".text\n"
       << ".protected " << name << "\n"
       << ".globl " << name << "\n"
@@ -140,14 +143,15 @@ std::string emitHeader(const Kernel &kernel) {
   return out.str();
 }
 
-std::string emitSymbolEnd(std::string_view name) {
+static std::string emitSymbolEnd(std::string_view name) {
   std::ostringstream out;
   out << ".L" << name << "_end:\n"
       << ".size " << name << ", .L" << name << "_end - " << name << "\n";
   return out.str();
 }
 
-std::string emitDescriptor(const Kernel &kernel, const RegisterCounts &counts) {
+static std::string emitDescriptor(const Kernel &kernel,
+                                  const RegisterCounts &counts) {
   std::ostringstream out;
   out << ".rodata\n"
       << ".p2align 6\n"
@@ -171,7 +175,7 @@ std::string emitDescriptor(const Kernel &kernel, const RegisterCounts &counts) {
   return out.str();
 }
 
-std::string emitArguments(const KernelSignature &signature) {
+static std::string emitArguments(const KernelSignature &signature) {
   if (signature.arguments().empty())
     return {};
   std::ostringstream out;
@@ -191,7 +195,8 @@ std::string emitArguments(const KernelSignature &signature) {
   return out.str();
 }
 
-std::string emitMetadata(const Kernel &kernel, const RegisterCounts &counts) {
+static std::string emitMetadata(const Kernel &kernel,
+                                const RegisterCounts &counts) {
   std::ostringstream out;
   out << ".amdgpu_metadata\n"
       << "---\n"
@@ -219,10 +224,8 @@ std::string emitMetadata(const Kernel &kernel, const RegisterCounts &counts) {
   return out.str();
 }
 
-} // namespace
-
-int KernelSignature::addExplicit(std::string_view name, KernelArgumentKind kind,
-                                 int size) {
+int32_t KernelSignature::addExplicit(std::string_view name,
+                                     KernelArgumentKind kind, int32_t size) {
   if (!args.empty() && isHidden(args.back().kind))
     throw std::invalid_argument(
         "explicit kernel arguments must precede hidden ones");
@@ -236,25 +239,25 @@ int KernelSignature::addExplicit(std::string_view name, KernelArgumentKind kind,
   return append(std::string(name), kind, size);
 }
 
-int KernelSignature::append(std::string name, KernelArgumentKind kind,
-                            int size) {
-  int end = args.empty() ? 0 : args.back().offset + args.back().size;
-  int offset = roundUp(end, size);
+int32_t KernelSignature::append(std::string name, KernelArgumentKind kind,
+                                int32_t size) {
+  int32_t end = args.empty() ? 0 : args.back().offset + args.back().size;
+  int32_t offset = roundUp(end, size);
   args.push_back({std::move(name), kind, size, offset});
   return offset;
 }
 
-int KernelSignature::addPointer(std::string_view name) {
+int32_t KernelSignature::addPointer(std::string_view name) {
   return addExplicit(name, KernelArgumentKind::globalPointer, 8);
 }
 
-int KernelSignature::addScalar(std::string_view name, int size) {
+int32_t KernelSignature::addScalar(std::string_view name, int32_t size) {
   if (size != 4 && size != 8)
     throw std::invalid_argument("scalar kernel argument size must be 4 or 8");
   return addExplicit(name, KernelArgumentKind::byValue, size);
 }
 
-int KernelSignature::addHidden(KernelArgumentKind kind, int size) {
+int32_t KernelSignature::addHidden(KernelArgumentKind kind, int32_t size) {
   if (!isHidden(kind))
     throw std::invalid_argument("kernel argument kind is not hidden");
   bool sizeAllowed = size == 4 || (size == 2 && isGroupSize(kind));
@@ -266,15 +269,15 @@ int KernelSignature::addHidden(KernelArgumentKind kind, int size) {
   return append({}, kind, size);
 }
 
-int KernelSignature::segmentSize() const {
+int32_t KernelSignature::segmentSize() const {
   if (args.empty())
     return 0;
   return roundUp(args.back().offset + args.back().size, segmentAlignment);
 }
 
 // Validation runs in the initializers so no partially built kernel exists.
-Kernel::Kernel(const Target &target, std::string_view name, int workgroupSize,
-               CodeObjectVersion codeObjectVersion)
+Kernel::Kernel(const Target &target, std::string_view name,
+               int32_t workgroupSize, CodeObjectVersion codeObjectVersion)
     : kernelTarget(target), kernelName(validatedName(name)),
       maxWorkgroupSize(validatedWorkgroupSize(workgroupSize)),
       version(validatedVersion(codeObjectVersion)), registers(target),
@@ -292,7 +295,7 @@ void Kernel::enableWorkgroupIds(bool y, bool z) {
   if (workgroupIdsEnabled)
     throw std::logic_error("workgroup ids already enabled");
   // The hardware packs the enabled ids right after workgroup id x.
-  int next = 3;
+  int32_t next = 3;
   if (y)
     workgroupIdYReg.emplace(
         registers.reserve(RegisterKind::sgpr, next++, 1, "workgroup_id_y"));
@@ -314,7 +317,7 @@ const RegisterRange &Kernel::workgroupIdZ() const {
   return *workgroupIdZReg;
 }
 
-void Kernel::setLdsSize(int bytes) {
+void Kernel::setLdsSize(int32_t bytes) {
   if (bytes < 0 || bytes > kernelTarget.maxLdsSize())
     throw std::invalid_argument("lds size must be in [0, " +
                                 std::to_string(kernelTarget.maxLdsSize()) +
@@ -323,7 +326,7 @@ void Kernel::setLdsSize(int bytes) {
 }
 
 std::shared_ptr<rocisa::SMemLoadInstruction>
-Kernel::loadArgument(RegisterRef dst, int offset) {
+Kernel::loadArgument(RegisterRef dst, int32_t offset) {
   if (dst.kind != RegisterKind::sgpr)
     throw std::invalid_argument("kernel argument load needs SGPRs");
   if (dst.count != 1 && dst.count != 2 && dst.count != 4)

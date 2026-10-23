@@ -52,7 +52,7 @@ public:
     return isRegister() && reg().kind == kind;
   }
   bool isImmediate() const {
-    return std::holds_alternative<int>(
+    return std::holds_alternative<int32_t>(
         static_cast<const InstructionInput &>(*this));
   }
 
@@ -61,7 +61,7 @@ public:
   /// The immediate; asserts isImmediate().
   int32_t immediate() const {
     assert(isImmediate() && "operand is not an immediate");
-    return std::get<int>(static_cast<const InstructionInput &>(*this));
+    return std::get<int32_t>(static_cast<const InstructionInput &>(*this));
   }
 };
 
@@ -73,13 +73,13 @@ static_assert(sizeof(Operand) == sizeof(InstructionInput),
 /// counter, and rocisa combines them into the target's wait instructions.
 struct WaitCounts {
   /// Vector memory loads (rocisa vlcnt).
-  std::optional<int> vectorLoads;
+  std::optional<int32_t> vectorLoads;
   /// Vector memory stores (rocisa vscnt).
-  std::optional<int> vectorStores;
+  std::optional<int32_t> vectorStores;
   /// LDS operations (rocisa dscnt).
-  std::optional<int> lds;
+  std::optional<int32_t> lds;
   /// Scalar memory loads and messages (rocisa kmcnt).
-  std::optional<int> scalarMemory;
+  std::optional<int32_t> scalarMemory;
 };
 
 /// Integer comparison predicates. The s and u prefixes compare as signed or
@@ -162,15 +162,15 @@ public:
 
   /// Allocates count VGPRs through the allocator; see
   /// RegisterAllocator::allocate.
-  RegisterRange allocateVgpr(int count, int alignment = 1,
+  RegisterRange allocateVgpr(int32_t count, int32_t alignment = 1,
                              std::string_view tag = {});
   /// Allocates count SGPRs through the allocator; see
   /// RegisterAllocator::allocate.
-  RegisterRange allocateSgpr(int count, int alignment = 1,
+  RegisterRange allocateSgpr(int32_t count, int32_t alignment = 1,
                              std::string_view tag = {});
   /// Allocates count AGPRs through the allocator; see
   /// RegisterAllocator::allocate.
-  RegisterRange allocateAgpr(int count, int alignment = 1,
+  RegisterRange allocateAgpr(int32_t count, int32_t alignment = 1,
                              std::string_view tag = {});
 
   // The moves below copy one value into a register.
@@ -356,7 +356,7 @@ private:
   const Target *targetInfo;
   RegisterAllocator *registers;
   rocisa::Module *module;
-  int nextLabelId = 0;
+  int32_t nextLabelId = 0;
 };
 
 } // namespace rocm::tensilelite::codegen

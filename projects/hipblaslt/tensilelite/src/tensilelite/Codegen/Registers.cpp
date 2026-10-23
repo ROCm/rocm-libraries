@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -13,13 +14,11 @@
 
 using namespace rocm::tensilelite::codegen;
 
-namespace {
-
 // accum_offset is rounded to rocisa's granule of 8; LLVM rounds to 4, which the
 // hardware also accepts.
-constexpr int accumOffsetGranule = 8;
+static constexpr int32_t accumOffsetGranule = 8;
 
-std::string_view kindName(RegisterKind kind) {
+static std::string_view kindName(RegisterKind kind) {
   switch (kind) {
   case RegisterKind::sgpr:
     return "sgpr";
@@ -32,7 +31,7 @@ std::string_view kindName(RegisterKind kind) {
 }
 
 // Matches the prefix rocisa emits in assembly.
-std::string_view registerPrefix(RegisterKind kind) {
+static std::string_view registerPrefix(RegisterKind kind) {
   switch (kind) {
   case RegisterKind::sgpr:
     return "s";
@@ -46,7 +45,8 @@ std::string_view registerPrefix(RegisterKind kind) {
 
 // Formats a register range for diagnostics without touching rocisa's
 // per-thread state.
-std::string registerText(RegisterKind kind, int start, int count) {
+static std::string registerText(RegisterKind kind, int32_t start,
+                                int32_t count) {
   std::string prefix(registerPrefix(kind));
   if (count == 1)
     return prefix + std::to_string(start);
@@ -54,8 +54,8 @@ std::string registerText(RegisterKind kind, int start, int count) {
          std::to_string(start + count - 1) + "]";
 }
 
-std::shared_ptr<rocisa::RegisterContainer> makeContainer(RegisterKind kind,
-                                                         int start, int count) {
+static std::shared_ptr<rocisa::RegisterContainer>
+makeContainer(RegisterKind kind, int32_t start, int32_t count) {
   float regNum = static_cast<float>(count);
   switch (kind) {
   case RegisterKind::sgpr:
@@ -70,10 +70,11 @@ std::shared_ptr<rocisa::RegisterContainer> makeContainer(RegisterKind kind,
 
 // Occupies every free register below start one at a time, so that first-fit
 // is forced to land on start. Returns the occupied indices.
-std::vector<int> occupyBelow(rocisa::RegisterPool &regPool, int start) {
-  std::vector<int> padding;
+static std::vector<int32_t> occupyBelow(rocisa::RegisterPool &regPool,
+                                        int32_t start) {
+  std::vector<int32_t> padding;
   while (true) {
-    int index = static_cast<int>(
+    int32_t index = static_cast<int32_t>(
         regPool.checkOut(1, "reserve-padding", /*preventOverflow=*/1));
     if (index >= start) {
       regPool.checkIn(index);
@@ -83,16 +84,14 @@ std::vector<int> occupyBelow(rocisa::RegisterPool &regPool, int start) {
   }
 }
 
-void requirePositiveCount(int count) {
+static void requirePositiveCount(int32_t count) {
   if (count <= 0)
     throw std::invalid_argument("register count must be positive, got " +
                                 std::to_string(count));
 }
 
-} // namespace
-
 RegisterRange::RegisterRange(RegisterAllocator &allocator, RegisterKind kind,
-                             int start, int count)
+                             int32_t start, int32_t count)
     : allocator(&allocator), rangeKind(kind), rangeStart(start),
       rangeCount(count) {}
 
@@ -119,12 +118,12 @@ RegisterKind RegisterRange::kind() const {
   return rangeKind;
 }
 
-int RegisterRange::start() const {
+int32_t RegisterRange::start() const {
   assert(allocator && "register range owns no registers");
   return rangeStart;
 }
 
-int RegisterRange::count() const {
+int32_t RegisterRange::count() const {
   assert(allocator && "register range owns no registers");
   return rangeCount;
 }
@@ -133,7 +132,7 @@ std::shared_ptr<rocisa::RegisterContainer> RegisterRef::container() const {
   return makeContainer(kind, start, count);
 }
 
-RegisterRef RegisterRef::slice(int offset, int subCount) const {
+RegisterRef RegisterRef::slice(int32_t offset, int32_t subCount) const {
   if (offset < 0 || subCount <= 0 || offset + subCount > count)
     throw std::out_of_range("register sub-range at offset " +
                             std::to_string(offset) + " with count " +
@@ -147,7 +146,7 @@ std::shared_ptr<rocisa::RegisterContainer> RegisterRange::container() const {
 }
 
 std::shared_ptr<rocisa::RegisterContainer>
-RegisterRange::sub(int offset, int subCount) const {
+RegisterRange::sub(int32_t offset, int32_t subCount) const {
   return ref(offset, subCount).container();
 }
 
@@ -156,7 +155,7 @@ RegisterRef RegisterRange::ref() const {
   return RegisterRef{rangeKind, rangeStart, rangeCount};
 }
 
-RegisterRef RegisterRange::ref(int offset, int subCount) const {
+RegisterRef RegisterRange::ref(int32_t offset, int32_t subCount) const {
   assert(allocator && "register range owns no registers");
   return ref().slice(offset, subCount);
 }
@@ -197,24 +196,25 @@ const rocisa::RegisterPool &RegisterAllocator::pool(RegisterKind kind) const {
   throw std::invalid_argument("invalid register kind");
 }
 
-RegisterRange RegisterAllocator::allocate(RegisterKind kind, int count,
-                                          int alignment, std::string_view tag) {
+RegisterRange RegisterAllocator::allocate(RegisterKind kind, int32_t count,
+                                          int32_t alignment,
+                                          std::string_view tag) {
   requirePositiveCount(count);
   if (alignment <= 0)
     throw std::invalid_argument("register alignment must be positive, got " +
                                 std::to_string(alignment));
   std::string poolTag = tag.empty() ? "codegen" : std::string(tag);
-  int start =
-      static_cast<int>(pool(kind).checkOutAligned(count, alignment, poolTag));
+  int32_t start = static_cast<int32_t>(
+      pool(kind).checkOutAligned(count, alignment, poolTag));
   ++liveRanges;
   return RegisterRange(*this, kind, start, count);
 }
 
-void RegisterAllocator::requireFree(RegisterKind kind, int start,
-                                    int count) const {
+void RegisterAllocator::requireFree(RegisterKind kind, int32_t start,
+                                    int32_t count) const {
   std::vector<rocisa::RegisterPool::Register> slots = pool(kind).getPool();
-  int end = std::min(start + count, static_cast<int>(slots.size()));
-  for (int index = start; index < end; ++index) {
+  int32_t end = std::min(start + count, static_cast<int32_t>(slots.size()));
+  for (int32_t index = start; index < end; ++index) {
     if (slots[index].status != rocisa::RegisterPool::Status::InUse)
       continue;
     throw std::invalid_argument(
@@ -223,8 +223,8 @@ void RegisterAllocator::requireFree(RegisterKind kind, int start,
   }
 }
 
-RegisterRange RegisterAllocator::reserve(RegisterKind kind, int start,
-                                         int count, std::string_view tag) {
+RegisterRange RegisterAllocator::reserve(RegisterKind kind, int32_t start,
+                                         int32_t count, std::string_view tag) {
   requirePositiveCount(count);
   if (start < 0)
     throw std::invalid_argument("register start must not be negative, got " +
@@ -233,10 +233,10 @@ RegisterRange RegisterAllocator::reserve(RegisterKind kind, int start,
   requireFree(kind, start, count);
   rocisa::RegisterPool &regPool = pool(kind);
   regPool.appendPool(start + count);
-  std::vector<int> padding = occupyBelow(regPool, start);
+  std::vector<int32_t> padding = occupyBelow(regPool, start);
   std::string poolTag = tag.empty() ? "codegen" : std::string(tag);
-  int got = static_cast<int>(regPool.checkOut(count, poolTag, 1));
-  for (int index : padding)
+  int32_t got = static_cast<int32_t>(regPool.checkOut(count, poolTag, 1));
+  for (int32_t index : padding)
     regPool.checkIn(index);
   if (got != start) {
     regPool.checkIn(got);
@@ -248,18 +248,18 @@ RegisterRange RegisterAllocator::reserve(RegisterKind kind, int start,
   return RegisterRange(*this, kind, start, count);
 }
 
-int RegisterAllocator::highWaterMark(RegisterKind kind) const {
-  return static_cast<int>(pool(kind).size());
+int32_t RegisterAllocator::highWaterMark(RegisterKind kind) const {
+  return static_cast<int32_t>(pool(kind).size());
 }
 
-int RegisterAllocator::accumOffset() const {
-  int vgprs = std::max(1, highWaterMark(RegisterKind::vgpr));
+int32_t RegisterAllocator::accumOffset() const {
+  int32_t vgprs = std::max(1, highWaterMark(RegisterKind::vgpr));
   return (vgprs + accumOffsetGranule - 1) / accumOffsetGranule *
          accumOffsetGranule;
 }
 
-void RegisterAllocator::checkLimit(RegisterKind kind, int limit) const {
-  int used = highWaterMark(kind);
+void RegisterAllocator::checkLimit(RegisterKind kind, int32_t limit) const {
+  int32_t used = highWaterMark(kind);
   if (used <= limit)
     return;
   throw std::runtime_error("kernel uses " + std::to_string(used) + " " +
@@ -269,8 +269,8 @@ void RegisterAllocator::checkLimit(RegisterKind kind, int limit) const {
 }
 
 void RegisterAllocator::checkUnifiedLimit() const {
-  int agprs = highWaterMark(RegisterKind::agpr);
-  int used = accumOffset() + agprs;
+  int32_t agprs = highWaterMark(RegisterKind::agpr);
+  int32_t used = accumOffset() + agprs;
   if (used <= target.maxUnifiedVgpr())
     return;
   throw std::runtime_error(
@@ -289,7 +289,7 @@ void RegisterAllocator::checkLimits() const {
   checkLimit(RegisterKind::agpr, target.maxAgpr());
 }
 
-void RegisterAllocator::release(RegisterKind kind, int start) {
+void RegisterAllocator::release(RegisterKind kind, int32_t start) {
   pool(kind).checkIn(start);
   --liveRanges;
 }

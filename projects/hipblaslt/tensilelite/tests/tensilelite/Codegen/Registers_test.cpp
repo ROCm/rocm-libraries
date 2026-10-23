@@ -9,13 +9,13 @@
 #include <string>
 #include <utility>
 
-namespace {
-
 using namespace rocm::tensilelite::codegen;
 
-constexpr RegisterKind sgpr = RegisterKind::sgpr;
-constexpr RegisterKind vgpr = RegisterKind::vgpr;
-constexpr RegisterKind agpr = RegisterKind::agpr;
+static constexpr RegisterKind sgpr = RegisterKind::sgpr;
+static constexpr RegisterKind vgpr = RegisterKind::vgpr;
+static constexpr RegisterKind agpr = RegisterKind::agpr;
+
+namespace {
 
 class Registers : public testing::Test {
 protected:
@@ -29,7 +29,9 @@ protected:
   RegisterAllocator allocator;
 };
 
-std::string limitMessage(const RegisterAllocator &allocator) {
+} // namespace
+
+static std::string limitMessage(const RegisterAllocator &allocator) {
   try {
     allocator.checkLimits();
   } catch (const std::runtime_error &error) {
@@ -267,5 +269,3 @@ TEST_F(Registers, SliceOutOfBoundsThrows) {
   EXPECT_THROW(pair.slice(0, 0), std::out_of_range);
   EXPECT_NO_THROW(pair.slice(1));
 }
-
-} // namespace

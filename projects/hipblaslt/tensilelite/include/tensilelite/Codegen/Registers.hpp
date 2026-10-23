@@ -9,6 +9,7 @@
 #include "container.hpp"
 #include "register.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
@@ -23,8 +24,8 @@ enum class RegisterKind { sgpr, vgpr, agpr };
 /// allocated, so it must not be used after the range it came from is released.
 struct RegisterRef {
   RegisterKind kind;
-  int start;
-  int count;
+  int32_t start;
+  int32_t count;
 
   /// Returns a container naming the registers, such as v[4:7], s2 or acc5.
   std::shared_ptr<rocisa::RegisterContainer> container() const;
@@ -32,7 +33,7 @@ struct RegisterRef {
   /// Returns a reference to count registers starting offset registers into
   /// this one, such as slice(1) for the high half of a pair. Throws
   /// std::out_of_range if they are not inside this reference.
-  RegisterRef slice(int offset, int count = 1) const;
+  RegisterRef slice(int32_t offset, int32_t count = 1) const;
 
   bool operator==(const RegisterRef &) const = default;
 };
@@ -54,22 +55,22 @@ public:
 
   RegisterKind kind() const;
   /// Index of the first register.
-  int start() const;
+  int32_t start() const;
   /// Number of registers.
-  int count() const;
+  int32_t count() const;
 
   /// Returns a container naming the whole range, such as v[4:7], s2 or
   /// acc[0:3].
   std::shared_ptr<rocisa::RegisterContainer> container() const;
   /// Same as ref(offset, count).container(), so it throws the same exception.
-  std::shared_ptr<rocisa::RegisterContainer> sub(int offset,
-                                                 int count = 1) const;
+  std::shared_ptr<rocisa::RegisterContainer> sub(int32_t offset,
+                                                 int32_t count = 1) const;
 
   /// Returns a reference to the whole range.
   RegisterRef ref() const;
   /// Returns a reference to count registers starting offset registers into
   /// the range. Throws std::out_of_range if they are not inside the range.
-  RegisterRef ref(int offset, int count = 1) const;
+  RegisterRef ref(int32_t offset, int32_t count = 1) const;
 
   /// Returns the registers to the allocator before the handle goes out of
   /// scope. Does nothing on a handle that owns nothing.
@@ -77,13 +78,13 @@ public:
 
 private:
   friend class RegisterAllocator;
-  RegisterRange(RegisterAllocator &allocator, RegisterKind kind, int start,
-                int count);
+  RegisterRange(RegisterAllocator &allocator, RegisterKind kind, int32_t start,
+                int32_t count);
 
   RegisterAllocator *allocator; // Null when the handle owns nothing.
   RegisterKind rangeKind;
-  int rangeStart;
-  int rangeCount;
+  int32_t rangeStart;
+  int32_t rangeCount;
 };
 
 /// Allocates the SGPRs, VGPRs and AGPRs of one kernel.
@@ -106,8 +107,8 @@ public:
   /// Allocates count registers of kind at the lowest free index that is a
   /// multiple of alignment. Throws std::invalid_argument if count or alignment
   /// is not positive.
-  RegisterRange allocate(RegisterKind kind, int count, int alignment = 1,
-                         std::string_view tag = {});
+  RegisterRange allocate(RegisterKind kind, int32_t count,
+                         int32_t alignment = 1, std::string_view tag = {});
 
   /// Reserves count registers of kind at exactly index start, for registers
   /// whose index the hardware ABI fixes (the kernarg pointer in s[0:1], for
@@ -115,18 +116,18 @@ public:
   /// indices are still free. Throws std::invalid_argument if start is
   /// negative, count is not positive, or any requested register is in use; the
   /// returned range always starts at start.
-  RegisterRange reserve(RegisterKind kind, int start, int count,
+  RegisterRange reserve(RegisterKind kind, int32_t start, int32_t count,
                         std::string_view tag = {});
 
   /// Returns one past the highest register index of kind ever handed out; the
   /// kernel descriptor's next_free_sgpr/next_free_vgpr, and the AGPR count in
   /// the descriptor and metadata, come from this.
-  int highWaterMark(RegisterKind kind) const;
+  int32_t highWaterMark(RegisterKind kind) const;
 
   /// Index of the first AGPR in the unified register file, the descriptor's
   /// accum_offset: the arch VGPR high-water mark, at least 1, rounded up to a
   /// multiple of 8 as rocisa's KernelBody::setGprs does.
-  int accumOffset() const;
+  int32_t accumOffset() const;
 
   /// Throws std::runtime_error if the high-water mark of any kind exceeds the
   /// target's per-kind limit, or if the accum offset plus the AGPRs exceed the
@@ -135,18 +136,18 @@ public:
 
 private:
   friend class RegisterRange;
-  void release(RegisterKind kind, int start);
+  void release(RegisterKind kind, int32_t start);
   rocisa::RegisterPool &pool(RegisterKind kind);
   const rocisa::RegisterPool &pool(RegisterKind kind) const;
-  void requireFree(RegisterKind kind, int start, int count) const;
-  void checkLimit(RegisterKind kind, int limit) const;
+  void requireFree(RegisterKind kind, int32_t start, int32_t count) const;
+  void checkLimit(RegisterKind kind, int32_t limit) const;
   void checkUnifiedLimit() const;
 
   Target target;
   rocisa::RegisterPool sgprPool;
   rocisa::RegisterPool vgprPool;
   rocisa::RegisterPool agprPool;
-  int liveRanges = 0; // Ranges handed out and not yet released.
+  int32_t liveRanges = 0; // Ranges handed out and not yet released.
 };
 
 } // namespace rocm::tensilelite::codegen

@@ -359,17 +359,17 @@ std::shared_ptr<rocisa::SEndpgm> IRBuilder::createEndProgram() {
   return create<rocisa::SEndpgm>();
 }
 
-RegisterRange IRBuilder::allocateVgpr(int count, int alignment,
+RegisterRange IRBuilder::allocateVgpr(int32_t count, int32_t alignment,
                                       std::string_view tag) {
   return registers->allocate(RegisterKind::vgpr, count, alignment, tag);
 }
 
-RegisterRange IRBuilder::allocateSgpr(int count, int alignment,
+RegisterRange IRBuilder::allocateSgpr(int32_t count, int32_t alignment,
                                       std::string_view tag) {
   return registers->allocate(RegisterKind::sgpr, count, alignment, tag);
 }
 
-RegisterRange IRBuilder::allocateAgpr(int count, int alignment,
+RegisterRange IRBuilder::allocateAgpr(int32_t count, int32_t alignment,
                                       std::string_view tag) {
   return registers->allocate(RegisterKind::agpr, count, alignment, tag);
 }
@@ -810,9 +810,9 @@ static void emitExact(IRBuilder &builder, RegisterRef dst, Operand a,
                       Operand b) {
   RegisterKind kind = dst.kind;
   Temporaries temps;
-  if (kind == RegisterKind::vgpr) {
+  if (kind == RegisterKind::vgpr)
     legalizeVop3Sources(builder, a, b, temps);
-  } else {
+  else {
     // s_abs_i32 takes only registers.
     for (Operand *source : {&a, &b})
       if (source->isImmediate())

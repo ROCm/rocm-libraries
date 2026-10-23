@@ -9,14 +9,13 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
-
-namespace {
 
 using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
@@ -53,7 +52,7 @@ TEST(SkinnyGEMM, KernelNameMatchesTheReference) {
             "NUM_XCDS8_GRID_3D1");
 }
 
-std::vector<SkinnyGEMMConfig> invalidConfigs() {
+static std::vector<SkinnyGEMMConfig> invalidConfigs() {
   std::vector<SkinnyGEMMConfig> configs(12);
   configs[0].lanesK = 32;
   configs[1].lanesK = 0;
@@ -79,7 +78,7 @@ TEST(SkinnyGEMM, RejectsInvalidKnobs) {
   }
 }
 
-std::string rejectionMessage(const SkinnyGEMMConfig &config) {
+static std::string rejectionMessage(const SkinnyGEMMConfig &config) {
   try {
     emitSkinnyGEMM(Target::get("gfx950"), config);
   } catch (const std::invalid_argument &error) {
@@ -101,8 +100,9 @@ TEST(SkinnyGEMM, RejectsConfigsOverTheRegisterBudget) {
             std::string::npos);
 }
 
-SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch,
-                        int upIters = 0, int partialSteps = 0) {
+static SkinnyGEMMConfig config(int32_t bm, int32_t tn, int32_t lanesK,
+                               int32_t waves, int32_t prefetch,
+                               int32_t upIters = 0, int32_t partialSteps = 0) {
   SkinnyGEMMConfig result;
   result.upIters = upIters;
   result.partialSteps = partialSteps;
@@ -114,13 +114,13 @@ SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch,
   return result;
 }
 
-std::string emitted(const SkinnyGEMMConfig &config) {
+static std::string emitted(const SkinnyGEMMConfig &config) {
   return emitSkinnyGEMM(Target::get("gfx950"), config);
 }
 
-bool isBlank(char c) { return c == ' ' || c == '\t'; }
+static bool isBlank(char c) { return c == ' ' || c == '\t'; }
 
-std::string trimmed(const std::string &line) {
+static std::string trimmed(const std::string &line) {
   std::string::const_iterator first =
       std::find_if_not(line.begin(), line.end(), isBlank);
   std::string::const_reverse_iterator last =
@@ -132,9 +132,9 @@ std::string trimmed(const std::string &line) {
 
 // Returns the lines from the first one that starts with from up to the first
 // later one that contains to.
-std::vector<std::string> linesBetween(const std::string &assembly,
-                                      std::string_view from,
-                                      std::string_view to) {
+static std::vector<std::string> linesBetween(const std::string &assembly,
+                                             std::string_view from,
+                                             std::string_view to) {
   std::vector<std::string> lines;
   std::istringstream stream(assembly);
   std::string line;
@@ -155,7 +155,7 @@ std::vector<std::string> linesBetween(const std::string &assembly,
   return lines;
 }
 
-std::vector<std::string> waitsOf(const std::vector<std::string> &lines) {
+static std::vector<std::string> waitsOf(const std::vector<std::string> &lines) {
   std::vector<std::string> waits;
   for (const std::string &line : lines)
     if (line.rfind("s_waitcnt", 0) == 0)
@@ -163,18 +163,18 @@ std::vector<std::string> waitsOf(const std::vector<std::string> &lines) {
   return waits;
 }
 
-std::string joined(const std::vector<std::string> &lines) {
+static std::string joined(const std::vector<std::string> &lines) {
   std::string text;
   for (const std::string &line : lines)
     text += line + "\n";
   return text;
 }
 
-std::string vmcnt(int count) {
+static std::string vmcnt(int32_t count) {
   return "s_waitcnt vmcnt(" + std::to_string(count) + ")";
 }
 
-std::string lgkmcnt(int count) {
+static std::string lgkmcnt(int32_t count) {
   return "s_waitcnt lgkmcnt(" + std::to_string(count) + ")";
 }
 
@@ -223,17 +223,17 @@ TEST(SkinnyGEMM, PrimarySteadyLoopWaits) {
   std::vector<std::string> loop =
       linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
   ASSERT_FALSE(loop.empty());
-  constexpr int columns = 2;
-  constexpr int loadsPerSlot = 5 * columns;
+  constexpr int32_t columns = 2;
+  constexpr int32_t loadsPerSlot = 5 * columns;
   std::vector<std::string> expected;
-  for (int c = 0; c < columns; ++c)
+  for (int32_t c = 0; c < columns; ++c)
     expected.push_back(vmcnt(loadsPerSlot - 1 - c));
   // The permutes of the two columns are the 2 * (NC - 1 - c) newest of the LDS
   // operations in flight.
-  for (int c = 0; c < columns; ++c)
+  for (int32_t c = 0; c < columns; ++c)
     expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
-  for (int chunk = 0; chunk < 4; ++chunk)
-    for (int c = 0; c < columns; ++c)
+  for (int32_t chunk = 0; chunk < 4; ++chunk)
+    for (int32_t c = 0; c < columns; ++c)
       expected.push_back(vmcnt(loadsPerSlot - 1 - c));
   EXPECT_EQ(waitsOf(loop), expected);
   EXPECT_EQ(expected.size(), 12u);
@@ -250,16 +250,16 @@ TEST(SkinnyGEMM, DecodeFirstSteadyLoopWaits) {
   ASSERT_FALSE(loop.empty());
   // One more slot is in flight behind each use: 19 and 18, the reference's
   // values, in both unrolled slots.
-  constexpr int columns = 2;
-  constexpr int loadsPerSlot = 5 * columns;
+  constexpr int32_t columns = 2;
+  constexpr int32_t loadsPerSlot = 5 * columns;
   std::vector<std::string> expected;
-  for (int slot = 0; slot < 2; ++slot) {
-    for (int c = 0; c < columns; ++c)
+  for (int32_t slot = 0; slot < 2; ++slot) {
+    for (int32_t c = 0; c < columns; ++c)
       expected.push_back(vmcnt(loadsPerSlot + loadsPerSlot - 1 - c));
-    for (int c = 0; c < columns; ++c)
+    for (int32_t c = 0; c < columns; ++c)
       expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
-    for (int chunk = 0; chunk < 4; ++chunk)
-      for (int c = 0; c < columns; ++c)
+    for (int32_t chunk = 0; chunk < 4; ++chunk)
+      for (int32_t c = 0; c < columns; ++c)
         expected.push_back(vmcnt(loadsPerSlot + loadsPerSlot - 1 - c));
   }
   EXPECT_EQ(waitsOf(loop), expected);
@@ -270,8 +270,8 @@ TEST(SkinnyGEMM, DecodeFirstSteadyLoopWaits) {
 // a split has fewer iterations than the ring has slots.
 TEST(SkinnyGEMM, EpilogueWaitsForThePrologueLoadsItOverwrites) {
   struct Case {
-    int prefetch;
-    int outstanding;
+    int32_t prefetch;
+    int32_t outstanding;
   };
   // The first register of the epilogue is the first chunk of the ring, so only
   // the loads issued after it are left: the reference's 7 for PF = 1, and 17
@@ -311,7 +311,7 @@ TEST(SkinnyGEMM, NoPrefetchLoopWaits) {
 // the steady loop end is max((NIfull / PF - 1) * PF, 0), as shifts for a power
 // of two and as LLVM's multiply by a magic number otherwise.
 TEST(SkinnyGEMM, RemainderArmsAndSteadyLoopEnd) {
-  for (int prefetch : {1, 2, 3, 4}) {
+  for (int32_t prefetch : {1, 2, 3, 4}) {
     std::string assembly = emitted(config(1, 1, 16, 1, prefetch));
     SCOPED_TRACE("prefetch " + std::to_string(prefetch));
     EXPECT_EQ(countLinesContaining(assembly, "s_cmp_eq_i32 "),
@@ -354,7 +354,7 @@ TEST(SkinnyGEMM, PerChunkOpOrder) {
 
 // The mnemonic of a line with its ds offset, if any, and the other operands
 // dropped.
-std::string shape(const std::string &line) {
+static std::string shape(const std::string &line) {
   std::string mnemonic = line.substr(0, line.find(' '));
   if (mnemonic.rfind("ds_", 0) != 0)
     return line.rfind("s_waitcnt", 0) == 0 ? line : mnemonic;
@@ -364,8 +364,9 @@ std::string shape(const std::string &line) {
 }
 
 // The lines of the given mnemonics, reduced to their shape.
-std::vector<std::string> shapesOf(const std::vector<std::string> &lines,
-                                  const std::vector<std::string> &prefixes) {
+static std::vector<std::string>
+shapesOf(const std::vector<std::string> &lines,
+         const std::vector<std::string> &prefixes) {
   std::vector<std::string> shapes;
   for (const std::string &line : lines)
     for (const std::string &prefix : prefixes)
@@ -388,9 +389,9 @@ TEST(SkinnyGEMM, UpFrontLoadsComeFirst) {
     if (line.rfind("buffer_load", 0) == 0)
       loads.push_back(line.substr(0, line.find(' ')));
   }
-  constexpr int scaleLoads = 5 * 2;
-  ASSERT_GT(static_cast<int>(loads.size()), scaleLoads);
-  for (int i = 0; i < scaleLoads; ++i)
+  constexpr int32_t scaleLoads = 5 * 2;
+  ASSERT_GT(std::ssize(loads), scaleLoads);
+  for (int32_t i = 0; i < scaleLoads; ++i)
     EXPECT_EQ(loads[i], "buffer_load_dword") << i;
   EXPECT_EQ(loads[scaleLoads], "buffer_load_dwordx4");
   // Nothing issues scales again: the prologue, loop and arms load chunks.
@@ -407,7 +408,7 @@ TEST(SkinnyGEMM, UpFrontPerWavePackWaits) {
       linesBetween(assembly, vmcnt(25), "label_kloop_0:");
   ASSERT_FALSE(pack.empty());
   std::vector<std::string> expected;
-  for (int entry = 0; entry < 5; ++entry) {
+  for (int32_t entry = 0; entry < 5; ++entry) {
     expected.insert(expected.end(),
                     {vmcnt(25 - 2 * entry), "ds_bpermute_b32",
                      "ds_bpermute_b32", vmcnt(24 - 2 * entry),
@@ -432,7 +433,7 @@ TEST(SkinnyGEMM, UpFrontSharedPackOrderAndWaits) {
                                        vmcnt(17),  "ds_write_b32offset:2048",
                                        vmcnt(16),  "ds_write_b32offset:3072",
                                        lgkmcnt(0), "s_barrier"};
-  for (int entry = 0; entry < 2; ++entry) {
+  for (int32_t entry = 0; entry < 2; ++entry) {
     std::string first = std::to_string(entry * 2048);
     std::string second = std::to_string(entry * 2048 + 1024);
     std::string hiFirst = std::to_string(entry * 2048 + 64);
@@ -467,8 +468,8 @@ TEST(SkinnyGEMM, UpFrontSelectChainIsEntryOuter) {
       chain.push_back("cndmask");
   }
   std::vector<std::string> expected;
-  for (int slot = 0; slot < 2; ++slot)
-    for (int entry = 1; entry < 5; ++entry)
+  for (int32_t slot = 0; slot < 2; ++slot)
+    for (int32_t entry = 1; entry < 5; ++entry)
       expected.insert(expected.end(),
                       {std::to_string(entry), "select", "cndmask", "cndmask"});
   EXPECT_EQ(chain, expected);
@@ -487,7 +488,7 @@ TEST(SkinnyGEMM, UpFrontLoopWaits) {
       linesBetween(shared, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
   ASSERT_FALSE(loop.empty());
   std::vector<std::string> expected;
-  for (int chunk = 0; chunk < 8; ++chunk)
+  for (int32_t chunk = 0; chunk < 8; ++chunk)
     expected.insert(expected.end(), {vmcnt(15), vmcnt(14)});
   EXPECT_EQ(waitsOf(loop), expected);
 
@@ -499,12 +500,12 @@ TEST(SkinnyGEMM, UpFrontLoopWaits) {
                       "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
   ASSERT_FALSE(loop.empty());
   expected.clear();
-  for (int load = 15; load >= 0; --load)
+  for (int32_t load = 15; load >= 0; --load)
     expected.push_back(vmcnt(load));
   EXPECT_EQ(waitsOf(loop), expected);
 }
 
-std::string ldsSegmentSize(const SkinnyGEMMConfig &config) {
+static std::string ldsSegmentSize(const SkinnyGEMMConfig &config) {
   return ".group_segment_fixed_size: " +
          std::to_string(config.upIters * (config.bm + config.tn) *
                         config.waves * 256);
@@ -532,7 +533,7 @@ TEST(SkinnyGEMM, UpFrontLdsSize) {
 }
 
 // Whether an s_and_b32 of the assembly ends in the operand mask.
-bool masksBy(const std::string &assembly, std::string_view mask) {
+static bool masksBy(const std::string &assembly, std::string_view mask) {
   std::istringstream stream(assembly);
   for (std::string line; std::getline(stream, line);) {
     line = trimmed(line);
@@ -576,7 +577,7 @@ TEST(SkinnyGEMM, UpFrontRotationModulusIsUpIters) {
 }
 
 // The lines of the assembly, trimmed.
-std::vector<std::string> allLines(const std::string &assembly) {
+static std::vector<std::string> allLines(const std::string &assembly) {
   std::vector<std::string> lines;
   std::istringstream stream(assembly);
   for (std::string line; std::getline(stream, line);)
@@ -586,11 +587,11 @@ std::vector<std::string> allLines(const std::string &assembly) {
 
 // The compute of the last partial step: the lines after the last chunk-end
 // label up to the last dot before the epilogue's first DPP add.
-std::vector<std::string> stepCompute(const std::string &assembly) {
+static std::vector<std::string> stepCompute(const std::string &assembly) {
   std::vector<std::string> lines = allLines(assembly);
-  int first = 0;
-  int last = 0;
-  for (int i = 0; i < std::ssize(lines); ++i) {
+  int32_t first = 0;
+  int32_t last = 0;
+  for (int32_t i = 0; i < std::ssize(lines); ++i) {
     if (lines[i].rfind("label_step_chunk_end_", 0) == 0)
       first = i;
     if (lines[i].find("quad_perm") != std::string::npos)
@@ -604,7 +605,7 @@ std::vector<std::string> stepCompute(const std::string &assembly) {
 // The step code is emitted once whatever the number of steps: four chunk
 // tests, and a back edge only for the loop over the head and the tail.
 TEST(SkinnyGEMM, PartialStepBodyIsEmittedOnce) {
-  for (int upIters : {0, 2}) {
+  for (int32_t upIters : {0, 2}) {
     SCOPED_TRACE("upIters " + std::to_string(upIters));
     std::string none = emitted(config(1, 4, 16, 1, 1, upIters, 0));
     EXPECT_EQ(countLinesContaining(none, "s_bitcmp1_b32"), 0);
@@ -625,26 +626,26 @@ TEST(SkinnyGEMM, PartialStepBodyIsEmittedOnce) {
 // computed once per chunk and dword, as a left shift of -1 for the lo bound
 // and a right shift of -1 for the hi bound.
 TEST(SkinnyGEMM, TailDwordsWaitForEachLoad) {
-  constexpr int columns = 5;
-  constexpr int chunks = 4;
-  constexpr int dwords = 4;
-  for (int partialSteps : {1, 2}) {
+  constexpr int32_t columns = 5;
+  constexpr int32_t chunks = 4;
+  constexpr int32_t dwords = 4;
+  for (int32_t partialSteps : {1, 2}) {
     SCOPED_TRACE("partialSteps " + std::to_string(partialSteps));
     std::string assembly = emitted(config(1, 4, 16, 1, 1, 0, partialSteps));
     std::vector<std::string> lines = allLines(assembly);
-    int first = 0;
-    int last = 0;
-    for (int i = 0; i < std::ssize(lines); ++i) {
+    int32_t first = 0;
+    int32_t last = 0;
+    for (int32_t i = 0; i < std::ssize(lines); ++i) {
       if (first == 0 && lines[i].rfind("s_bitcmp1_b32", 0) == 0)
         first = i;
       if (lines[i].rfind("label_step_chunk_end_", 0) == 0)
         last = i;
     }
     // The chunk loads of the step all follow the first chunk test.
-    int masked = 0;
-    int leftMasks = 0;
-    int rightMasks = 0;
-    for (int i = first; i + 2 < last; ++i) {
+    int32_t masked = 0;
+    int32_t leftMasks = 0;
+    int32_t rightMasks = 0;
+    for (int32_t i = first; i + 2 < last; ++i) {
       const std::string &line = lines[i];
       bool minusOne =
           line.size() > 4 && line.compare(line.size() - 4, 4, ", -1") == 0;
@@ -668,13 +669,13 @@ TEST(SkinnyGEMM, TailDwordsWaitForEachLoad) {
 // for column c behind the NC - 1 - c later scale loads, so the last wait is for
 // everything, and no compute wait follows.
 TEST(SkinnyGEMM, RingStepWaitsOnlyForItsScales) {
-  constexpr int columns = 2;
+  constexpr int32_t columns = 2;
   std::string assembly = emitted(config(1, 1, 16, 1, 1, 0, 1));
   SCOPED_TRACE("assembly:\n" + assembly);
   std::vector<std::string> expected;
-  for (int c = 0; c < columns; ++c)
+  for (int32_t c = 0; c < columns; ++c)
     expected.push_back(vmcnt(columns - 1 - c));
-  for (int c = 0; c < columns; ++c)
+  for (int32_t c = 0; c < columns; ++c)
     expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
   EXPECT_EQ(waitsOf(stepCompute(assembly)), expected);
 }
@@ -683,17 +684,17 @@ TEST(SkinnyGEMM, RingStepWaitsOnlyForItsScales) {
 // column c of every chunk waits behind the NC - 1 - c later columns of its own
 // chunk, the only loads certain to be in flight.
 TEST(SkinnyGEMM, UpFrontStepWaitsPerChunk) {
-  constexpr int columns = 5;
-  constexpr int chunks = 4;
+  constexpr int32_t columns = 5;
+  constexpr int32_t chunks = 4;
   std::string assembly = emitted(config(1, 4, 16, 1, 2, 4, 1));
   SCOPED_TRACE("assembly:\n" + assembly);
   std::vector<std::string> compute = stepCompute(assembly);
   std::vector<std::string> expected;
-  for (int chunk = 0; chunk < chunks; ++chunk)
-    for (int c = 0; c < columns; ++c)
+  for (int32_t chunk = 0; chunk < chunks; ++chunk)
+    for (int32_t c = 0; c < columns; ++c)
       expected.push_back(vmcnt(columns - 1 - c));
   EXPECT_EQ(waitsOf(compute), expected);
-  for (int i = 0; i + 1 < std::ssize(compute); ++i)
+  for (int32_t i = 0; i + 1 < std::ssize(compute); ++i)
     if (compute[i].rfind("s_waitcnt", 0) == 0)
       EXPECT_EQ(compute[i + 1].rfind("v_cvt_scalef32_pk_bf16_fp8", 0), 0u);
 }
@@ -702,20 +703,20 @@ TEST(SkinnyGEMM, UpFrontStepWaitsPerChunk) {
 // registers is followed by the later prologue slots, the rest of its own slot's
 // loads are before it, and the step's NC scale loads were issued on every path.
 TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
-  constexpr int columns = 2;
-  constexpr int scaleLoads = columns;
-  constexpr int loadsPerSlot = scaleLoads + 4 * columns;
-  for (int prefetch : {1, 2}) {
+  constexpr int32_t columns = 2;
+  constexpr int32_t scaleLoads = columns;
+  constexpr int32_t loadsPerSlot = scaleLoads + 4 * columns;
+  for (int32_t prefetch : {1, 2}) {
     SCOPED_TRACE("prefetch " + std::to_string(prefetch));
     std::vector<std::string> lines =
         allLines(emitted(config(1, 1, 16, 1, prefetch, 0, 1)));
     std::vector<std::string> waits;
-    for (int i = 0; i + 1 < std::ssize(lines); ++i)
+    for (int32_t i = 0; i + 1 < std::ssize(lines); ++i)
       if (lines[i].rfind("label_step_zero_", 0) == 0)
         waits.push_back(lines[i + 1]);
     std::vector<std::string> expected;
-    for (int chunk = 0; chunk < 4; ++chunk) {
-      int newest = scaleLoads + chunk * columns + columns - 1;
+    for (int32_t chunk = 0; chunk < 4; ++chunk) {
+      int32_t newest = scaleLoads + chunk * columns + columns - 1;
       expected.push_back(vmcnt(loadsPerSlot - 1 - newest +
                                (prefetch - 1) * loadsPerSlot + scaleLoads));
     }
@@ -724,8 +725,8 @@ TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
   // Without a ring there is no prologue load to wait for.
   std::vector<std::string> lines =
       allLines(emitted(config(1, 1, 16, 1, 0, 0, 1)));
-  int zeroArms = 0;
-  for (int i = 0; i + 1 < std::ssize(lines); ++i) {
+  int32_t zeroArms = 0;
+  for (int32_t i = 0; i + 1 < std::ssize(lines); ++i) {
     if (lines[i].rfind("label_step_zero_", 0) != 0)
       continue;
     ++zeroArms;
@@ -738,14 +739,15 @@ TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
 // scale load ORs its voffset with the sign mask, which PARTIAL_STEPS = 0 does
 // not need.
 TEST(SkinnyGEMM, UpFrontEntriesSteerAtK) {
-  constexpr int entries = 3;
-  constexpr int columns = 2;
-  for (int partialSteps : {0, 1, 2}) {
+  constexpr int32_t entries = 3;
+  constexpr int32_t columns = 2;
+  for (int32_t partialSteps : {0, 1, 2}) {
     SCOPED_TRACE("partialSteps " + std::to_string(partialSteps));
     std::vector<std::string> lines =
         allLines(emitted(config(1, 1, 16, 1, 2, entries, partialSteps)));
-    int loads = 0;
-    for (int i = 1; i < std::ssize(lines) && loads < entries * columns; ++i) {
+    int32_t loads = 0;
+    for (int32_t i = 1; i < std::ssize(lines) && loads < entries * columns;
+         ++i) {
       if (lines[i].rfind("buffer_load_dword ", 0) != 0)
         continue;
       ++loads;
@@ -758,10 +760,10 @@ TEST(SkinnyGEMM, UpFrontEntriesSteerAtK) {
 
 // Counts the v_nop that precede each DPP add of the reduction of a single
 // accumulator, in order.
-std::vector<int> nopsBeforeDpp(const std::string &assembly) {
-  std::vector<int> counts;
+static std::vector<int32_t> nopsBeforeDpp(const std::string &assembly) {
+  std::vector<int32_t> counts;
   std::istringstream stream(assembly);
-  int nops = 0;
+  int32_t nops = 0;
   bool inReduction = false;
   for (std::string line; std::getline(stream, line);) {
     line = trimmed(line);
@@ -790,15 +792,15 @@ std::vector<int> nopsBeforeDpp(const std::string &assembly) {
 TEST(SkinnyGEMM, ReduceForEveryLanesK) {
   // Three nops cover the dot's write, two every DPP read of a VALU result.
   EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 4, 1, 1))),
-            (std::vector<int>{3, 2}));
+            (std::vector<int32_t>{3, 2}));
   EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 8, 1, 1))),
-            (std::vector<int>{3, 2, 2}));
+            (std::vector<int32_t>{3, 2, 2}));
   EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 16, 1, 1))),
-            (std::vector<int>{3, 2, 2, 2}));
+            (std::vector<int32_t>{3, 2, 2, 2}));
   // 64 lanes add the row broadcasts and read lane 63 after one nop; the move
   // of the lane's value takes two more, which the reference omits.
   EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 64, 1, 1))),
-            (std::vector<int>{3, 2, 2, 2, 2, 2, 1}));
+            (std::vector<int32_t>{3, 2, 2, 2, 2, 2, 1}));
 
   std::string lanes16 = emitted(config(1, 1, 16, 1, 1));
   expectLinesInOrder(lanes16,
@@ -850,8 +852,9 @@ TEST(SkinnyGEMM, VectorStoresOnlyWhenPreconditionHolds) {
 }
 
 // The 1-D launch form of base, with the tile order knobs.
-SkinnyGEMMConfig persistentConfig(SkinnyGEMMConfig base, int group = 1,
-                                  int numXcds = 1) {
+static SkinnyGEMMConfig persistentConfig(SkinnyGEMMConfig base,
+                                         int32_t group = 1,
+                                         int32_t numXcds = 1) {
   base.grid3d = false;
   base.group = group;
   base.numXcds = numXcds;
@@ -873,9 +876,9 @@ TEST(SkinnyGEMM, PersistentLaunchAbi) {
   EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 96"), 0);
 }
 
-std::ptrdiff_t indexOfLineStartingWith(const std::vector<std::string> &lines,
-                                       std::string_view prefix,
-                                       std::ptrdiff_t from = 0) {
+static std::ptrdiff_t
+indexOfLineStartingWith(const std::vector<std::string> &lines,
+                        std::string_view prefix, std::ptrdiff_t from = 0) {
   for (std::ptrdiff_t i = from; i < std::ssize(lines); ++i)
     if (lines[i].rfind(prefix, 0) == 0)
       return i;
@@ -934,7 +937,7 @@ TEST(SkinnyGEMM, PersistentBarrierOnlyWhenShared) {
 
 // The lines of the tile loop body before its first buffer load: the barrier,
 // the remap, the decode, the rotation and the bases.
-std::string tileDecode(const SkinnyGEMMConfig &config) {
+static std::string tileDecode(const SkinnyGEMMConfig &config) {
   return joined(
       linesBetween(emitted(config), "label_tile_loop_0:", "buffer_load"));
 }
@@ -1043,13 +1046,13 @@ TEST(SkinnyGEMM, PersistentNearRegisterLimitConfigEmits) {
   EXPECT_NO_THROW(emitted(persistentConfig(wide, 4, 8)));
 }
 
-bool isLabelOrComment(const std::string &line) {
+static bool isLabelOrComment(const std::string &line) {
   return line.empty() || line.back() == ':' || line[0] == ';' ||
          line.rfind("//", 0) == 0 || line.rfind("/*", 0) == 0;
 }
 
 // Returns the mnemonics from the kernel symbol to s_endpgm.
-std::vector<std::string> bodyMnemonics(const std::string &assembly) {
+static std::vector<std::string> bodyMnemonics(const std::string &assembly) {
   std::vector<std::string> mnemonics;
   std::istringstream stream(assembly);
   std::string line;
@@ -1116,5 +1119,3 @@ TEST(SplitKReduce, DeclaresTheReferenceArguments) {
                                 ".offset: 48", "hidden_block_count_y",
                                 ".offset: 52", "hidden_block_count_z"});
 }
-
-} // namespace

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -55,9 +56,9 @@ inline std::string line(std::string_view mnemonic, const std::string &dst,
   return line(mnemonic, dst, src0) + ", " + src1;
 }
 
-inline int countLinesContaining(const std::string &text,
-                                std::string_view needle) {
-  int count = 0;
+inline int32_t countLinesContaining(const std::string &text,
+                                    std::string_view needle) {
+  int32_t count = 0;
   std::istringstream stream(text);
   for (std::string current; std::getline(stream, current);)
     if (current.find(needle) != std::string::npos)
@@ -123,7 +124,7 @@ struct DeviceFree {
 using DevicePtr = std::unique_ptr<void, DeviceFree>;
 
 inline bool hasHipDevice() {
-  int deviceCount = 0;
+  int32_t deviceCount = 0;
   return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
 }
 
@@ -203,7 +204,7 @@ struct ArithKernelSpec {
 };
 
 /// Lanes per workgroup: one wave64.
-constexpr int arithWorkgroupSize = 64;
+constexpr int32_t arithWorkgroupSize = 64;
 
 /// Assembles and launches workgroupCount workgroups and compares out exactly
 /// with expected. A lane input holds workgroupCount * arithWorkgroupSize words,
@@ -211,7 +212,7 @@ constexpr int arithWorkgroupSize = 64;
 /// result) or per workgroup (sgpr result). Reports up to 8 mismatches with
 /// their inputs, prints the assembly on any failure, and fails fatally on HIP
 /// errors.
-void expectArithResults(const ArithKernelSpec &spec, int workgroupCount,
+void expectArithResults(const ArithKernelSpec &spec, int32_t workgroupCount,
                         const std::vector<std::vector<uint32_t>> &inputs,
                         const std::vector<uint32_t> &expected);
 
@@ -224,7 +225,7 @@ inline Values widen(const Words &words) {
 
 inline Values join(const Words &low, const Words &high) {
   Values values;
-  for (size_t i = 0; i < low.size(); ++i)
+  for (int64_t i = 0; i < std::ssize(low); ++i)
     values.push_back(low[i] | uint64_t{high[i]} << 32);
   return values;
 }
@@ -253,8 +254,8 @@ std::vector<T> perLane(const std::vector<T> &perGroup) {
 }
 
 /// The number of workgroups that cover laneWords.
-inline int laneGroupCount(const Words &laneWords) {
-  return static_cast<int>(laneWords.size()) / arithWorkgroupSize;
+inline int32_t laneGroupCount(const Words &laneWords) {
+  return static_cast<int32_t>(laneWords.size()) / arithWorkgroupSize;
 }
 
 /// Edge values: 0, 1, -1, 2, -2, 64, 65, -16, -17, INT32_MIN, INT32_MIN + 1,
@@ -271,7 +272,7 @@ struct WordPairs {
 /// std::mt19937 with a fixed seed (raw engine output, which is portable; not a
 /// distribution), padded with more random pairs to a multiple of
 /// arithWorkgroupSize.
-WordPairs makeArithPairs(int randomCount);
+WordPairs makeArithPairs(int32_t randomCount);
 
 /// The 64-bit operand pairs a and b as their low and high 32-bit words.
 struct WordQuads {
@@ -283,7 +284,7 @@ struct WordQuads {
 /// differ in the sign bit of the low word) followed by randomCount pairs from
 /// std::mt19937 with a fixed seed (raw engine output), padded with more random
 /// pairs to a multiple of arithWorkgroupSize.
-WordQuads makeArithPairs64(int randomCount);
+WordQuads makeArithPairs64(int32_t randomCount);
 
 /// A register pair under test and the registers that keep it allocated.
 struct PairRegisters {

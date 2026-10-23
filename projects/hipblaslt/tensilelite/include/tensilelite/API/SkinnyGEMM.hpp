@@ -6,6 +6,7 @@
 
 #include <tensilelite/Codegen/Target.hpp>
 
+#include <cstdint>
 #include <string>
 
 namespace rocm::tensilelite {
@@ -14,23 +15,23 @@ namespace rocm::tensilelite {
 /// the MLIR reference (gemm_mxfp8_skinny.mlir).
 struct SkinnyGEMMConfig {
   /// BM: rows of the skinny operand handled per workgroup.
-  int bm = 1;
+  int32_t bm = 1;
   /// TN: output columns of the wide operand per lane group.
-  int tn = 1;
+  int32_t tn = 1;
   /// LANES_K: lanes that split the k dimension; one of 4, 8, 16 and 64.
-  int lanesK = 64;
+  int32_t lanesK = 64;
   /// WAVES: wavefronts per workgroup, so a block has 64 * waves lanes.
-  int waves = 4;
+  int32_t waves = 4;
   /// PF: prefetch ring depth; 0 means no ring.
-  int prefetch = 2;
+  int32_t prefetch = 2;
   /// UP_ITERS: 0 rings the scales, otherwise the up-front scale vector size.
-  int upIters = 0;
+  int32_t upIters = 0;
   /// PARTIAL_STEPS: 0, 1 or 2, derived by the host from k and spk.
-  int partialSteps = 0;
+  int32_t partialSteps = 0;
   /// GROUP: workgroup grouping factor of the grid swizzle.
-  int group = 1;
+  int32_t group = 1;
   /// NUM_XCDS: number of XCDs the workgroups are distributed over.
-  int numXcds = 1;
+  int32_t numXcds = 1;
   /// GRID_3D: false selects a persistent 1-D launch.
   bool grid3d = true;
 };
