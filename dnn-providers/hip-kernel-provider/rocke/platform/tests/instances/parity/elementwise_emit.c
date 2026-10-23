@@ -98,6 +98,12 @@ static int make_spec(int idx, rocke_elementwise_spec_t* spec)
         spec->block_size = 512;
         spec->vec = 2;
         break;
+    case 13: /* f64 abs lowers through llvm.fabs.f64 */
+        spec->op = "abs";
+        spec->dtype = "f64";
+        spec->block_size = 256;
+        spec->vec = 2;
+        break;
     default:
         return -1;
     }

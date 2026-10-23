@@ -30,12 +30,13 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
@@ -101,9 +102,6 @@ constexpr uint32_t HEAD_AXIS = 1;
 constexpr uint32_t SEQ_AXIS = 2;
 constexpr uint32_t HEAD_SIZE_AXIS = 3;
 constexpr uint32_t SDPA_RANK = 4;
-
-/// Unbounded, in the left_bound/right_bound convention.
-constexpr int64_t UNBOUNDED = -1;
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -295,68 +293,52 @@ enum class MaskType : int
 /**
  * @brief Which mask the graph is asking for, or nullopt for one this engine lacks.
  *
- * A real bound wins over the deprecated booleans: a graph that sets a boolean AND
- * carries a bound is asking for a windowed mask.
+ * Deprecated causal booleans are merged with the bounds and alignment by
+ * asm_sdpa_engine::plan_utils::resolveDiagonalBand, then classified by getMaskType
+ * without makeCoveringBoundsUnbound (the Python shape miner does not unbound
+ * covering windows either). Both booleans set, invalid bounds,
+ * or any band other than unmasked or causal, is declined: the compiled kernel is
+ * hard-causal with no right-bound field, and no shipped variant carries a
+ * non-zero sliding_window.
  */
 std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
-    const bool topLeftDeprecated = attributes.causal_mask();
-    const bool bottomRightDeprecated = attributes.causal_mask_bottom_right();
+    using asm_sdpa_engine::plan_utils::getMaskType;
+    using asm_sdpa_engine::plan_utils::resolveDiagonalBand;
+    using PlanMaskType = asm_sdpa_engine::plan_utils::MaskType;
 
-    if(topLeftDeprecated && bottomRightDeprecated)
+    PlanMaskType planMask{};
+    try
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
-                               << "causal_mask and causal_mask_bottom_right are both set");
+        const auto band = resolveDiagonalBand(attributes);
+        planMask = getMaskType(band.leftBound, band.rightBound, band.alignment);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << e.what());
         return std::nullopt;
     }
 
-    const int64_t left
-        = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
-    const int64_t right
-        = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-
-    // A non-zero right bound creates a bidirectional window the kernel cannot serve:
-    // the compiled kernel is hard-causal (upper mask only) and has no right-bound field.
-    // Decline early so the graph is not silently served with wrong numerics.
-    if(right != UNBOUNDED && right != 0)
+    switch(planMask)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
-                               << "right_bound " << right
-                               << " (a bidirectional window) is not supported; the kernel is "
-                                  "causal or unmasked only");
-        return std::nullopt;
-    }
-
-    // A bounded left edge is a window whatever the booleans say, and no shipped variant
-    // carries a non-zero sliding_window. Serving one on a causal binary would apply the
-    // wrong mask with no error.
-    if(left != UNBOUNDED)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
-                               << "left_bound " << left
-                               << " (a sliding window) is not supported; no shipped variant "
-                                  "carries a window");
-        return std::nullopt;
-    }
-
-    if(topLeftDeprecated)
-    {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-
-    // Both bounds are now either unset or zero: unset on the right is an unmasked graph,
-    // zero is a diagonal with no band, whose alignment picks the causal corner.
-    if(right == UNBOUNDED)
-    {
+    case PlanMaskType::NO_MASK:
         return MaskType::NO_MASK;
+    case PlanMaskType::TOP_LEFT_CAUSAL:
+        return MaskType::TOP_LEFT_CAUSAL;
+    case PlanMaskType::BOTTOM_RIGHT_CAUSAL:
+        return MaskType::BOTTOM_RIGHT_CAUSAL;
+    case PlanMaskType::SLIDING_WINDOW:
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                               << "left_bound " << attributes.left_bound().value_or(-1)
+                               << ", right_bound " << attributes.right_bound().value_or(-1)
+                               << " is a window; the kernel is causal or unmasked only and no "
+                                  "shipped variant carries a sliding_window");
+        return std::nullopt;
+    default:
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "mask type " << static_cast<int>(planMask)
+                                                << " is not supported");
+        return std::nullopt;
     }
-    return attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT
-               ? MaskType::BOTTOM_RIGHT_CAUSAL
-               : MaskType::TOP_LEFT_CAUSAL;
 }
 
 /// The kernel's dtype spelling for a graph dtype, or nullopt for one it cannot be built for.

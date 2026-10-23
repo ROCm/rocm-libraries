@@ -3,7 +3,7 @@
 """Solution-validation guard for PrefetchGL2 on Stream-K (gfx1250).
 
 AIHPBLAS-4142: the PrefetchGL2 validator in
-``Tensile/SolutionStructs/Solution.py`` was broadened so that PrefetchGL2 is
+``tensilelite/SolutionStructs/Solution.py`` was broadened so that PrefetchGL2 is
 compatible with DP-first Stream-K (``StreamK==3``) -- both the DP-only
 (``StreamKForceDPOnly=1``) and non-DP-only (``StreamKForceDPOnly=0``) variants --
 while every other non-zero Stream-K mode (1, 2, 4, 5) stays rejected. The old
@@ -36,8 +36,8 @@ import copy
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 
@@ -63,9 +63,9 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -79,8 +79,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -90,8 +90,8 @@ def assembler():
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -113,8 +113,8 @@ def _gp_gfx1250(gfx1250_iim):
 # sk_mxf4gemm_tdm_pap_prefetchgl2.yaml). Each test flips exactly one knob.
 # ---------------------------------------------------------------------------
 def _make_params(gfx1250_iim, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 

@@ -5,10 +5,10 @@ import logging
 
 import pytest
 
-from Tensile.ductile.core.mating import Mating
-from Tensile.ductile.core.mating import MatingExhaustedError
-from Tensile.ductile.core.population import Individual, Population
-from Tensile.ductile.utils import logger as logger_mod
+from tensilelite.ductile.core.mating import Mating
+from tensilelite.ductile.core.mating import MatingExhaustedError
+from tensilelite.ductile.core.population import Individual, Population
+from tensilelite.ductile.utils import logger as logger_mod
 
 pytestmark = pytest.mark.unit
 

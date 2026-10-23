@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.hash_objs``.
+``tensilelite.Common.Utilities.hash_objs``.
 
 These tests pin the current behavior that the returned hash is derived from the
 tuple of positional arguments (``hash(tuple(objs))``), distinguishing the
@@ -16,7 +16,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 
