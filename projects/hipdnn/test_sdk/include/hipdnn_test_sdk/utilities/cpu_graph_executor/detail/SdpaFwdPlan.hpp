@@ -42,7 +42,8 @@ struct SdpaFwdParams
         = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVAttributes
         = nullptr,
-        int64_t pagedMaxSeqKv = 0)
+        int64_t pagedMaxSeqKv = 0,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -79,6 +80,9 @@ struct SdpaFwdParams
                                ? std::make_optional(unpackTensorAttributes(*pageTableVAttributes))
                                : std::nullopt)
         , pagedMaxSeqKv(pagedMaxSeqKv)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -101,6 +105,7 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
     int64_t pagedMaxSeqKv;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 template <typename QDataType,
@@ -209,6 +214,13 @@ public:
                   ? static_cast<const hipdnn_data_sdk::utilities::TensorBase<VDataType>&>(*denseV)
                   : *shallowVTensor;
 
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowSink;
+        if(_params.sinkTensor.has_value())
+        {
+            shallowSink = createShallowTensor<float>(*_params.sinkTensor,
+                                                     variantPack.at(_params.sinkTensor->uid));
+        }
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
@@ -234,7 +246,8 @@ public:
                 shallowDescaleK.get(),
                 shallowDescaleV.get(),
                 shallowSeqLenQ.get(),
-                shallowSeqLenKv.get());
+                shallowSeqLenKv.get(),
+                shallowSink.get());
     }
 
 private:
@@ -328,8 +341,13 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Attention sink: FLOAT [1, H, 1, 1].
+        if(!isSupportedSdpaSink(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -456,7 +474,10 @@ public:
                           nodeAttributes->page_table_v_tensor_uid().has_value()
                               ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
                               : nullptr,
-                          sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap)));
+                          sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap),
+                          nodeAttributes->sink_token_tensor_uid().has_value()
+                              ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                              : nullptr));
     }
 };
 

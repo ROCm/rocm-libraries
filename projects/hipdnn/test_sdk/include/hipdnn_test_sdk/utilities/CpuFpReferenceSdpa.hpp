@@ -140,6 +140,9 @@ public:
     /// @param seqLenKv         Optional per-batch valid key length, INT32 [B, 1, 1, 1]. Keys past
     ///                         it are masked and never read. Bottom-right alignment uses the
     ///                         per-batch lengths.
+    /// @param sinkToken        Optional attention sink, FP32 [1, H, 1, 1]: one unscaled logit per
+    ///                         query head that joins the softmax max and denominator but has no
+    ///                         value row. LSE includes it.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -162,7 +165,8 @@ public:
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -252,6 +256,14 @@ public:
         const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
         const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
 
+        // Attention sink (cuDNN): one unscaled logit per query head, [1, H, 1, 1].
+        if(sinkToken != nullptr
+           && (static_cast<int64_t>(sinkToken->elementCount()) != numHeads
+               || sinkToken->dims().size() != 4 || sinkToken->dims()[1] != numHeads))
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
+        }
+
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
@@ -335,10 +347,21 @@ public:
                 }
             }
 
-            // Step 4: Numerically stable softmax over skv
-            const auto maxVal = *std::max_element(scores.begin(), scores.end());
+            // Step 4: Numerically stable softmax over skv. An attention sink (cuDNN) is one more
+            // logit in the max and the denominator with no value row, so it only rescales P; the
+            // LSE includes it. A row with no live key but a finite sink gets O = 0, LSE = sink.
+            auto maxVal = *std::max_element(scores.begin(), scores.end());
+            const auto sink = sinkToken != nullptr
+                                  ? static_cast<ComputeDataType>(
+                                        sinkToken->getHostValue(std::vector<int64_t>{0, h, 0, 0}))
+                                  : -std::numeric_limits<ComputeDataType>::infinity();
+            maxVal = std::max(maxVal, sink);
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
             auto sumExp = static_cast<ComputeDataType>(0.0);
+            if(sink != -std::numeric_limits<ComputeDataType>::infinity())
+            {
+                sumExp = std::exp(sink - maxVal);
+            }
 
             // If row is not all -inf, probs should be calculated normally
             if(maxVal != -std::numeric_limits<ComputeDataType>::infinity())

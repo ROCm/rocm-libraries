@@ -227,9 +227,15 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-022: Attention sinks
 
-- **Status:** Aligned (not implemented).
+- **Status:** Aligned (CPU forward reference).
 - **Agreed semantics:** one unscaled logit per head, counted in the softmax denominator only, with no V row,
-  and included in the LSE.
+  and included in the LSE. cuDNN shape `[1, H_q, 1, 1]`, fp32 (cudnn-frontend `test/python/sdpa/fp16_ref.py`):
+  `M = max(max_j s_j, sink)`, denominator `Σ exp(s_j − M) + exp(sink − M)`.
+- **Consequence:** a row with no live key but a finite sink has O = 0 and **LSE = sink**, not -inf. Padded query
+  rows stay O = 0, LSE = -inf.
+- **hipDNN today:** CPU forward reference implements it for a FLOAT `[1, H, 1, 1]` sink (other dtypes declined;
+  vLLM's model-dtype sinks are converted by the adapter). Pinned by `SinkWithUniformScores`,
+  `SinkOnFullyMaskedRow` and `SinkEqualsExtraZeroValueKey`.
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
 - **Open:** the dSink definition. AITER's test uses an LSE without the sink; do not follow it.
 
