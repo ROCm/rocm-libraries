@@ -1,0 +1,108 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  # Maf2_0 (28): N(0,1) drawn in double, rounded to float then BF16 (RNE), fixed-seed,
+  # per-tensor seeding; C is used (beta != 0)
+  DataInitTypeA: 28
+  DataInitTypeB: 28
+  DataInitTypeC: 28
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  # Tensor printing controls:
+  # PrintTensorA: 1          # Print TensorA after initialization
+  # PrintTensorB: 1          # Print TensorB after initialization
+  # PrintTensorC: 0x3          # Print TensorC.  0x1=after init; 0x2=after copy-back; 0x3=both
+  # PrintTensorD: 0x3          # Print TensorD.  0x1=after init; 0x2=after copy-back; 0x3=both
+  #PrintTensorRef: 1
+  # print logs
+  PrintLevel: 2                # how much info to print in generator. 0=none, 1=standard, 2=verbose
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      Activation: False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+          # Putting it all together:
+          #  - [32, 32, 1, 2,  1,  4, 1,  2, 2]
+          #     ^^^^^^^^^^^^   ^   ^^^^   ^^^^
+          #      MatrixInst  BlkM   WT    Wave
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  2, 1 ]
+
+        - DepthU: [32]
+        - TransposeLDS: [-1]
+        - LDSTrInst: [True]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - WavefrontSize: [32]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        # - AssertSummationElementMultiple: [32]
+        - Groups:
+          -
+            - SourceSwap: True
+            - StoreRemapVectorWidth: 0
+          -
+            - SourceSwap: False
+            - StoreRemapVectorWidth: -1
+            - VectorWidthA: 1
+            - VectorWidthB: 1
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 2, 127]
+          - Exact: [128, 128, 2, 128]
+          - Exact: [129, 129, 2, 129]
+          - Exact: [64, 64, 1, 4096]

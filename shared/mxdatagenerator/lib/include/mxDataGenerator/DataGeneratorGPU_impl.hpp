@@ -329,7 +329,9 @@ namespace DGen
         //     the scale-byte derivation is undefined for NaN inputs and
         //     `__amd_cvt_*_scale` doesn't expose a way to pick a specific
         //     NaN payload or the Inf encoding.
-        // Route those four through the host CPU `DataGenerator<DTYPE>` and
+        //   * Maf2_0 draws scale bytes and data encodings directly, with
+        //     no float value per element to quantise.
+        // Route those through the host CPU `DataGenerator<DTYPE>` and
         // then hipMemcpy the bytes to device.
         inline bool requiresHostFallback(DataInitMode const& initMode)
         {
@@ -337,7 +339,8 @@ namespace DGen
                 [](auto const& mode) -> bool {
                     using T = std::decay_t<decltype(mode)>;
                     return std::is_same_v<T, DenormMins> || std::is_same_v<T, DenormMaxs>
-                           || std::is_same_v<T, NaNs> || std::is_same_v<T, Infs>;
+                           || std::is_same_v<T, NaNs> || std::is_same_v<T, Infs>
+                           || std::is_same_v<T, Maf2_0>;
                 },
                 initMode);
         }

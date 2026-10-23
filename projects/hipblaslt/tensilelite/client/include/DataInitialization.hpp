@@ -36,9 +36,12 @@
 
 #include <mxDataGen.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <map>
+#include <omp.h>
 #include <random>
+#include <type_traits>
 
 #include "RunListener.hpp"
 
@@ -82,6 +85,13 @@ namespace TensileLite
         //   the maximum representable value of the target type. Only supported for
         //   low-precision packed types (FP4, FP6, BF6). Produces significantly fewer
         //   zeros than Random by covering the full representable range uniformly.
+        // Maf2_0 (28): MAF2.0 data init. N(0,1) for the non-scaled types (Double, Float,
+        //   Half, BFloat16, FP8); block-scaled (MX) sides use mxDataGenerator Maf2_0 (FP8/FP6:
+        //   2^Binomial scales, FP4: N(0.34375, 0.08) scales; data uniform over the encodings).
+        //   Deterministic with mxDataGenerator-style seeding; problem-dependent so each
+        //   problem's data does not depend on the other problems in the run.
+        // Maf2_0UnitScale (29): the MAF2.0 FP4 non-scaled row: MX FP4 sides get every block scale
+        //   1.0 and N(0,1) data; every other tensor is filled as Maf2_0.
         enum class InitMode
         {
             Zero = 0, // 0
@@ -112,6 +122,8 @@ namespace TensileLite
             TrigIndAbsSin, // 25
             TrigIndAbsCos, // 26
             UniformLowPrecision, // 27
+            Maf2_0, // 28
+            Maf2_0UnitScale, // 29
             Count
         };
 
@@ -127,7 +139,8 @@ namespace TensileLite
             return mode == InitMode::SerialIdx || mode == InitMode::SerialDim0
                    || mode == InitMode::SerialDim1 || mode == InitMode::Identity
                    || mode == InitMode::TrigSin || mode == InitMode::TrigCos
-                   || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos;
+                   || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos
+                   || mode == InitMode::Maf2_0 || mode == InitMode::Maf2_0UnitScale;
         }
 
         std::string ToString(InitMode mode);
@@ -441,66 +454,71 @@ namespace TensileLite
                                          std::shared_ptr<ProblemInputs> inputs,
                                          hipStream_t                    stream);
 
+            // tensorIndex (ContractionProblemGemm::TENSOR) only seeds Maf2_0.
             template <typename S>
-            void initArray(rocisa::DataType dataType, InitMode initMode, void* array, S descriptor)
+            void initArray(rocisa::DataType dataType,
+                           InitMode         initMode,
+                           void*            array,
+                           S                descriptor,
+                           size_t           tensorIndex = 0)
             {
                 switch(dataType)
                 {
                 case rocisa::DataType::Float:
-                    initArray<float>(initMode, static_cast<float*>(array), descriptor);
+                    initArray<float>(initMode, static_cast<float*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Double:
-                    initArray<double>(initMode, static_cast<double*>(array), descriptor);
+                    initArray<double>(initMode, static_cast<double*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Half:
-                    initArray<Half>(initMode, static_cast<Half*>(array), descriptor);
+                    initArray<Half>(initMode, static_cast<Half*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Int32:
-                    initArray<int32_t>(initMode, static_cast<int32_t*>(array), descriptor);
+                    initArray<int32_t>(initMode, static_cast<int32_t*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::BFloat16:
-                    initArray<BFloat16>(initMode, static_cast<BFloat16*>(array), descriptor);
+                    initArray<BFloat16>(initMode, static_cast<BFloat16*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Int8:
-                    initArray<int8_t>(initMode, static_cast<int8_t*>(array), descriptor);
+                    initArray<int8_t>(initMode, static_cast<int8_t*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Float8:
-                    initArray<Float8>(initMode, static_cast<Float8*>(array), descriptor);
+                    initArray<Float8>(initMode, static_cast<Float8*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::BFloat8:
-                    initArray<BFloat8>(initMode, static_cast<BFloat8*>(array), descriptor);
+                    initArray<BFloat8>(initMode, static_cast<BFloat8*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Float8_fnuz:
-                    initArray<Float8_fnuz>(initMode, static_cast<Float8_fnuz*>(array), descriptor);
+                    initArray<Float8_fnuz>(initMode, static_cast<Float8_fnuz*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::BFloat8_fnuz:
                     initArray<BFloat8_fnuz>(
-                        initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
+                        initMode, static_cast<BFloat8_fnuz*>(array), descriptor, tensorIndex);
                     break;
 #ifndef _WIN32
                 case rocisa::DataType::Float6:
-                    initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor);
+                    initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::BFloat6:
-                    initArray<BFloat6x32>(initMode, static_cast<BFloat6x32*>(array), descriptor);
+                    initArray<BFloat6x32>(initMode, static_cast<BFloat6x32*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Float4:
-                    initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
+                    initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor, tensorIndex);
                     break;
 #endif // !_WIN32
                 case rocisa::DataType::E8:
-                    initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
+                    initArray<E8>(initMode, static_cast<E8*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::E5M3:
-                    initArray<E5M3>(initMode, static_cast<E5M3*>(array), descriptor);
+                    initArray<E5M3>(initMode, static_cast<E5M3*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
-                    initArray<std::complex<float>>(initMode, static_cast<std::complex<float>*>(array), descriptor);
+                    initArray<std::complex<float>>(initMode, static_cast<std::complex<float>*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::ComplexDouble:
-                    initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor);
+                    initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor, tensorIndex);
                     break;
                 case rocisa::DataType::Int8x4:
                 case rocisa::DataType::Count:
@@ -557,6 +575,9 @@ namespace TensileLite
                     return convertDoubleTo<T>(value);
                 case InitMode::UniformLowPrecision:
                     return getValue<T, InitMode::UniformLowPrecision>();
+                case InitMode::Maf2_0:
+                case InitMode::Maf2_0UnitScale:
+                    throw std::runtime_error("Maf2_0 is not supported for scalar values.");
                 case InitMode::SerialIdx:
                 case InitMode::SerialDim0:
                 case InitMode::SerialDim1:
@@ -591,7 +612,7 @@ namespace TensileLite
 
             // Fills max buffer size
             template <typename T>
-            void initArray(InitMode mode, T* array, size_t elements)
+            void initArray(InitMode mode, T* array, size_t elements, size_t tensorIndex = 0)
             {
                 switch(mode)
                 {
@@ -640,6 +661,10 @@ namespace TensileLite
                 case InitMode::UniformLowPrecision:
                     initArray<T, InitMode::UniformLowPrecision>(array, elements);
                     break;
+                case InitMode::Maf2_0:
+                case InitMode::Maf2_0UnitScale:
+                    initArrayMaf2_0<T>(array, elements, tensorIndex);
+                    break;
                 case InitMode::SerialIdx:
                     initArrayConvert<T>(array, elements);
                     break;
@@ -670,7 +695,10 @@ namespace TensileLite
 
             // For problem dependent data initialization
             template <typename T>
-            void initArray(InitMode mode, T* array, TensorDescriptor const& tensor)
+            void initArray(InitMode                mode,
+                           T*                      array,
+                           TensorDescriptor const& tensor,
+                           size_t                  tensorIndex = 0)
             {
                 switch(mode)
                 {
@@ -755,6 +783,10 @@ namespace TensileLite
                 case InitMode::UniformLowPrecision:
                     initArray<T, InitMode::UniformLowPrecision>(array, tensor);
                     break;
+                case InitMode::Maf2_0:
+                case InitMode::Maf2_0UnitScale:
+                    initArrayMaf2_0<T>(array, tensor.totalAllocatedElements(), tensorIndex);
+                    break;
                 case InitMode::Free:
                 case InitMode::Count:
                     throw std::runtime_error("Invalid InitMode.");
@@ -769,6 +801,43 @@ namespace TensileLite
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
+                }
+            }
+
+            // Maf2_0 seeding mirrors mxDataGenerator (DataGenerator.hpp) so data is reproducible:
+            // one std::mt19937 per OpenMP thread seeded seed + tid, using
+            // min(32, omp_get_max_threads()) threads that each fill a contiguous chunk. Each tensor
+            // gets its own seed range (seed + 32 * tensorIndex), matching hipBLASLt's maf2_0.
+            template <typename T>
+            void initArrayMaf2_0(T* array, size_t elements, size_t tensorIndex)
+            {
+                // Draws in double; Float, Half and the FP8 types round each draw to nearest even
+                // (Half and FP8 directly from double, FP8 saturating finite values to the largest
+                // finite one). BFloat16's constructor casts to float, then rounds to BF16, like the
+                // other double-based modes.
+                if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                             || std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>
+                             || std::is_same_v<T, Float8> || std::is_same_v<T, BFloat8>
+                             || std::is_same_v<T, Float8_fnuz> || std::is_same_v<T, BFloat8_fnuz>)
+                {
+                    constexpr uint32_t baseSeed = 1713573849u; // generateMXInput's fixed seed
+                    constexpr int      maxThreads = 32;
+                    const uint32_t     seed
+                        = baseSeed + maxThreads * static_cast<uint32_t>(tensorIndex);
+                    const int numThreads = std::min(maxThreads, omp_get_max_threads());
+#pragma omp parallel num_threads(numThreads)
+                    {
+                        std::mt19937 gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+                        std::normal_distribution<double> dist(0.0, 1.0);
+#pragma omp for schedule(static)
+                        for(size_t i = 0; i < elements; i++)
+                            array[i] = static_cast<T>(dist(gen));
+                    }
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "Maf2_0 init is not supported for this data type yet.");
                 }
             }
 

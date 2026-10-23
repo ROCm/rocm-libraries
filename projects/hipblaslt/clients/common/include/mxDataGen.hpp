@@ -31,6 +31,8 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 
 #include <vector>
 
+// seedIndex (abc + 3 * batch, abc = 0 for A and 1 for B) only salts the maf2_0 seed; every
+// other initMethod uses one fixed seed for all matrices and batches.
 // integer_exact supports fp8 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
@@ -48,7 +50,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod  = "Bounded",
                                    float                  min_val     = -1.0f,
                                    float                  max_val     = 1.0f,
-                                   std::string_view const scaleInitMethod = "");
+                                   std::string_view const scaleInitMethod = "",
+                                   uint32_t               seedIndex       = 0);
 
 // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
 // on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this
