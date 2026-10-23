@@ -146,6 +146,10 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
             dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
         }
         COMPUTE_TYPE s = dot * static_cast<COMPUTE_TYPE>(args.scale);
+        if(args.softcap > 0.0f)
+        {
+            s = args.softcap * tanhf(s / args.softcap);
+        }
 
         // (a) Additive attention mask (right-aligned, broadcast on size-1 dims).
         if(mask != nullptr)

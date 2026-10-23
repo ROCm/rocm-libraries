@@ -714,3 +714,142 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<BwdDropoutCase>& info) {
         return std::string(info.param.name);
     });
+
+// Logit softcap (reference-only extension, SEM-020): GPU forward and backward vs CPU, with GQA,
+// bias + dBias, bottom-right causal and padding.
+TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const std::vector<int64_t> qDims = {2, 4, 6, 8};
+    const std::vector<int64_t> kDims = {2, 2, 9, 8};
+    constexpr float SCALE = 1.2f;
+    constexpr float SOFTCAP = 1.5f;
+    Tensor<float> q(qDims);
+    Tensor<float> k(kDims);
+    Tensor<float> v(kDims);
+    Tensor<float> oCpu(qDims);
+    Tensor<float> oGpu(qDims);
+    Tensor<float> dO(qDims);
+    Tensor<float> lse({2, 4, 6, 1});
+    Tensor<float> bias({6, 9});
+    Tensor<int32_t> seqLenQ({2, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({2, 1, 1, 1});
+    q.fillWithRandomValues(-1.5f, 1.5f, 221);
+    k.fillWithRandomValues(-1.5f, 1.5f, 222);
+    v.fillWithRandomValues(-1.0f, 1.0f, 223);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 224);
+    bias.fillWithRandomValues(-1.0f, 1.0f, 225);
+    seqLenQ.setHostValue(6, 0, 0, 0, 0);
+    seqLenQ.setHostValue(4, 1, 0, 0, 0);
+    seqLenKv.setHostValue(9, 0, 0, 0, 0);
+    seqLenKv.setHostValue(7, 1, 0, 0, 0);
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    for(auto* t : {&q, &k, &v, &dO, &bias})
+    {
+        t->memory().hostData();
+    }
+    seqLenQ.memory().hostData();
+    seqLenKv.memory().hostData();
+
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oCpu,
+                                SCALE,
+                                static_cast<const TensorBase<float>*>(&bias),
+                                -1,
+                                0,
+                                false,
+                                &lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv,
+                                nullptr,
+                                nullptr,
+                                std::nullopt,
+                                SOFTCAP);
+    GpuFpReferenceSdpa::fprop(q,
+                              k,
+                              v,
+                              oGpu,
+                              SCALE,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              0,
+                              false,
+                              nullptr,
+                              SdpaSoftmaxProbabilityMode::FLOAT,
+                              &seqLenQ,
+                              &seqLenKv,
+                              nullptr,
+                              nullptr,
+                              0,
+                              nullptr,
+                              nullptr,
+                              std::nullopt,
+                              SOFTCAP);
+    assertAllClose(oCpu, oGpu, TOL_FP32);
+
+    Tensor<float> dQCpu(qDims);
+    Tensor<float> dKCpu(kDims);
+    Tensor<float> dVCpu(kDims);
+    Tensor<float> dBiasCpu({6, 9});
+    Tensor<float> dQGpu(qDims);
+    Tensor<float> dKGpu(kDims);
+    Tensor<float> dVGpu(kDims);
+    Tensor<float> dBiasGpu({6, 9});
+    for(auto* t : {&dQGpu, &dKGpu, &dVGpu, &dBiasGpu})
+    {
+        t->fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    }
+    oCpu.memory().hostData();
+    lse.memory().hostData();
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 oCpu,
+                                 dO,
+                                 dQCpu,
+                                 dKCpu,
+                                 dVCpu,
+                                 SCALE,
+                                 &lse,
+                                 static_cast<const TensorBase<float>*>(&bias),
+                                 -1,
+                                 0,
+                                 false,
+                                 &dBiasCpu,
+                                 &seqLenQ,
+                                 &seqLenKv,
+                                 nullptr,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 SOFTCAP);
+    GpuFpReferenceSdpa::bprop(q,
+                              k,
+                              v,
+                              oCpu,
+                              dO,
+                              dQGpu,
+                              dKGpu,
+                              dVGpu,
+                              SCALE,
+                              &lse,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              0,
+                              false,
+                              &dBiasGpu,
+                              &seqLenQ,
+                              &seqLenKv,
+                              nullptr,
+                              std::nullopt,
+                              std::nullopt,
+                              SOFTCAP);
+    assertAllClose(dQCpu, dQGpu, TOL_FP32);
+    assertAllClose(dKCpu, dKGpu, TOL_FP32);
+    assertAllClose(dVCpu, dVGpu, TOL_FP32);
+    assertAllClose(dBiasCpu, dBiasGpu, TOL_FP32);
+}

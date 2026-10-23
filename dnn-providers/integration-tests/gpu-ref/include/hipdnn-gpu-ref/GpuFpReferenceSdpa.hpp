@@ -111,8 +111,10 @@ public:
         int64_t pagedMaxSeqKv = 0,
         hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
-        std::optional<float> dropoutScale = std::nullopt)
+        std::optional<float> dropoutScale = std::nullopt,
+        std::optional<float> softcap = std::nullopt)
     {
+        validateSoftcap(softcap);
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
         // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
         // padding. Table entries must name existing blocks; the kernel does not check them.
@@ -261,7 +263,8 @@ public:
                       sinkStride,
                       dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv),
                       dropoutMaskStrides(dropoutMask),
-                      dropoutScale.value_or(1.0F));
+                      dropoutScale.value_or(1.0F),
+                      softcap.value_or(0.0F));
 
         o.memory().markDeviceModified();
         if(lse != nullptr)
@@ -311,8 +314,10 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
         std::optional<float> dropoutScale = std::nullopt,
-        std::optional<float> dropoutScaleInv = std::nullopt)
+        std::optional<float> dropoutScaleInv = std::nullopt,
+        std::optional<float> softcap = std::nullopt)
     {
+        validateSoftcap(softcap);
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -423,6 +428,7 @@ public:
         launch.dropoutMaskStrides = dropoutMaskStrides(dropoutMask);
         launch.dropoutScale = dropoutScale.value_or(1.0F);
         launch.dropoutScaleInv = dropoutScaleInv.value_or(1.0F);
+        launch.softcap = softcap.value_or(0.0F);
         launchSdpaBwd(launch, defines);
 
         dQ.memory().markDeviceModified();
@@ -470,6 +476,7 @@ private:
         std::vector<int64_t> dropoutMaskStrides;
         float dropoutScale = 1.0F;
         float dropoutScaleInv = 1.0F;
+        float softcap = 0.0F; // 0 = no softcap
         int64_t leftBound = -1;
         int64_t rightBound = -1;
         bool topLeftAlignment = true;
@@ -589,7 +596,17 @@ private:
                               int64_t sinkStride = 0,
                               const float* dropoutMaskPtr = nullptr,
                               const std::vector<int64_t>& dropoutMaskStrides = {},
-                              float dropoutScale = 1.0F);
+                              float dropoutScale = 1.0F,
+                              float softcap = 0.0F);
+
+    // Logit softcap (reference-only extension, SEM-020): finite and > 0 when given.
+    static void validateSoftcap(std::optional<float> softcap)
+    {
+        if(softcap.has_value() && !(softcap.value() > 0.0F && std::isfinite(softcap.value())))
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: softcap must be finite and > 0");
+        }
+    }
 
     // Explicit dropout mask (cuDNN custom dropout): FLOAT [B|1, H|1, Sq, Skv] on the device.
     static const float* dropoutMaskPointer(hipdnn_data_sdk::utilities::TensorBase<float>* mask,
