@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
@@ -101,6 +102,66 @@ namespace
                           stream.value),
                       hipSuccess);
             EXPECT_FALSE(verify_freivalds_device(matrix, plans, stream.value).passed);
+        }
+    }
+
+    TEST(FreivaldsDevice_pre_checkin, Encoded16BitValues_smoke)
+    {
+        const Stream     stream;
+        constexpr size_t count = size_t{1} << 16;
+        for(auto apiType : {HIP_R_16F, HIP_R_16BF})
+        {
+            SCOPED_TRACE(int(apiType));
+            hn::Tensor stored(hipblaslt::hostnumerics::scalarType(apiType), hn::Shape{count, 1});
+            const auto bytes = stored.rawEncodedBackingStorage();
+            for(size_t i = 0; i < count; ++i)
+            {
+                const auto bits = uint16_t(i);
+                std::memcpy(bytes.data() + i * sizeof(bits), &bits, sizeof(bits));
+            }
+            HipDeviceBuffer device(apiType, count);
+            ASSERT_EQ(
+                hipMemcpyAsync(
+                    device.buf(), bytes.data(), bytes.size(), hipMemcpyHostToDevice, stream.value),
+                hipSuccess);
+            hn::FreivaldsRequest request;
+            request.shape              = stored.shape();
+            request.outputType         = stored.type();
+            request.fastMagnitudeLimit = 2048;
+            request.maximumExceptions  = count;
+            request.rightProbe = hn::Tensor(uint64_t{1}).reshapeSharingStorage(hn::Shape{1});
+            request.leftProbe  = hn::Tensor(hn::ScalarType::UInt64, hn::Shape{count});
+            for(size_t i = 0; i < count; ++i)
+                request.leftProbe.storeFrom({i}, uint64_t{1});
+            const auto result = hipblaslt::client::observeFreivalds(
+                request, device.buf(), stored.layout(), stream.value);
+            const auto* observed = std::get_if<hn::FreivaldsObservation>(&result.output);
+            ASSERT_NE(observed, nullptr);
+            ASSERT_TRUE(observed->complete);
+            EXPECT_EQ(observed->checkedElements, count);
+            std::vector<bool> exceptional(count);
+            for(const auto& element : observed->exceptions)
+            {
+                ASSERT_LT(element.row, count);
+                EXPECT_EQ(element.column, 0u);
+                EXPECT_FALSE(exceptional[element.row]);
+                exceptional[element.row] = true;
+                const double expected    = stored.loadAs<double>({element.row, 0});
+                if(std::isnan(expected))
+                    EXPECT_TRUE(std::isnan(element.storedValue));
+                else
+                    EXPECT_EQ(element.storedValue, expected) << "encoded bits " << element.row;
+            }
+            for(size_t i = 0; i < count; ++i)
+            {
+                const double value = stored.loadAs<double>({i, 0});
+                const bool   exact
+                    = std::fabs(value) < request.fastMagnitudeLimit && std::trunc(value) == value;
+                EXPECT_EQ(exceptional[i], !exact) << "encoded bits " << i;
+                EXPECT_EQ(observed->rowSums.loadAs<uint64_t>({i}),
+                          exact ? hn::freivaldsResidue(int64_t(value)) : 0u)
+                    << "encoded bits " << i;
+            }
         }
     }
 
