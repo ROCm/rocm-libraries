@@ -14,6 +14,7 @@ illegal ones are refused.
 from __future__ import annotations
 
 from dataclasses import replace
+from unittest import mock
 
 import pytest
 
@@ -24,6 +25,7 @@ from dispatch.gdn import (
     dispatch_gdn_decode_all,
     request_errors,
 )
+from dispatch.gdn import gfx950, rules
 from dispatch.gdn.gfx950 import ARCH
 from rocke.dispatch.core import PinRefused
 from rocke.dispatch.tuning import sweep_level
@@ -333,6 +335,40 @@ def test_a_stored_tuning_id_does_not_travel_where_scope_drops_a_knob(
     moved = dispatch_gdn_decode(replace(stored, tuning_id="auto"))
     assert dropped not in dict(moved.spec.knobs)
     assert set(dict(moved.spec.knobs)) < set(knobs)
+
+
+def test_a_changed_default_refuses_the_stored_pin_instead_of_drifting():
+    """A pin stores only its knob delta; the defaults it is relative to are
+    fingerprinted into config_key. When a default moves, the stored
+    (tuning_id, knobs) pin is refused rather than rebuilt into a kernel that
+    was never measured. Candidates cache resolution per request, so each side
+    builds a fresh candidate, as a new release would."""
+
+    def fresh_candidate():
+        return gfx950._make_candidate(tile=(2, 16, 8), priority=1, gate_kind="gdn")
+
+    req = _req(gate_kind="gdn", heads=16)
+    stored = dispatch_gdn_decode(
+        replace(req, spec_id="nw2_wtk16_bpv8", tuning_knobs={"dpp_reduce": True})
+    ).spec
+    pin = replace(
+        req,
+        spec_id="nw2_wtk16_bpv8",
+        tuning_id=stored.tuning_id,
+        tuning_knobs={"dpp_reduce": True},
+    )
+    assert fresh_candidate().select_spec(pin) == stored
+
+    with mock.patch.dict(rules._SPEC_DEFAULTS, {"state_load_hint": "streaming"}):
+        upgraded = fresh_candidate()
+        ok, why = upgraded.admits(pin)
+        assert not ok
+        assert stored.tuning_id in why
+        assert "the defaults they are relative to" in why
+        assert "re-sweep/revalidate" in why
+        assert "no fallback" in why
+        moved = upgraded.select_spec(replace(pin, tuning_id="auto"))
+        assert moved.config_key != stored.config_key
 
 
 def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
