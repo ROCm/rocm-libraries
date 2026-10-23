@@ -26,7 +26,10 @@ NB_MODULE(origami, m) {
       .value("gfx950", hardware_t::architecture_t::gfx950)
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1170", hardware_t::architecture_t::gfx1170)
+      .value("gfx1171", hardware_t::architecture_t::gfx1171)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .value("gfx1152", hardware_t::architecture_t::gfx1152)
@@ -166,6 +169,8 @@ NB_MODULE(origami, m) {
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
+      .def_rw("non_temporal_a_available", &origami::config_t::non_temporal_a_available)
+      .def_rw("non_temporal_b_available", &origami::config_t::non_temporal_b_available)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
@@ -176,6 +181,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("cluster_dim", &origami::config_t::cluster_dim)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -353,9 +359,9 @@ NB_MODULE(origami, m) {
   m.def("calculate_output_utilization",
         &origami::gemm::calculate_output_utilization,
         "Calculate the output utilization ratio");
-  m.def("round_elements_to_128B",
-        &origami::gemm::round_elements_to_128B,
-        "Round elements to 128B alignment");
+  m.def("round_elements_to_NB",
+        &origami::gemm::round_elements_to_NB,
+        "Round elements up to a multiple of transaction_bytes");
   m.def("predict_workgroup_mapping",
         &origami::gemm::predict_workgroup_mapping,
         "Fast WGM prediction based on last-XCD L2 cost minimization");
@@ -412,6 +418,9 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions

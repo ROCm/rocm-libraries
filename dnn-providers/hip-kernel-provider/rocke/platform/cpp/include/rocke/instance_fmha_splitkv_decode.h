@@ -7,7 +7,7 @@
  * Decoding from a long KV cache with a small batch is bandwidth-limited;
  * splitting the K dimension across many CTAs (each handling one K-segment) and
  * then reducing the per-segment (m, l, acc) triples lifts occupancy to fully
- * saturate the SMs. Two-launch pipeline:
+ * saturate the CUs. Two-launch pipeline:
  *
  *   1. build_fmha_fwd_splitkv_decode_segment -- one CTA per
  *      (seq_idx, head_idx, segment_idx). Each CTA walks its slice of the K cache

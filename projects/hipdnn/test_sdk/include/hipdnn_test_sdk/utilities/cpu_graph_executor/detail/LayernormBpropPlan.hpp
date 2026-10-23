@@ -68,7 +68,7 @@ struct LayernormBpropParams
 template <typename DyDataType,
           typename ScaleBiasDataType,
           typename MeanInvVarianceDataType,
-          typename OutputDataType,
+          typename DxDataType,
           typename ComputeDataType>
 class LayernormBpropPlan : public IGraphNodePlanExecutor
 {
@@ -89,7 +89,7 @@ public:
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
         auto shallowXTensor
-            = createShallowTensor<DyDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
+            = createShallowTensor<DxDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
@@ -109,7 +109,7 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        auto shallowDxTensor = createShallowTensor<OutputDataType>(
+        auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
         auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
@@ -128,7 +128,7 @@ public:
 
         utilities::CpuFpReferenceLayernorm::bprop<DyDataType,
                                                   ScaleBiasDataType,
-                                                  OutputDataType,
+                                                  DxDataType,
                                                   MeanInvVarianceDataType,
                                                   ComputeDataType>(*shallowDyTensor,
                                                                    *shallowXTensor,
@@ -149,7 +149,7 @@ private:
 template <hipdnn_flatbuffers_sdk::data_objects::DataType DyDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType MeanInvVarianceDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType DxDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class LayernormBpropPlanBuilder : public IGraphNodePlanBuilder
 {
@@ -157,7 +157,7 @@ public:
     using DyDataType = utilities::DataTypeToNative<DyDataTypeEnum>;
     using ScaleBiasDataType = utilities::DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanInvVarianceDataType = utilities::DataTypeToNative<MeanInvVarianceDataTypeEnum>;
-    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using DxDataType = utilities::DataTypeToNative<DxDataTypeEnum>;
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
@@ -186,9 +186,9 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), DyDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), DxDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), DxDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
 
@@ -262,7 +262,7 @@ public:
         return std::make_unique<LayernormBpropPlan<DyDataType,
                                                    ScaleBiasDataType,
                                                    MeanInvVarianceDataType,
-                                                   OutputDataType,
+                                                   DxDataType,
                                                    ComputeDataType>>(std::move(params));
     }
 };

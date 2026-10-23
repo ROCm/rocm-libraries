@@ -82,8 +82,6 @@ namespace std
         }
     };
 
-#ifdef TENSILE_USE_HALF
-
     template <>
     struct hash<Tensile::Half>
     {
@@ -92,18 +90,6 @@ namespace std
             return hash<float>()(static_cast<float>(obj));
         }
     };
-
-#else
-    template <>
-    struct hash<Tensile::Half>
-    {
-        inline size_t operator()(Tensile::Half const& obj) const
-        {
-            return hash<decltype(obj.value)>()(obj.value);
-        }
-    };
-
-#endif // TENSILE_USE_HALF
 
 } // namespace std
 

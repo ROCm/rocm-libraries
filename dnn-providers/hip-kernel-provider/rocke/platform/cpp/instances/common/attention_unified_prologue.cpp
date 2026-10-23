@@ -91,7 +91,7 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
         sp->use_alibi = p->use_alibi;
         sp->use_qq_bias = p->use_qq_bias;
         sp->use_fp8 = p->use_fp8;
-        sp->num_sms = p->num_sms;
+        sp->num_cus = p->num_cus;
         sp->num_kv_blocks = p->num_kv_blocks;
     }
 
@@ -415,9 +415,9 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
      * q_desc      = _q_descriptor(p)              (2D/reduce)
      * kv_desc     = _paged_kv_descriptor(p)       (2D/3D)
      * (ml_desc, out_desc) = _segm_descriptors(p, num_segments) (3D/reduce)
-     * The 2D body builds q_desc + kv_desc here; the 3D/reduce bodies build their
-     * segm descriptors in the epilogue/loop phases. We populate every descriptor
-     * the kind needs so phase functions only read ctx fields. */
+     * The 2D body builds q_desc + kv_desc here and the 3D body its segm
+     * descriptors, so phase functions only read ctx fields. Reduce never runs
+     * this prologue; its builder fills ml_desc, out_desc and q_desc itself. */
     ctx->q_desc = rocke_unified_attn_q_descriptor(b, &ctx->sel_p);
     ctx->kv_desc = rocke_unified_attn_paged_kv_descriptor(&ctx->sel_p);
     if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)

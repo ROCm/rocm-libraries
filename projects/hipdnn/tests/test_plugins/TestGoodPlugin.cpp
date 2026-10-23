@@ -46,5 +46,6 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<GoodPlugin>());
 }
 
-// Register all API functions
+// The optional engine-name entry point is omitted and `getEngineName()` is left at
+// its `nullptr` default, making this the fixture for host-side name fallback.
 REGISTER_TEST_PLUGIN_API()

@@ -1,9 +1,0 @@
-{
-	"targets": [
-		"projects/hipblaslt/tensilelite/Tensile"
-	],
-	"exclude": [
-		{"dir": "projects/hipblaslt/tensilelite/Tensile/Tests", "pattern": "*.yaml"},
-		{"dir": "projects/hipblaslt/docs", "pattern": "*"}
-	]
-}

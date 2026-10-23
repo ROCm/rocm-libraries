@@ -223,7 +223,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_indextype value_)
 #define CASE(C) \
     case C:     \
         return #C
-    switch(value_)
+    switch(static_cast<int>(value_))
     {
         CASE(deprecated_rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
@@ -471,7 +471,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_operation value_)
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_indextype value_)
 {
-    switch(value_)
+    switch(static_cast<int>(value_))
     {
     case deprecated_rocsparse_indextype_u16:
     case rocsparse_indextype_i32:
@@ -588,7 +588,6 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /********************************************************************************
  * \brief rocsparse_handle_create creates the rocsparse library context on a
  * user-defined stream. All device memory allocation and stream-ordered setup
@@ -636,7 +635,6 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /********************************************************************************
  * \brief destroy handle
@@ -1429,6 +1427,19 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_bsrmv_info(dest_bsrmv_info, src_bsrmv_info));
     }
 
+    rocsparse_coomv_info src_coomv_info  = src->get_coomv_info();
+    rocsparse_coomv_info dest_coomv_info = dest->get_coomv_info();
+    if(src_coomv_info != nullptr)
+    {
+        if(dest_coomv_info == nullptr)
+        {
+            dest_coomv_info = new _rocsparse_coomv_info();
+            dest->set_coomv_info(dest_coomv_info);
+        }
+
+        dest_coomv_info->max_nnz_per_row = src_coomv_info->max_nnz_per_row;
+    }
+
     if(src->csrgemm_info != nullptr)
     {
         if(dest->csrgemm_info == nullptr)
@@ -1851,7 +1862,6 @@ catch(...)
 // LCOV_EXCL_STOP
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1872,7 +1882,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -1920,7 +1929,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 }
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1943,7 +1951,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -1990,13 +1997,66 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 {
 }
 
-_rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
-                                               int64_t            nitems_,
-                                               rocsparse_datatype datatype_,
-                                               const void*        const_values_,
-                                               void*              values_,
-                                               int64_t            inc_,
-                                               int64_t            batch_stride_)
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+_rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_const_spmat_descr that,
+                                               rocsparse_format            format,
+                                               rocsparse_mat_descr         descr,
+                                               rocsparse_mat_info          info)
+    : _rocsparse_spmat_descr(format,
+                             that->batch_count,
+                             that->rows,
+                             that->cols,
+                             that->nnz,
+                             that->data_type,
+                             that->const_val_data,
+                             that->val_data,
+                             that->batch_stride,
+                             that->col_type,
+                             that->const_col_data,
+                             that->col_data,
+                             that->offsets_batch_stride,
+                             that->row_type,
+                             that->const_row_data,
+                             that->row_data,
+                             that->columns_values_batch_stride,
+                             that->idx_base,
+                             descr,
+                             info)
+{
+    rocsparse_host_assert(
+        (format == rocsparse_format_csr) || (format == rocsparse_format_csc),
+        "this constructor is targetting rocsparse_format_csr or rocsparse_format_csc");
+    rocsparse_host_assert(
+        ((that->format == rocsparse_format_csr) && (format == rocsparse_format_csc))
+            || ((that->format == rocsparse_format_csc) && (format == rocsparse_format_csr)),
+        "it isn't a switch of format between rocsparse_format_csr and rocsparse_format_csc");
+    descr[0] = that->descr[0];
+    switch(descr->fill_mode)
+    {
+    case rocsparse_fill_mode_lower:
+    {
+        descr->fill_mode = rocsparse_fill_mode_upper;
+        break;
+    }
+
+    case rocsparse_fill_mode_upper:
+    {
+        descr->fill_mode = rocsparse_fill_mode_lower;
+        break;
+    }
+    }
+}
+
+#endif
+
+_rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t                batch_count_,
+                                               int64_t                nitems_,
+                                               rocsparse_datatype     datatype_,
+                                               const void*            const_values_,
+                                               void*                  values_,
+                                               int64_t                inc_,
+                                               int64_t                batch_stride_,
+                                               rocsparse_pointer_mode pointer_mode_)
     : init(true)
     , size(nitems_)
     , values(values_)
@@ -2005,6 +2065,7 @@ _rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
     , batch_stride(batch_stride_)
     , batch_count(batch_count_)
     , inc(inc_)
+    , pointer_mode(pointer_mode_)
 {
 }
 
@@ -4039,9 +4100,6 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
-
     // The row pointer is being reassigned, so the cached line-length profile
     // (used by the default SpMM/SpMV algorithm selection) is now stale.
     descr->line_profile.known = false;
@@ -4082,9 +4140,6 @@ try
         2, csc_row_ind, descr->nnz > 0 && csc_row_ind == nullptr, rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     // The column pointer is being reassigned, so the cached line-length profile
     // (used by the default SpMM/SpMV algorithm selection) is now stale.
@@ -4154,9 +4209,6 @@ try
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
-
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
     descr->val_data = bsr_val;
@@ -4195,9 +4247,6 @@ try
                        bell_val,
                        brows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;
@@ -4620,9 +4669,40 @@ try
                        (rows_values_batch_stride < 0),
                        rocsparse_status_invalid_value);
 
-    descr->batch_count                 = batch_count;
+    descr->batch_count = batch_count;
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    descr->batch_stride = rows_values_batch_stride;
+#endif
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_ell_set_strided_batch sets the ELL sparse matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
+                                                 rocsparse_int         batch_count,
+                                                 int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -5054,7 +5134,6 @@ try
         break;
     }
     }
-
     ROCSPARSE_CHECKARG_ARRAY(4, int64_t(rows) * cols, values);
 
     *descr = new _rocsparse_dnmat_descr;
@@ -5372,21 +5451,9 @@ try
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
-
-    if(descr->order == rocsparse_order_column)
-    {
-        ROCSPARSE_CHECKARG(2,
-                           batch_stride,
-                           (batch_count > 1 && batch_stride < descr->ld * descr->cols),
-                           rocsparse_status_invalid_value);
-    }
-    else if(descr->order == rocsparse_order_row)
-    {
-        ROCSPARSE_CHECKARG(2,
-                           batch_stride,
-                           (batch_count > 1 && batch_stride < descr->ld * descr->rows),
-                           rocsparse_status_invalid_value);
-    }
+    //
+    // No constraint on the batch_stride value.
+    //
 
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;

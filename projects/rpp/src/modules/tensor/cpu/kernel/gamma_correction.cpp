@@ -24,138 +24,240 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
+// Helper function for u8->u8 gamma_correction processing
+inline void gamma_correction_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
+                                             Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
+                                             Rpp32f gamma, RpptROI roi,
+                                             RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp8u gammaLUT[256];
+    for (int i = 0; i < 256; i++) {
+        gammaLUT[i] = (Rpp8u)RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0);
+    }
+
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = gammaLUT[srcPtrTemp[0]];
+                *dstPtrTempG = gammaLUT[srcPtrTemp[1]];
+                *dstPtrTempB = gammaLUT[srcPtrTemp[2]];
+
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = gammaLUT[*srcPtrTempR];
+                dstPtrTemp[1] = gammaLUT[*srcPtrTempG];
+                dstPtrTemp[2] = gammaLUT[*srcPtrTempB];
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp8u *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = gammaLUT[*srcPtrTemp];
+
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
+}
+
 RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                              RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
                                              RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                              RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f gamma = gammaTensor[batchCount];
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp8u gammaLUT[256];
-        for (int i = 0; i < 256; i++) {
-            gammaLUT[i] = (Rpp8u)RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0);
-        }
+        Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp8u *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        gamma_correction_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                         gammaTensor[batchCount], roi, layoutParams, intraThreads);
+    }
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    return RPP_SUCCESS;
+}
 
-        Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+// Helper function for f32->f32 gamma_correction processing
+// Computes pow(value, gamma) directly on the full-precision pixel instead of quantizing through
+// a truncated 8-bit LUT (which loses precision F32 can otherwise represent exactly).
+inline void gamma_correction_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                               Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                               Rpp32f gamma, RpptROI roi,
+                                               RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = gammaLUT[srcPtrTemp[0]];
-                    *dstPtrTempG = gammaLUT[srcPtrTemp[1]];
-                    *dstPtrTempB = gammaLUT[srcPtrTemp[2]];
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[0], gamma));
+                *dstPtrTempG = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[1], gamma));
+                *dstPtrTempB = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[2], gamma));
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = gammaLUT[*srcPtrTempR];
-                    dstPtrTemp[1] = gammaLUT[*srcPtrTempG];
-                    dstPtrTemp[2] = gammaLUT[*srcPtrTempB];
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp8u *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp8u *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = gammaLUT[*srcPtrTemp];
-
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempR, gamma));
+                dstPtrTemp[1] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempG, gamma));
+                dstPtrTemp[2] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempB, gamma));
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp32f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp32f *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTemp, gamma));
+
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
@@ -164,128 +266,133 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
                                                RpptRoiType roiType, RppLayoutParams layoutParams,
                                                rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f gamma = gammaTensor[batchCount];
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp32f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        gamma_correction_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                           gammaTensor[batchCount], roi, layoutParams,
+                                           intraThreads);
+    }
 
-        Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    return RPP_SUCCESS;
+}
 
-        // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+// Helper function for f16->f16 gamma_correction processing
+// Computes pow(value, gamma) directly on the full-precision pixel instead of quantizing through
+// a truncated 8-bit LUT (which loses precision F16 can otherwise represent exactly).
+inline void gamma_correction_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                               Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                               Rpp32f gamma, RpptROI roi,
+                                               RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[0], gamma));
-                    *dstPtrTempG = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[1], gamma));
-                    *dstPtrTempB = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[2], gamma));
+    // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[0], gamma));
+                *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[1], gamma));
+                *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[2], gamma));
 
-        // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempR, gamma));
-                    dstPtrTemp[1] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempG, gamma));
-                    dstPtrTemp[2] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempB, gamma));
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp32f *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp32f *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTemp, gamma));
-
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempR), gamma));
+                dstPtrTemp[1] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempG), gamma));
+                dstPtrTemp[2] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempB), gamma));
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp16f *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp16f *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTemp), gamma));
+
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
@@ -294,135 +401,133 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDe
                                                RpptRoiType roiType, RppLayoutParams layoutParams,
                                                rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f gamma = gammaTensor[batchCount];
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp16f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        gamma_correction_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                           gammaTensor[batchCount], roi, layoutParams,
+                                           intraThreads);
+    }
 
-        Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    return RPP_SUCCESS;
+}
 
-        // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+// Helper function for i8->i8 gamma_correction processing
+inline void gamma_correction_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
+                                             Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
+                                             Rpp32f gamma, RpptROI roi,
+                                             RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp8s gammaLUT[256];
+    for (int i = 0; i < 256; i++) {
+        gammaLUT[i] =
+            (Rpp8s)(RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0) - 128);
+    }
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[0], gamma));
-                    *dstPtrTempG =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[1], gamma));
-                    *dstPtrTempB =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[2], gamma));
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
+    // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-        // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTempR = gammaLUT[(Rpp32s)(srcPtrTemp[0]) + 128];
+                *dstPtrTempG = gammaLUT[(Rpp32s)(srcPtrTemp[1]) + 128];
+                *dstPtrTempB = gammaLUT[(Rpp32s)(srcPtrTemp[2]) + 128];
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempR), gamma));
-                    dstPtrTemp[1] =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempG), gamma));
-                    dstPtrTemp[2] =
-                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempB), gamma));
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp16f *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp16f *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp =
-                            (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTemp), gamma));
-
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                dstPtrTemp[0] = gammaLUT[(Rpp32s)(*srcPtrTempR) + 128];
+                dstPtrTemp[1] = gammaLUT[(Rpp32s)(*srcPtrTempG) + 128];
+                dstPtrTemp[2] = gammaLUT[(Rpp32s)(*srcPtrTempB) + 128];
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
+    else {
+        for (int c = 0; c < layoutParams.channelParam; c++) {
+            Rpp8s *srcPtrRow, *dstPtrRow;
+            srcPtrRow = srcPtrChannel;
+            dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8s *srcPtrTemp, *dstPtrTemp;
+                srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+                dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+                int vectorLoopCount = 0;
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    *dstPtrTemp = gammaLUT[(Rpp32s)(*srcPtrTemp) + 128];
+
+                    srcPtrTemp++;
+                    dstPtrTemp++;
+                }
+            }
+
+            srcPtrChannel += srcDescPtr->strides.cStride;
+            dstPtrChannel += dstDescPtr->strides.cStride;
+        }
+    }
 }
 
 RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -430,131 +535,21 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescP
                                              RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                              RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32f gamma = gammaTensor[batchCount];
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp8s gammaLUT[256];
-        for (int i = 0; i < 256; i++) {
-            gammaLUT[i] =
-                (Rpp8s)(RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0) - 128);
-        }
+        Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp8s *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
-
-        Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
-
-        // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = gammaLUT[(Rpp32s)(srcPtrTemp[0]) + 128];
-                    *dstPtrTempG = gammaLUT[(Rpp32s)(srcPtrTemp[1]) + 128];
-                    *dstPtrTempB = gammaLUT[(Rpp32s)(srcPtrTemp[2]) + 128];
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = gammaLUT[(Rpp32s)(*srcPtrTempR) + 128];
-                    dstPtrTemp[1] = gammaLUT[(Rpp32s)(*srcPtrTempG) + 128];
-                    dstPtrTemp[2] = gammaLUT[(Rpp32s)(*srcPtrTempB) + 128];
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else {
-            for (int c = 0; c < layoutParams.channelParam; c++) {
-                Rpp8s *srcPtrRow, *dstPtrRow;
-                srcPtrRow = srcPtrChannel;
-                dstPtrRow = dstPtrChannel;
-
-                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                    Rpp8s *srcPtrTemp, *dstPtrTemp;
-                    srcPtrTemp = srcPtrRow;
-                    dstPtrTemp = dstPtrRow;
-
-                    int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = gammaLUT[(Rpp32s)(*srcPtrTemp) + 128];
-
-                        srcPtrTemp++;
-                        dstPtrTemp++;
-                    }
-
-                    srcPtrRow += srcDescPtr->strides.hStride;
-                    dstPtrRow += dstDescPtr->strides.hStride;
-                }
-
-                srcPtrChannel += srcDescPtr->strides.cStride;
-                dstPtrChannel += dstDescPtr->strides.cStride;
-            }
-        }
+        gamma_correction_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                         gammaTensor[batchCount], roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;

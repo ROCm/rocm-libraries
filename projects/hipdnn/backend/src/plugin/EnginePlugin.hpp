@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -27,6 +29,28 @@ public:
     // Functions that don't require a handle (called first)
     virtual std::vector<int64_t> getAllEngineIds() const;
 
+    /**
+     * @brief Reports whether this plugin exports the optional engine-name
+     *        symbol (`hipdnnEnginePluginGetEngineName`).
+     *
+     * Symbol presence is the sole predicate for consulting a plugin about names:
+     * the version a plugin reports is self-declared, and most leave it at the
+     * 1.0.0 baseline.
+     */
+    virtual bool hasEngineName() const;
+
+    /**
+     * @brief Queries the plugin for the canonical name of an engine.
+     *
+     * Returns `std::nullopt` when the symbol is absent, when the plugin answers
+     * `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, or when the returned string is null
+     * or empty. Throws `HipdnnException` on any other status: declining is
+     * spelled `NOT_APPLICABLE`, so a failure status is a defect.
+     *
+     * @param engineId Engine ID as reported by `getAllEngineIds()`.
+     */
+    [[nodiscard]] virtual std::optional<std::string> getEngineName(int64_t engineId) const;
+
     // Handle lifecycle functions
     virtual hipdnnEnginePluginHandle_t createHandle() const;
     virtual void setStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream) const;
@@ -39,6 +63,21 @@ public:
                                   int64_t engineId,
                                   const hipdnnPluginConstData_t* opGraph,
                                   hipdnnPluginConstData_t* engineDetails) const;
+    virtual void enumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                     const hipdnnPluginConstData_t* engineConfig,
+                                     const hipdnnPluginConstData_t* opGraph,
+                                     uint64_t offset,
+                                     uint64_t limit,
+                                     hipdnnPluginConstData_t* engineDetails) const;
+    /// Returns false when the optional prediction capability is unavailable. Output follows
+    /// the engine-details allocation protocol. The requested metric is engineConfig's
+    /// ranking_metric; EnginePluginResourceManager validates the response.
+    virtual bool getPrediction(hipdnnEnginePluginHandle_t handle,
+                               const hipdnnPluginConstData_t* engineConfig,
+                               const hipdnnPluginConstData_t* opGraph,
+                               hipdnnEnginePredictionKind_t kind,
+                               bool evaluate,
+                               hipdnnPluginConstData_t* prediction) const;
     virtual size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const hipdnnPluginConstData_t* opGraph) const;
@@ -134,6 +173,20 @@ private:
                                                   int64_t,
                                                   const hipdnnPluginConstData_t*,
                                                   hipdnnPluginConstData_t*);
+    hipdnnPluginStatus_t (*_funcEnumerateCandidates)(hipdnnEnginePluginHandle_t,
+                                                     const hipdnnPluginConstData_t*,
+                                                     const hipdnnPluginConstData_t*,
+                                                     uint64_t,
+                                                     uint64_t,
+                                                     hipdnnPluginConstData_t*)
+        = nullptr;
+    hipdnnPluginStatus_t (*_funcGetPrediction)(hipdnnEnginePluginHandle_t,
+                                               const hipdnnPluginConstData_t*,
+                                               const hipdnnPluginConstData_t*,
+                                               hipdnnEnginePredictionKind_t,
+                                               int32_t,
+                                               hipdnnPluginConstData_t*)
+        = nullptr;
     hipdnnPluginStatus_t (*_funcDestroyEngineDetails)(hipdnnEnginePluginHandle_t,
                                                       hipdnnPluginConstData_t*);
     hipdnnPluginStatus_t (*_funcGetWorkspaceSize)(hipdnnEnginePluginHandle_t,
@@ -175,6 +228,10 @@ private:
                                                              const uint32_t*,
                                                              const int64_t* const*,
                                                              const int64_t* const*)
+        = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
+
+    // Optional engine-name symbol, engine plugin API 1.4.0 and newer.
+    hipdnnPluginStatus_t (*_funcGetEngineName)(int64_t, const char**)
         = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
 
     friend class PluginManagerBase<EnginePlugin>;

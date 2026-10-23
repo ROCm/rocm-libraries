@@ -121,7 +121,11 @@ def _objdump_path() -> str:
         if not c:
             continue
         try:
-            subprocess.run([c, "--version"], capture_output=True, timeout=5, check=True)
+            # generous: on a loaded host a cold start of the tool can take
+            # seconds, and a time-out here reads as "no llvm-objdump"
+            subprocess.run(
+                [c, "--version"], capture_output=True, timeout=60, check=True
+            )
             return c
         except (
             FileNotFoundError,
