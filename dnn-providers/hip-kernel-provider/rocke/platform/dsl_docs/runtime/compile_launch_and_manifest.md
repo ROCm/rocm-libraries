@@ -145,7 +145,7 @@ Construct **once** per (problem-shape, problem-dtype). The HIP module is loaded 
 For immutable bound calls, retain their operation before enqueue:
 
 ```python
-from rocke.runtime import no_fence, retain_until_drain, wait_stream_and_release
+from rocke.runtime.launcher import no_fence, retain_until_drain, wait_stream_and_release
 
 with no_fence():
     for _ in range(batch_size):  # finite batch, on the submitting host thread
