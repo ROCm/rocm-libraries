@@ -17,6 +17,7 @@
 
 #include <thrust/random/detail/xor_combine_engine_max.h>
 
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TEST(XorCombineEngineMaxTests, TestLog2)
