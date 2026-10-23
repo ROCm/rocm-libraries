@@ -427,6 +427,33 @@ def test_kda_admits_exactly_its_d128_tiles():
     assert len(dispatch_gdn_decode_bases(_req(gate_kind="kda"))) == 54
 
 
+def test_empty_values_default_only_where_documented():
+    """build() defaults the arch only when none is given; an empty arch is
+    passed through and refused, never replaced by the spec's. An empty or
+    whitespace tuning_id means auto, as documented for spec_id."""
+    from dispatch.gdn import common
+
+    req = _req(gate_kind="gdn")
+    spec = dispatch_gdn_decode(req).spec
+    seen = []
+    module = common._decode_kernel_module(spec.arch)
+    with mock.patch.object(
+        module, "build_gdn_decode", side_effect=lambda s, arch: seen.append(arch)
+    ):
+        spec.build(None)
+        spec.build("")
+    assert seen == [spec.arch, ""]
+    with pytest.raises(ValueError, match="unknown gfx target"):
+        spec.build("")
+
+    base = dispatch_gdn_decode(replace(req, spec_id="nw2_wtk16_bpv8"))
+    for blank in ("", "   "):
+        got = dispatch_gdn_decode(
+            replace(req, spec_id="nw2_wtk16_bpv8", tuning_id=blank)
+        )
+        assert got.spec == base.spec, repr(blank)
+
+
 def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
     """``production`` lists waves_per_eu 0 and 4 on every knob set, ``full``
     every legal value 0-8; any legal value is pinnable at either level."""
