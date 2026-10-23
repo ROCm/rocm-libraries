@@ -87,7 +87,8 @@ struct GpuSdpaFwdParams
         = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVAttributes
         = nullptr,
-        int64_t pagedMaxSeqKv = 0)
+        int64_t pagedMaxSeqKv = 0,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -121,6 +122,10 @@ struct GpuSdpaFwdParams
                                      *pageTableVAttributes))
                                : std::nullopt)
         , pagedMaxSeqKv(pagedMaxSeqKv)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(
+                               hipdnn_test_sdk::detail::unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -143,6 +148,7 @@ struct GpuSdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
     int64_t pagedMaxSeqKv;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 template <typename QDataType,
@@ -214,6 +220,14 @@ public:
             }
         }
 
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sinkTensor;
+        if(_params.sinkTensor.has_value())
+        {
+            sinkTensor.emplace(variantPack.at(_params.sinkTensor->uid),
+                               _params.sinkTensor->dims,
+                               _params.sinkTensor->strides);
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -237,7 +251,8 @@ public:
                 seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr,
                 pageTableK.has_value() ? &pageTableK.value() : nullptr,
                 pageTableV.has_value() ? &pageTableV.value() : nullptr,
-                _params.pagedMaxSeqKv);
+                _params.pagedMaxSeqKv,
+                sinkTensor.has_value() ? &sinkTensor.value() : nullptr);
     }
 
 private:
@@ -350,8 +365,13 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Attention sink: FLOAT [1, H, 1, 1], as on the CPU.
+        if(!isSupportedSdpaSink(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -449,7 +469,10 @@ public:
                              nodeAttributes->page_table_v_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
                                  : nullptr,
-                             sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap)));
+                             sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap),
+                             nodeAttributes->sink_token_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                                 : nullptr));
     }
 };
 

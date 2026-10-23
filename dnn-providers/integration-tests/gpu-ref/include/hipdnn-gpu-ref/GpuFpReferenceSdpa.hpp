@@ -107,7 +107,8 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr,
-        int64_t pagedMaxSeqKv = 0)
+        int64_t pagedMaxSeqKv = 0,
+        hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
     {
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
         // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
@@ -207,6 +208,20 @@ public:
             seqLenKvStride = seqLenKv->strides()[0];
         }
 
+        // Attention sink (cuDNN): FLOAT [1, H, 1, 1], one logit per query head.
+        const float* sinkPtr = nullptr;
+        int64_t sinkStride = 0;
+        if(sinkToken != nullptr)
+        {
+            if(sinkToken->dims().size() != 4 || sinkToken->dims()[1] != numHeads
+               || static_cast<int64_t>(sinkToken->elementCount()) != numHeads)
+            {
+                throw std::invalid_argument("GpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
+            }
+            sinkPtr = static_cast<const float*>(sinkToken->memory().deviceData());
+            sinkStride = sinkToken->strides()[1];
+        }
+
         launchSdpaFwd(q.memory().deviceData(),
                       k.memory().deviceData(),
                       v.memory().deviceData(),
@@ -238,7 +253,9 @@ public:
                       seqLenQStride,
                       seqLenKvStride,
                       pagedKSide,
-                      pagedVSide);
+                      pagedVSide,
+                      sinkPtr,
+                      sinkStride);
 
         o.memory().markDeviceModified();
         if(lse != nullptr)
@@ -355,7 +372,9 @@ private:
                               int64_t seqLenQStride = 0,
                               int64_t seqLenKvStride = 0,
                               const SdpaPagedSide& pagedK = {},
-                              const SdpaPagedSide& pagedV = {});
+                              const SdpaPagedSide& pagedV = {},
+                              const float* sinkPtr = nullptr,
+                              int64_t sinkStride = 0);
 };
 
 } // namespace hipdnn_gpu_ref
