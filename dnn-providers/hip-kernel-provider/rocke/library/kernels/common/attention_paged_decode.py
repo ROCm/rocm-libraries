@@ -299,6 +299,8 @@ def validate_paged_loader_geometry(
             raise ValueError(f"paged reduce_spec.{name} disagrees with segment")
     if gather and tile != 32:
         raise ValueError("paged gather requires tile_size=32")
+    if gather and not has_paged_metadata_containment(tuning_spec):
+        raise ValueError("paged gather requires segment/reducer metadata containment")
     return page, tile, gather
 
 

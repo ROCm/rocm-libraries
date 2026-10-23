@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Mapping, Optional, Tuple, get_args, get_type_hints
 
+from kernels.common._attention_kv_loader import (
+    AttentionKVLoaderKind,
+    resolve_attention_kv_loader,
+)
+
 from kernels.common._attention_validation import (
     require_attention_int,
     require_attention_bool,
@@ -379,6 +384,16 @@ def make_explicit_attention_3d_specs(
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
     # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
     knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
+    containment = (
+        resolve_attention_kv_loader(
+            arch,
+            "paged",
+            problem.block_size,
+            tile,
+            use_i64_kv_addr=_semantic_fields(problem)["use_i64_kv_addr"],
+        )
+        is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+    )
     segment = spec_type(
         **_semantic_fields(problem),
         **_mask_fields(problem, arch),
@@ -388,6 +403,7 @@ def make_explicit_attention_3d_specs(
         # Both explicit 3D arches implement the all-decode grid
         # (``_use_decode_grid``); it follows the problem, never the config.
         use_decode_grid=bool(problem.all_decode),
+        metadata_containment=containment,
         **knobs,
     )
     ok, why = supports(
@@ -411,6 +427,7 @@ def make_explicit_attention_3d_specs(
         dtype=problem.dtype,
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
+        metadata_containment=containment,
     )
     return segment, reduce
 

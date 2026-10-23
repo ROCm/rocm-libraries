@@ -87,7 +87,17 @@ def test_loader_boundary_engine_agreement(
         tuning = SimpleNamespace(
             arch=arch, path="3d", kernel_spec=snapshot, reduce_spec=reduce
         )
-        assert validate_paged_loader_geometry(problem, tuning) == (page, tile, gather)
+        if gather:
+            # Raw builders retain the caller-validity contract tested below;
+            # an unmarked pair cannot enter the runtime gather launcher.
+            with pytest.raises(ValueError, match="metadata containment"):
+                validate_paged_loader_geometry(problem, tuning)
+        else:
+            assert validate_paged_loader_geometry(problem, tuning) == (
+                page,
+                tile,
+                False,
+            )
 
     expected = _lower_kernel_to_llvm_python(
         module.build_unified_attention_3d_tiled(segment, arch=arch), arch=arch

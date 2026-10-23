@@ -263,13 +263,14 @@ def _paged_runtime_kwargs(arch, page):
         algorithm="paged_decode_t32",
     )
     spec = dispatch_attention(req).spec
-    # This fixture exercises legacy direct/structural loader contracts. The
-    # dedicated containment suite covers the candidate's marked pair.
-    spec = replace(
-        spec,
-        kernel_spec=replace(spec.kernel_spec, metadata_containment=False),
-        reduce_spec=replace(spec.reduce_spec, metadata_containment=False),
-    )
+    # Gather launches require the bounded ABI. Page-contained controls retain
+    # the legacy direct/structural loader contract.
+    if not spec.kernel_spec.uses_paged_gather:
+        spec = replace(
+            spec,
+            kernel_spec=replace(spec.kernel_spec, metadata_containment=False),
+            reduce_spec=replace(spec.reduce_spec, metadata_containment=False),
+        )
     return {
         "problem": p,
         "q": ts[0],
@@ -490,7 +491,14 @@ def test_paged_direct_rejects_malformed_feature_contract(
             else:
                 bad.with_num_kv_blocks = forbidden_retarget
                 initial = bad
-            with pytest.raises(ValueError, match=field):
+            # Bounded gather also rejects a non-None storage format at its
+            # geometry gate, before comparing the feature with the problem.
+            message = (
+                "kv_storage_dtype|bounded decode requires"
+                if field == "kv_storage_dtype"
+                else field
+            )
+            with pytest.raises(ValueError, match=message):
                 au.run_unified_attention_torch(**dict(kwargs, tuning_spec=initial))
 
 
@@ -853,7 +861,11 @@ def test_runtime_revalidates_retargeted_paged_spec(
         retargeted = replace(concrete, path="2d")
     elif change in ("to_legacy", "to_gather"):
         legacy = replace(
-            concrete, kernel_spec=replace(concrete.kernel_spec, tile_size_override=16)
+            concrete,
+            kernel_spec=replace(
+                concrete.kernel_spec, tile_size_override=16, metadata_containment=False
+            ),
+            reduce_spec=replace(concrete.reduce_spec, metadata_containment=False),
         )
         if change == "to_legacy":
             retargeted = legacy
@@ -871,11 +883,15 @@ def test_runtime_revalidates_retargeted_paged_spec(
             ),
         )
     elif change == "segments":
-        retargeted = replace(
-            concrete,
-            kernel_spec=replace(concrete.kernel_spec, num_segments=256),
-            reduce_spec=replace(concrete.reduce_spec, num_segments=256),
-        )
+        # A concrete bounded spec rejects this at construction. Exercise the
+        # runtime revalidation of the structural retarget protocol instead.
+        retargeted = _structural_paged_spec(concrete)
+        retargeted.kernel_spec.num_segments = 256
+        from types import SimpleNamespace
+
+        reducer = asdict(concrete.reduce_spec)
+        reducer["num_segments"] = 256
+        retargeted.reduce_spec = SimpleNamespace(**reducer)
     elif change == "workspace":
         batch = 32768
         kwargs["problem"] = replace(kwargs["problem"], num_seqs=batch, total_q=batch)
@@ -889,17 +905,18 @@ def test_runtime_revalidates_retargeted_paged_spec(
             kernel_spec=replace(concrete.kernel_spec, num_seqs=batch, num_segments=16),
             reduce_spec=replace(concrete.reduce_spec, num_segments=16),
         )
-        retargeted = replace(
-            concrete,
-            kernel_spec=replace(concrete.kernel_spec, num_segments=32),
-            reduce_spec=replace(concrete.reduce_spec, num_segments=32),
-        )
+        retargeted = _structural_paged_spec(concrete)
+        retargeted.kernel_spec.num_segments = 32
+        retargeted.reduce_spec = replace(concrete.reduce_spec, num_segments=32)
+
+    retarget_calls = []
 
     class RetargetAdapter:
         def __getattr__(self, name):
             return getattr(concrete, name)
 
         def with_num_kv_blocks(self, count):
+            retarget_calls.append(count)
             return retargeted
 
     def forbidden(**kw):
@@ -909,6 +926,7 @@ def test_runtime_revalidates_retargeted_paged_spec(
     monkeypatch.setattr(au, "_run_3d_tiled", forbidden)
     with pytest.raises(ValueError):
         au.run_unified_attention_torch(**dict(kwargs, tuning_spec=RetargetAdapter()))
+    assert retarget_calls == [kwargs["k"].shape[0]]
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -925,6 +943,12 @@ def test_runtime_accepts_concrete_paged_loader_contract(
     kwargs = _paged_runtime_kwargs(arch, page)
     concrete = kwargs["tuning_spec"]
     if default_tile:
+        if page != 1:
+            concrete = replace(
+                concrete,
+                kernel_spec=replace(concrete.kernel_spec, metadata_containment=False),
+                reduce_spec=replace(concrete.reduce_spec, metadata_containment=False),
+            )
         concrete = replace(
             concrete, kernel_spec=replace(concrete.kernel_spec, tile_size_override=None)
         )
@@ -1083,6 +1107,53 @@ def test_automatic_page_one_launch_passes_actual_bounds(arch, monkeypatch):
     assert segment["max_seqlen_k"] == args["problem"].max_seqlen_k
     assert segment["table_cols"] == args["block_table"].shape[1]
     assert reducer["num_seqs"] == 3
+
+
+GATHER_GEOMETRIES = [
+    ("gfx942", 1),
+    ("gfx942", 16),
+    ("gfx950", 1),
+    ("gfx950", 16),
+    ("gfx950", 64),
+]
+
+
+@pytest.mark.parametrize("arch,page", GATHER_GEOMETRIES)
+@pytest.mark.parametrize("structural", [False, True])
+@pytest.mark.parametrize("allow_unsupported", [False, True])
+def test_runtime_rejects_unbounded_gather_pair(
+    arch, page, structural, allow_unsupported, monkeypatch
+):
+    args = _paged_runtime_kwargs(arch, page)
+    spec = args["tuning_spec"]
+    spec = replace(
+        spec,
+        allow_unsupported=allow_unsupported,
+        kernel_spec=replace(spec.kernel_spec, metadata_containment=False),
+        reduce_spec=replace(spec.reduce_spec, metadata_containment=False),
+    )
+    args["tuning_spec"] = _structural_paged_spec(spec) if structural else spec
+    au = _forbid_paged_launch(arch, monkeypatch)
+    with pytest.raises(ValueError, match="metadata containment"):
+        au.run_unified_attention_torch(**args)
+
+
+@pytest.mark.parametrize("arch,page", GATHER_GEOMETRIES)
+def test_explicit_config_generates_bounded_gather_pair(arch, page):
+    from dispatch.attention.tuning_specs import (
+        ExplicitAttention3DConfig,
+        make_explicit_attention_3d_specs,
+    )
+
+    problem, _ = inputs(page)
+    problem = replace(problem, clamp_arch=arch)
+    segment, reducer = make_explicit_attention_3d_specs(
+        problem,
+        ExplicitAttention3DConfig(num_segments=8, tile_policy="32"),
+        arch=arch,
+    )
+    assert segment.uses_paged_gather
+    assert segment.metadata_containment and reducer.metadata_containment
 
 
 @pytest.mark.parametrize(
@@ -1973,6 +2044,12 @@ def test_structural_subpage_loader_contract(arch, tile):
     snapshot.update(
         tile_size=tile, tile_size_override=tile, uses_paged_gather=arch == "gfx950"
     )
+    if tile != 32:
+        snapshot["metadata_containment"] = False
+        concrete = replace(
+            concrete,
+            reduce_spec=replace(concrete.reduce_spec, metadata_containment=False),
+        )
     structural = _structural_paged_spec(
         concrete, kernel_spec=SimpleNamespace(**snapshot)
     )
