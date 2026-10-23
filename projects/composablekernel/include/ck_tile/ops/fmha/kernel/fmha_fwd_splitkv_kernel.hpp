@@ -87,10 +87,10 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    // TDM pipelines (qr_tdm_sched) consume native row-major V and need affine
-    // DRAM views: software padding would let the DMA engine pull in real
-    // neighbouring memory. Everything else about them is self-contained --
-    // in particular they carve up the LDS arena themselves.
+    // The TDM split-kv pipeline (qr_tdm) consumes native row-major V and needs
+    // affine DRAM views: software padding would let the DMA engine pull in real
+    // neighbouring memory. Everything else about it is self-contained --
+    // in particular it carves up the LDS arena itself.
     static constexpr bool kUsesUntransposedVKernelPath =
         detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
     static constexpr bool kUsesTdmAffineDramPath =
