@@ -753,8 +753,9 @@ def _spec(idx: int):
         )
 
     if idx == 32:
-        # Rejected by both validators: depthwise (channels-per-group == 1) is
-        # not an implicit-GEMM grouped problem.
+        # Grouped depthwise (channels-per-group == 1): a one-column GEMM per
+        # group, every operand scalar. cshuffle so the config is accepted (the
+        # default epilogue rejects a 16-bit dX).
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64)
         return (
             DgradConvSpec(
@@ -768,7 +769,7 @@ def _spec(idx: int):
                 warp_tile_n=32,
                 warp_tile_k=16,
                 pipeline="mem",
-                epilogue="default",
+                epilogue="cshuffle",
             ),
             "gfx950",
         )
@@ -791,6 +792,55 @@ def _spec(idx: int):
                 pipeline="mem",
                 epilogue="default",
                 split_k=2,
+            ),
+            "gfx950",
+        )
+
+    if idx == 34:
+        # patch: a patch embedding (stride == filter, no padding) as one GEMM
+        # over the filter's (y, x, c) -- the tilde cshuffle store splits each
+        # column into a filter row and its run of X*C.
+        p = _cp(N=4, Hi=32, Wi=32, C=3, K=64, Y=4, X=4, sH=4, sW=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="cshuffle",
+                vector_size_a=8,
+                vector_size_b=4,
+                vector_size_c=4,
+                lds_k_outer=True,
+                uniform_k_decode=True,
+                patch=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 35:
+        # patch with the scalar (default) tilde store and stride > filter.
+        p = _cp(N=2, Hi=30, Wi=30, C=4, K=32, Y=2, X=2, sH=3, sW=3)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                patch=True,
             ),
             "gfx950",
         )

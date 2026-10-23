@@ -189,6 +189,14 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
     return rocke_b_global_load(b, ptr, idx, rocke_bf16(), align <= 0 ? 2 : align);
 }
 
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_f64(), align <= 0 ? 8 : align);
+}
+
 rocke_value_t*
     rocke_b_global_load_i8(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int align)
 {
@@ -883,7 +891,8 @@ void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
 
 /* ===================== vector.* element-wise family ===================== */
 
-/* IRBuilder.vector_binary: matching vector operands -> a->type. */
+/* IRBuilder.vector_binary: matching vector operands -> a->type. The signed
+ * ops (smax, smin) refuse an unsigned element type. */
 static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
                                             rocke_opcode_t opcode,
                                             rocke_value_t* a,
@@ -898,6 +907,10 @@ static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
     if(!rocke_i_is_vector(a->type, NULL, -1) || !rocke_type_eq(a->type, c->type))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_binary expects matching vector operands");
+    if(opcode == ROCKE_OP_VECTOR_SMAX)
+        rocke_i_refuse_unsigned("vector_smax", a->type, NULL);
+    if(opcode == ROCKE_OP_VECTOR_SMIN)
+        rocke_i_refuse_unsigned("vector_smin", a->type, NULL);
     ops[0] = a;
     ops[1] = c;
     return rocke_i_op1(b, opcode, ops, 2, a->type, NULL, hint);
@@ -1130,6 +1143,7 @@ rocke_value_t*
     if(!rocke_i_is_vector(v->type, NULL, -1))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_sext expects vector input");
+    rocke_i_refuse_unsigned("vector_sext", v->type, NULL);
     vt = rocke_vector_type(b, target, rocke_i_count_of(v->type));
     if(!vt)
         return NULL;
@@ -1242,6 +1256,30 @@ rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke
     return rocke_i_op1(b, ROCKE_OP_VECTOR_CONCAT, ops, 2, vt, &attr, "vc");
 }
 
+/* ==================== undef (freeze-poison) vector base ================= */
+
+/* Only a base for vectors fully overwritten by subsequent inserts; never a
+ * zero substitute. Port of Python IRBuilder.undef_vec / the pinned PR9710
+ * vector.undef op (LLVM: ``freeze <nxtype> poison``). */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n)
+{
+    rocke_attr_map_t a;
+    const rocke_type_t* vt;
+    char* hint;
+    if(!rocke_i_live(b))
+        return NULL;
+    vt = rocke_vector_type(b, elem, n);
+    if(!vt)
+        return NULL;
+    hint = rocke_arena_printf(&b->arena, "udf%d", n);
+    if(!hint)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "OOM udf hint");
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "elem", elem->name);
+    rocke_attr_set_int(b, &a, "vec", (int64_t)n);
+    return rocke_i_op1(b, ROCKE_OP_VECTOR_UNDEF, NULL, 0, vt, &a, hint);
+}
+
 /* =================== vec bitcast / packed f32->fXX ===================== */
 
 rocke_value_t*
@@ -1254,6 +1292,8 @@ rocke_value_t*
     if(!v || !target)
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vec_bitcast: null operand/target");
+    rocke_i_check_bitcast_width(
+        "vec_bitcast", v->type, target, "slice or concatenate the vector first");
     ops[0] = v;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "target", target->name);

@@ -52,7 +52,7 @@ def test_r8_iterate_predicate_tracks_depthu():
     threshold on both A and B; DepthU=256 stays under it. If the predicate
     stops tracking DepthU the iterate arms would go dark again.
     """
-    from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+    from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
 
     sols = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=8)
     assert len(sols) == 4, f"Expected 4 forked solutions, got {len(sols)}"

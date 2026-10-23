@@ -52,13 +52,14 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import os
-import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from _llvm_identity import clang_identity, flavor_of_clang
+from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
+from _hostcaps import available_cpus
+from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -84,16 +85,7 @@ def _bootstrap_sys_path() -> None:
 # library/tests/test_library_layering.py, and carries the same rule: this list
 # only ever SHRINKS. An entry that starts passing is itself a failure (see
 # STALE below) so a fix cannot silently leave dead weight behind.
-KNOWN_BAD: dict[str, str] = {
-    "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-    "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-}
+KNOWN_BAD: dict[str, str] = {}
 
 
 def _llvm_tool(name: str) -> str | None:
@@ -149,6 +141,21 @@ def _llvm_tool(name: str) -> str | None:
         if raw:
             roots.append(Path(raw))
 
+    # Real ROCm installs, found without going through a loaded comgr. When the
+    # comgr that loaded is one bundled with another package (the ROCm torch
+    # wheel ships its own), no LLVM sits beside it, and stopping here would fall
+    # through to PATH -- typically a distro clang with no AMDGPU linker, the
+    # wrong-vintage toolchain this lookup exists to avoid.
+    try:
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        install_libdirs = _rocm_root_libdirs()
+    except (ImportError, OSError):  # rocke not importable here, or an unreadable /opt
+        install_libdirs = []
+    for libdir in install_libdirs:
+        libp = Path(libdir).resolve()
+        roots.extend(libp.parents[i] for i in range(min(3, len(libp.parents))))
+
     for root in roots:
         cand = root / "llvm" / "bin" / exe
         if _is_file(cand):
@@ -159,21 +166,37 @@ def _llvm_tool(name: str) -> str | None:
     return shutil.which(name)
 
 
-def _requires_newer_flavor(exc: BaseException) -> bool:
-    """Did the instance decline to lower because this LLVM is too old?
+def _unpaired_opt(
+    opt: str, clang: str, clang_identity: str, clang_flavor: str
+) -> str | None:
+    """Why L0 must be skipped because `opt` is not clang's sibling, or None.
 
-    The corpus is flavor-wide but a host is not. An instance gated on a newer
-    vintage says so and refuses -- `tile.wmma_gfx1250_..._scale_e8m0_e8m0_k32`
-    raises `requires llvm23 (ROCm 7.13+), got llvm22` -- and that refusal is
-    the emitter working correctly, on a case this host was never going to be
-    able to validate.
+    `_llvm_tool` resolves the two independently: a discovered prefix shipping
+    clang but not `opt` lets `opt` fall through to PATH, so the L0 verifier and
+    the L1 compiler can be different vintages. An older `opt` that rejects a
+    construct newer than its parser marks the case red as L0-VERIFY, i.e.
+    blames the kernel for IR that is fine.
 
-    It has to be separated from every other lowering error, because those are
-    still a validity failure of exactly the kind this gate exists to catch. So
-    the match is on the gate's own wording rather than on the exception type:
-    a bare `NotImplementedError` from anywhere else in the lowerer stays fatal.
+    Skip the lane rather than fail the run (unlike the generator, which needs
+    both tools and must stop): clang's front end re-reaches L0's findings at
+    L1, so dropping it costs only an earlier diagnostic. The caller already
+    handles `opt is None`.
+
+    Silent when either banner is unparseable, per `flavor_of_clang`: an
+    unreadable version is not evidence of a mismatch.
     """
-    return bool(re.search(r"requires llvm\d+", str(exc)))
+    opt_identity = tool_identity(opt)
+    opt_flavor = flavor_of_clang(opt_identity)
+    if not (opt_flavor and clang_flavor) or opt_flavor == clang_flavor:
+        return None
+    return (
+        f"   L0     : SKIPPED - opt reports {opt_flavor} but clang reports "
+        f"{clang_flavor}; they are different LLVM installs, so an L0 verdict "
+        f"from this opt would not be about the IR this clang compiles. Set "
+        f"ROCKE_LLVM_BIN to one complete LLVM install to restore the lane.\n"
+        f"            opt   : {opt} ({opt_identity})\n"
+        f"            clang : {clang} ({clang_identity})"
+    )
 
 
 def _dump_corpus(
@@ -382,7 +405,7 @@ def main() -> int:
     # because the path alone does not say which vintage lives there -- and a
     # green recorded against the wrong compiler is not distinguishable after
     # the fact without this line.
-    identity = clang_identity(clang)
+    identity = tool_identity(clang)
     print(f"   version: {identity}")
 
     # The `flavor != native` test above compares two rocke-side values and so
@@ -413,6 +436,12 @@ def main() -> int:
         )
         return 1 if args.strict else 0
 
+    if opt is not None:
+        unpaired = _unpaired_opt(opt, clang, identity, clang_flavor)
+        if unpaired:
+            print(unpaired)
+            opt = None
+
     tmp = tempfile.TemporaryDirectory(prefix="rocke_ir_validity_")
     ir_dir = Path(args.keep_ir) if args.keep_ir else Path(tmp.name)
     ir_dir.mkdir(parents=True, exist_ok=True)
@@ -427,7 +456,12 @@ def main() -> int:
     if not_lowerable:
         print(f"   {len(not_lowerable)} case(s) need a newer LLVM than {flavor}")
 
-    jobs = args.jobs or min(32, (os.cpu_count() or 1))
+    # `available_cpus()`, not `os.cpu_count()`: the hosts this runs on are
+    # scheduler-pinned (384 CPUs reported, 2 allowed) or containerised. Sizing
+    # from the machine would run ~32 concurrent clang+link jobs on a 2-CPU
+    # allocation, and the resulting resource-limit failures surface as
+    # L1-COMPILE defects -- bad IR reported for an oversubscribed host.
+    jobs = args.jobs or min(32, available_cpus())
     out_dir = Path(tmp.name) / "out"
     out_dir.mkdir(exist_ok=True)
 

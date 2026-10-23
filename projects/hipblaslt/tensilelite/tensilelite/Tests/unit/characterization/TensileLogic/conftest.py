@@ -35,9 +35,9 @@ reproducible in the dev container (see ``../resistance.md``).
 
 import pytest
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Validators import validateToolchain
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Toolchain.Validators import validateToolchain
 
 
 @pytest.fixture(scope="session")

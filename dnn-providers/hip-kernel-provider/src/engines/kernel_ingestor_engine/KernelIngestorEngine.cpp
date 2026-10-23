@@ -24,27 +24,22 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-std::filesystem::path descriptorSearchDirectory()
+namespace
 {
-    // Three sources, in falling order of specificity.
 
-    // 1. Env var first: it's the only one an operator or test can set.
-    if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-       !override.empty())
+/// descriptorSearchDirectory() given the already-read HIPDNN_DESCRIPTOR_DIR, so one
+/// discovery reads (and warns about) the environment once.
+std::filesystem::path providerDescriptorTree(std::filesystem::path replacement)
+{
+    // 1. HIPDNN_DESCRIPTOR_DIR. The SDK reader already drops a value that is not a real
+    //    directory (stale build paths are common), so empty means fall through.
+    if(!replacement.empty())
     {
-        std::error_code notFound;
-        if(std::filesystem::is_directory(override, notFound))
-        {
-            return override;
-        }
-        HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_DIR is set to '"
-                               << override
-                               << "', which is not a directory; ignoring it and resolving "
-                                  "the descriptor tree from the loaded module instead");
+        return replacement;
     }
 
     // 2. Where this plugin was actually loaded from.
-    //    Measuring from the loaded module is correct wherever it lands. Keyed on this
+    //    Measuring from the loaded module is correct wherever it lands. Keyed on a
     //    function's own address rather than a symbol name, since a name lookup can resolve
     //    to a different module when every provider exports the same plugin entry points.
     try
@@ -71,27 +66,27 @@ std::filesystem::path descriptorSearchDirectory()
     return HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR;
 }
 
+} // namespace
+
+std::filesystem::path descriptorSearchDirectory()
+{
+    return providerDescriptorTree(
+        hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().replacement);
+}
+
 std::vector<std::filesystem::path> descriptorSearchDirectories()
 {
-    std::vector<std::filesystem::path> roots{descriptorSearchDirectory()};
+    auto environment = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots();
+
+    std::vector<std::filesystem::path> roots;
+    roots.reserve(1 + environment.additional.size());
+    roots.push_back(providerDescriptorTree(std::move(environment.replacement)));
 
     // Additive, where HIPDNN_DESCRIPTOR_DIR above replaces: this is where descriptors are
-    // dropped in beside a shipped install rather than instead of it. Validated the same
-    // way, since a stale path here would otherwise be a silent no-op -- the loader treats
-    // a missing root as "nothing to add", which is exactly what a typo looks like.
-    if(const auto runtime = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
-       !runtime.empty())
+    // dropped in beside a shipped install rather than instead of it.
+    for(auto& additional : environment.additional)
     {
-        std::error_code notFound;
-        if(std::filesystem::is_directory(runtime, notFound))
-        {
-            roots.emplace_back(runtime);
-        }
-        else
-        {
-            HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_RUNTIME_DIR is set to '"
-                                   << runtime << "', which is not a directory; ignoring it");
-        }
+        roots.push_back(std::move(additional));
     }
 
     return roots;
@@ -137,6 +132,16 @@ void registerNativeIngestorSymbols()
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
+const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
+{
+    // Memoized: descriptor engines and opaque engines' declared L1 models read the same
+    // trees; one parse keeps them from disagreeing.
+    static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog
+        = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
+
+    return s_catalog;
+}
+
 namespace
 {
 
@@ -150,14 +155,14 @@ struct StateManagerSlot
     std::unique_ptr<StateManager> stateManager;
 };
 
-/// What one scan of descriptorSearchDirectories() produced.
+/// What one validation of descriptorCatalog() produced.
 struct Scan
 {
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
     std::vector<StateManagerSlot> slots;
 };
 
-/// Scans descriptorSearchDirectories(), splitting each validated set from the state manager
+/// Validates descriptorCatalog(), splitting each validated set from the state manager
 /// validation built for it. Discovery and rediscoverStateManagersForTesting() both scan
 /// through here.
 Scan scanDescriptorSets()
@@ -166,8 +171,8 @@ Scan scanDescriptorSets()
     // registry, so an unregistered pack drops its descriptors here instead of throwing at
     // first use.
     registerNativeIngestorSymbols();
-    auto validated = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
-        descriptorSearchDirectories());
+    auto validated
+        = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(descriptorCatalog());
 
     Scan scan;
     scan.sets.reserve(validated.size());

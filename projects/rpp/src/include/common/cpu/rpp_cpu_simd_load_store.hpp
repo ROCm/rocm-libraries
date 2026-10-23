@@ -5689,9 +5689,9 @@ inline void rpp_store12_float_pkd_pln(Rpp16f** dstPtrTempChannels, __m128* pDst)
     pxDst[0] = _mm_cvtps_ph(pDst[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     pxDst[1] = _mm_cvtps_ph(pDst[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     pxDst[2] = _mm_cvtps_ph(pDst[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[0]), pxDst[0]);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[1]), pxDst[1]);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[2]), pxDst[2]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[0]), pxDst[0]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[1]), pxDst[1]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[2]), pxDst[2]);
 }
 
 inline void rpp_store12_float_pkd_pln(Rpp8u** dstPtrTempChannels, __m128* pDst) {

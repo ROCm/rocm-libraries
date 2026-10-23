@@ -1,12 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "SdpaGraphUtils.hpp"
 #include "SdpaTensorBundles.hpp"
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
@@ -15,6 +18,7 @@ using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
+using namespace ::testing;
 
 TEST(TestSdpaFwdSignatureKey, EqualityOperator)
 {
@@ -106,4 +110,122 @@ TEST(TestSdpaFwdSignatureKey, CreateFromNodeAndTensorMap)
     const SdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+namespace
+{
+const std::vector<DataType> ALL_MASK_DTYPES
+    = {DataType::UNSET, DataType::FLOAT, DataType::HALF, DataType::BFLOAT16};
+}
+
+TEST(TestSdpaFwdSignatureKey, MaskDataTypeParticipatesInEquality)
+{
+    const SdpaFwdSignatureKey noMask{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    const SdpaFwdSignatureKey explicitNoMask{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET};
+    EXPECT_TRUE(noMask == explicitNoMask);
+
+    for(const auto lhsMask : ALL_MASK_DTYPES)
+    {
+        for(const auto rhsMask : ALL_MASK_DTYPES)
+        {
+            const SdpaFwdSignatureKey lhs{
+                DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, lhsMask};
+            const SdpaFwdSignatureKey rhs{
+                DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, rhsMask};
+            EXPECT_EQ(lhs == rhs, lhsMask == rhsMask)
+                << "lhs mask " << lhsMask << ", rhs mask " << rhsMask;
+        }
+    }
+}
+
+TEST(TestSdpaFwdSignatureKey, MaskDataTypeParticipatesInHash)
+{
+    std::unordered_set<std::size_t> hashes;
+    for(const auto mask : ALL_MASK_DTYPES)
+    {
+        const SdpaFwdSignatureKey key{
+            DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, mask};
+        hashes.insert(key.hashSelf());
+    }
+    EXPECT_EQ(hashes.size(), ALL_MASK_DTYPES.size());
+}
+
+// Every Q/K/V/O combination resolves with the no-mask key and with each supported mask dtype;
+// a mask dtype outside that set resolves to nothing.
+TEST(TestSdpaFwdSignatureKey, PlanBuildersCoverSupportedMaskDtypes)
+{
+    const auto planBuilders = SdpaFwdSignatureKey::getPlanBuilders();
+
+    const std::vector<std::array<DataType, 4>> qkvoCombinations = {
+        {DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+        {DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF},
+        {DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16},
+        {DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT},
+        {DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT},
+        {DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::BFLOAT16},
+        {DataType::FP8_E4M3_FNUZ,
+         DataType::FP8_E4M3_FNUZ,
+         DataType::FP8_E4M3_FNUZ,
+         DataType::BFLOAT16},
+    };
+
+    for(const auto& [q, k, v, o] : qkvoCombinations)
+    {
+        for(const auto mask : ALL_MASK_DTYPES)
+        {
+            EXPECT_NE(planBuilders.find(SdpaFwdSignatureKey{q, k, v, o, mask}), planBuilders.end())
+                << "q=" << q << ", o=" << o << ", mask=" << mask;
+        }
+        for(const auto unsupportedMask : {DataType::INT32, DataType::FP8_E4M3, DataType::DOUBLE})
+        {
+            EXPECT_EQ(planBuilders.find(SdpaFwdSignatureKey{q, k, v, o, unsupportedMask}),
+                      planBuilders.end())
+                << "q=" << q << ", o=" << o << ", mask=" << unsupportedMask;
+        }
+    }
+}
+
+template <class MaskT>
+class SdpaFwdSignatureKeyMask : public Test
+{
+};
+
+using MaskTypes
+    = Types<float, hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::bfloat16, int32_t>;
+TYPED_TEST_SUITE(SdpaFwdSignatureKeyMask, MaskTypes, );
+
+TYPED_TEST(SdpaFwdSignatureKeyMask, NodeConstructorReadsDeclaredMaskDtype)
+{
+    SdpaFwdTensorBundle<float, TypeParam> tensorBundle({1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1});
+    tensorBundle.maskTensor.emplace(std::vector<int64_t>{1, 1, 1, 1});
+    auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
+    auto [serializedGraph, serErr] = std::get<0>(graphTuple)->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrap(
+        serializedGraph.data(), serializedGraph.size());
+
+    const SdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    const SdpaFwdSignatureKey expectedKey{DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          nativeTypeToDataType<TypeParam>()};
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestSdpaFwdSignatureKey, NodeConstructorWithoutMaskYieldsUnset)
+{
+    SdpaFwdTensorBundle<float> tensorBundle({1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1});
+    auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
+    auto [serializedGraph, serErr] = std::get<0>(graphTuple)->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrap(
+        serializedGraph.data(), serializedGraph.size());
+
+    const SdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_EQ(keyFromNode.maskDataType, DataType::UNSET);
 }

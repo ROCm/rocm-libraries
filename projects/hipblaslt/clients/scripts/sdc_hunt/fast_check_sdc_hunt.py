@@ -42,8 +42,6 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-
 
 def read_text(path: Path) -> Optional[str]:
     try:
@@ -125,7 +123,7 @@ def load_command(
             "-i", "1000000", "-j", "0",
         ]  # fmt: skip
     if load.startswith("cotenant:"):
-        cotenant = SCRIPT_DIR.parent / "cotenant" / "hipblaslt-cotenant"
+        cotenant = test_bin.parent / "hipblaslt-cotenant"
         return [
             str(cotenant),
             "--cus",

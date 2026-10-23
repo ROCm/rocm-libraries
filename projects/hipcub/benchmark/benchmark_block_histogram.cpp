@@ -64,6 +64,9 @@ struct histogram
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bhistogram_t(storage).Histogram(values, histogram);
+
+            // Stop optimizer from collapsing loop
+            values[0] ^= static_cast<T>(histogram[hipThreadIdx_x] & 1);
         }
 
 #pragma unroll

@@ -74,7 +74,7 @@ info = ptr.contents
 result = {'llvm_version': [info.major, info.minor, info.patch] if info.major else None}
 for name in ('source', 'requested_comgr', 'comgr_path', 'query_library_path'):
     value = getattr(info, name)
-    result[name] = value.decode() if value else None
+    result[name] = value.decode() if value is not None else None
 print(json.dumps({'native': result, 'python': asdict(loaded_compiler_info())}))
 """
 
@@ -94,13 +94,23 @@ def native_detector(tmp_path_factory):
         "const CompilerInfo* candidate_compiler_info(); }\n"
         "static bool block_loads = false;\n"
         "static unsigned load_calls = 0;\n"
+        "static unsigned invalid_path_calls = 0;\n"
+        "static const char* fixture_root = nullptr;\n"
+        "#include <cstring>\n"
         'extern "C" void* __real_dlopen(const char*, int);\n'
         'extern "C" void* __wrap_dlopen(const char* path, int mode) {\n'
         "    ++load_calls;\n"
+        "    if(!*path || (*path != '/' && strchr(path, '/')))\n"
+        "        ++invalid_path_calls;\n"
+        "    if(fixture_root && *path == '/' &&\n"
+        "       strncmp(path, fixture_root, strlen(fixture_root)) != 0)\n"
+        "        return nullptr;\n"
         "    return block_loads ? nullptr : __real_dlopen(path, mode);\n"
         "}\n"
         'extern "C" void fixture_block_loads(int block) { block_loads = block; }\n'
         'extern "C" unsigned fixture_load_calls() { return load_calls; }\n'
+        'extern "C" unsigned fixture_invalid_path_calls() { return invalid_path_calls; }\n'
+        'extern "C" void fixture_limit_roots(const char* root) { fixture_root = root; }\n'
         'extern "C" const ckc::CompilerInfo* rocke_loaded_compiler_info() {\n'
         "    return ckc::candidate_compiler_info();\n"
         "}\n"
@@ -217,6 +227,76 @@ def test_unloadable_override_uses_first_loadable_library(native_detector, tmp_pa
     assert info["requested_comgr"] == str(library)
 
 
+@pytest.mark.parametrize("variable", ["ROCKE_COMGR_LIB", "ROCM_PATH", "ROCM_HOME"])
+def test_empty_discovery_values_match_unset(native_detector, tmp_path, variable):
+    library = build_library(
+        tmp_path / "fallback" / "lib",
+        "void amd_comgr_get_version(void){}\n"
+        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=0;*c=1;}\n",
+    )
+    cwd = tmp_path / "cwd"
+    build_library(
+        cwd / "lib",
+        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=20;*b=0;*c=2;}\n",
+    )
+    # Limit system-install tiers in both engines so the fallback is independent
+    # of the host's /opt installations. Relative candidates stay observable.
+    script = (
+        PROBE.replace(
+            "ptr = native.rocke_loaded_compiler_info()",
+            "native.fixture_limit_roots.argtypes = [ctypes.c_char_p]\n"
+            "fixture_root = os.fsencode(sys.argv[2])\n"
+            "native.fixture_limit_roots(fixture_root)\n"
+            "from rocke.runtime import runtime_coexistence as coexistence\n"
+            "real_glob = coexistence.glob.glob\n"
+            "coexistence.glob.glob = lambda pattern: (\n"
+            "    [] if pattern.startswith('/opt/rocm') else real_glob(pattern))\n"
+            "ptr = native.rocke_loaded_compiler_info()",
+        )
+        + "\nnative.fixture_invalid_path_calls.restype = ctypes.c_uint\nassert native.fixture_invalid_path_calls() == 0\n"
+    )
+    env = dict(os.environ)
+    for name in ("ROCKE_LLVM_FLAVOR", "ROCKE_COMGR_LIB", "ROCM_PATH", "ROCM_HOME"):
+        env.pop(name, None)
+    env.update(
+        PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
+        # Keep the fixture first while preserving shared-Python dependencies.
+        LD_LIBRARY_PATH=os.pathsep.join(
+            [str(library.parent)]
+            + [
+                path
+                for path in env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+                if path
+            ]
+        ),
+    )
+    if variable == "ROCKE_COMGR_LIB":
+        env["ROCM_PATH"] = str(library.parent.parent)
+    results = []
+    for value in (None, ""):
+        child_env = dict(env)
+        if value is not None:
+            child_env[variable] = value
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(native_detector), str(tmp_path)],
+            env=child_env,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        info = json.loads(result.stdout)
+        assert info["native"] == info["python"]
+        assert info["native"]["llvm_version"] == [23, 0, 1]
+        assert info["native"]["source"] == "LLVMGetVersion"
+        assert info["native"]["comgr_path"] == str(library)
+        assert info["native"]["query_library_path"] == str(library)
+        expected = str(library) if variable == "ROCKE_COMGR_LIB" else library.name
+        assert info["native"]["requested_comgr"] == expected
+        results.append(info)
+    assert results[0] == results[1]
+
+
 def test_loaded_unqueryable_library_does_not_fall_through(native_detector, tmp_path):
     library = build_library(tmp_path, "void amd_comgr_get_version(void){}\n")
     info = run_probe(native_detector, library)
@@ -327,7 +407,7 @@ import rocke_engine
 kernel = IRBuilder("compiler_requirement").kernel
 serialized = serialize(kernel)
 for lower in (
-    lambda: lower_llvm.lower_kernel_to_llvm(kernel),
+    lambda: lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950"),
     lambda: rocke_engine.lower_serialized_ir(serialized, arch="gfx950"),
 ):
     try:
@@ -338,12 +418,12 @@ for lower in (
         raise AssertionError("AUTO emitted IR without compiler evidence")
 
 for flavor in lower_llvm.LLVM_FLAVORS:
-    py = lower_llvm.lower_kernel_to_llvm(kernel, llvm_flavor=flavor)
+    py = lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=flavor)
     native = rocke_engine.lower_serialized_ir(serialized, arch="gfx950", flavor=flavor)
     assert py == native
 
 os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
-assert lower_llvm.lower_kernel_to_llvm(kernel) == rocke_engine.lower_serialized_ir(
+assert lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950") == rocke_engine.lower_serialized_ir(
     serialized, arch="gfx950")
 try:
     comgr.build_hsaco_from_llvm_ir(py)

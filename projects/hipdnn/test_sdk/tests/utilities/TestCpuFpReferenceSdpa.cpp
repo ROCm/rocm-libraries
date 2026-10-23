@@ -193,6 +193,65 @@ TEST(TestCpuFpReferenceSdpaFp64, WithAttnMask)
     EXPECT_GT(o.getHostValue(0, 0, 1, 1), 3.0);
 }
 
+namespace
+{
+
+template <class MaskT>
+void expectTypedMaskMatchesFloatMask()
+{
+    // Skv=4 with distinct, exactly representable mask values: softmax is shift-invariant, so a
+    // uniform mask would pass even if the mask were misread.
+    Tensor<float> q({1, 1, 2, 4});
+    Tensor<float> k({1, 1, 4, 4});
+    Tensor<float> v({1, 1, 4, 4});
+    Tensor<float> oFloatMask({1, 1, 2, 4});
+    Tensor<float> oTypedMask({1, 1, 2, 4});
+    Tensor<float> floatMask({2, 4});
+    Tensor<MaskT> typedMask({2, 4});
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 301);
+    k.fillWithRandomValues(-1.0f, 1.0f, 302);
+    v.fillWithRandomValues(-1.0f, 1.0f, 303);
+
+    const std::array<std::array<float, 4>, 2> values
+        = {{{0.0f, -0.5f, 1.0f, -2.0f}, {0.25f, 1.5f, -1.0f, 0.5f}}};
+    for(size_t sq = 0; sq < 2; ++sq)
+    {
+        for(size_t skv = 0; skv < 4; ++skv)
+        {
+            const auto sqIdx = static_cast<int64_t>(sq);
+            const auto skvIdx = static_cast<int64_t>(skv);
+            floatMask.setHostValue(values.at(sq).at(skv), sqIdx, skvIdx);
+            typedMask.setHostValue(static_cast<MaskT>(values.at(sq).at(skv)), sqIdx, skvIdx);
+        }
+    }
+
+    CpuFpReferenceSdpa::forward<float, float, float, float, float, float>(
+        q, k, v, oFloatMask, std::nullopt, &floatMask);
+    CpuFpReferenceSdpa::forward<float, float, float, float, float, MaskT>(
+        q, k, v, oTypedMask, std::nullopt, &typedMask);
+
+    for(int sq = 0; sq < 2; ++sq)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            EXPECT_EQ(oTypedMask.getHostValue(0, 0, sq, d), oFloatMask.getHostValue(0, 0, sq, d));
+        }
+    }
+}
+
+} // namespace
+
+TEST(TestCpuFpReferenceSdpa, HalfMaskMatchesFloatMask)
+{
+    expectTypedMaskMatchesFloatMask<half>();
+}
+
+TEST(TestCpuFpReferenceSdpa, Bfloat16MaskMatchesFloatMask)
+{
+    expectTypedMaskMatchesFloatMask<bfloat16>();
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, GqaSupport)
 {
     // H=4, Hkv=2: each KV head serves 2 Q heads.
@@ -828,7 +887,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     v.setHostValue(4.0, 0, 0, 1, 1);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, false, &lse);
 
     // Manually compute expected LSE
     const float scale = 1.0f; // no attention scale given
@@ -900,7 +960,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
     v.fillWithRandomValues(-1.0, 1.0, 202);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, false, &lse);
 
     // Verify all LSE values are reasonable (no NaN, finite)
     for(int b = 0; b < 2; ++b)
@@ -933,7 +994,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     v.fillWithValue(1.0);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, true, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, true, &lse);
 
     // With uniform Q/K and causal mask:
     // sq=0: 1 valid position → smaller sumExp → smaller LSE
@@ -1011,7 +1073,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
 
     // Forward without mask
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o1, std::nullopt, noMask, false, &lse1);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o1, std::nullopt, noMask, false, &lse1);
 
     // Forward with mask that suppresses one position
     Tensor<float> mask({2, 2});
@@ -1046,7 +1109,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongRank)
             k.fillWithValue(1.0);
             v.fillWithValue(1.0);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }
@@ -1067,7 +1131,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongShape)
             k.fillWithRandomValues(-1.0, 1.0, 43);
             v.fillWithRandomValues(-1.0, 1.0, 44);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }
@@ -1088,7 +1153,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseMismatchedBatch)
             k.fillWithRandomValues(-1.0, 1.0, 51);
             v.fillWithRandomValues(-1.0, 1.0, 52);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }

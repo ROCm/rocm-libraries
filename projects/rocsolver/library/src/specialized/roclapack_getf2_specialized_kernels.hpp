@@ -75,7 +75,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
         // for each pivot (main loop)
 #pragma unroll DIM
-    for(I k = 0; k < DIM; ++k)
+    for(I k = 0; k < std::min(m, I(DIM)); ++k)
     {
         // share current column
         common[myrow] = rA[k];
@@ -183,7 +183,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
         // for each pivot (main loop)
 #pragma unroll DIM
-    for(I k = 0; k < DIM; ++k)
+    for(I k = 0; k < std::min(m, I(DIM)); ++k)
     {
         // share pivot row
         if(myrow == k)

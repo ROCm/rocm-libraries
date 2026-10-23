@@ -20,6 +20,7 @@
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.arch import ArchTarget
+from rocke.core.arch.target import _gfx1250_scale_combination_valid
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -75,7 +76,7 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, scale_a="e8m0", scale_b="e8m0"):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
     block_k = 16 if scale_mode == "scale16" else 32
@@ -84,7 +85,7 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
         a_dtype=a_kind,
         b_dtype=b_kind,
         c_dtype="fp32",
-        scales=("e8m0", "e8m0", block_k),
+        scales=(scale_a, scale_b, block_k),
         m=16,
         n=16,
         k=128,
@@ -318,6 +319,25 @@ CONFIGS.extend(
     for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
     for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
     if a != b
+)
+
+
+# Keep the supported FP4 scale cases in their original order.
+_MATRIX_DTYPES = ("fp8", "bf8", "fp6", "bf6", "fp4")
+_SCALE_DTYPES = ("e8m0", "e5m3", "e4m3")
+_SCALE_PAIRS = [
+    (a, b, sa, sb)
+    for a in _MATRIX_DTYPES
+    for b in _MATRIX_DTYPES
+    for sa in _SCALE_DTYPES
+    for sb in _SCALE_DTYPES
+    if (sa, sb) != ("e8m0", "e8m0") and _gfx1250_scale_combination_valid(a, b, sa, sb)
+]
+
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b, sa, sb in _SCALE_PAIRS
 )
 
 

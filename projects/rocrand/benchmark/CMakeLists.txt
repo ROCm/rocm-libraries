@@ -20,6 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+if(NOT WIN32 AND NOT HIP_COMPILER STREQUAL "nvcc")
+  find_package(amd_smi REQUIRED)
+endif()
+
 # Get the current branch, or fall back to DETACHED
 execute_process(
   COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD

@@ -27,7 +27,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.Tensile")
+M = importlib.import_module("tensilelite.Tensile")
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ def test_pure_helper_full_domain_enumeration():
 
 
 # ---------------------------------------------------------------------------
-# (2) Real-entry pin: call Tensile.Tensile(userArgs) and observe SystemExit
+# (2) Real-entry pin: call tensilelite.Tensile(userArgs) and observe SystemExit
 # ---------------------------------------------------------------------------
 
 def _make_fake_configs(tmpdir, n):

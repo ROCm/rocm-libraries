@@ -69,7 +69,7 @@ include(install_legacy_header_symlink)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# NOTE(hipccl2): temporary migration aid, default OFF. Pre-hipccl code doing
+# NOTE(hipccl2): temporary migration aid, default ON. Pre-hipccl code doing
 # `#include <rocprim/...>` (etc.) against a plain `-I<prefix>/include` breaks
 # once headers move to include/hipccl/rocprim above. When enabled, installs a
 # relative symlink at <prefix>/include/<component> pointing back into

@@ -218,7 +218,7 @@ class TestDefaultUniformKDecode(unittest.TestCase):
             self.assertTrue(is_valid_dgrad_spec(spec, "gfx950")[0])
 
     def test_aot_jobs_carry_it_in_spec_and_identity(self):
-        from benchmarks.common import kernel_sweep as ks
+        from kernels.conv import aot_jobs as ks
         from rocke.core.arch import ArchTarget
 
         target = ArchTarget.from_gfx("gfx950")

@@ -19,6 +19,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -29,7 +30,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
@@ -155,11 +156,66 @@ inline GraphId makeNilGraphId()
     return GraphId{};
 }
 
+/// A serialized single-node matmul C[m, n] = A[m, k] x B[k, n], so `graph.flops` = 2mnk;
+/// TestGraph has no node and so no work. @p graphId, when given, makes the catalog cacheable.
+class MatmulTestGraph
+{
+public:
+    MatmulTestGraph(int64_t m, int64_t n, int64_t k, std::optional<GraphId> graphId = std::nullopt)
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        GraphT graph;
+        graph.name = "matmul";
+        if(graphId.has_value())
+        {
+            graph.id = std::make_unique<Uuid>(
+                hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId));
+        }
+        const auto addTensor = [&graph](int64_t uid, int64_t rows, int64_t columns) {
+            auto tensor = std::make_unique<TensorAttributesT>();
+            tensor->uid = uid;
+            tensor->dims = {rows, columns};
+            tensor->strides = {columns, 1};
+            tensor->data_type = DataType::HALF;
+            graph.tensors.push_back(std::move(tensor));
+        };
+        addTensor(1, m, k);
+        addTensor(2, k, n);
+        addTensor(3, m, n);
+        MatmulAttributesT matmul;
+        matmul.a_tensor_uid = 1;
+        matmul.b_tensor_uid = 2;
+        matmul.c_tensor_uid = 3;
+        auto node = std::make_unique<NodeT>();
+        node->compute_data_type = DataType::FLOAT;
+        node->attributes.Set(matmul);
+        graph.nodes.push_back(std::move(node));
+        _buffer.Finish(Graph::Pack(_buffer, &graph));
+        _graph = std::make_unique<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper>(
+            _buffer.GetBufferPointer(), _buffer.GetSize());
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph() const
+    {
+        return *_graph;
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _buffer;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper> _graph;
+};
+
 inline DeviceProperties testDeviceProperties()
 {
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    // Non-zero memory facts, so corpus rows carry meaningful `device.*` columns.
+    properties.multiProcessorCount = 304;
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = size_t{64} * 1024;
     return properties;
 }
 
@@ -669,10 +725,13 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-/// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
-/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// The same engine as makeStateManager(), but carrying @p engine so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the identity empty, which
 /// disables the disk cache, so every test that does not opt in stays in-memory only.
-inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+/// @param winnerCacheCapacity Lets a test reach the eviction bound without recording the
+///        thousands of rankings the production default holds.
+inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
+    EngineIdentity engine, size_t winnerCacheCapacity = StateManager::DEFAULT_WINNER_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
@@ -688,7 +747,15 @@ inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& en
         "test.graph",
         "engine 'test fixture'",
         StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
-        engineName);
+        std::move(engine),
+        winnerCacheCapacity);
+}
+
+/// An engine identified by name alone: no revision, no UHD, no model hash. Pairs with
+/// `winnerCacheShardPath({engineName}, ...)`.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    return makeIdentifiedStateManager(EngineIdentity{engineName});
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing
@@ -769,6 +836,11 @@ struct StubContext
     bool hasPlan() const
     {
         return _plan != nullptr;
+    }
+
+    const hipdnn_plugin_sdk::IPlan<StubHandle>& plan() const
+    {
+        return *_plan;
     }
 
 private:

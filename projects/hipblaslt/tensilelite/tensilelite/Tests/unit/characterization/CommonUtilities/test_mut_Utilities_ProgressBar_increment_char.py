@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ProgressBar.increment``.
+``tensilelite.Common.Utilities.ProgressBar.increment``.
 
 Pins the default step size of ``increment`` (value=1): calling it with no
 argument advances ``priorValue`` by exactly one. Kills the mutant that flips
@@ -15,7 +15,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 
