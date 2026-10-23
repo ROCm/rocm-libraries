@@ -36,6 +36,7 @@ target_sources(tensilelite-codegen
         "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMLoop.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMScales.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMSetup.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMSteps.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SplitKReduce.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitTracker.cpp"

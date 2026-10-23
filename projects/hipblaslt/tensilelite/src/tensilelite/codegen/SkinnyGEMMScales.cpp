@@ -46,28 +46,61 @@ LdsAddress ldsAddress(IRBuilder &builder, RegisterRef base, int offset,
 
 // Loads every entry of the up-front vector, in order, before anything else
 // that reads memory, so that the in-order vmcnt wait of the first use covers
-// only the scales. Entry j is the iteration kBaseIter + j, whose offset the
-// first two entries compute from kBaseIter and the others from chunkBase[0].
+// only the scales. Entry j is the iteration base + j, with base the split's
+// first full iteration, or with PARTIAL_STEPS = 2 its first touched one, which
+// the head step owns. The first two entries compute their offset from the base
+// iteration and the others from the base offset. With partial steps the entries
+// are steered at k, as the vector may hold iterations that reach or pass it.
 void SkinnyGEMMEmitter::issueUpFrontScales() {
   scaleVector = vgpr(dims.upIters * dims.columns);
-  ensureChunkBase(0);
+  RegisterRef baseIter = startIter ? startIter->ref() : kBaseIter.ref();
+  std::optional<RegisterRange> headBase;
+  RegisterRef baseOffset = chunkBase.ref(0);
+  if (startIter) {
+    headBase = sgpr();
+    shiftLeft(builder, headBase->ref(), baseIter, dims.log2Ki);
+    baseOffset = headBase->ref();
+  } else {
+    ensureChunkBase(0);
+  }
   for (int entry = 0; entry < dims.upIters; ++entry) {
-    RegisterRef soffset = chunkBase.ref(0);
+    RegisterRef soffset = baseOffset;
     std::optional<RegisterRange> entryOffset;
     if (entry > 0) {
       entryOffset = sgpr();
       soffset = entryOffset->ref();
     }
     if (entry == 1) {
-      builder.addi32(soffset, kBaseIter.ref(), 1);
+      builder.addi32(soffset, baseIter, 1);
       shiftLeft(builder, soffset, soffset, dims.log2Ki);
     } else if (entry > 1) {
-      builder.addi32(soffset, chunkBase.ref(0), entry * dims.ki);
+      builder.addi32(soffset, baseOffset, entry * dims.ki);
     }
-    issueScales(scaleVector->ref(entry * dims.columns, dims.columns), soffset);
+    RegisterRef raw = scaleVector->ref(entry * dims.columns, dims.columns);
+    if (dims.partialSteps == 0) {
+      issueScales(raw, soffset);
+      continue;
+    }
+    RegisterRange kAvail = sgpr();
+    builder.subi32(kAvail.ref(), k.ref(), soffset);
+    issueScalesWithinK(raw, soffset, kAvail.ref());
   }
-  // No scale load remains in the loop.
+  // No scale load remains in the loop or the steps.
   sBase.release();
+  scaleGroup.reset();
+}
+
+// The up-front vector entry of a physical iteration, vecOff + it (vecOff is 1
+// when PARTIAL_STEPS = 2 and the split starts inside an iteration, whose entry
+// 0 belongs to the head step). storage receives the sum when there is one.
+RegisterRef
+SkinnyGEMMEmitter::vectorEntry(RegisterRef physical,
+                               std::optional<RegisterRange> &storage) {
+  if (!vecOff)
+    return physical;
+  storage = sgpr();
+  builder.addi32(storage->ref(), physical, vecOff->ref());
+  return storage->ref();
 }
 
 // Loads issued after the up-front load at index: the later up-front loads and

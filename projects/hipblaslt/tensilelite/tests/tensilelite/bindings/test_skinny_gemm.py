@@ -78,7 +78,6 @@ def test_kernel_name(knobs, expected):
 
 
 UNIMPLEMENTED_FEATURES = [
-    ({"partialSteps": 1}, "partialSteps"),
     ({"grid3d": False}, "grid3d"),
     ({"group": 2}, "group"),
     ({"numXcds": 8}, "numXcds"),

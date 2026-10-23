@@ -877,8 +877,6 @@ def missingMilestones(p: Problem) -> list[str]:
     """The later milestones the emitter needs for the problem; empty when it
     runs with the current one."""
     missing = []
-    if p.partial_steps != 0:
-        missing.append("M8 (partial steps)")
     if not p.grid3d:
         missing.append("M9 (persistent launch / tile reordering)")
     return missing

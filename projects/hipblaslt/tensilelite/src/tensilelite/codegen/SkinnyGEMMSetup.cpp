@@ -122,7 +122,8 @@ void divideByConstant(IRBuilder &builder, RegisterRef quotient,
 
 SkinnyDims::SkinnyDims(const SkinnyGEMMConfig &config)
     : bm(config.bm), tn(config.tn), lanesK(config.lanesK), waves(config.waves),
-      prefetch(config.prefetch), upIters(config.upIters) {
+      prefetch(config.prefetch), upIters(config.upIters),
+      partialSteps(config.partialSteps) {
   columns = bm + tn;
   accumulators = bm * tn;
   columnGroups = 64 / lanesK;
@@ -225,6 +226,8 @@ SkinnyGEMMEmitter::SkinnyGEMMEmitter(Kernel &kernel,
       addresses(vgpr(dims.scalesShared ? 1 : 2)),
       ldsStage(dims.scalesShared ? std::optional<RegisterRange>(vgpr())
                                  : std::nullopt),
+      scaleGroup(dims.partialSteps != 0 ? std::optional<RegisterRange>(vgpr())
+                                        : std::nullopt),
       sRsrc(sgpr(4, 4)), wRsrc(sgpr(4, 4)), sSclRsrc(sgpr(4, 4)),
       wSclRsrc(sgpr(4, 4)), dRsrc(sgpr(4, 4)), wsRsrc(sgpr(4, 4)), k(sgpr()),
       spk(sgpr()), mn(sgpr()), dStrideS(sgpr()), dStrideW(sgpr()),
@@ -232,7 +235,17 @@ SkinnyGEMMEmitter::SkinnyGEMMEmitter(Kernel &kernel,
       wideCols(sgpr()), contigS(sgpr()), s0(sgpr()), nIterFull(sgpr()),
       fitRot(dims.upIters != 1 ? std::optional<RegisterRange>(sgpr())
                                : std::nullopt),
-      kBaseIter(sgpr()), chunkBase(sgpr(4)), chunkBaseReady(4, false),
+      kBaseIter(sgpr()),
+      splitStart(dims.partialSteps == 2 ? std::optional<RegisterRange>(sgpr())
+                                        : std::nullopt),
+      splitEnd(dims.partialSteps != 0 ? std::optional<RegisterRange>(sgpr())
+                                      : std::nullopt),
+      startIter(dims.partialSteps == 2 ? std::optional<RegisterRange>(sgpr())
+                                       : std::nullopt),
+      vecOff(dims.partialSteps == 2 && dims.upIters >= 2
+                 ? std::optional<RegisterRange>(sgpr())
+                 : std::nullopt),
+      chunkBase(sgpr(4)), chunkBaseReady(4, false),
       sValid(sgpr(2 * dims.bm, 2)), wValid(sgpr(2 * dims.tn, 2)) {}
 
 RegisterRange SkinnyGEMMEmitter::sgpr(int count, int alignment) {
@@ -383,21 +396,44 @@ void SkinnyGEMMEmitter::dispatchPaths(const SetupScalars &scalars,
 void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars) {
   RegisterRef ty = kernel.workgroupIdY().ref();
   RegisterRef kz = kernel.workgroupIdZ().ref();
-  RegisterRange ks = sgpr();
-  RegisterRange ke = sgpr();
+  // With partial steps the bounds outlive the setup, in members.
+  std::optional<RegisterRange> startLocal;
+  std::optional<RegisterRange> endLocal;
+  if (!splitStart)
+    startLocal = sgpr();
+  if (!splitEnd)
+    endLocal = sgpr();
+  RegisterRef ks = splitStart ? splitStart->ref() : startLocal->ref();
+  RegisterRef ke = splitEnd ? splitEnd->ref() : endLocal->ref();
   // Only the last split can be shorter than spk.
-  builder.muli32(ks.ref(), kz, spk.ref());
-  builder.addi32(ke.ref(), ks.ref(), spk.ref());
+  builder.muli32(ks, kz, spk.ref());
+  builder.addi32(ke, ks, spk.ref());
   builder.create<rocisa::SMinI32>(ke.container(), ke.container(),
                                   k.container());
-  builder.create<rocisa::SAShiftRightI32>(ke.container(), dims.log2Ki,
+  // The steps need ke itself, so its iteration index goes to a temporary.
+  std::optional<RegisterRange> endIterLocal;
+  RegisterRef keIter = ke;
+  if (splitEnd) {
+    endIterLocal = sgpr();
+    keIter = endIterLocal->ref();
+  }
+  builder.create<rocisa::SAShiftRightI32>(keIter.container(), dims.log2Ki,
                                           ke.container());
-  builder.addi32(kBaseIter.ref(), ks.ref(), dims.ki - 1);
+  builder.addi32(kBaseIter.ref(), ks, dims.ki - 1);
   builder.create<rocisa::SAShiftRightI32>(kBaseIter.container(), dims.log2Ki,
                                           kBaseIter.container());
-  builder.subi32(nIterFull.ref(), ke.ref(), kBaseIter.ref());
+  builder.subi32(nIterFull.ref(), keIter, kBaseIter.ref());
   builder.create<rocisa::SMaxI32>(nIterFull.container(), nIterFull.container(),
                                   0);
+  if (startIter)
+    shiftRight(builder, startIter->ref(), ks, dims.log2Ki);
+  if (vecOff) {
+    // The head step owns entry 0 of the up-front vector when the split starts
+    // inside an iteration.
+    RegisterRange misaligned = sgpr();
+    bitAnd(builder, misaligned.ref(), ks, dims.ki - 1);
+    builder.create<rocisa::SCSelectB32>(vecOff->container(), 1, 0);
+  }
   if (fitRot) {
     RegisterRange rot = sgpr();
     computeRotation(scalars, rot.ref());
@@ -708,6 +744,8 @@ void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
 void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
                                        const LaneValues &lane) {
   constexpr int outOfRange = -1;
+  if (scaleGroup)
+    bitAnd(builder, scaleGroup->ref(), lane.sclOff.ref(), -256);
   for (int r = 0; r < dims.bm; ++r) {
     RegisterRange col = sgpr();
     RegisterRange row = sgpr();

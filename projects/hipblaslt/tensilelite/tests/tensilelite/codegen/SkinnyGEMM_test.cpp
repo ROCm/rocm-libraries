@@ -19,6 +19,7 @@ namespace {
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
+// The symbol follows the reference's format, each knob with its value.
 TEST(SkinnyGEMM, KernelNameMatchesTheReference) {
   EXPECT_EQ(skinnyGEMMKernelName({}), "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_"
                                       "PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_"
@@ -66,6 +67,7 @@ std::vector<SkinnyGEMMConfig> invalidConfigs() {
   return configs;
 }
 
+// Out-of-range knobs are rejected by the name and by the emitter.
 TEST(SkinnyGEMM, RejectsInvalidKnobs) {
   Target target = Target::get("gfx950");
   for (const SkinnyGEMMConfig &config : invalidConfigs()) {
@@ -84,12 +86,8 @@ std::string rejectionMessage(const SkinnyGEMMConfig &config) {
   return {};
 }
 
+// The features of later milestones are rejected with a message naming the knob.
 TEST(SkinnyGEMM, RejectsUnimplementedFeatures) {
-  SkinnyGEMMConfig partial;
-  partial.partialSteps = 2;
-  EXPECT_EQ(rejectionMessage(partial),
-            "partialSteps != 0 (partial K steps) is not implemented yet");
-
   SkinnyGEMMConfig persistent;
   persistent.grid3d = false;
   EXPECT_EQ(rejectionMessage(persistent),
@@ -104,6 +102,7 @@ TEST(SkinnyGEMM, RejectsUnimplementedFeatures) {
   EXPECT_EQ(rejectionMessage(remapped), "grid3d requires numXcds = 1");
 }
 
+// A configuration that needs more registers than the target has is rejected.
 TEST(SkinnyGEMM, RejectsConfigsOverTheRegisterBudget) {
   SkinnyGEMMConfig wide;
   wide.bm = 8;
@@ -116,9 +115,10 @@ TEST(SkinnyGEMM, RejectsConfigsOverTheRegisterBudget) {
 }
 
 SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch,
-                        int upIters = 0) {
+                        int upIters = 0, int partialSteps = 0) {
   SkinnyGEMMConfig result;
   result.upIters = upIters;
+  result.partialSteps = partialSteps;
   result.bm = bm;
   result.tn = tn;
   result.lanesK = lanesK;
@@ -131,8 +131,9 @@ std::string emitted(const SkinnyGEMMConfig &config) {
   return emitSkinnyGEMM(Target::get("gfx950"), config);
 }
 
+bool isBlank(char c) { return c == ' ' || c == '\t'; }
+
 std::string trimmed(const std::string &line) {
-  auto isBlank = [](char c) { return c == ' ' || c == '\t'; };
   std::string::const_iterator first =
       std::find_if_not(line.begin(), line.end(), isBlank);
   std::string::const_reverse_iterator last =
@@ -190,6 +191,7 @@ std::string lgkmcnt(int count) {
   return "s_waitcnt lgkmcnt(" + std::to_string(count) + ")";
 }
 
+// The kernel declares the reference's kernargs, hidden arguments and ids.
 TEST(SkinnyGEMM, AssemblyHasTheReferenceAbi) {
   std::string assembly = emitted(config(1, 1, 16, 2, 1));
   SCOPED_TRACE("assembly:\n" + assembly);
@@ -252,6 +254,7 @@ TEST(SkinnyGEMM, PrimarySteadyLoopWaits) {
   EXPECT_EQ(expected[1], "s_waitcnt vmcnt(8)");
 }
 
+// With PF = 2 the scales are decoded first and one more slot is in flight.
 TEST(SkinnyGEMM, DecodeFirstSteadyLoopWaits) {
   std::string assembly = emitted(config(1, 1, 16, 1, 2));
   SCOPED_TRACE("assembly:\n" + assembly);
@@ -333,6 +336,7 @@ TEST(SkinnyGEMM, RemainderArmsAndSteadyLoopEnd) {
             std::string::npos);
 }
 
+// Each chunk decodes its scale, converts and accumulates, then refills.
 TEST(SkinnyGEMM, PerChunkOpOrder) {
   std::string assembly = emitted(config(1, 1, 16, 1, 1));
   SCOPED_TRACE("assembly:\n" + assembly);
@@ -398,7 +402,7 @@ TEST(SkinnyGEMM, UpFrontLoadsComeFirst) {
       loads.push_back(line.substr(0, line.find(' ')));
   }
   constexpr int scaleLoads = 5 * 2;
-  ASSERT_GT(loads.size(), static_cast<size_t>(scaleLoads));
+  ASSERT_GT(static_cast<int>(loads.size()), scaleLoads);
   for (int i = 0; i < scaleLoads; ++i)
     EXPECT_EQ(loads[i], "buffer_load_dword") << i;
   EXPECT_EQ(loads[scaleLoads], "buffer_load_dwordx4");
@@ -486,6 +490,7 @@ TEST(SkinnyGEMM, UpFrontSelectChainIsEntryOuter) {
   EXPECT_EQ(countLinesContaining(text, "buffer_load_dword "), 0);
 }
 
+// The up-front loops wait per chunk behind the slots in flight.
 TEST(SkinnyGEMM, UpFrontLoopWaits) {
   // Every chunk of the loop waits for its two columns behind the next slot:
   // L = 8 loads per slot and one more slot in flight, so 15 and 14.
@@ -539,19 +544,21 @@ TEST(SkinnyGEMM, UpFrontLdsSize) {
   EXPECT_NE(message.find("config exceeds the LDS budget: "), std::string::npos);
 }
 
+// Whether an s_and_b32 of the assembly ends in the operand mask.
+bool masksBy(const std::string &assembly, std::string_view mask) {
+  std::istringstream stream(assembly);
+  for (std::string line; std::getline(stream, line);) {
+    line = trimmed(line);
+    if (line.rfind("s_and_b32", 0) == 0 && line.size() > mask.size() &&
+        line.compare(line.size() - mask.size(), mask.size(), mask) == 0)
+      return true;
+  }
+  return false;
+}
+
 // The rotation of up-front scales is modulo the literal UP_ITERS, a mask for a
 // power of two, LLVM's magic division otherwise and nothing for one entry.
 TEST(SkinnyGEMM, UpFrontRotationModulusIsUpIters) {
-  auto masksBy = [](const std::string &assembly, std::string_view mask) {
-    std::istringstream stream(assembly);
-    for (std::string line; std::getline(stream, line);) {
-      line = trimmed(line);
-      if (line.rfind("s_and_b32", 0) == 0 && line.size() > mask.size() &&
-          line.compare(line.size() - mask.size(), mask.size(), mask) == 0)
-        return true;
-    }
-    return false;
-  };
   std::string ring = emitted(config(1, 1, 64, 4, 2));
   EXPECT_NE(ring.find("v_rcp_iflag_f32"), std::string::npos);
 
@@ -579,6 +586,187 @@ TEST(SkinnyGEMM, UpFrontRotationModulusIsUpIters) {
   EXPECT_EQ(countLinesContaining(joined(loop), ", 23, "), 0);
   // Chunk 0 of the two columns is the only decode that shifts by 23.
   EXPECT_EQ(countLinesContaining(one, ", 23, "), 2);
+}
+
+// The lines of the assembly, trimmed.
+std::vector<std::string> allLines(const std::string &assembly) {
+  std::vector<std::string> lines;
+  std::istringstream stream(assembly);
+  for (std::string line; std::getline(stream, line);)
+    lines.push_back(trimmed(line));
+  return lines;
+}
+
+// The compute of the last partial step: the lines after the last chunk-end
+// label up to the last dot before the epilogue's first DPP add.
+std::vector<std::string> stepCompute(const std::string &assembly) {
+  std::vector<std::string> lines = allLines(assembly);
+  int first = 0;
+  int last = 0;
+  for (int i = 0; i < std::ssize(lines); ++i) {
+    if (lines[i].rfind("label_step_chunk_end_", 0) == 0)
+      first = i;
+    if (lines[i].find("quad_perm") != std::string::npos)
+      break;
+    if (lines[i].rfind("v_dot2_f32_bf16", 0) == 0)
+      last = i;
+  }
+  return {lines.begin() + first, lines.begin() + last + 1};
+}
+
+// The step code is emitted once whatever the number of steps: four chunk
+// tests, and a back edge only for the loop over the head and the tail.
+TEST(SkinnyGEMM, PartialStepBodyIsEmittedOnce) {
+  for (int upIters : {0, 2}) {
+    SCOPED_TRACE("upIters " + std::to_string(upIters));
+    std::string none = emitted(config(1, 4, 16, 1, 1, upIters, 0));
+    EXPECT_EQ(countLinesContaining(none, "s_bitcmp1_b32"), 0);
+    EXPECT_EQ(countLinesContaining(none, "label_step_loop_"), 0);
+
+    std::string tail = emitted(config(1, 4, 16, 1, 1, upIters, 1));
+    EXPECT_EQ(countLinesContaining(tail, "s_bitcmp1_b32"), 4);
+    EXPECT_EQ(countLinesContaining(tail, "s_cbranch_scc1 label_step_loop_"), 0);
+
+    std::string both = emitted(config(1, 4, 16, 1, 1, upIters, 2));
+    EXPECT_EQ(countLinesContaining(both, "s_bitcmp1_b32"), 4);
+    EXPECT_EQ(countLinesContaining(both, "s_cbranch_scc1 label_step_loop_"), 1);
+  }
+}
+
+// Every dword of a tail chunk is loaded, waited for and masked at once: the
+// AND consumes the load just issued. The steering and mask of a dword are
+// computed once per chunk and dword, as a left shift of -1 for the lo bound
+// and a right shift of -1 for the hi bound.
+TEST(SkinnyGEMM, TailDwordsWaitForEachLoad) {
+  constexpr int columns = 5;
+  constexpr int chunks = 4;
+  constexpr int dwords = 4;
+  for (int partialSteps : {1, 2}) {
+    SCOPED_TRACE("partialSteps " + std::to_string(partialSteps));
+    std::string assembly = emitted(config(1, 4, 16, 1, 1, 0, partialSteps));
+    std::vector<std::string> lines = allLines(assembly);
+    int first = 0;
+    int last = 0;
+    for (int i = 0; i < std::ssize(lines); ++i) {
+      if (first == 0 && lines[i].rfind("s_bitcmp1_b32", 0) == 0)
+        first = i;
+      if (lines[i].rfind("label_step_chunk_end_", 0) == 0)
+        last = i;
+    }
+    // The chunk loads of the step all follow the first chunk test.
+    int masked = 0;
+    int leftMasks = 0;
+    int rightMasks = 0;
+    for (int i = first; i + 2 < last; ++i) {
+      const std::string &line = lines[i];
+      bool minusOne =
+          line.size() > 4 && line.compare(line.size() - 4, 4, ", -1") == 0;
+      if (line.rfind("v_lshlrev_b32", 0) == 0 && minusOne)
+        ++leftMasks;
+      if (line.rfind("v_lshrrev_b32", 0) == 0 && minusOne)
+        ++rightMasks;
+      if (line.rfind("buffer_load_dword ", 0) != 0)
+        continue;
+      EXPECT_EQ(lines[i + 1], vmcnt(0));
+      EXPECT_EQ(lines[i + 2].rfind("v_and_b32", 0), 0u);
+      ++masked;
+    }
+    EXPECT_EQ(masked, chunks * dwords * columns);
+    EXPECT_EQ(rightMasks, chunks * dwords);
+    EXPECT_EQ(leftMasks, partialSteps == 2 ? chunks * dwords : 0);
+  }
+}
+
+// A step with ring scales waits only for its own scale loads: the gather waits
+// for column c behind the NC - 1 - c later scale loads, so the last wait is for
+// everything, and no compute wait follows.
+TEST(SkinnyGEMM, RingStepWaitsOnlyForItsScales) {
+  constexpr int columns = 2;
+  std::string assembly = emitted(config(1, 1, 16, 1, 1, 0, 1));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> expected;
+  for (int c = 0; c < columns; ++c)
+    expected.push_back(vmcnt(columns - 1 - c));
+  for (int c = 0; c < columns; ++c)
+    expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
+  EXPECT_EQ(waitsOf(stepCompute(assembly)), expected);
+}
+
+// With up-front scales a step issues no scale load, and the first convert of
+// column c of every chunk waits behind the NC - 1 - c later columns of its own
+// chunk, the only loads certain to be in flight.
+TEST(SkinnyGEMM, UpFrontStepWaitsPerChunk) {
+  constexpr int columns = 5;
+  constexpr int chunks = 4;
+  std::string assembly = emitted(config(1, 4, 16, 1, 2, 4, 1));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> compute = stepCompute(assembly);
+  std::vector<std::string> expected;
+  for (int chunk = 0; chunk < chunks; ++chunk)
+    for (int c = 0; c < columns; ++c)
+      expected.push_back(vmcnt(columns - 1 - c));
+  EXPECT_EQ(waitsOf(compute), expected);
+  for (int i = 0; i + 1 < std::ssize(compute); ++i)
+    if (compute[i].rfind("s_waitcnt", 0) == 0)
+      EXPECT_EQ(compute[i + 1].rfind("v_cvt_scalef32_pk_bf16_fp8", 0), 0u);
+}
+
+// The wait before a zero arm of a step: the newest prologue load of the chunk's
+// registers is followed by the later prologue slots, the rest of its own slot's
+// loads are before it, and the step's NC scale loads were issued on every path.
+TEST(SkinnyGEMM, ZeroedChunkWaitsForPrologueLoads) {
+  constexpr int columns = 2;
+  constexpr int scaleLoads = columns;
+  constexpr int loadsPerSlot = scaleLoads + 4 * columns;
+  for (int prefetch : {1, 2}) {
+    SCOPED_TRACE("prefetch " + std::to_string(prefetch));
+    std::vector<std::string> lines =
+        allLines(emitted(config(1, 1, 16, 1, prefetch, 0, 1)));
+    std::vector<std::string> waits;
+    for (int i = 0; i + 1 < std::ssize(lines); ++i)
+      if (lines[i].rfind("label_step_zero_", 0) == 0)
+        waits.push_back(lines[i + 1]);
+    std::vector<std::string> expected;
+    for (int chunk = 0; chunk < 4; ++chunk) {
+      int newest = scaleLoads + chunk * columns + columns - 1;
+      expected.push_back(vmcnt(loadsPerSlot - 1 - newest +
+                               (prefetch - 1) * loadsPerSlot + scaleLoads));
+    }
+    EXPECT_EQ(waits, expected);
+  }
+  // Without a ring there is no prologue load to wait for.
+  std::vector<std::string> lines =
+      allLines(emitted(config(1, 1, 16, 1, 0, 0, 1)));
+  int zeroArms = 0;
+  for (int i = 0; i + 1 < std::ssize(lines); ++i) {
+    if (lines[i].rfind("label_step_zero_", 0) != 0)
+      continue;
+    ++zeroArms;
+    EXPECT_EQ(lines[i + 1].rfind("v_mov_b32", 0), 0u);
+  }
+  EXPECT_EQ(zeroArms, 4);
+}
+
+// The up-front entries of a split with partial steps are steered at k: every
+// scale load ORs its voffset with the sign mask, which PARTIAL_STEPS = 0 does
+// not need.
+TEST(SkinnyGEMM, UpFrontEntriesSteerAtK) {
+  constexpr int entries = 3;
+  constexpr int columns = 2;
+  for (int partialSteps : {0, 1, 2}) {
+    SCOPED_TRACE("partialSteps " + std::to_string(partialSteps));
+    std::vector<std::string> lines =
+        allLines(emitted(config(1, 1, 16, 1, 2, entries, partialSteps)));
+    int loads = 0;
+    for (int i = 1; i < std::ssize(lines) && loads < entries * columns; ++i) {
+      if (lines[i].rfind("buffer_load_dword ", 0) != 0)
+        continue;
+      ++loads;
+      bool steered = lines[i - 1].rfind("v_or_b32", 0) == 0;
+      EXPECT_EQ(steered, partialSteps != 0) << lines[i - 1];
+    }
+    EXPECT_EQ(loads, entries * columns);
+  }
 }
 
 // Counts the v_nop that precede each DPP add of the reduction of a single
@@ -611,6 +799,7 @@ std::vector<int> nopsBeforeDpp(const std::string &assembly) {
   return counts;
 }
 
+// The reduction adds one DPP step per doubling of the cluster.
 TEST(SkinnyGEMM, ReduceForEveryLanesK) {
   // Three nops cover the dot's write, two every DPP read of a VALU result.
   EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 4, 1, 1))),
@@ -648,6 +837,7 @@ TEST(SkinnyGEMM, ReduceForEveryLanesK) {
   EXPECT_EQ(lanes4.find("row_half_mirror"), std::string::npos);
 }
 
+// Vector stores exist only when the runs are dword aligned.
 TEST(SkinnyGEMM, VectorStoresOnlyWhenPreconditionHolds) {
   // One element per lane has no run to vectorize and no orientation split.
   std::string scalar = emitted(config(1, 1, 16, 1, 1));
@@ -728,6 +918,7 @@ TEST(SplitKReduce, EmitsTheReferenceSchedule) {
                  "buffer_store_short", "s_mov_b64 exec", "s_endpgm"});
 }
 
+// The reduce kernel declares the reference's hidden arguments.
 TEST(SplitKReduce, DeclaresTheReferenceArguments) {
   std::string assembly = emitSplitKReduce(Target::get("gfx950"));
   SCOPED_TRACE("assembly:\n" + assembly);

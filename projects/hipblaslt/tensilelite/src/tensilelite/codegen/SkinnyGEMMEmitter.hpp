@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 // Private header of the skinny MXFP8 GEMM emitter, which implements @gemm,
-// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for GRID_3D = 1 and
-// PARTIAL_STEPS = 0, with ring scales (UP_ITERS = 0) or up-front scales. The
-// method names follow the MLIR functions: the setup is in SkinnyGEMMSetup.cpp,
-// the K loop in SkinnyGEMMLoop.cpp, the up-front scales in
-// SkinnyGEMMScales.cpp and the epilogue in SkinnyGEMMEpilogue.cpp.
+// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for GRID_3D = 1 and any
+// PARTIAL_STEPS, with ring scales (UP_ITERS = 0) or up-front scales. The method
+// names follow the MLIR functions: the setup is in SkinnyGEMMSetup.cpp, the K
+// loop in SkinnyGEMMLoop.cpp, the up-front scales in SkinnyGEMMScales.cpp, the
+// partial K steps in SkinnyGEMMSteps.cpp and the epilogue in
+// SkinnyGEMMEpilogue.cpp.
 
 #ifndef ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
 #define ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
@@ -15,6 +16,8 @@
 #include <tensilelite/codegen/Kernel.hpp>
 #include <tensilelite/codegen/Registers.hpp>
 #include <tensilelite/codegen/SkinnyGEMM.hpp>
+
+#include "instruction/mem.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -39,6 +42,8 @@ struct SkinnyDims {
   int bm, tn, lanesK, waves, prefetch;
   /// UP_ITERS up-front scale entries per split, 0 for ring scales.
   int upIters;
+  /// PARTIAL_STEPS: 0, 1 (tail step only) or 2 (head and tail steps).
+  int partialSteps;
   /// NC = BM + TN columns per lane.
   int columns;
   /// P = BM * TN accumulators per lane.
@@ -72,6 +77,9 @@ struct SkinnyDims {
   /// Bytes between the chunks of a lane, 16 * S.
   int chunkStride;
 };
+
+/// The modifiers of a buffer load or store addressed with a voffset.
+rocisa::MUBUFModifiers offen();
 
 /// Returns log2 of a power of two.
 int log2Exact(int value);
@@ -131,6 +139,9 @@ struct SlotContext {
   /// vector, as the vector starts at the split's first iteration. Only set
   /// with at least 2 up-front entries.
   std::optional<RegisterRef> vectorIndex;
+  /// Whether the slot is a partial step's, whose chunk loads sit behind dynamic
+  /// branches that may load nothing.
+  bool partialStep = false;
 };
 
 /// Emits the GEMM kernel body.
@@ -246,16 +257,21 @@ private:
   void ensureChunkBase(int chunk);
   void wrapIteration(RegisterRef dst, RegisterRef sum);
   void wrapZero(RegisterRef dst);
-  void issueScales(RegisterRef raw, RegisterRef soffset);
-  void issueChunk(int slot, int chunk, RegisterRef soffset);
+  void issueScales(RegisterRef raw, RegisterRef soffset,
+                   std::optional<RegisterRef> neg = std::nullopt);
+  void issueChunk(int slot, int chunk, RegisterRef soffset,
+                  std::optional<RegisterRef> neg = std::nullopt);
   void refillOffset(const SlotContext &context, RegisterRef soffset);
   void startRefill(const SlotContext &context, RegisterRef soffset);
   void refillChunk(const SlotContext &context, int chunk, RegisterRef soffset);
   void waitForLoad(SlotLoadPosition where);
+  void waitForVectorLoads(int outstanding);
   RegisterRange gatherSlotScales(const SlotContext &context);
   void gatherSlotScales(RegisterRef raw, RegisterRef lo, int firstOutstanding);
   void permSlotScales(RegisterRef hi, RegisterRef lo, RegisterRef out);
   void decodeScales(RegisterRef dst, RegisterRef packed, int chunk);
+  void waitBeforeFirstUse(const SlotContext &context, int chunk, int column,
+                          int ownRefill);
   void computeChunk(const SlotContext &context, int chunk, RegisterRef scales);
   void processSlot(const SlotContext &context);
   void processStaged(const SlotContext &context, RegisterRef packed);
@@ -277,6 +293,47 @@ private:
   std::optional<RegisterRange> selectScales(const SlotContext &context);
   void decodeHoistedScales();
   int upFrontLoadsAfter(int index) const;
+  RegisterRef vectorEntry(RegisterRef physical,
+                          std::optional<RegisterRange> &storage);
+
+  // Partial steps (SkinnyGEMMSteps.cpp).
+  //
+  // The bounds of a partial step (@run_partial_step), SGPRs: the K offset of
+  // its iteration, the bytes [lo, hi) of it that the split keeps (lo is absent
+  // when it is the literal 0 of a tail-only step), the K extent from the
+  // iteration on (ring scales) and the up-front vector entry (two entries or
+  // more), with laneBytes the VGPR of the lane's byte offset in a chunk 0.
+  struct PartialStep {
+    RegisterRef iterOff;
+    std::optional<RegisterRef> lo;
+    RegisterRef hi;
+    std::optional<RegisterRef> kAvail;
+    std::optional<RegisterRef> vectorIndex;
+    RegisterRef laneBytes;
+  };
+
+  // The steering, mask and soffset of one dword of a tail chunk.
+  struct TailDword {
+    RegisterRef steer;
+    RegisterRef soffset;
+    RegisterRef mask;
+  };
+
+  void allocateStepRawScales();
+  void runTailStep();
+  void runHeadAndTailSteps();
+  void runPartialStep(const PartialStep &step);
+  void loadPartialStep(const PartialStep &step);
+  void computePartialStep(const PartialStep &step);
+  void issueScalesWithinK(RegisterRef raw, RegisterRef soffset,
+                          RegisterRef kAvail);
+  void straddlesInChunk(RegisterRef dst, RegisterRef bound);
+  void loadStepChunk(const PartialStep &step, int chunk,
+                     RegisterRef partialChunks);
+  void loadTailDwords(const PartialStep &step, int chunk, RegisterRef soffset,
+                      RegisterRef laneRem, std::optional<RegisterRef> laneLo);
+  void loadMaskedDword(int chunk, int column, int dword, RegisterRef voffset,
+                       const TailDword &tail);
 
   // Epilogue (SkinnyGEMMEpilogue.cpp).
   void emitEpilogue();
@@ -285,6 +342,8 @@ private:
   int runLength(bool skinnyContiguous) const;
   int redIndex(const RedLayout &layout, int r, int t) const;
   void waitForEpilogueRegisters(const EpilogueState &state);
+  void waitForPrologueLoads(const std::vector<RegisterRef> &written,
+                            int issuedSince);
   void reduceAccumulators(const EpilogueState &state);
   int reduceAccumulator(const EpilogueState &state, int r, int t);
   void emitDpp(RegisterRef dst, RegisterRef src, const DppStep &step);
@@ -327,6 +386,9 @@ private:
   // Up-front scales: the thread's LDS staging address (shared only), the raw
   // entries that pack in place, and for one entry the decoded chunk scales.
   std::optional<RegisterRange> ldsStage;
+  // With partial steps, the K offset of the 8-block scale group of the lane's
+  // load role, sclOff & -256 (@scl_group).
+  std::optional<RegisterRange> scaleGroup;
   std::optional<RegisterRange> scaleVector;
   std::vector<RegisterRange> hoistedScales;
 
@@ -340,6 +402,15 @@ private:
   // The rotation, absent with one up-front entry, where it is the constant 0.
   std::optional<RegisterRange> fitRot;
   RegisterRange kBaseIter;
+  // The split's K range [ks, ke) with partial steps: ks when the split can
+  // start inside an iteration (PARTIAL_STEPS = 2), ke whenever it can end
+  // inside one, and startIter = floor(ks / KI).
+  std::optional<RegisterRange> splitStart;
+  std::optional<RegisterRange> splitEnd;
+  std::optional<RegisterRange> startIter;
+  // The first full iteration's up-front vector entry: 1 when the split starts
+  // inside an iteration, whose entry 0 belongs to the head step, else 0.
+  std::optional<RegisterRange> vecOff;
   // chunkBase[0] = kBaseIter << log2KI and chunkBase[u] = chunkBase[0] + u * 16
   // * S, emitted when first needed.
   RegisterRange chunkBase;

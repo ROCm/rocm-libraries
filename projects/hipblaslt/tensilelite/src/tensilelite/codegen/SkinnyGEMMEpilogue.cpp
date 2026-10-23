@@ -138,12 +138,21 @@ void SkinnyGEMMEmitter::emitEpilogueVariant(bool skinnyContiguous) {
 
 // The epilogue overwrites the ring registers, and a prologue load that was
 // never consumed (a split with fewer than PF iterations) may still be in
-// flight. Loads complete in order, so waiting for the newest one that wrote an
-// epilogue register leaves only the loads issued after it outstanding.
+// flight.
 void SkinnyGEMMEmitter::waitForEpilogueRegisters(const EpilogueState &state) {
   std::vector<RegisterRef> written = {state.red, state.off};
   if (state.wBase)
     written.push_back(*state.wBase);
+  waitForPrologueLoads(written, /*issuedSince=*/0);
+}
+
+// Waits until no prologue load that writes one of the registers in written is
+// in flight. A prologue load stays in flight when the split has fewer full
+// iterations than PF and its slot is never consumed; loads complete in order,
+// so the wait allows the later prologue loads and the issuedSince loads that
+// every path issued after the prologue.
+void SkinnyGEMMEmitter::waitForPrologueLoads(
+    const std::vector<RegisterRef> &written, int issuedSince) {
   int count = static_cast<int>(prologueLoads.size());
   for (int newest = count - 1; newest >= 0; --newest) {
     bool conflict =
@@ -152,9 +161,7 @@ void SkinnyGEMMEmitter::waitForEpilogueRegisters(const EpilogueState &state) {
         });
     if (!conflict)
       continue;
-    int outstanding = count - 1 - newest;
-    builder.createWaitCnt(WaitCounts{
-        .vectorLoads = std::min(outstanding, kernel.target().maxVmcnt())});
+    waitForVectorLoads(count - 1 - newest + issuedSince);
     return;
   }
 }

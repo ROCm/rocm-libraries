@@ -16,14 +16,15 @@
 #include "instruction/mem.hpp"
 
 #include <algorithm>
+#include <memory>
 
 namespace rocm::tensilelite::codegen::detail {
+
+rocisa::MUBUFModifiers offen() { return rocisa::MUBUFModifiers(true, 0); }
 
 namespace {
 
 constexpr int exponentMask = 0x7F800000;
-
-rocisa::MUBUFModifiers offen() { return rocisa::MUBUFModifiers(true, 0); }
 
 } // namespace
 
@@ -52,6 +53,13 @@ void SkinnyGEMMEmitter::runTile() {
     runNoPrefetchLoop();
   else
     runPrefetchedLoop();
+  // The steps run on ring slot 0 and read the up-front scales, so they precede
+  // the release of both.
+  if (dims.partialSteps == 1)
+    runTailStep();
+  else if (dims.partialSteps == 2)
+    runHeadAndTailSteps();
+  scaleGroup.reset();
   // The ring and the scale vector are dead, so the epilogue reuses their
   // registers.
   ringData.release();
@@ -100,11 +108,23 @@ void SkinnyGEMMEmitter::hoistChunkBases() {
 }
 
 // Loads the scale dword of every column of the iteration at soffset into the
-// NC registers of raw.
-void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset) {
+// NC registers of raw. With neg (0 or -1 per lane) the voffset is ORed with it
+// first, into one temporary that every column reuses since a load reads its
+// voffset when it issues.
+void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset,
+                                    std::optional<RegisterRef> neg) {
+  std::optional<RegisterRange> steered;
+  if (neg)
+    steered = vgpr();
   for (int c = 0; c < dims.columns; ++c) {
     RegisterRef dst = raw.slice(c);
-    builder.create<rocisa::BufferLoadB32>(dst.container(), sBase.sub(c),
+    std::shared_ptr<rocisa::RegisterContainer> voffset = sBase.sub(c);
+    if (neg) {
+      builder.create<rocisa::VOrB32>(steered->container(), voffset,
+                                     neg->container());
+      voffset = steered->container();
+    }
+    builder.create<rocisa::BufferLoadB32>(dst.container(), voffset,
                                           scaleRsrc(c).container(),
                                           soffset.container(), offen());
     if (recordLoads)
@@ -112,10 +132,23 @@ void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset) {
   }
 }
 
-void SkinnyGEMMEmitter::issueChunk(int slot, int chunk, RegisterRef soffset) {
+// Loads chunk u of every column of the ring slot, steered by neg as the scales
+// are. The steered voffset never goes into the destination registers, which
+// may still have a prologue load in flight.
+void SkinnyGEMMEmitter::issueChunk(int slot, int chunk, RegisterRef soffset,
+                                   std::optional<RegisterRef> neg) {
+  std::optional<RegisterRange> steered;
+  if (neg)
+    steered = vgpr();
   for (int c = 0; c < dims.columns; ++c) {
     RegisterRef dst = dataChunk(slot, chunk, c);
-    builder.create<rocisa::BufferLoadB128>(dst.container(), dBase.sub(c),
+    std::shared_ptr<rocisa::RegisterContainer> voffset = dBase.sub(c);
+    if (neg) {
+      builder.create<rocisa::VOrB32>(steered->container(), voffset,
+                                     neg->container());
+      voffset = steered->container();
+    }
+    builder.create<rocisa::BufferLoadB128>(dst.container(), voffset,
                                            dataRsrc(c).container(),
                                            soffset.container(), offen());
     if (recordLoads)
@@ -165,7 +198,12 @@ void SkinnyGEMMEmitter::refillChunk(const SlotContext &context, int chunk,
 // The load at where is complete once at most the loads issued after it are
 // outstanding, as vmcnt counts the loads of a wave in issue order.
 void SkinnyGEMMEmitter::waitForLoad(SlotLoadPosition where) {
-  int outstanding = loadsIssuedAfter(dims, where);
+  waitForVectorLoads(loadsIssuedAfter(dims, where));
+}
+
+// Waits until at most outstanding vector memory loads are in flight, capped at
+// the counter's range.
+void SkinnyGEMMEmitter::waitForVectorLoads(int outstanding) {
   builder.createWaitCnt(WaitCounts{
       .vectorLoads = std::min(outstanding, kernel.target().maxVmcnt())});
 }
@@ -177,9 +215,7 @@ void SkinnyGEMMEmitter::waitForLoad(SlotLoadPosition where) {
 void SkinnyGEMMEmitter::gatherSlotScales(RegisterRef raw, RegisterRef lo,
                                          int firstOutstanding) {
   for (int c = 0; c < dims.columns; ++c) {
-    int outstanding = firstOutstanding - c;
-    builder.createWaitCnt(WaitCounts{
-        .vectorLoads = std::min(outstanding, kernel.target().maxVmcnt())});
+    waitForVectorLoads(firstOutstanding - c);
     RegisterRef dword = raw.slice(c);
     builder.create<rocisa::DSBPermuteB32>(lo.slice(c).container(),
                                           addresses.sub(0), dword.container());
@@ -190,8 +226,12 @@ void SkinnyGEMMEmitter::gatherSlotScales(RegisterRef raw, RegisterRef lo,
 
 RegisterRange SkinnyGEMMEmitter::gatherSlotScales(const SlotContext &context) {
   RegisterRange packed = vgpr(dims.columns);
+  // A step issues only its own scale loads on every path: its chunk loads may
+  // all be skipped.
   int firstOutstanding =
-      loadsIssuedAfter(dims, {0, context.groupsAfter, /*ownRefill=*/0});
+      context.partialStep
+          ? dims.columns - 1
+          : loadsIssuedAfter(dims, {0, context.groupsAfter, /*ownRefill=*/0});
   gatherSlotScales(rawScales(context.slot), packed.ref(), firstOutstanding);
   return packed;
 }
@@ -227,6 +267,22 @@ void SkinnyGEMMEmitter::decodeScales(RegisterRef dst, RegisterRef packed,
   }
 }
 
+// The first convert of column c of the chunk waits for its load. In a partial
+// step every chunk load may be skipped, so only the later columns of the chunk
+// itself are certain to be in flight; with ring scales the gather already
+// waited for every load, as the chunk loads follow the scale loads.
+void SkinnyGEMMEmitter::waitBeforeFirstUse(const SlotContext &context,
+                                           int chunk, int column,
+                                           int ownRefill) {
+  if (!context.partialStep) {
+    waitForLoad({dims.scaleLoads + chunk * dims.columns + column,
+                 context.groupsAfter, ownRefill});
+    return;
+  }
+  if (dims.scaleLoads == 0)
+    waitForVectorLoads(dims.columns - 1 - column);
+}
+
 // Consumes chunk u of the slot: 4 dwords of 2 fp8 pairs per column, converted
 // with the decoded scale and accumulated with v_dot2_f32_bf16.
 void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
@@ -241,8 +297,7 @@ void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
         highWord = rocisa::VOP3PModifiers({1, 0, 0});
       for (int c = 0; c < dims.columns; ++c) {
         if (dword == 0 && word == 0)
-          waitForLoad({dims.scaleLoads + chunk * dims.columns + c,
-                       context.groupsAfter, ownRefill});
+          waitBeforeFirstUse(context, chunk, c, ownRefill);
         builder.create<rocisa::VCvtScalePkFP8toBF16>(
             pairs.sub(c),
             dataChunk(context.slot, chunk, c).slice(dword).container(),
@@ -280,21 +335,35 @@ void SkinnyGEMMEmitter::processStaged(const SlotContext &context,
 
 // Decode-first schedule (PF >= 2): decode the four chunk scales before the
 // scales are refilled, then per chunk compute and refill. The packed dwords
-// die after the last decode.
+// die after the last decode. A partial step decodes chunk 3 in place over the
+// packed dwords, as the reference does, to fit the register budget; the loop
+// keeps its allocation.
 void SkinnyGEMMEmitter::processDecodeFirst(const SlotContext &context,
                                            RegisterRange &packed) {
   std::vector<RegisterRange> scales;
-  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+  std::vector<RegisterRef> chunkScales;
+  int separate =
+      context.partialStep ? SkinnyDims::chunks - 1 : SkinnyDims::chunks;
+  for (int chunk = 0; chunk < separate; ++chunk) {
     scales.push_back(vgpr(dims.columns));
-    decodeScales(scales.back().ref(), packed.ref(), chunk);
+    chunkScales.push_back(scales.back().ref());
+    decodeScales(chunkScales.back(), packed.ref(), chunk);
   }
-  packed.release();
+  if (context.partialStep) {
+    decodeScales(packed.ref(), packed.ref(), SkinnyDims::chunks - 1);
+    chunkScales.push_back(packed.ref());
+  } else {
+    packed.release();
+  }
   RegisterRange soffset = sgpr();
   if (context.refillIteration)
     startRefill(context, soffset.ref());
   for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
-    computeChunk(context, chunk, scales[chunk].ref());
-    scales[chunk].release();
+    computeChunk(context, chunk, chunkScales[chunk]);
+    if (chunk < separate)
+      scales[chunk].release();
+    else
+      packed.release();
     if (context.refillIteration)
       refillChunk(context, chunk, soffset.ref());
   }
@@ -339,7 +408,11 @@ void SkinnyGEMMEmitter::processSlot(const SlotContext &context) {
   permSlotScales(rawScales(context.slot), packed.ref(), packed.ref());
   if (dims.prefetch == 0)
     ringRaw->release();
-  if (dims.prefetch >= 2)
+  // The MLIR decodes first for every depth but 1; the PF = 0 loop keeps the
+  // staged schedule, which its steps do not use.
+  bool decodeFirst =
+      dims.prefetch >= 2 || (dims.prefetch == 0 && context.partialStep);
+  if (decodeFirst)
     processDecodeFirst(context, packed);
   else
     processStaged(context, packed.ref());
@@ -375,9 +448,10 @@ void SkinnyGEMMEmitter::runNoPrefetchLoop() {
   }
   // The select precedes the loads so that its VALU work hides their latency.
   std::optional<RegisterRange> packed;
+  std::optional<RegisterRange> entry;
   if (dims.upIters > 0)
-    packed =
-        selectScales(SlotContext{0, 0, std::nullopt, true, physical.ref()});
+    packed = selectScales(SlotContext{0, 0, std::nullopt, true,
+                                      vectorEntry(physical.ref(), entry)});
   RegisterRange soffset = sgpr();
   SlotContext loads{0, 0, physical.ref()};
   startRefill(loads, soffset.ref());
@@ -503,6 +577,7 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
     wrapIteration(refill.ref(), refill.ref());
     SlotContext context{slot, pf - 1, refill.ref()};
     std::optional<RegisterRange> physical;
+    std::optional<RegisterRange> entry;
     if (vectorized) {
       physical = sgpr();
       if (slot == 0)
@@ -510,7 +585,7 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
       else
         builder.addi32(physical->ref(), iteration.ref(), physBase->ref(slot));
       wrapIteration(physical->ref(), physical->ref());
-      context.vectorIndex = physical->ref();
+      context.vectorIndex = vectorEntry(physical->ref(), entry);
     }
     processSlot(context);
   }
@@ -561,14 +636,15 @@ void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
       context.refillIteration = refill.ref();
     }
     std::optional<RegisterRange> physical;
+    std::optional<RegisterRange> entry;
     if (vectorized && i >= pf) {
-      context.vectorIndex = keptRefills[i - pf].ref();
+      context.vectorIndex = vectorEntry(keptRefills[i - pf].ref(), entry);
     } else if (vectorized) {
       physical = sgpr();
       if (i > 0)
         builder.addi32(physical->ref(), baseRef, i);
       wrapIteration(physical->ref(), i > 0 ? physical->ref() : baseRef);
-      context.vectorIndex = physical->ref();
+      context.vectorIndex = vectorEntry(physical->ref(), entry);
     }
     processSlot(context);
     if (vectorized && hasRefill)

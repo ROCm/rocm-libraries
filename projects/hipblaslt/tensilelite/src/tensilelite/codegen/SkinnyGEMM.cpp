@@ -57,9 +57,6 @@ namespace {
 
 // The reference's features that are not emitted yet.
 void requireImplemented(const SkinnyGEMMConfig &config) {
-  if (config.partialSteps != 0)
-    throw std::invalid_argument(
-        "partialSteps != 0 (partial K steps) is not implemented yet");
   if (!config.grid3d)
     throw std::invalid_argument(
         "grid3d = false (persistent launch) is not implemented yet");
