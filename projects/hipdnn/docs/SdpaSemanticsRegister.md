@@ -227,8 +227,9 @@ batch when `seq_len_q/kv` are set).
 - **Philox dropout (decision C3):** validated through RNG_DUMP. A forward graph with `dropout_probability`, seed,
   offset and an `rng_dump` output FLOAT `[B, H_q, Sq, Skv]` is accepted by the CPU and GPU forward references, which
   read the engine's dumped keep mask as the explicit mask with scale `1/(1−p)`. Engines that claim Philox dropout must
-  support RNG_DUMP. Without RNG_DUMP the references decline (no exact oracle). Harness hand-off of the engine's
-  rng_dump to the reference: pending (design in the decisions notes).
+  support RNG_DUMP. Without RNG_DUMP the references decline (no exact oracle). The integration harness checks the
+  dumped mask (values in {0, 1}, keep rate within a 6-sigma binomial bound of `1−p`), copies it into the reference
+  run and does not compare `rng_dump` itself (`harness/bundle/RngDumpHandoff.hpp`).
 
 ## Score modifiers (extensions and conventions)
 

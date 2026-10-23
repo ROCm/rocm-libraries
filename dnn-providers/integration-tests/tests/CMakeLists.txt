@@ -87,6 +87,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestProductionPolicy.cpp
     TestGraphSession.cpp
     TestOutputComparison.cpp
+    TestRngDumpHandoff.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
