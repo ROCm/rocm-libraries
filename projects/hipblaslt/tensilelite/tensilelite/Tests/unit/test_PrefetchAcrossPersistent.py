@@ -227,6 +227,12 @@ class _SetupNewTilePapTdmWriter:
     def tdmApplyTileKOffsetWaveSeparated(self, kernel, tpa, tpb):
         return self._module("tdmApplyTileKOffsetWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
 
+    def papApplyEntryKOffset(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.papApplyEntryKOffset(self, kernel, tpa, tpb)
+
+    def papDescriptorSnapshotLayout(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.papDescriptorSnapshotLayout(self, kernel, tpa, tpb)
+
     def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
         return self._module("releaseGlobalReadIncsSgprsAfterTdmWaveSep")
 
@@ -288,6 +294,10 @@ class _SetupNewTilePapTdmWriter:
     def papPgr2PipelineEnabled(self, kernel, tpa, tpb):
         # This fixture exercises StreamK PGR1 setup and WaveIdx lifetime.
         return False
+
+    def papRestoreNextTileDescriptors(self, kernel, tpa, tpb, ordinary):
+        # This StreamK PGR1 fixture keeps descriptor snapshots inactive.
+        return ordinary
 
     def _nextLdsToken(self, idx):
         return KernelWriter._nextLdsToken(self, idx)

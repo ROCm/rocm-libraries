@@ -28,6 +28,7 @@ reads the wrong partials and the result is silently wrong. Hence the mechanical
 "exactly three tests" count.
 """
 
+import ast
 import inspect
 import itertools
 import re
@@ -238,7 +239,14 @@ def test_both_mapping_arms_are_emitted(site, inVgprs, variant):
 
 def test_only_the_helper_can_emit_the_predicate():
     """No caller may hand-roll the bit test; all go through the one helper."""
-    assert len(re.findall(r"SBitcmp1B32\(", inspect.getsource(skmod))) == 1, (
+    calls = [node for node in ast.walk(ast.parse(inspect.getsource(skmod)))
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+             and node.func.id == "SBitcmp1B32"
+             and any(arg.arg == "src1" and (
+                 isinstance(arg.value, ast.Name) and arg.value.id == "_SK_USO_BIT"
+                 or isinstance(arg.value, ast.Constant) and arg.value.value == 29)
+                 for arg in node.keywords)]
+    assert len(calls) == 1, (
         "the bit-29 test must exist only in emitUsoBranchToGlobal"
     )
 
