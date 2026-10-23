@@ -21,9 +21,12 @@ from typing import Iterable, Tuple
 
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
+    conv_once_applies,
     dpp_reduce_applies,
     interleave_cols_applies,
     is_valid_spec,
+    norm_gate_once_applies,
+    out_lds_applies,
     stream_rows_applies,
     xcd_remap_applies,
 )
@@ -97,41 +100,29 @@ _AXIS_VALUES = {
 }
 
 
+# Each scoped knob axis and the kernel predicate that says where it can change
+# emitted code: the same predicates is_valid_spec and kernel_name() read, so
+# dispatch scope and kernel legality cannot drift. Order is listing order.
+_SCOPED_AXES = (
+    (CONV_ONCE_AXIS, conv_once_applies),
+    (NORM_GATE_ONCE_AXIS, norm_gate_once_applies),
+    (DPP_REDUCE_AXIS, dpp_reduce_applies),
+    (XCD_REMAP_AXIS, xcd_remap_applies),
+    (STREAM_ROWS_AXIS, stream_rows_applies),
+    (INTERLEAVE_COLS_AXIS, interleave_cols_applies),
+    (OUT_LDS_AXIS, out_lds_applies),
+)
+
+
 def _axes_of(spec: GdnDecodeSpec) -> Tuple[KnobAxis, ...]:
-    return _scoped_axes(
-        bool(spec.fuse_conv),
-        bool(spec.fuse_out_norm),
-        dpp_reduce_applies(spec),
-        xcd_remap_applies(spec),
-        stream_rows_applies(spec),
-        interleave_cols_applies(spec),
-    )
+    return _scoped_axes(tuple(applies(spec) for _, applies in _SCOPED_AXES))
 
 
 @lru_cache(maxsize=None)
-def _scoped_axes(
-    fuse_conv: bool,
-    fuse_out_norm: bool,
-    dpp_reduce: bool,
-    xcd_remap: bool,
-    stream_rows: bool,
-    interleave_cols: bool,
-) -> Tuple[KnobAxis, ...]:
-    axes = [STATE_LOAD_HINT_AXIS, STATE_STORE_HINT_AXIS]
-    if fuse_conv:
-        axes.append(CONV_ONCE_AXIS)
-        if fuse_out_norm:
-            axes.append(NORM_GATE_ONCE_AXIS)
-    for applies, axis in (
-        (dpp_reduce, DPP_REDUCE_AXIS),
-        (xcd_remap, XCD_REMAP_AXIS),
-        (stream_rows, STREAM_ROWS_AXIS),
-        (interleave_cols, INTERLEAVE_COLS_AXIS),
-        (fuse_out_norm, OUT_LDS_AXIS),
-    ):
-        if applies:
-            axes.append(axis)
-    return tuple(axes)
+def _scoped_axes(applies: Tuple[bool, ...]) -> Tuple[KnobAxis, ...]:
+    return (STATE_LOAD_HINT_AXIS, STATE_STORE_HINT_AXIS) + tuple(
+        axis for (axis, _), on in zip(_SCOPED_AXES, applies) if on
+    )
 
 
 def out_of_scope_knobs(base: GdnDecodeSpec, knobs) -> Tuple[str, ...]:
@@ -152,13 +143,13 @@ def out_of_scope_knobs(base: GdnDecodeSpec, knobs) -> Tuple[str, ...]:
 @dc.dataclass(frozen=True)
 class GdnDecodeSpace(WavesPerEuSpace):
     """One registered tile's space. Scope (what a request can read) drops a
-    knob rather than refusing it:
+    knob rather than refusing it. Scope is the kernel's own ``*_applies``
+    predicates (``_SCOPED_AXES``):
 
-    * ``conv_once`` needs ``fuse_conv``; ``norm_gate_once`` needs ``fuse_conv``
-      and ``fuse_out_norm``; ``out_lds`` needs ``fuse_out_norm``;
+    * ``conv_once`` needs ``fuse_conv``; ``norm_gate_once`` and ``out_lds``
+      need ``fuse_out_norm``;
     * ``dpp_reduce``, ``xcd_remap``, ``stream_rows`` and ``interleave_cols``
-      follow the kernel's ``*_applies`` predicates (the tiles where they change
-      the emitted code).
+      apply on the tiles where they change the emitted code.
 
     So ``tuning_knobs`` alone (``tuning_id`` ``auto``) carry a configuration
     across shapes: where one of the knobs is out of scope it is dropped and the

@@ -385,6 +385,20 @@ def test_illegal_pins_are_refused_with_the_candidate_reason():
             )
         assert reason in str(raised.value), (knobs, str(raised.value))
         assert "kda_nw8_wtk8_bpv1" in str(raised.value)
+    # Scope is the kernel's own predicate (norm_gate_once applies with
+    # fuse_out_norm), so on a norm-only request norm_gate_once is in scope and
+    # the validator's NOT_YET_IMPLEMENTED coupling to conv_once refuses it,
+    # exactly as with conv on and conv_once off; it is not silently dropped.
+    norm_only = _req(gate_kind="kda", state_dtype="f32", fuse_out_norm=True)
+    for mode in (norm_only, req):
+        with pytest.raises(PinRefused, match="NOT_YET_IMPLEMENTED"):
+            dispatch_gdn_decode(
+                replace(
+                    mode,
+                    spec_id="kda_nw8_wtk8_bpv1",
+                    tuning_knobs={"norm_gate_once": True},
+                )
+            )
     # A stale id (knobs that no longer reproduce it) is refused, never remapped.
     auto = dispatch_gdn_decode(req)
     stale = replace(auto.request, tuning_knobs={"xcd_remap": True})
