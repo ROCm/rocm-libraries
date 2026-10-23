@@ -83,13 +83,13 @@ static int test_required_indexed_dtypes()
 {
     const auto* arch = rocke_arch_target_from_gfx("gfx942");
     CHECK(arch);
-    for(int missing = 0; missing < 5; ++missing)
+    for(int missing = 0; missing < 4; ++missing)
     {
         const char* srcs[] = {"fp32", "fp32", "fp32"};
-        const char* dst = missing == 3 ? nullptr : "fp32";
+        const char* dst = "fp32";
         if(missing < 3)
             srcs[missing] = nullptr;
-        const char* const* sources = missing == 4 ? nullptr : srcs;
+        const char* const* sources = missing == 3 ? nullptr : srcs;
         CHECK(rejects_query([&] {
             rocke_mma_catalog_enumerate_indexed(
                 &arch->mma, nullptr, sources, dst, 16, 16, nullptr, 0);
@@ -108,6 +108,7 @@ static int test_required_indexed_dtypes()
             [&] { rocke_arch_supports_dtype_combo_indexed(arch, sources, dst, nullptr); }));
     }
     const char* srcs[] = {"fp32", "fp32", "fp32"};
+    CHECK(rocke_arch_supports_dtype_combo_indexed(arch, srcs, nullptr, nullptr));
     CHECK(rocke_mma_catalog_op_for_shape_indexed(&arch->mma, nullptr, srcs, "fp32", 16, 16, 4));
     CHECK(!rocke_mma_catalog_op_for_shape_indexed(&arch->mma, nullptr, srcs, "", 16, 16, 4));
     CHECK(rejects_query([&] {
@@ -233,8 +234,34 @@ static int test_scale_contracts()
     indexed_rows[1].dst.dtype = indexed_rows[2].dst.dtype = "i32";
     indexed_rows[2].srcs[0].scale_block_size = ROCKE_MMA_SCALE_K16;
     indexed_rows[2].srcs[1].scale_block_size = ROCKE_MMA_SCALE_K16;
-    const rocke_mma_catalog_t indexed = {indexed_rows, 3};
     const char* sources[] = {"fp8", "fp8", "fp32"};
+    const rocke_mma_catalog_t indexed = {indexed_rows, 3};
+    CHECK(rocke_mma_catalog_enumerate_indexed(
+              &indexed, "wmma_scaled", sources, nullptr, 16, 16, NULL, 0, &e8)
+          == 1);
+    CHECK(rocke_mma_catalog_has_shape_indexed(
+        &indexed, "wmma_scaled", sources, nullptr, 16, 16, 128, &e8));
+    CHECK(rocke_mma_catalog_op_for_shape_indexed(
+              &indexed, "wmma_scaled", sources, nullptr, 16, 16, 128, &e8)
+          == &indexed_rows[0]);
+    CHECK(rocke_mma_catalog_select_largest_k_indexed(
+              &indexed, "wmma_scaled", sources, nullptr, 16, 16, -1, &e8)
+          == &indexed_rows[0]);
+    CHECK(rocke_mma_catalog_enumerate(
+              &indexed, "wmma_scaled", sources[0], sources[1], sources[2], 16, 16, NULL, 0, &e8)
+          == 1);
+    CHECK(rocke_mma_catalog_has_shape(
+        &indexed, "wmma_scaled", sources[0], sources[1], sources[2], 16, 16, 128, &e8));
+    CHECK(rocke_mma_catalog_op_for_shape(
+              &indexed, "wmma_scaled", sources[0], sources[1], sources[2], 16, 16, 128, &e8)
+          == &indexed_rows[0]);
+    CHECK(rocke_mma_catalog_select_largest_k(
+              &indexed, "wmma_scaled", sources[0], sources[1], sources[2], 16, 16, -1, &e8)
+          == &indexed_rows[0]);
+    rocke_arch_target_t synthetic = *arch;
+    synthetic.mma = {&indexed_rows[1], 1};
+    CHECK(!rocke_arch_supports_dtype_combo_indexed(&synthetic, sources, nullptr, "wmma_scaled"));
+    CHECK(rocke_arch_supports_dtype_combo_indexed(&synthetic, sources, "i32", "wmma_scaled"));
     CHECK(rocke_mma_catalog_enumerate_indexed(
               &indexed, "wmma_scaled", sources, "i32", 16, 16, NULL, 0, &e8)
           == 1);

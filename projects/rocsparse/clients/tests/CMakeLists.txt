@@ -28,8 +28,6 @@ if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/T
   set(ROCSPARSE_HAS_CTEST_CATEGORIES ON)
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
 # MEMSTAT ?
 if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
@@ -45,37 +43,25 @@ if(BUILD_ROCSPARSE_ILP64)
 endif()
 
 #
-# Client matrices.
+# Client matrices; ClientMatrices.cmake converts only the .csr files that are missing.
 #
-if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
-  #
-  # Download.
-  #
-  set(CMAKE_MATRICES_DIR ${PROJECT_BINARY_DIR}/matrices CACHE STRING "Matrices directory.")
-  file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
+set(CMAKE_MATRICES_DIR ${PROJECT_BINARY_DIR}/matrices CACHE STRING "Matrices directory.")
 
-  if(NOT TARGET rocsparse AND NOT BUILD_CLIENTS_ONLY)
-    set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/../deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
-    include(${CMAKE_SOURCE_DIR}/../cmake/ClientMatrices.cmake)
-  else()
-   set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
-    include(${CMAKE_SOURCE_DIR}/cmake/ClientMatrices.cmake)
-  endif()
-
+if(NOT TARGET rocsparse AND NOT BUILD_CLIENTS_ONLY)
+  set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/../deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
+  include(${CMAKE_SOURCE_DIR}/../cmake/ClientMatrices.cmake)
 else()
-  #
-  # Copy.
-  #
-  if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
-    message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
+  set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
+  include(${CMAKE_SOURCE_DIR}/cmake/ClientMatrices.cmake)
+endif()
 
-    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+#
+# Copy.
+#
+if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
+  message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
 
-    if(STATUS AND NOT STATUS EQUAL 0)
-      message(FATAL_ERROR "Failed to copy matrix .csr files, aborting.")
-    endif()
-  endif()
-
+  file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
 endif()
 
 set(ROCSPARSE_TEST_SOURCES

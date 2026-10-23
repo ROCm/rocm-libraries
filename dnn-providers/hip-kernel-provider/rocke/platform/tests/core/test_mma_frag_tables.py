@@ -217,6 +217,8 @@ class TestMmaFragTables(unittest.TestCase):
         self.assertEqual(_mma_dst_frag_len("mfma_f32_16x16x16_f16"), 4)
         self.assertEqual(_mma_dst_frag_len("mfma_f32_32x32x8_f16"), 16)
         self.assertEqual(_mma_dst_frag_len("wmma_f32_16x16x16_f16"), 8)
+        self.assertEqual(_mma_dst_frag_len("mfma_f64_16x16x4_f64"), 4)
+        self.assertEqual(_mma_dst_frag_len("mfma_f64_4x4x4_f64"), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from .ir import BF8E5M2, BF16, F16, F32, FP8E4M3, I8, I32, U8, Op, Type, VectorType
+from .ir import BF8E5M2, BF16, F16, F32, F64, FP8E4M3, I8, I32, U8, Op, Type, VectorType
 from .tf32 import TF32_MMA, mma_instruction_id, tf32_mma_error
 
 # These are the implemented instructions' fixed emission signatures, independent
@@ -18,6 +18,9 @@ _SOURCES = {
     "mfma_f32_32x32x8_f16": VectorType(F16, 4),
     "mfma_f32_32x32x16_f16": VectorType(F16, 8),
     "mfma_f32_4x4x4_f16": VectorType(F16, 4),
+    "mfma_f32_4x4x4_bf16": VectorType(BF16, 4),
+    "mfma_f64_16x16x4_f64": F64,
+    "mfma_f64_4x4x4_f64": F64,
     "mfma_f32_16x16x16_bf16": VectorType(BF16, 4),
     "mfma_f32_16x16x32_bf16": VectorType(BF16, 8),
     "mfma_f32_32x32x8_bf16": VectorType(BF16, 4),
@@ -59,6 +62,17 @@ def _carrier_bits(ty: Type) -> int:
     return _CARRIER_BITS.get(ty.name, 0) if type(ty) is Type else 0
 
 
+def _fixed_type_matches(actual: Type, expected: Type) -> bool:
+    if isinstance(expected, VectorType):
+        return (
+            isinstance(actual, VectorType)
+            and type(actual.count) is int
+            and type(actual.elem) is Type
+            and actual == expected
+        )
+    return type(actual) is Type and actual == expected
+
+
 def validate_mfma(op: Op) -> None:
     """Reject actual values that cannot use the selected fixed instruction ABI.
 
@@ -92,14 +106,22 @@ def validate_mfma(op: Op) -> None:
             )
         else:
             valid = all(
-                v.type == source or (source == F32 and v.type == VectorType(F32, 1))
+                _fixed_type_matches(v.type, source)
+                or (
+                    source in (F32, F64)
+                    and _fixed_type_matches(v.type, VectorType(source, 1))
+                )
                 for v in op.operands[:2]
             )
         if not valid:
             raise ValueError(f"MFMA requires src0 and src1 to be {source.name}")
     count = 16 if op_id.startswith("mfma_f32_32x32") else 4
-    expected = VectorType(F32, count)
-    if op.operands[2].type != expected or op.result.type != expected:
+    if op_id == "mfma_f64_4x4x4_f64":
+        count = 1
+    expected = VectorType(F64 if op_id.startswith("mfma_f64_") else F32, count)
+    if not _fixed_type_matches(
+        op.operands[2].type, expected
+    ) or not _fixed_type_matches(op.result.type, expected):
         raise ValueError(f"MFMA requires src2 and dst to be {expected.name}")
     if scaled and any(v.type != I32 for v in op.operands[3:]):
         raise ValueError("MFMA requires scale operands to be i32")

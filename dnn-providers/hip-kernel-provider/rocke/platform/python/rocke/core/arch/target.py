@@ -681,7 +681,7 @@ def _mfma_b_32x32x4_xf32(builder, lane, slot):
 
 
 def _mfma_a_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
+    """MFMA 16x16x4 fp32 / f64 A operand: each lane holds one scalar.
 
     row = lane % 16, k = lane // 16 (slot is always 0 — a_frag_len == 1).
     Returns ``(row, k)``.
@@ -693,7 +693,7 @@ def _mfma_a_16x16x4_f32(builder, lane, slot):
 
 
 def _mfma_b_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 B operand: each lane holds one fp32 scalar.
+    """MFMA 16x16x4 fp32 / f64 B operand: each lane holds one scalar.
 
     col = lane % 16, k = lane // 16 (slot is always 0 — b_frag_len == 1).
     Returns ``(k, col)``.
@@ -726,6 +726,46 @@ def _mfma_b_32x32x2_f32(builder, lane, slot):
     n_in_atom = builder.mod(lane, c32)
     k = builder.div(lane, c32)
     return k, n_in_atom
+
+
+def _mfma_row_col_16x16x4_f64(builder, lane, slot):
+    """MFMA 16x16x4 f64 accumulator: slot ``i`` -> ``(i*4 + lane // 16, lane % 16)``.
+
+    Unlike ``_mfma_row_col_16x16``, consecutive slots of a lane are 4 rows apart.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    m_blk = builder.div(lane, c16)
+    row = builder.add(builder.const_i32(slot * 4), m_blk)
+    return row, n_in_atom
+
+
+def _mfma_b_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 B operand (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*k + 4*blk + n`` holds
+    ``(blk*4 + k, n)``. Returns ``(blk*4 + k, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    k = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), k)
+    return row, n_in_blk
+
+
+def _mfma_row_col_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 accumulator (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*m + 4*blk + n`` holds
+    ``(blk*4 + m, n)``. Returns ``(blk*4 + m, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    m = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), m)
+    return row, n_in_blk
 
 
 def _mfma_a_32x32x8(builder, lane, slot):
@@ -1067,6 +1107,17 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "mfma_f32_32x32x2_f32": _shared_src2_dst_frag_info(
         1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_row_col_32x32
     ),
+    # --- MFMA fp64 (wave64) -----------------------------------------------
+    # A/B are scalar double per lane in the same layout as fp32 16x16x4; the
+    # accumulator has its own f64 layout (c_frag_len=4).
+    "mfma_f64_16x16x4_f64": _shared_src2_dst_frag_info(
+        1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_row_col_16x16x4_f64
+    ),
+    # 4x4x4 is four independent 4x4x4 blocks stacked along rows (16x4 A, B and
+    # C/D). A matches the 16x16x4 A map.
+    "mfma_f64_4x4x4_f64": _shared_src2_dst_frag_info(
+        1, 1, 1, 64, _mfma_a_16x16x4_f32, _mfma_b_4x4x4_f64, _mfma_row_col_4x4x4_f64
+    ),
     # --- MFMA f16 (wave64) ------------------------------------------------
     "mfma_f32_16x16x16_f16": _shared_src2_dst_frag_info(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_row_col_16x16
@@ -1081,6 +1132,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_row_col_32x32
     ),
     "mfma_f32_4x4x4_f16": _shared_src2_dst_frag_info(4, 4, 4, 64),
+    "mfma_f32_4x4x4_bf16": _shared_src2_dst_frag_info(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
     "mfma_f32_16x16x16_bf16": _shared_src2_dst_frag_info(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_row_col_16x16
@@ -1843,7 +1895,7 @@ def _mma_operand_rows(o: dict) -> tuple[list[dict], dict]:
                     raise ValueError("conflicting indexed and legacy matrix dtypes")
     else:
         src_rows = [matrix_row({"dtype": o.get(key)}, key) for key in ("a", "b", "c")]
-    dst_row = matrix_row(o["dst"] if "dst" in o else {"dtype": o.get("c")}, "dst")
+    dst_row = matrix_row(o["dst"] if "dst" in o else src_rows[2], "dst")
     if "a_scale_dtype" in o or "b_scale_dtype" in o or "scale_block_k" in o:
         a, b, block_k = _normalize_mma_scales(
             o.get("a_scale_dtype"), o.get("b_scale_dtype"), o.get("scale_block_k")

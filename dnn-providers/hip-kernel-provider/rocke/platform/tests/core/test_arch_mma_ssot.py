@@ -921,6 +921,41 @@ def test_indexed_queries_preserve_explicit_destination(dst_dtype):
     assert catalog.select_largest_k(**query) is expected
 
 
+def test_omitted_destination_excludes_distinct_result_contracts():
+    base = _contracts()[0]
+    distinct = replace(base, dst=replace(base.dst, dtype="i32"))
+    catalog = MmaCatalog([distinct, base])
+    for dtypes in (
+        dict(src_dtypes=("fp8", "bf8", "fp32")),
+        dict(a_dtype="fp8", b_dtype="bf8", c_dtype="fp32"),
+    ):
+        query = dict(family=base.family, m=16, n=16, **dtypes)
+        assert catalog.enumerate(**query) == [base]
+        assert catalog.has_shape(**query, k=128)
+        assert catalog.op_for_shape(**query, k=128) is base
+        assert catalog.select_largest_k(**query) is base
+        assert catalog.op_for_shape(**query, dst_dtype="i32", k=128) is distinct
+
+
+def test_indexed_json_without_destination_inherits_source_two():
+    row = dict(
+        family="mma",
+        m=16,
+        n=16,
+        k=4,
+        op_id="mfma_f32_16x16x4_f32",
+        srcs=[{"dtype": "fp32"}, {"dtype": "fp32"}, {"dtype": "fp32"}],
+    )
+    implicit = _build_mma_op(row)
+    explicit = _build_mma_op({**row, "dst": {"dtype": "fp32"}})
+    assert implicit == explicit
+    assert implicit.srcs[2].dtype == implicit.dst.dtype == "fp32"
+    assert implicit.srcs[2].layout.role == "src2"
+    assert implicit.dst.layout.role == "dst"
+    with pytest.raises(ValueError, match="dst must define a string dtype"):
+        _build_mma_op({**row, "dst": None})
+
+
 @pytest.mark.parametrize("source", [0, 1])
 @pytest.mark.parametrize("legacy_dtype", [None, "e4m3"])
 @pytest.mark.parametrize("indexed_dtype", [None, "fp8e4m3"])
@@ -1124,12 +1159,13 @@ def test_raw_mma_preserves_aliases_and_absent_catalog_fallback(dtype, element):
 
 
 @pytest.mark.parametrize("reader", ["builder", "raw"])
-def test_indexed_row_missing_destination_does_not_invent_a_default(reader):
+def test_indexed_row_missing_destination_defaults_to_source_two(reader):
     row = _duplicate_matrix_row()
     del row["dst"]
     del row["c"]
-    with pytest.raises(ValueError, match="MMA catalog"):
-        _read_fixture_row(row, reader)
+    implicit = _read_fixture_row(row, reader)
+    explicit = _read_fixture_row({**row, "dst": {"dtype": "fp32"}}, reader)
+    assert implicit == explicit
 
 
 def test_rdna_integer_wmma_rows_name_i8_and_i4():

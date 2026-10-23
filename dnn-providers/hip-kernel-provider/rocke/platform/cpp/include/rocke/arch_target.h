@@ -266,7 +266,9 @@ const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int*
 #endif
 
 /* Indexed MmaCatalog.enumerate: filter atoms by family + the exact three src
- * dtypes and dst dtype. `src_dtypes` must contain three entries.
+ * dtypes and dst dtype. `src_dtypes` must contain three non-NULL entries.
+ * In every indexed query, NULL dst_dtype defaults to src_dtypes[2]; an empty
+ * string remains an explicit dtype filter and does not mean unspecified.
  * optional m/n. Writes up to `cap` matching op pointers into `out` and returns
  * the total number of matches (which may exceed `cap`). */
 int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,

@@ -37,8 +37,6 @@ if(BUILD_CLIENTS_ONLY)
   return()
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
 # Unit-test sources (the tests themselves + a minimal gtest main).
 #
 # Subsequent per-area unit-test branches append their host-pure sources here.

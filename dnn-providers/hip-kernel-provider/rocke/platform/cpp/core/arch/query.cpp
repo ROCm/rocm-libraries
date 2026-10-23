@@ -293,11 +293,12 @@ static bool rocke_ati_op_selectable(const rocke_mma_catalog_t* cat,
            && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, d, m, n, scales);
 }
 
-static void rocke_ati_require_indexed_dtypes(const char* const src_dtypes[3], const char* dst_dtype)
+static const char* rocke_ati_require_indexed_dtypes(const char* const src_dtypes[3],
+                                                    const char* dst_dtype)
 {
-    if(!src_dtypes || !src_dtypes[0] || !src_dtypes[1] || !src_dtypes[2] || !dst_dtype)
-        ckc::raise_status(ROCKE_ERR_VALUE,
-                          "indexed MMA query requires three source dtypes and a destination dtype");
+    if(!src_dtypes || !src_dtypes[0] || !src_dtypes[1] || !src_dtypes[2])
+        ckc::raise_status(ROCKE_ERR_VALUE, "indexed MMA query requires three source dtypes");
+    return dst_dtype ? dst_dtype : src_dtypes[2];
 }
 
 int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
@@ -316,7 +317,7 @@ int rocke_mma_catalog_enumerate_indexed(const rocke_mma_catalog_t* cat,
 
     if(!cat)
         return 0;
-    rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
+    dst_dtype = rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
     rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
     a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
@@ -367,7 +368,7 @@ bool rocke_mma_catalog_has_shape_indexed(const rocke_mma_catalog_t* cat,
 
     if(!cat)
         return false;
-    rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
+    dst_dtype = rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
     rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
     a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
@@ -419,7 +420,7 @@ const rocke_mma_op_t*
 
     if(!cat)
         return NULL;
-    rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
+    dst_dtype = rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
     rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
     a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);
@@ -493,7 +494,7 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape_indexed(const rocke_mma_cat
 
     if(!cat)
         return NULL;
-    rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
+    dst_dtype = rocke_ati_require_indexed_dtypes(src_dtypes, dst_dtype);
     rocke_ati_validate_scales(scales);
     fam = rocke_ati_family_or_default(family);
     a = rocke_normalize_dtype(src_dtypes[0], abuf, sizeof abuf);

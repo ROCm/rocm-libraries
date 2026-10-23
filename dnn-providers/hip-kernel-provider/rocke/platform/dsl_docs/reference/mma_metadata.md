@@ -73,8 +73,8 @@ Unscaled sources have `scale=None`; the compatibility properties return
 Construct or replace the nested source descriptors to change scale metadata.
 The JSON loader accepts indexed rows and legacy A/B/C rows with top-level scales;
 conflicting indexed and legacy matrix dtypes or scales are rejected. Equivalent
-aliases remain accepted. Legacy JSON C describes `srcs[2]`, with `dst` defaulting
-to C only when omitted; an explicit result may differ. Present-null `srcs` or
+aliases remain accepted. Legacy JSON C describes `srcs[2]`. In both row forms,
+omitted `dst` inherits `srcs[2]`; an explicit result may differ. Present-null `srcs` or
 `dst`, incomplete rows and missing dtype fields are rejected before scale merging.
 
 Scale dtypes normalize to the string-backed `MmaScaleDType` enum: `E8M0`,
@@ -201,7 +201,11 @@ int main()
 The helper requires the trailing filter argument in both C and C++.
 Pass `NULL` (`nullptr` in C++) for unconstrained scales, or a pointer to
 `{NULL, NULL, ROCKE_MMA_SCALE_NONE}` to select only unscaled atoms.
-The scale-contract rules above apply. No match, or a null target, returns
+The scale-contract rules above apply. Indexed queries default a NULL `dst_dtype`
+to the third source dtype, matching Python's omitted `dst_dtype`. Required source
+dtype pointers must be non-NULL; an explicit empty destination stays an exact
+filter. Legacy A/B/C queries also require the destination dtype to equal C.
+No match, or a null target, returns
 `NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
 errors at a C++ boundary before returning to C. In particular, the scaled
 FP8/BF8/FP6/BF6/FP4 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
@@ -248,3 +252,14 @@ dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.m
 See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 for the distinction between raw FP32 payloads and explicit RNE preparation,
 and for a reproducible comparison through both engines.
+
+## FP64 operands
+
+On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks). A/B take
+one f64 element per lane, as `f64` or a one-element `vec<f64x1>` (reinterpreted
+with one bitcast); another number format is rejected. C/D take four and one, so
+`IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
+follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see
+the [MFMA atom catalog](mfma_atom_catalog.md)). The probe instance
+`instances/gfx942/f64_mma_probe.py` drives both atoms through both engines.

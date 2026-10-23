@@ -54,6 +54,9 @@ static const mfma_case_t cases[] = {
     {"mfma_f32_16x16x96_fp6", "i32", 3, 4, 96, 0, 0},
     {"mfma_f32_16x16x128_fp8", "i32", 8, 4, 256, 0, 0},
     {"mfma_scale_f32_16x16x128_f8f6f4", "i32", 8, 4, 256, 1, 0},
+    {"mfma_f64_16x16x4_f64", "f64", 1, 4, 0, 0, 1},
+    {"mfma_f64_4x4x4_f64", "f64", 1, 1, 0, 0, 1},
+    {"mfma_f32_4x4x4_bf16", "bf16", 4, 4, 0, 0, 0},
 };
 
 static int check_case(const mfma_case_t* spec, int variant, int generic)
@@ -64,8 +67,10 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
     const auto* source_type = spec->source_count == 1
                                   ? element
                                   : rocke_vector_type(&builder, element, spec->source_count);
+    const auto* accumulator_element
+        = strncmp(spec->id, "mfma_f64_", 9) == 0 ? rocke_f64() : rocke_f32();
     const auto* accumulator_type
-        = rocke_vector_type(&builder, rocke_f32(), spec->accumulator_count);
+        = rocke_vector_type(&builder, accumulator_element, spec->accumulator_count);
     auto* a = rocke_b_param(&builder, "a", source_type, NULL);
     auto* b = rocke_b_param(&builder, "b", source_type, NULL);
     auto* c = rocke_b_param(&builder, "c", accumulator_type, NULL);

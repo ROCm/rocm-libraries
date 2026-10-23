@@ -63,6 +63,7 @@ static inline void rocke_mfma_ssa_type(const char* abi, char* name, size_t capac
     if(sscanf(abi, "<%d x %31[^>]>", &count, element) != 2)
         snprintf(element, sizeof(element), "%s", abi);
     const char* scalar = strcmp(element, "float") == 0    ? "f32"
+                         : strcmp(element, "double") == 0 ? "f64"
                          : strcmp(element, "half") == 0   ? "f16"
                          : strcmp(element, "bfloat") == 0 ? "bf16"
                                                           : element;
@@ -90,6 +91,8 @@ static inline int rocke_mfma_type_matches(const rocke_type_t* type, const char* 
                && rocke_type_eq(type->elem, rocke_scalar_by_name(element));
     if(strcmp(expected, "f32") == 0 && type->kind == ROCKE_TYPE_VECTOR && type->count == 1)
         return rocke_type_eq(type->elem, rocke_f32());
+    if(strcmp(expected, "f64") == 0 && type->kind == ROCKE_TYPE_VECTOR && type->count == 1)
+        return rocke_type_eq(type->elem, rocke_f64());
     return type->kind == ROCKE_TYPE_SCALAR && rocke_type_eq(type, rocke_scalar_by_name(expected));
 }
 
