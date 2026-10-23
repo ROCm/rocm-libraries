@@ -34,6 +34,7 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
+from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
 from kernels.common.attention_dense_spec import (
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
@@ -137,6 +138,29 @@ class TestDenseSelection(unittest.TestCase):
         ):
             with self.subTest(**kw), self.assertRaises(ValueError):
                 dispatch_attention(_gfx950_dense_req(**kw))
+
+    def test_every_variant_needs_both_pins(self):
+        """Every variant is opt-in: unpinned or half-pinned requests are refused;
+        pinning its algorithm and spec_id routes to it."""
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        by_name = {c.name: c for c in attention_candidates()}
+        for variant in GFX950_DENSE_VARIANTS:
+            candidate = by_name[variant.candidate_name]
+            with self.subTest(spec_id=variant.spec_id):
+                for kw in (
+                    {},
+                    dict(algorithm=variant.algorithm),
+                    dict(spec_id=variant.spec_id),
+                ):
+                    ok, why = candidate.admits(replace(req, **kw))
+                    self.assertFalse(ok, kw)
+                    self.assertIn("opt-in", why)
+                pinned = replace(
+                    req, algorithm=variant.algorithm, spec_id=variant.spec_id
+                )
+                self.assertEqual(
+                    dispatch_attention(pinned).candidate.name, variant.candidate_name
+                )
 
     def test_spec_id_under_the_other_body_is_refused(self):
         """The algorithm names the body: the gfx942 ``attention_dense`` name
