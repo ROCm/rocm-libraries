@@ -126,6 +126,33 @@ Tests:
   filename: [nos3, nos7, qc2534, mplate]
   indextype: *i32
   batch_count: [1]
+  
+- name: spilu0
+  category: quick
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_bsr_range_quick
+  block_dim: [4]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_zero]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+- name: spilu0
+  category: quick
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_bsr_range_quick
+  block_dim: [1, 4]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [4]
 
 # Pre_checkin
 - name: spilu0_bad_arg
@@ -320,6 +347,52 @@ Tests:
   graph_test: true
   formatA: [rocsparse_format_bsr]
   indextype: *i32
+  
+- name: spilu0_graph_test
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_quick
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+  formatA: [rocsparse_format_csr]
+
+- name: spilu0_extra
+  category: pre_checkin
+  function: spilu0_extra
+  formatA: [rocsparse_format_csr]
+
+# AISPARSE-690 regression: see the equivalent block in test_spic0.yaml. spilu0
+# covers csrilu0 (CSR) and bsrilu0 (BSR).
+- name: spilu0_large_batch_count
+  category: pre_checkin
+  function: spilu0
+  precision: *single_precision
+  M_N:
+    - { M: 64, N: 64 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [70000]
+
+- name: spilu0_large_batch_count
+  category: pre_checkin
+  function: spilu0
+  precision: *single_precision
+  M_N:
+    - { M: 16, N: 16 }
+  block_dim: [4]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  formatA: [rocsparse_format_bsr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [70000]
 
 # Nightly
 - name: spilu0
@@ -549,6 +622,19 @@ Tests:
   indextype: *i32
 
 # Stress
+
+- name: spilu0_file
+  category: stress
+  function: spilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
+  skip_hardware: gfx940, gfx941
+  formatA: [rocsparse_format_csr]
 
 - name: spilu0_file
   category: stress

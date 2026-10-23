@@ -152,7 +152,9 @@ run is instead treated as a transient invalid sample: it is replaced with a fres
 measurement, up to two extra attempts per candidate in each pass, without disturbing
 the requested sample count or the convergence window. A third negative reading for
 the same candidate within one pass exhausts that budget, even if valid readings
-occurred between negatives.
+occurred between negatives. In a stalled pass, that discards the pass and reruns
+every candidate unstalled, so that bad stalled readings do not remove the fastest
+candidates. In an unstalled pass, the candidate fails.
 
 See :ref:`backend-api-attribute` for the low-level profiling attributes and
 backend context reuse.

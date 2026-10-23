@@ -269,26 +269,6 @@ Tests:
   formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
-- name: sptrsv_file
-  category: pre_checkin
-  function: sptrsv
-  indextype: *i64i32
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha_alphai: *alpha_csr_range_checkin
-  transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_general]
-  filename: [mc2depi]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
-  batch_count: [4]
-  batch_count_A: [1]
-
 - name: sptrsv_graph_test
   category: pre_checkin
   function: sptrsv
@@ -424,6 +404,25 @@ Tests:
   batch_count: [1]
 
 # Nightly
+- name: sptrsv_file
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  filename: [mc2depi]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count: [4]
+  batch_count_A: [1]
 
 # Diagonal solve, large matrices.
 - name: sptrsv_diagonal
@@ -787,7 +786,6 @@ Tests:
   formatA: [rocsparse_format_coo]
   batch_count: [4]
 
-# Nightly
 - name: sptrsv_file
   category: nightly
   function: sptrsv

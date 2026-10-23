@@ -48,6 +48,7 @@ from .ir import (
     BF16,
     F32,
     F16,
+    F64,
     I1,
     I16,
     I32,
@@ -506,6 +507,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
+    "amdgcn.fdot2.f16": (
+        "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"
+    ),
+    "amdgcn.fdot2.bf16": (
+        "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"
+    ),
     "fmuladd.f32": "declare float @llvm.fmuladd.f32(float, float, float)",
     "fmuladd.f16": "declare half @llvm.fmuladd.f16(half, half, half)",
     "fmuladd.bf16": "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)",
@@ -678,6 +685,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "mfma.f32.16x16x8.xf32": "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8.xf32(<2 x float>, <2 x float>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)",
     "mfma.f32.32x32x4.xf32": "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)",
+    "mfma.f64.16x16x4f64": (
+        "declare <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+        "double, double, <4 x double>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f64.4x4x4f64": (
+        "declare double @llvm.amdgcn.mfma.f64.4x4x4f64("
+        "double, double, double, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.16x16x4f32": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
         "float, float, <4 x float>, "
@@ -691,6 +708,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "mfma.f32.4x4x4f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
         "<4 x half>, <4 x half>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.4x4x4bf16.1k": (
+        # bf16 4x4x4 goes through the `_1k` variant like 16x16x16 / 32x32x8
+        # bf16: operands are `<4 x i16>` (bitcast of `<4 x bfloat>`).
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+        "<4 x i16>, <4 x i16>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     # FP8 / BF8 MFMA (gfx940+). Operands are packed as <2 x i32>
@@ -744,16 +768,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "ds.read.tr16.b64": (
         "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"
     ),
-    # gfx950 ``ds_read_b128_tr_b16`` — wide transposed-LDS read returning
-    # ``<8 x i16>`` per lane (the K-packed MFMA B-operand layout for the
-    # 16x16x32 / 32x32x16 atoms; one LDS op vs two paired b64 reads).
-    "ds.read.tr16.b128": (
-        "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
-    ),
     # gfx1250 (gfx1250) wave32 transpose-LDS read: ``ds_load_tr16_b128`` returns
-    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). This is the
-    # gfx1250 counterpart of gfx950's ``ds_read_tr16_b128`` (different opcode +
-    # wave32 lane distribution).
+    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). gfx950 has
+    # no wide transpose read; LLVM has no ``ds.read.tr16.b128``.
     "ds.load.tr16.b128.v8bf16": (
         "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"
     ),
@@ -2604,6 +2621,22 @@ class _Lowerer:
             f"{llvm_ty} {self._operand(c)})"
         )
 
+    def _op_arith_fdot2(self, op: Op) -> None:
+        """Lower ``arith.fdot2`` to ``llvm.amdgcn.fdot2[.f32.bf16]`` (clamp off)."""
+        a, b, c = op.operands
+        elem = a.type.elem.name
+        if elem == "bf16":
+            vty, fn = "<2 x bfloat>", "llvm.amdgcn.fdot2.f32.bf16"
+        elif elem == "f16":
+            vty, fn = "<2 x half>", "llvm.amdgcn.fdot2"
+        else:
+            raise NotImplementedError(f"fdot2: unsupported element type {elem!r}")
+        self._need(f"amdgcn.fdot2.{elem}")
+        self._current().emit(
+            f"  {op.result.name} = call float @{fn}({vty} {self._operand(a)}, "
+            f"{vty} {self._operand(b)}, float {self._operand(c)}, i1 false)"
+        )
+
     def _op_arith_fmax3(self, op: Op) -> None:
         """Lower ``arith.fmax3(a, b, c)`` -> ``maxnum(a, maxnum(b, c))``.
 
@@ -4165,6 +4198,41 @@ class _Lowerer:
             f"<{count} x float> {self._operand(c)}, i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        c = op.operands[2]
+        self._need("mfma.f64.16x16x4f64")
+        a_arg = self._mma_operand(op, "a", F64)
+        b_arg = self._mma_operand(op, "b", F64)
+        self._current().emit(
+            f"  {op.result.name} = call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+            f"double {a_arg}, "
+            f"double {b_arg}, "
+            f"<4 x double> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        c = op.operands[2]
+        self._need("mfma.f64.4x4x4f64")
+        a_arg = self._mma_operand(op, "a", F64)
+        b_arg = self._mma_operand(op, "b", F64)
+        # The intrinsic takes and returns a scalar; the IR accumulator is <1 x double>.
+        c_elem = self._fresh("mfma_c")
+        d_elem = self._fresh("mfma_d")
+        self._current().emit(
+            f"  {c_elem} = extractelement <1 x double> {self._operand(c)}, i32 0"
+        )
+        self._current().emit(
+            f"  {d_elem} = call double @llvm.amdgcn.mfma.f64.4x4x4f64("
+            f"double {a_arg}, "
+            f"double {b_arg}, "
+            f"double {c_elem}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = insertelement <1 x double> undef, double {d_elem}, i32 0"
+        )
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
         c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
@@ -4615,6 +4683,26 @@ class _Lowerer:
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
             f"<4 x half> {self._operand(a)}, "
             f"<4 x half> {self._operand(b)}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.4x4x4bf16.1k")
+        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -5178,12 +5266,10 @@ class _Lowerer:
         )
 
     def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        """``ds_read_b128_tr_b16`` -- gfx950 wide transpose-read.
+        """``ds_load_tr16_b128`` -- gfx1250 wide transpose-read.
 
-        Reads twice the bytes per lane vs the b64 sibling. The
-        intrinsic returns ``<8 x i16>`` (= 16 bytes per lane), which
-        we bitcast to ``<8 x half>`` / ``<8 x bfloat>`` to match the
-        IR result type.
+        The backend selects an element-typed intrinsic that returns
+        ``<8 x half>`` or ``<8 x bfloat>``. Other targets raise.
         """
         smem = op.operands[0]
         indices = list(op.operands[1:])
@@ -5199,24 +5285,9 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec(elem_name)
         self._need(need_key)
-        elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        want_ty = f"<8 x {elem_ty}>"
-        if ret_ty == want_ty:
-            # Element-type-specific intrinsic (gfx1250 selects ``.v8f16`` /
-            # ``.v8bf16`` to match the op): no reinterpret needed.
-            self._current().emit(
-                f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-        else:
-            # gfx950 returns a type-agnostic ``<8 x i16>``; reinterpret the raw
-            # 16-bit lanes as the requested half/bfloat element.
-            raw = self._fresh("trw.raw")
-            self._current().emit(
-                f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast {ret_ty} {raw} to {want_ty}"
-            )
+        self._current().emit(
+            f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+        )
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline-asm lowering (ADDITIVE).
@@ -5953,9 +6024,10 @@ class _Lowerer:
         callers reach the full 64-bit range needed for >4 GiB KV
         caches that would otherwise OOB-zero at the tail.
 
-        Flags = 0x00027000 -- the rsrc DWORD3 word that gives
-        "32-bit-uint, structured buffer, bounds-checked"; matches CK
-        Tile's hardcoded value.
+        Flags = the target ISA backend's ``buffer_rsrc_word3`` -- the rsrc
+        DWORD3 that makes the descriptor bounds-checked. Its encoding is
+        ISA-specific (``0x00027000`` on gfx9, ``0x31014000`` on gfx11 /
+        gfx12); the HIP lowering takes the same word from the same backend.
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands

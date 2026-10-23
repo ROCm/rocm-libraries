@@ -21,7 +21,7 @@ endif()
 # Set cpack license file here to avoid rocm-cmake warning
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
-include(fetch_rocm_cmake)
+include(find_rocm_cmake)
 include(GNUInstallDirs)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
