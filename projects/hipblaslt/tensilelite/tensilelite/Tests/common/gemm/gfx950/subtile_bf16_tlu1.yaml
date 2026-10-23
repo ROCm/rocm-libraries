@@ -1,0 +1,109 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# BF16 NN subtile GEMM correctness -- the bf16 counterpart to subtile_mxfp4_tlu1.yaml.
+#
+# NN (TransposeA=0, TransposeB=0) makes A free-dim contiguous, so TLUA=True and A
+# takes the stacked transpose-read geometry AB_B16_TLU1_4x1 (stack 4 = 64 M-rows
+# x 32 K, 128 B LDS column) while B stays TLU=0 on the row-major layout.  bf16 has
+# exactly one admissible stack -- see _SUBTILE_STACK_B16 in SolutionStructs -- so
+# every solution here lands on that one geometry and the sweep varies what sits
+# around it: how many strips the macro tile spans, and how many waves share one.
+#
+# MacroTile0 = MatrixInstM * MIWaveTile[0] * MIWaveGroup[0], and a strip holds 4
+# MMA-M tiles, so the four MI shapes below split into two regimes:
+#
+#   wg [2,2] MIWT 2x2  MT  64 -- 2 M-tiles/wave: waves SHARE a strip.  The wave's
+#                                window into a shared strip is a sub-strip stride
+#                                that overlaps the m-block field the LDS XOR
+#                                permutes, so it must be folded in BEFORE the
+#                                XOR.  Adding it after gave (tile_m ^ swz) +
+#                                window and silently corrupted every wave with a
+#                                non-zero window.  This shape is the guard.
+#   wg [1,4] MIWT 4x1  MT  64 -- 1 wave per strip, the simple case.
+#   wg [2,2] MIWT 4x4  MT 128 -- 2 strips (localSubtileGrid[0] == 2), which is
+#                                what pins globalReadDoSubtile's sId0 units; with
+#                                a single strip both unit conventions agree.
+#   wg [2,2] MIWT 4x2  MT 128 -- asymmetric MIWaveTile on the same 2 strips.
+#
+# K coverage deliberately includes sizes that are NOT a multiple of DepthU.  A
+# TLU=1 operand is ineligible for the boundary DTL fixup (one GR load covers M
+# rows at a single K, so no load can straddle the K boundary), which means an NN
+# kernel reaches tailLoopBoundaryDtlLoadAB with only B eligible -- the mixed pair
+# that the both-eligible assertion used to forbid.  Without a tail K here that
+# path never executes.
+#
+# DataInitType A/B/C = 3 (Random) is required, not cosmetic: with InitMode::One
+# every permutation of A yields the same dot product, so a wrong LDS data
+# placement -- exactly what a mis-applied swizzle produces -- would validate
+# clean.  Random is position-dependent, so a misplaced element changes the result
+# with probability ~1.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  PrintSolutionRejectionReason: True
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT  64x64,  waves share a strip
+          - [16, 16, 32, 1,  1, 4, 1,  1, 4]   # MT  64x64,  one wave per strip
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128, 2 strips
+          - [16, 16, 32, 1,  1, 4, 2,  2, 2]   # MT 128x64,  asymmetric MIWT
+        - DepthU: [64, 128]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - UseSubtileImpl: [True]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1,  64]   # one DepthU chunk at DepthU 64
+          - Exact: [128, 128, 1, 128]   # exact multiple of both DepthU values
+          - Exact: [128, 128, 1,  96]   # tail at DepthU 64 (64 + 32)
+          - Exact: [128, 128, 1, 160]   # tail at both DepthU (2*64+32, 128+32)
+          - Exact: [256, 256, 1, 384]
+          - Exact: [256, 256, 1, 512]
