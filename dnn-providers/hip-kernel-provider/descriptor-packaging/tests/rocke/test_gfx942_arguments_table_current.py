@@ -7,7 +7,12 @@ strides) and checks it against ``Gfx942AttentionUnified3dArgumentsTable.inc``,
 a table generated from the rocKE library. This test re-runs the generator in
 memory and requires the committed table byte-for-byte, so a change to the
 signature order or the stride packing fails CI even when nobody regenerates
-the table.
+the table -- but only where the change alters a SAMPLED row.
+
+Coverage is the generator's 12 ``CASES`` only (BHSD, BSHD, row-padded,
+capacity-padded and mixed K/V layouts at batch 1 to 16, D 64/128/256). The
+fp16 signature's order and names are checked whole; the stride packing only at
+those 12 layouts, so a change that alters the packing for another layout passes.
 
 CI lane: the ``hip-kernel-provider-hkp-pack-quick`` CTest, which runs
 ``pytest descriptor-packaging/tests -m quick`` from the source tree; it is

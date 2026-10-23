@@ -4,7 +4,15 @@ The kernel ingestor engine restates rocKE's ``_num_segments`` in C++ and checks
 it against ``Gfx942AttentionUnified3dSplitRuleTable.inc``, a table generated
 from the rocKE library. This test re-runs the generator in memory and requires
 the committed table byte-for-byte, so a change to ``_num_segments`` (or the
-problem it is fed) fails CI even when nobody regenerates the table.
+problem it is fed) fails CI even when nobody regenerates the table -- but only
+where the change alters a SAMPLED row.
+
+Coverage is the generator's sampled grid only: batch {1, 4, 16, 64, 256} x
+Hkv {1, 8} x GQA {1, 4, 16} x seqlen_k {1, 64, 256, 512, 2048, 8192, 32768,
+131072} x D {64, 128, 256} x block {16, 32, 64} at 304, 228, 76 and 38 CUs,
+plus the generator's PARTIAL_ROWS at 80 CUs and FULL_EDGE_ROWS. A change that
+only moves the rule at another CU count, batch or seqlen_k (for example only at
+Skv 4000) passes this test and the C++ table test.
 
 CI lane: the ``hip-kernel-provider-hkp-pack-quick`` CTest, which runs
 ``pytest descriptor-packaging/tests -m quick`` from the source tree; it is

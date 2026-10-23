@@ -7,7 +7,15 @@ C++, which graphs rocKE's strided split-KV decode candidate admits
 ``Gfx942AttentionUnified3dAdmissionTable.inc``, a table generated from the rocKE
 library. This test re-runs the generator in memory and requires the committed
 table byte-for-byte, so a change to the candidate's admission fails CI even
-when nobody regenerates the table.
+when nobody regenerates the table -- but only where the change alters a
+SAMPLED row.
+
+Coverage is the generator's sampled grid only: batch {1, 3, 64} x (Hq, Hkv)
+{(8, 1), (32, 8), (12, 4), (32, 1), (16, 16)} x seqlen_q {1, 2} x seqlen_k
+{1, 64, 256, 512, 8192} x D {64, 96, 128, 256} x dtype {fp16, bf16} x mask
+{none, top-left causal, bottom-right causal, window 128} x kv_block_size
+{16, 32, 64}, all at 304 CUs. A change that only moves admission at another
+shape (for example only at batch 1024 or D 192) passes this test.
 
 CI lane: the ``hip-kernel-provider-hkp-pack-quick`` CTest, which runs
 ``pytest descriptor-packaging/tests -m quick`` from the source tree; it is

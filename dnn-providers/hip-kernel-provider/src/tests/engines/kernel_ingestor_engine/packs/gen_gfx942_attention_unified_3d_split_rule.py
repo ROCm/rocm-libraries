@@ -33,10 +33,13 @@ GQA = (1, 4, 16)
 SEQLEN_K = (1, 64, 256, 512, 2048, 8192, 32768, 131072)
 HEAD_SIZES = (64, 128, 256)
 BLOCK_SIZES = (16, 32, 64)
-# 304: MI300X. 80: a partitioned part (gfx942 is not floored, see
-# _resolve_num_cus), sampled to cover the live-CU path and both sides of the
+# 304: MI300X, the reference device. 228: MI300A. 76 and 38: MI300X split into
+# 4 and 8 partitions (gfx942 is not floored, see _resolve_num_cus). The product
+# grid runs at each, so the scorer's live-CU path is sampled beyond 304.
+# 80: one more partitioned count, sampled below to cover both sides of the
 # `ctas * 16 >= num_cus` scope test.
 FULL_CUS = 304
+GRID_CUS = (FULL_CUS, 228, 76, 38)
 PARTIAL_CUS = 80
 PARTIAL_ROWS = (
     # batch, hkv, gqa, skv, d, block
@@ -80,9 +83,9 @@ def segments(batch, hkv, gqa, skv, d, block, cus):
 
 def main():
     rows = [
-        (b, kh, kh * g, d, blk, skv, FULL_CUS)
-        for b, kh, g, skv, d, blk in itertools.product(
-            BATCHES, KV_HEADS, GQA, SEQLEN_K, HEAD_SIZES, BLOCK_SIZES
+        (b, kh, kh * g, d, blk, skv, cus)
+        for cus, b, kh, g, skv, d, blk in itertools.product(
+            GRID_CUS, BATCHES, KV_HEADS, GQA, SEQLEN_K, HEAD_SIZES, BLOCK_SIZES
         )
     ]
     rows += [

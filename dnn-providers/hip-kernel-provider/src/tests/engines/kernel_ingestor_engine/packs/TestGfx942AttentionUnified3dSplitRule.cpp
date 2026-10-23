@@ -49,9 +49,9 @@ const std::vector<SplitRuleRow> SPLIT_RULE_TABLE = {
 
 TEST(TestGfx942AttentionUnified3dSplitRule, MatchesRockeOnEveryGeneratedRow)
 {
-    // 5 batches x 2 KV heads x 3 GQA x 8 seqlen_k x 3 D x 3 blocks at 304 CUs, + 9 at 80,
-    // + 1 pinned edge at 304.
-    ASSERT_EQ(std::size(SPLIT_RULE_TABLE), 2170u);
+    // 5 batches x 2 KV heads x 3 GQA x 8 seqlen_k x 3 D x 3 blocks at each of 304, 228, 76
+    // and 38 CUs, + 9 at 80, + 1 pinned edge at 304. Only these sampled points are checked.
+    ASSERT_EQ(std::size(SPLIT_RULE_TABLE), 8650u);
     for(const auto& r : SPLIT_RULE_TABLE)
     {
         EXPECT_EQ(gfx942SplitRuleSegments(
