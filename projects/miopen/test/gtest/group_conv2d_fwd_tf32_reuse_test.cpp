@@ -258,64 +258,110 @@ miopenTensorLayout_t Tf32ReuseLayout()
 
 } // namespace
 
-#define DEFINE_TF32_REUSE_TEST(ndim, dir)                                                  \
-    struct GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32                                   \
-        : GroupConvTF32Reuse<ndim, Direction::dir>                                         \
-    {                                                                                      \
-    };                                                                                     \
-    TEST_P(GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32, DbRestoredConfigStaysTF32)       \
-    {                                                                                      \
-        RunReuse<SolverFor<ndim, Direction::dir>::type>();                                 \
-    }                                                                                      \
-    TEST_P(GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)    \
-    {                                                                                      \
-        RunKeyDistinct();                                                                  \
-    }                                                                                      \
-    INSTANTIATE_TEST_SUITE_P(Full,                                                         \
-                             GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32,                \
-                             testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<ndim>()), \
-                                              testing::Values(1.0f),                       \
-                                              testing::Values(0.0f),                       \
-                                              testing::Values(Tf32ReuseLayout<ndim>())))
+// One suite per CK grouped solver the fix touches (2D/3D x fwd/bwd-data/bwd-weights). Suite
+// names are spelled out rather than macro-pasted so the MIOpen gtest-naming linter can parse
+// them.
 
-namespace {
-template <unsigned NDIM, Direction DIR>
-struct SolverFor;
-template <>
-struct SolverFor<2u, Direction::Forward>
+struct GPU_GroupConv2D_Forward_TF32Reuse_FP32 : GroupConvTF32Reuse<2u, Direction::Forward>
 {
-    using type = miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops;
 };
-template <>
-struct SolverFor<2u, Direction::BackwardData>
+TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
 {
-    using type = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops;
-};
-template <>
-struct SolverFor<2u, Direction::BackwardWeights>
-{
-    using type = miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops;
-};
-template <>
-struct SolverFor<3u, Direction::Forward>
-{
-    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops;
-};
-template <>
-struct SolverFor<3u, Direction::BackwardData>
-{
-    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops;
-};
-template <>
-struct SolverFor<3u, Direction::BackwardWeights>
-{
-    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops;
-};
-} // namespace
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>();
+}
+TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv2D_Forward_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<2u>())));
 
-DEFINE_TF32_REUSE_TEST(2, Forward);
-DEFINE_TF32_REUSE_TEST(2, BackwardData);
-DEFINE_TF32_REUSE_TEST(2, BackwardWeights);
-DEFINE_TF32_REUSE_TEST(3, Forward);
-DEFINE_TF32_REUSE_TEST(3, BackwardData);
-DEFINE_TF32_REUSE_TEST(3, BackwardWeights);
+struct GPU_GroupConv2D_BackwardData_TF32Reuse_FP32 : GroupConvTF32Reuse<2u, Direction::BackwardData>
+{
+};
+TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
+{
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>();
+}
+TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)
+{
+    RunKeyDistinct();
+}
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv2D_BackwardData_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<2u>())));
+
+struct GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32
+    : GroupConvTF32Reuse<2u, Direction::BackwardWeights>
+{
+};
+TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
+{
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>();
+}
+TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)
+{
+    RunKeyDistinct();
+}
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<2u>())));
+
+struct GPU_GroupConv3D_Forward_TF32Reuse_FP32 : GroupConvTF32Reuse<3u, Direction::Forward>
+{
+};
+TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
+{
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>();
+}
+TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv3D_Forward_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<3u>())));
+
+struct GPU_GroupConv3D_BackwardData_TF32Reuse_FP32 : GroupConvTF32Reuse<3u, Direction::BackwardData>
+{
+};
+TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
+{
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>();
+}
+TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)
+{
+    RunKeyDistinct();
+}
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv3D_BackwardData_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<3u>())));
+
+struct GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32
+    : GroupConvTF32Reuse<3u, Direction::BackwardWeights>
+{
+};
+TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
+{
+    RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>();
+}
+TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)
+{
+    RunKeyDistinct();
+}
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32,
+                         testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
+                                          testing::Values(1.0f),
+                                          testing::Values(0.0f),
+                                          testing::Values(Tf32ReuseLayout<3u>())));
