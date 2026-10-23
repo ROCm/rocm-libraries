@@ -220,7 +220,7 @@ struct TensorDescriptor : miopenTensorDescriptor
     MIOPEN_INTERNALS_EXPORT const std::string& GetLayout_str() const;
 
     MIOPEN_INTERNALS_EXPORT std::size_t GetVectorLength() const;
-    std::optional<miopenDataType_t> GetCastType() const;
+    MIOPEN_INTERNALS_EXPORT std::optional<miopenDataType_t> GetCastType() const;
     void SetCastType(miopenDataType_t cast_type_);
 
     MIOPEN_INTERNALS_EXPORT std::size_t GetElementSize() const;

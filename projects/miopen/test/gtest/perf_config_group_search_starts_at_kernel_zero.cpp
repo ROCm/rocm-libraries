@@ -39,6 +39,7 @@ using BwdConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupB
 using WrwConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
 using Fwd3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops;
 using Bwd3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops;
+using Wrw3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupWrwXdlops;
 
 // Builds a 2D grouped-conv ProblemDescription for the requested direction. input == x,
 // output == y; the backward directions pass tensors in (output, weights, input) order, matching
@@ -151,6 +152,34 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     EXPECT_EQ(cfg.split_k, 1);
     EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front() + "+1");
     EXPECT_TRUE(cfg.IsValid(problem));
+}
+
+TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP16, SearchStartsAtKernelZero)
+{
+    const auto device_name = miopen::solver::GetCurrentDeviceName();
+    if(device_name.empty())
+        GTEST_SKIP() << "No ROCm-capable device is detected";
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
+
+    const auto base =
+        MakeSearchProblem3D({1, 2, 64, 64, {4, 4, 4}, {3, 3, 3},
+                             {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+                            miopenHalf, miopenTensorNDHWC, Direction::BackwardWeights);
+    for(const bool deterministic : {false, true})
+    {
+        auto conv = base.GetConv();
+        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, deterministic ? 1 : 0);
+        const Problem problem(base.GetIn(), base.GetWeights(), base.GetOut(), conv,
+                              Direction::BackwardWeights);
+        Wrw3DConfig cfg(false);
+        ASSERT_TRUE(cfg.SetNextValue(problem));
+        ASSERT_FALSE(cfg.valid_kernels.empty());
+        EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front() + "+1");
+        EXPECT_EQ(cfg.split_k, 1);
+        EXPECT_TRUE(cfg.IsValid(problem));
+    }
 }
 
 // --- Host-only advance walk for the non-split solvers (2D Fwd, 3D Fwd, 3D Bwd). With valid_kernels

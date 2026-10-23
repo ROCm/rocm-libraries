@@ -236,6 +236,9 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
         {
             return false;
         }
+        // InitValidKernels seeds the first candidate at split one. Return it
+        // before advancing so exhaustive search measures every eligible kernel.
+        return true;
     }
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;

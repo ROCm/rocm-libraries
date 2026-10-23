@@ -42,6 +42,7 @@ The MIOpen public repository is located at
     * :doc:`Manual tuning <./conceptual/tuningdb>`
     * :doc:`MI200 alternate implementation <./conceptual/MI200-alt-implementation>`
     * :doc:`Porting to MIOpen <./conceptual/porting-guide>`
+    * :doc:`CK Tile convolution on gfx1250 <./conceptual/ck-tile-convolution>`
 
   .. grid-item-card:: How to
 

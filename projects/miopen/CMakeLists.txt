@@ -294,6 +294,11 @@ option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for 
 option(MIOPEN_CK_UNBUNDLE_PER_ARCH
     "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
     OFF)
+option(MIOPEN_USE_CK_TILE
+    "Add native CK Tile grouped convolution candidates to the gfx1250 CK plugin" OFF)
+if(MIOPEN_USE_CK_TILE AND NOT MIOPEN_USE_COMPOSABLEKERNEL)
+    message(FATAL_ERROR "MIOPEN_USE_CK_TILE requires MIOPEN_USE_COMPOSABLEKERNEL")
+endif()
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 

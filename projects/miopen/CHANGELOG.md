@@ -25,11 +25,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Omit old-dW staging for selected packed 2D FP16/BF16 grouped CK WMMA-v3 backward-weights at explicit split one on gfx1250; preserve kernel arithmetic, native clears, scratch reservations, and alias/scalar fallbacks.
 * [Conv] Use CK's gfx1250 packed-weight Tensor Data Mover forward path for eligible 2D/3D FP16/BF16/FP32 convolutions; keep the existing layout conversion, precision, kernel IDs, and workspace contracts.
 * [Conv] Add gfx1250 native-output CK tuning candidates for packed non-pointwise NCHW/NCDHW forward convolutions in FP16/BF16/exact FP32 with alpha=1 and beta=0. Selected invocations retain input/weight conversions but omit output staging and conversion; existing candidates remain available.
+* [Conv] Add opt-in `MIOPEN_USE_CK_TILE` gfx1250 2D/3D grouped forward, backward-data, and backward-weights candidates in FP16/BF16/exact FP32 through the existing CK plugin. Expose native WMMA CompV3/BasicV1/Memory tuning portfolios to normal MIOpenDriver full tuning alongside legacy CK and other backends. Preserve caller streams; use caller-owned FP32 WRW and low-precision backward-data split scratch, and reject unsupported scalar, layout, and byte-offset contracts.
 
 ### Resolved Issues
 * [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.
 * [BatchNorm] Mask padded batch tiles in spatial forward and backward kernels when multiple batches are processed per thread.
 * [BatchNorm] Fix NHWC vector-channel backward reduction compilation and include epsilon in the recomputed-statistics CPU verification reference.
+* [Conv] Include the first split-one 3D grouped CK backward-weights configuration in exhaustive tuning, including deterministic searches.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

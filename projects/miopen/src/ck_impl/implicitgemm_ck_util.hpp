@@ -17,6 +17,7 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_scale.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp>
+#include "ck_tile_grouped_conv_adapter.hpp"
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace miopen {
@@ -154,7 +155,7 @@ using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     ck::tensor_operation::element_wise::PassThrough,
     ComputeType>;
 template <typename DataType, typename ComputeType = DataType>
-using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+using DeviceOpGWrwPtrs = miopen::solver::CKTileOperationInstanceFactory<
     DeviceOpGWrw<DataType, ComputeType>>;
 
 template <typename DataType, typename ComputeType = DataType>
@@ -174,7 +175,7 @@ using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMulti
     ComputeType>;
 
 template <typename DataType, typename ComputeType = DataType>
-using DeviceOpGBwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+using DeviceOpGBwdPtrs = miopen::solver::CKTileOperationInstanceFactory<
     DeviceOpGBwd<DataType, ComputeType>>;
 
 using InLayout    = ck::tensor_layout::convolution::NDHWGC;
@@ -232,7 +233,7 @@ using DeviceOpGBwdWeightScale =
 
 template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefaultPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    miopen::solver::CKTileOperationInstanceFactory<
         DeviceOpGBwdWeightDefault<DataType, ComputeType>>;
 
 template <typename DataType, typename ComputeType = DataType>
@@ -256,6 +257,32 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     return std::find_if(conv_ptrs.begin(), conv_ptrs.end(), [&kernel_id](const auto& ptr) {
         return ptr->GetTypeString() == kernel_id;
     });
+}
+
+inline bool IsCKTileKernel(const std::string& id)
+{
+    return id.rfind("CKTileGroupedConv", 0) == 0;
+}
+
+inline bool IsCKTileProblemSupported(const miopen::conv::ProblemDescription& problem,
+                                     const std::string& id)
+{
+    if(!IsCKTileKernel(id))
+        return true;
+    if(!problem.AllTensorsDimsFitIntoInt() ||
+       problem.GetIn().GetNumDims() != problem.GetSpatialDims() + 2 ||
+       problem.GetOut().GetNumDims() != problem.GetSpatialDims() + 2 ||
+       problem.GetWeights().GetNumDims() != problem.GetSpatialDims() + 2)
+        return false;
+    const std::string rank = "<" + std::to_string(problem.GetSpatialDims()) + ",";
+    const char* dtype = problem.IsFp16() ? "fp16" : problem.IsBfp16() ? "bf16" : "fp32";
+    return (problem.Is2d() || problem.Is3d()) &&
+           (problem.IsFp16() || problem.IsBfp16() || problem.IsFp32()) &&
+           id.find(rank) != std::string::npos && id.find(dtype) != std::string::npos &&
+           !problem.HasNonPackedTensors() && !problem.IsTensorsCasted() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
+           problem.GetConv().mode == miopenConvolution &&
+           problem.GetAlpha().GetAsDouble() == 1.0 && problem.GetBeta().GetAsDouble() == 0.0;
 }
 
 // Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
@@ -320,6 +347,8 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
     {
         if(require_large_tensor && !IsLargeTensorCKInstance(conv_ptrs[idx]))
+            continue;
+        if(!IsCKTileProblemSupported(problem, conv_ptrs[idx]->GetTypeString()))
             continue;
         if(args.IsSupportedBy(conv_ptrs[idx]))
             valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
@@ -559,6 +588,8 @@ template <typename DeviceOpType,
 bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string& kernel_id)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(!IsCKTileProblemSupported(problem, kernel_id))
+        return false;
     if(!kernel_id.empty())
     {
         auto conv_ptrs                  = DeviceOpType::GetInstances();
@@ -614,6 +645,8 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     const auto ptrs                 = DeviceOpType::GetInstances();
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     return std::any_of(ptrs.begin(), ptrs.end(), [&](auto& ptr) {
+        if(!IsCKTileProblemSupported(problem, ptr->GetTypeString()))
+            return false;
         if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
             return false;
         return args.IsSupportedBy(ptr);
@@ -650,6 +683,8 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
                          int split_k)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(!IsCKTileProblemSupported(problem, kernel_id))
+        return false;
     auto conv_ptrs = DeviceOpType::GetInstances();
     auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
 
@@ -740,6 +775,8 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     for(auto& ptr : ptrs)
     {
+        if(!IsCKTileProblemSupported(problem, ptr->GetTypeString()))
+            continue;
         if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
             continue;
         // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
@@ -866,6 +903,13 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
                  const CastType& data_ctx,
                  const std::optional<int>& split_k)
 {
+    if constexpr(!std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
+    {
+        MIOPEN_THROW_IF(IsCKTileKernel(sh_conv_ptr->GetTypeString()) &&
+                            (data_ctx.alpha.GetAsFloat() != 1.0f ||
+                             data_ctx.beta.GetAsFloat() != 0.0f),
+                        "CK Tile convolution requires alpha=1 and beta=0");
+    }
     const auto buffer = [&](size_t index) { return operand_ptrs[index]; };
 
     std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr;
@@ -957,6 +1001,13 @@ MakeNHWCCKArgPtr(const std::shared_ptr<DeviceOpType>& sh_conv_ptr,
                  const CastType& data_ctx,
                  const std::optional<int>& split_k)
 {
+    if constexpr(!std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
+    {
+        MIOPEN_THROW_IF(IsCKTileKernel(sh_conv_ptr->GetTypeString()) &&
+                            (data_ctx.alpha.GetAsFloat() != 1.0f ||
+                             data_ctx.beta.GetAsFloat() != 0.0f),
+                        "CK Tile convolution requires alpha=1 and beta=0");
+    }
     std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr;
 
     if constexpr(std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
@@ -1061,6 +1112,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
     ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(IsCKTileKernel(kernel_id) &&
+       !IsCKArgsSupported<DeviceOpType, CKArgsType>(problem, kernel_id))
+    {
+        result.status = miopenStatusInvalidValue;
+        return result;
+    }
     auto ck_args = CKArgsType{problem};
 
     auto conv_ptrs = DeviceOpType::GetInstances();
@@ -1109,7 +1166,15 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     }
     else
     {
-        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
+        size_t ck_ws_size = 0;
+        if constexpr(IsSplitKNeeded<DeviceOpType>())
+        {
+            if(IsCKTileKernel(kernel_id))
+                ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        }
+        if(ck_ws_size != 0)
+            _ck_buff_des.emplace(ck_ws_size, 0);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
     }
 
     auto [_input1_tr_inst, _input2_tr_inst, _output_tr_inst, _output_init_tr_inst] =
@@ -1183,6 +1248,14 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
             Data_t workspace_ptr = GetWorkspacePointer<CastType>(data_ctx);
             ValidateWorkspacePointer<CastType>(workspace_ptr);
+            if constexpr(!std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
+            {
+                MIOPEN_THROW_IF(IsCKTileKernel(kernel_id2) &&
+                                    (data_ctx.workSpaceSize < workspace_size2 ||
+                                     data_ctx.alpha.GetAsFloat() != 1.0f ||
+                                     data_ctx.beta.GetAsFloat() != 0.0f),
+                                "Invalid CK Tile workspace or convolution scalars");
+            }
             if constexpr(NativeForwardWorkspace)
             {
                 MIOPEN_THROW_IF(
@@ -1350,6 +1423,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
+    if(IsCKTileKernel(kernel_id) &&
+       !IsCKArgsSupported<DeviceOpType, CKArgsType>(problem, kernel_id))
+    {
+        result.status = miopenStatusInvalidValue;
+        return result;
+    }
     auto conv_ptrs             = DeviceOpType::GetInstances();
     std::optional<int> split_k = std::nullopt;
     std::string id_string      = kernel_id;
@@ -1422,6 +1501,15 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 // use captured value, other wise getting warning
                 // "lambda capture is not used" since this variable is only used in assert.
                 (void)should_allocated_wrw_buffer2;
+                if(IsCKTileKernel(kernel_id2))
+                {
+                    const auto required =
+                        sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
+                    MIOPEN_THROW_IF(required != 0 &&
+                                        (data_ctx.workSpace == nullptr ||
+                                         data_ctx.workSpaceSize < required),
+                                    "CK Tile convolution workspace is missing or undersized");
+                }
                 assert((should_allocated_wrw_buffer2 && data_ctx.workSpace != nullptr) ||
                        !(should_allocated_wrw_buffer2 && data_ctx.workSpace == nullptr));
                 if(data_ctx.workSpace)
@@ -1460,6 +1548,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         auto ck_args = CKArgsType{problem};
         if constexpr(NativeForwardWorkspace)
             result.workspace_sz = ck_args.GetCKWorkspaceSize(*ptr_iter);
+        else if constexpr(IsSplitKNeeded<DeviceOpType>())
+        {
+            if(IsCKTileKernel(kernel_id))
+                result.workspace_sz =
+                    ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        }
 
         result.invoker_factory = [kernel_id_   = kernel_id,
                                   split_k_     = split_k,
@@ -1482,6 +1576,17 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                                ck_args_and_workspace2.first,
                                                data_ctx,
                                                split_k2);
+                if(IsCKTileKernel(kernel_id2))
+                {
+                    const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
+                    MIOPEN_THROW_IF(actual_size > ck_args_and_workspace2.second ||
+                                        (actual_size != 0 &&
+                                         (data_ctx.workSpace == nullptr ||
+                                          data_ctx.workSpaceSize < actual_size)),
+                                    "Insufficient CK Tile convolution workspace");
+                    if(actual_size != 0)
+                        sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), data_ctx.workSpace);
+                }
                 if constexpr(NativeForwardWorkspace)
                 {
                     const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());

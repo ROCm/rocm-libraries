@@ -123,6 +123,32 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # the main MIOpen target and with how CK itself was built.
     miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
 
+    if(MIOPEN_USE_CK_TILE AND arch_base MATCHES "^gfx1250")
+        if(MIOPEN_BUILD_CK)
+            set(_ck_tile_hints "${MIOPEN_CK_INCLUDE_DIR}")
+        else()
+            get_target_property(_ck_tile_hints composable_kernel::device_conv_operations
+                INTERFACE_INCLUDE_DIRECTORIES)
+        endif()
+        find_path(MIOPEN_CK_TILE_INCLUDE_DIR ck_tile/ops/grouped_convolution.hpp
+            HINTS ${_ck_tile_hints}
+            DOC "CK include root containing the CK Tile grouped convolution headers")
+        if(NOT MIOPEN_CK_TILE_INCLUDE_DIR)
+            message(FATAL_ERROR "MIOPEN_USE_CK_TILE requires CK Tile grouped convolution headers")
+        endif()
+        target_include_directories(${lib_name} SYSTEM BEFORE PRIVATE
+            "${MIOPEN_CK_TILE_INCLUDE_DIR}")
+        target_sources(${lib_name} PRIVATE ck_tile_grouped_conv.cpp)
+        target_compile_definitions(${lib_name} PRIVATE
+            MIOPEN_USE_CK_TILE=1
+            USE_NEW_UNIFIED_FRAMEWORK=0
+            CK_TILE_USE_WMMA=1
+            CK_CMAKE_GPU_TARGET_IDS=0x1250
+            CK_USE_GFX1250=1
+            CK_GFX1250_SUPPORT=1
+            CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0)
+    endif()
+
     # Select the wavefront-size-specialized depthwise instance set for this GPU.
     # CDNA (gfx9xx) uses 64-lane wavefronts; RDNA (gfx10xx/gfx11xx/gfx12xx) uses 32.
     if(arch_base MATCHES "^gfx9")

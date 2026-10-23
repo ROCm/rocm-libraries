@@ -28,6 +28,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_GetitemBwd*"
   - "*/GPU_GLU_*"
   - "*/GPU_GroupConv*"
+  - "*/GPU_CkTileGroupedConv*"
   - "*/GPU_GroupNorm_*"
   - "*/GPU_GRUExtra_*"
   - "*/GPU_TestActivation*"
@@ -68,6 +69,7 @@ positive_patterns: &positive_patterns
   # so they carry no "Prefix/" and the leading "*/" above would not match them.
   - "GPU_StreamTracker_FP32*"
   - "GPU_NaiveTimeout_FP32*"
+  - "GPU_CKTileDriver_FP16.*"
   - "Standard/*" # include all standard tests by default
 
 

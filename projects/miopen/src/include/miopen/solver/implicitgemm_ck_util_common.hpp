@@ -603,8 +603,7 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
         {
             return (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem);
         }
-        // Only forward's selected candidate consumes native CK scratch here.
-        return problem.IsDirectionForward() ? ck_ws_size : 0;
+        return ck_ws_size;
     }
 
     assert(problem.IsLayoutDefault());
@@ -630,7 +629,8 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
 
     MultiBufferWorkspaceTraits wt({GetPackedSize(problem.GetIn()),
                                    GetPackedSize(problem.GetWeights()),
-                                   GetPackedSize(problem.GetOut())});
+                                   GetPackedSize(problem.GetOut()),
+                                   ck_ws_size});
     return wt.GetSize();
 }
 

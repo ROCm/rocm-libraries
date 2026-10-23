@@ -29,6 +29,8 @@ subtrees:
     title: MI200 alternate implementation
   - file: conceptual/porting-guide.rst
     title: Porting to MIOpen
+  - file: conceptual/ck-tile-convolution.rst
+    title: CK Tile convolution on gfx1250
 
 - caption: How to
   entries:

@@ -98,7 +98,7 @@ using DeviceOpGBwdScalePtrs =
 
 template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdDefaultPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    miopen::solver::CKTileOperationInstanceFactory<
         DeviceOpGBwdDefault<DataType, ComputeType>>;
 
 // ---------------------------------------------------------------------------

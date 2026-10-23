@@ -21,8 +21,7 @@ namespace {
 using miopen::conv::ProblemDescription;
 
 template <typename DataType, typename ComputeType = DataType>
-using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-    miopen::solver::conv::DeviceOpGWrw<DataType, ComputeType>>;
+using DeviceOpGWrwPtrs = miopen::solver::conv::DeviceOpGWrwPtrs<DataType, ComputeType>;
 
 // CKArgs — WRW direction.
 // Inherits shared members and split-k methods from CKArgsSplitK.

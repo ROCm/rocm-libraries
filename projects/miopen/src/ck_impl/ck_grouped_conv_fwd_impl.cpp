@@ -44,7 +44,7 @@ using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleA
     ComputeType>;
 
 template <typename DataType, typename ComputeType = DataType>
-using DeviceOpGFwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+using DeviceOpGFwdPtrs = miopen::solver::CKTileOperationInstanceFactory<
     DeviceOpGFwd<DataType, ComputeType>>;
 
 template <typename DataType, typename ComputeType = DataType>
