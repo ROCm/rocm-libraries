@@ -18,8 +18,6 @@ set(@PROJECT_NAME@_AUDIO_AUGMENTATIONS_SUPPORT "@RPP_PACKAGE_AUDIO_AUGMENTATIONS
 
 # Ensure transitive dependencies of rpp::rpp are available before rpp-targets.cmake is included
 include(CMakeFindDependencyMacro)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
-find_dependency(HALF)
 if("@RPP_PACKAGE_BACKEND_TYPE@" STREQUAL "HIP")
     find_dependency(HIP)
 endif()
@@ -68,6 +66,15 @@ if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
       INTERFACE_INCLUDE_DIRECTORIES "${SIMDE_INCLUDE_DIRS}")
   endif()
 endif ()
+
+find_path(@PROJECT_NAME@_HALF_INCLUDE_DIR
+  NAMES half/half.hpp half.hpp
+  HINTS "${PACKAGE_PREFIX_DIR}/include" "$ENV{ROCM_PATH}/include")
+mark_as_advanced(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+if(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+  set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES "${@PROJECT_NAME@_HALF_INCLUDE_DIR}")
+endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(

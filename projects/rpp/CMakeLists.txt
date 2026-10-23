@@ -393,7 +393,7 @@ endif()
 message("-- ${White}${PROJECT_NAME} -- Using Compiler - Path:" ${CMAKE_CXX_COMPILER} "\tVersion:" ${CMAKE_CXX_COMPILER_VERSION} "\tCompiler:" ${CMAKE_CXX_COMPILER_ID}${ColourReset})
 message("-- ${White}${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
 target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
-target_link_libraries(${PROJECT_NAME} PUBLIC HALF::half)
+target_include_directories(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIRS}>)
 
 if(RPP_HIP_HOST_TARGET)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${RPP_HIP_HOST_TARGET})
@@ -534,12 +534,9 @@ write_basic_package_version_file(
 )
 
 # Install the rpp-config.cmake and rpp-config-version.cmake
-# FindHALF.cmake is required so find_package(rpp) can recreate HALF::half for the
-# public link interface of rpp::rpp (rppdefs.h includes half.hpp).
 install(FILES
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
-    "${PROJECT_SOURCE_DIR}/cmake/FindHALF.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
     COMPONENT dev
 )
