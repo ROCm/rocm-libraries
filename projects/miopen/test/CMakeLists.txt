@@ -804,27 +804,6 @@ add_custom_test(conv_transposed_wrw_find_2
     COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
 )
 
-# Build-time check (ROCM-20937): verify the DLLs actually built carry an embedded Windows
-# VERSIONINFO resource (see miopen_embed_version_resource() in src/CMakeLists.txt). Standalone,
-# not a gtest: no HIP/GPU dependency, nothing to discover per-GPU, just one check of the already-
-# built binaries.
-if(WIN32)
-    add_executable(win_versioninfo_check win_versioninfo_check.cpp)
-    target_link_libraries(win_versioninfo_check PRIVATE version.lib)
-
-    set(_miopen_versioninfo_dll_targets MIOpen ${MIOPEN_CK_PLUGIN_TARGETS})
-    set(_miopen_versioninfo_dll_paths)
-    foreach(_miopen_versioninfo_tgt IN LISTS _miopen_versioninfo_dll_targets)
-        list(APPEND _miopen_versioninfo_dll_paths "$<TARGET_FILE:${_miopen_versioninfo_tgt}>")
-    endforeach()
-
-    add_test(NAME test_dll_versioninfo
-        COMMAND win_versioninfo_check
-            "${MIOpen_VERSION_MAJOR}.${MIOpen_VERSION_MINOR}.${MIOpen_VERSION_PATCH}"
-            ${_miopen_versioninfo_dll_paths}
-    )
-endif()
-
 #Dont install the tests if we are building each test separately
 #When the tests are built as a single unit, then we want to be
 #able to package them

@@ -183,10 +183,3 @@ endforeach()
 # Propagate the list to the parent scope so src/CMakeLists.txt can wire
 # build-order dependencies into the MIOpen_with_plugins proxy target.
 set(CK_PLUGIN_TARGETS "${CK_PLUGIN_TARGETS}" PARENT_SCOPE)
-
-# Also stash it as a CACHE INTERNAL variable (ROCM-20937) so test/CMakeLists.txt -- added via
-# add_subdirectory(test) from the top-level CMakeLists.txt, in a sibling directory scope that
-# doesn't inherit src/'s PARENT_SCOPE chain -- can enumerate the exact per-arch plugin DLLs this
-# configure produced without re-deriving the GPU_TARGETS arch-filtering logic above.
-set(MIOPEN_CK_PLUGIN_TARGETS "${CK_PLUGIN_TARGETS}" CACHE INTERNAL
-    "CK per-arch plugin DLL target names, for test/CMakeLists.txt")

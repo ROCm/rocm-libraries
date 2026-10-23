@@ -107,6 +107,13 @@ function(_miopen_probe_rc_pipeline RC_COMPILER RC_RULE RC_FLAGS OUT_DETAIL)
 endfunction()
 
 # Best-effort explanation for a failed two-stage probe, so the report names a cause, not a symptom.
+#
+# Reachable only when CMake selects its two-stage llvm-rc rule (cmake -E cmake_llvm_rc). That is
+# not what the MSVC-ABI toolchains used here normally get: Platform/Windows-MSVC.cmake installs a
+# single-stage rule that invokes the resource compiler directly, with no separate preprocessing
+# pass to go wrong, so this diagnosis returns empty and the caller falls back to the generic
+# report. It is kept for toolchains (notably GNU-ABI clang) where CMake does pick the two-stage
+# rule, which is the configuration the pipe-deadlock described at the top of this file applies to.
 function(_miopen_diagnose_rc_preprocessor OUT_VAR)
     set(${OUT_VAR} "" PARENT_SCOPE)
 
