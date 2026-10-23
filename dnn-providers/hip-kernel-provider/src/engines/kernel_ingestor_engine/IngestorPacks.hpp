@@ -62,6 +62,15 @@ void resetGfx950AttentionDenseModuleCache();
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();
 
+/// The engine name attention_paged_unified.ued.json declares; read by the pack table, the
+/// pack's decline log lines and its descriptor census.
+inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_ENGINE_NAME
+    = "hipkernel:AttentionPagedUnified";
+
+/// @see packs/AttentionPagedUnifiedNative.cpp
+void registerAttentionPagedUnifiedSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetAttentionPagedUnifiedModuleCache();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.
