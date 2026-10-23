@@ -30,7 +30,8 @@ of the strides.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+import operator
+from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Literal, TypeAlias
 
 from rocke.core.arch import base_arch_from_target_id
@@ -79,6 +80,8 @@ Dtype: TypeAlias = Literal[
 SDPA_DTYPES: tuple[str, ...] = Dtype.__args__
 
 _FP8_DTYPES = frozenset(d for d in SDPA_DTYPES if d.startswith("fp8"))
+# hipDNN reads ragged offsets as 4- or 8-byte integers (``RaggedTensor.hpp``).
+_RAGGED_OFFSET_DTYPES = ("int32", "int64")
 _DIAGONALS = ("top_left", "bottom_right")
 _SCALE_SOURCES = ("default", "value", "tensor")
 _IMPLEMENTATIONS = ("auto", "composite", "unified")
@@ -148,42 +151,93 @@ def _check_choice(value: object, choices: tuple[str, ...], what: str) -> None:
         raise ValueError(f"{what} must be one of {choices}, got {value!r}")
 
 
+def _as_int(value: object, what: str) -> int:
+    """``value`` as an ``int``; a float, bool or string is malformed, not rounded."""
+    if isinstance(value, bool):
+        raise ValueError(f"{what} must be an integer, got {value!r}")
+    try:
+        return operator.index(value)
+    except TypeError:
+        raise ValueError(f"{what} must be an integer, got {value!r}") from None
+
+
 @dataclass(frozen=True)
 class SdpaTensor:
     """One operand: hipDNN ``TensorAttributes`` minus the uid, name and value.
 
     ``dims`` and ``strides`` are in element units and in logical order (BHSD
-    for Q/K/V/O/Stats). ``ragged`` means ``ragged_offset_tensor_uid`` is set:
-    the operand is packed per batch and its batch stride is not used.
-    ``alignment`` is the byte alignment hipDNN guarantees for the base pointer.
-    A by-value tensor's runtime ``value`` is deliberately not stored: seeds and
-    offsets change per call and must not split the cache key.
+    for Q/K/V/O/Stats). ``ragged_offset`` is the descriptor of the tensor that
+    ``ragged_offset_tensor_uid`` names (its uid dropped): when set, the operand
+    is packed per batch, its batch stride is not used, and a kernel reads
+    ``B + 1`` offsets of that dtype. ``alignment`` is the byte alignment hipDNN
+    guarantees for the base pointer. A by-value tensor's runtime ``value`` is
+    deliberately not stored: seeds and offsets change per call and must not
+    split the cache key.
     """
 
     dtype: Dtype
     dims: tuple[int, ...]
     strides: tuple[int, ...]
-    ragged: bool = False
+    ragged_offset: SdpaTensor | None = None
     ragged_offset_multiplier: int = 1
     by_value: bool = False
     alignment: int = _BASE_ALIGNMENT
 
     def __post_init__(self) -> None:
         _check_dtype(self.dtype, "tensor")
-        dims = tuple(int(d) for d in self.dims)
-        strides = tuple(int(s) for s in self.strides)
+        dims = tuple(_as_int(d, "tensor dims") for d in self.dims)
+        strides = tuple(_as_int(s, "tensor strides") for s in self.strides)
         if len(dims) != len(strides):
             raise ValueError(f"dims {dims} and strides {strides} differ in rank")
         if any(d <= 0 for d in dims):
             raise ValueError(f"dims must be positive, got {dims}")
         if any(s < 0 for s in strides):
             raise ValueError(f"strides must be non-negative, got {strides}")
+        multiplier = _as_int(self.ragged_offset_multiplier, "ragged_offset_multiplier")
+        alignment = _as_int(self.alignment, "alignment")
+        if multiplier < 1:
+            raise ValueError(f"ragged_offset_multiplier must be >= 1, got {multiplier}")
+        if alignment < 0:
+            raise ValueError(f"alignment must be non-negative, got {alignment}")
         object.__setattr__(self, "dims", dims)
         object.__setattr__(self, "strides", strides)
-        object.__setattr__(
-            self, "ragged_offset_multiplier", int(self.ragged_offset_multiplier)
-        )
-        object.__setattr__(self, "alignment", int(self.alignment))
+        object.__setattr__(self, "ragged_offset_multiplier", multiplier)
+        object.__setattr__(self, "alignment", alignment)
+        self._validate_ragged_offset()
+
+    def _validate_ragged_offset(self) -> None:
+        """The hipDNN frontend and ``RaggedTensor`` rules for the offset operand."""
+        offset = self.ragged_offset
+        if offset is None:
+            if self.ragged_offset_multiplier != 1:
+                raise ValueError(
+                    "ragged_offset_multiplier "
+                    f"{self.ragged_offset_multiplier} needs a ragged_offset"
+                )
+            return
+        if not isinstance(offset, SdpaTensor):
+            raise ValueError(
+                f"ragged_offset must be an SdpaTensor, got {type(offset).__name__}"
+            )
+        if offset.ragged:
+            raise ValueError("a ragged_offset cannot itself be ragged")
+        if offset.dtype not in _RAGGED_OFFSET_DTYPES:
+            raise ValueError(
+                f"ragged_offset dtype must be one of {_RAGGED_OFFSET_DTYPES}, "
+                f"got {offset.dtype!r}"
+            )
+        if len(self.dims) < 2:
+            raise ValueError(f"a ragged tensor needs rank >= 2, got dims {self.dims}")
+        if offset.volume != self.dims[0] + 1:
+            raise ValueError(
+                f"ragged_offset needs B + 1 = {self.dims[0] + 1} elements, "
+                f"got dims {offset.dims}"
+            )
+
+    @property
+    def ragged(self) -> bool:
+        """The operand is packed per batch through ``ragged_offset``."""
+        return self.ragged_offset is not None
 
     @property
     def volume(self) -> int:
@@ -209,25 +263,16 @@ class SdpaBias:
         rank = len(t.dims)
         if not 1 <= rank <= 4:
             raise ValueError(f"bias rank must be in [1, 4], got {rank}")
+        # Padding would move a ragged bias's batch axis off its B + 1 offsets.
+        if t.ragged and rank != 4:
+            raise ValueError(f"a ragged bias must be rank 4, got rank {rank}")
         pad = 4 - rank
         dims = (1,) * pad + t.dims
         strides = tuple(
             0 if d == 1 else s for d, s in zip(dims, (0,) * pad + t.strides)
         )
         if (dims, strides) != (t.dims, t.strides):
-            object.__setattr__(
-                self,
-                "tensor",
-                SdpaTensor(
-                    t.dtype,
-                    dims,
-                    strides,
-                    t.ragged,
-                    t.ragged_offset_multiplier,
-                    t.by_value,
-                    t.alignment,
-                ),
-            )
+            object.__setattr__(self, "tensor", replace(t, dims=dims, strides=strides))
 
 
 @dataclass(frozen=True)
@@ -395,8 +440,10 @@ class SdpaRequest(OperatorRequest):
         object.__setattr__(
             self, "arch", base_arch_from_target_id(self.arch.strip().lower())
         )
-        object.__setattr__(self, "left_bound", int(self.left_bound))
-        object.__setattr__(self, "right_bound", int(self.right_bound))
+        object.__setattr__(self, "left_bound", _as_int(self.left_bound, "left_bound"))
+        object.__setattr__(
+            self, "right_bound", _as_int(self.right_bound, "right_bound")
+        )
         if self.scale_source != "value":
             object.__setattr__(self, "scale", 1.0)
         object.__setattr__(self, "scale", float(self.scale))
@@ -521,7 +568,8 @@ class SdpaRequest(OperatorRequest):
 
         Optional groups (bias, dropout, paged, fp8) are read through their
         dataclass fields, so a tensor added to one of them is covered without
-        touching this method.
+        touching this method. A ragged operand's offset tensor is an operand
+        too: a kernel loads it.
         """
         found: list[SdpaTensor] = [self.q, self.k, self.v, self.o]
         for value in (
@@ -546,6 +594,7 @@ class SdpaRequest(OperatorRequest):
                     for f in fields(value)
                     if isinstance(t := getattr(value, f.name), SdpaTensor)
                 )
+        found.extend(t.ragged_offset for t in tuple(found) if t.ragged)
         return tuple(found)
 
     def features(self) -> frozenset[str]:
@@ -691,12 +740,19 @@ _NESTED: dict[str, type] = {
 }
 
 
+def _tensor_from(payload: dict[str, Any]) -> SdpaTensor:
+    offset = payload.get("ragged_offset")
+    if isinstance(offset, dict):
+        payload = {**payload, "ragged_offset": _tensor_from(offset)}
+    return SdpaTensor(**payload)
+
+
 def _rebuild(cls: type, payload: dict[str, Any]) -> Any:
     if cls is SdpaTensor:
-        return SdpaTensor(**payload)
+        return _tensor_from(payload)
     return cls(
         **{
-            key: SdpaTensor(**value) if isinstance(value, dict) else value
+            key: _tensor_from(value) if isinstance(value, dict) else value
             for key, value in payload.items()
         }
     )

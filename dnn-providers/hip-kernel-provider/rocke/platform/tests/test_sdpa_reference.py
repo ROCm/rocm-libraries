@@ -314,6 +314,23 @@ class TestResolveHipdnnBand(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown diagonal_alignment"):
             resolve_hipdnn_band(diagonal_alignment="CENTER")
 
+    def test_non_integer_bounds_rejected(self):
+        # int(-1.75) is the unbounded -1; truncating would drop the mask.
+        for kw in (
+            {"left_bound": -1.75},
+            {"left_bound": 2.5},
+            {"right_bound": "0"},
+            {"right_bound": True},
+            {"causal_mask": True, "left_bound": 3.0},
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "must be an integer"):
+                    resolve_hipdnn_band(**kw)
+        self.assertEqual(
+            resolve_hipdnn_band(left_bound=np.int64(3), right_bound=np.int32(0)),
+            ("top_left", 3, 0),
+        )
+
     def test_result_feeds_keep(self):
         diagonal, left, right = resolve_hipdnn_band(causal_mask_bottom_right=True)
         self.assertTrue(keep(1, 4, 2, 5, diagonal, left, right))

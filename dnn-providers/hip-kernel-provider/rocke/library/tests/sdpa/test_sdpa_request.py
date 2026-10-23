@@ -19,7 +19,14 @@ from dispatch.sdpa import (
     SdpaTensor,
 )
 from rocke.dispatch.core import Capability, stable_json_hash
-from tests.sdpa.request_cases import CASES, bhsd, bshd, make_request, packed
+from tests.sdpa.request_cases import (
+    CASES,
+    bhsd,
+    bshd,
+    make_request,
+    packed,
+    ragged_offset,
+)
 
 BASE = CASES["dense_bshd"]
 
@@ -173,10 +180,12 @@ def test_bottom_right_on_per_sequence_lengths_moves(name):
 # --- ragged and alignment cover every operand, not only Q/K/V/O ----------------
 
 
-def _f32(dims, **kw):
+def _f32(dims, ragged=False, **kw):
     strides = [1]
     for d in reversed(dims[1:]):
         strides.insert(0, strides[0] * d)
+    if ragged:
+        kw["ragged_offset"] = ragged_offset(dims[0])
     return SdpaTensor("fp32", dims, tuple(strides), **kw)
 
 
@@ -221,9 +230,10 @@ def test_by_value_operand_is_exempt_from_alignment():
 
 
 def _walk_tensors(value):
+    # An SdpaTensor is itself a dataclass, so its ragged offset is walked too.
     if isinstance(value, SdpaTensor):
         yield value
-    elif is_dataclass(value) and not isinstance(value, type):
+    if is_dataclass(value) and not isinstance(value, type):
         for f in fields(value):
             yield from _walk_tensors(getattr(value, f.name))
 
@@ -336,6 +346,86 @@ def test_bias_rank_above_four_is_rejected():
 def test_tensor_rejects_mismatched_strides():
     with pytest.raises(ValueError, match="differ in rank"):
         SdpaTensor("fp16", (2, 4), (4,))
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        # int() would turn these into (1,) / (0,): different memory accesses.
+        ({"dims": (1.75,), "strides": (1,)}, "dims must be an integer"),
+        ({"dims": (2,), "strides": (-0.5,)}, "strides must be an integer"),
+        ({"dims": (True,), "strides": (1,)}, "dims must be an integer"),
+        ({"alignment": 16.5}, "alignment must be an integer"),
+        ({"alignment": -4}, "alignment must be non-negative"),
+        ({"ragged_offset_multiplier": 2.5}, "ragged_offset_multiplier must be an"),
+    ],
+)
+def test_tensor_rejects_non_integer_metadata(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        SdpaTensor(**{"dtype": "fp32", "dims": (2,), "strides": (1,), **kwargs})
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        # Zero would turn every packed segment into an empty one.
+        (
+            {"ragged_offset": ragged_offset(2), "ragged_offset_multiplier": 0},
+            "must be >= 1",
+        ),
+        # hipDNN's frontend rejects a multiplier with no ragged offset.
+        ({"ragged_offset_multiplier": 4}, "needs a ragged_offset"),
+        ({"ragged_offset": packed((3, 1, 1, 1), "fp32")}, "ragged_offset dtype"),
+        ({"ragged_offset": ragged_offset(3)}, "B \\+ 1 = 3"),
+        (
+            {
+                "ragged_offset": replace(
+                    ragged_offset(2), ragged_offset=ragged_offset(3)
+                )
+            },
+            "itself be ragged",
+        ),
+    ],
+)
+def test_tensor_rejects_invalid_ragged_offsets(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        SdpaTensor("fp16", (2, 4, 8, 16), (512, 16, 64, 1), **kwargs)
+
+
+def test_ragged_offset_descriptor_is_part_of_the_identity():
+    """int32 and int64 offsets need different loads, so they are different requests."""
+    req = CASES["ragged"]
+    wide = replace(req, q=replace(req.q, ragged_offset=ragged_offset(2, "int64")))
+    assert wide != req
+    assert wide.normalized() != req.normalized()
+    assert wide.q.ragged_offset in wide._operands()
+    payload = json.loads(json.dumps(wide.normalized()))
+    assert SdpaRequest.from_normalized(payload) == wide
+
+
+def test_underaligned_ragged_offset_reports_unaligned():
+    req = CASES["ragged"]
+    offset = replace(ragged_offset(2), alignment=2)
+    assert "unaligned" not in req.features()
+    assert (
+        "unaligned" in replace(req, q=replace(req.q, ragged_offset=offset)).features()
+    )
+
+
+def test_ragged_bias_below_rank_four_is_rejected():
+    """Padding a ragged bias would move its batch axis off its B + 1 offsets."""
+    bias = SdpaTensor("fp32", (8, 8), (8, 1), ragged_offset=ragged_offset(8))
+    with pytest.raises(ValueError, match="ragged bias must be rank 4"):
+        SdpaBias(bias)
+
+
+@pytest.mark.parametrize(
+    "bounds", [{"left_bound": -1.75}, {"left_bound": 2.5}, {"right_bound": 0.0}]
+)
+def test_non_integer_bounds_are_rejected(bounds):
+    """``int(-1.75)`` is the unbounded -1, so a direct caller would get no mask."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        replace(BASE, **bounds)
 
 
 def test_valid_but_unimplemented_is_not_an_error():

@@ -27,7 +27,15 @@ from dispatch.sdpa import (
     SdpaTensor,
 )
 
-__all__ = ["CASES", "bhsd", "bshd", "make_request", "make_tensors", "packed"]
+__all__ = [
+    "CASES",
+    "bhsd",
+    "bshd",
+    "make_request",
+    "make_tensors",
+    "packed",
+    "ragged_offset",
+]
 
 ARCH = "gfx950"
 
@@ -85,8 +93,15 @@ def _lse(b: int = 2, h: int = 4, s: int = 8) -> SdpaTensor:
     return packed((b, h, s, 1), "fp32")
 
 
+def ragged_offset(batch: int, dtype: str = "int32") -> SdpaTensor:
+    """The ``(B + 1, 1, 1, 1)`` offset tensor hipDNN pairs with a ragged operand."""
+    return packed((batch + 1, 1, 1, 1), dtype)
+
+
 def _ragged(t: SdpaTensor) -> SdpaTensor:
-    return replace(t, ragged=True, ragged_offset_multiplier=t.strides[2])
+    return replace(
+        t, ragged_offset=ragged_offset(t.dims[0]), ragged_offset_multiplier=t.strides[2]
+    )
 
 
 def _batch_padded(t: SdpaTensor, extra: int) -> SdpaTensor:

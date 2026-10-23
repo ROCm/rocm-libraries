@@ -322,6 +322,50 @@ def test_ragged_offsets_must_be_whole_rows():
         sdpa_reference_from_request(req, tensors)
 
 
+def test_ragged_k_and_v_lengths_must_match():
+    """A V packed with fewer tokens than K would pair a key with a zero value row."""
+    req = CASES["ragged"]
+    tensors = make_tensors(req)
+    lengths = np.diff(tensors["ragged_offset_k"])
+    lengths[0] -= 1
+    tensors["ragged_offset_v"] = np.concatenate([[0], np.cumsum(lengths)])
+    with pytest.raises(ValueError, match="ragged K lengths .* and V lengths"):
+        sdpa_reference_from_request(req, tensors)
+
+
+def test_seq_lengths_are_read_through_strides():
+    """A (2, 1, 1, 1) length tensor with batch stride 2 over [3, 0, 5] is [3, 5]."""
+    strided = SdpaTensor("int32", (2, 1, 1, 1), (2, 1, 1, 1))
+    req = make_request(seq_len_q=strided, seq_len_kv=strided)
+    tensors = make_tensors(req)
+    tensors["seq_len_q"] = tensors["seq_len_kv"] = np.array([3, 0, 5])
+    got = sdpa_reference_from_request(req, tensors)
+    logical = dict(tensors, seq_len_q=np.array([3, 5]), seq_len_kv=np.array([3, 5]))
+    seq = packed((2, 1, 1, 1), "int32")
+    want = _check(replace(req, seq_len_q=seq, seq_len_kv=seq), logical)
+    np.testing.assert_array_equal(got["row_valid"], want["row_valid"])
+    np.testing.assert_array_equal(got["o"], want["o"])
+
+
+def test_fp8_descales_are_read_through_strides():
+    """Flattening a (B, H_kv) descale stored head-major would swap batches and heads."""
+    t = SdpaTensor("fp32", (2, 2, 1, 1), (1, 2, 0, 0))
+    req = make_request(
+        h_q=4,
+        h_k=2,
+        dtype="fp8_e4m3",
+        o=bshd(2, 4, 8, 16, "bf16"),
+        fp8=SdpaFp8(descale_q=t, descale_k=t, descale_v=t),
+    )
+    logical = make_tensors(req)
+    want = _check(req, logical)
+    buffers = dict(logical)
+    for name in ("descale_q", "descale_k", "descale_v"):
+        buffers[name] = _to_buffer(logical[name], t)
+    got = sdpa_reference_from_request(req, buffers)
+    np.testing.assert_array_equal(got["o"], want["o"])
+
+
 # --- PyTorch math SDPA, the hipDNN golden generator's backend --------------------
 
 

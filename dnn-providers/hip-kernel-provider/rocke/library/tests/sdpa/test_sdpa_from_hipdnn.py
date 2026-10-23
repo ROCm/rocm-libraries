@@ -185,6 +185,21 @@ def test_bounds_below_minus_one_are_rejected_like_hipdnn(attributes):
         _request(attributes=attributes)
 
 
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        # int() would read -1.75 as the unbounded -1.
+        {"left_bound": -1.75},
+        {"left_bound": 2.5},
+        {"right_bound": "0"},
+        {"causal_mask": True, "left_bound": 3.0},
+    ],
+)
+def test_non_integer_bounds_are_rejected(attributes):
+    with pytest.raises(ValueError, match="must be an integer"):
+        _request(attributes=attributes)
+
+
 def test_flag_with_a_stored_left_bound_is_a_window_not_causal():
     """The merged band is a sliding window, so a causal-only kernel must decline it."""
     req = _request(attributes={"causal_mask_bottom_right": True, "left_bound": 3})
@@ -243,6 +258,22 @@ def test_compile_time_constant_scale_tensor_folds_to_value():
     scale = _tensor(10, (1,), "float", value_type="Float32Value", value=0.5)
     req = _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
     assert (req.scale_source, req.scale, req.scale_tensor) == ("value", 0.5, None)
+
+
+@pytest.mark.parametrize(
+    "edit, match",
+    [
+        ({"dims": [2], "strides": [1]}, "volume 1"),
+        ({"data_type": "fp12"}, "data_type"),
+        ({"stride_order": [0]}, "hipDNN does not write"),
+    ],
+)
+def test_constant_scale_tensor_is_validated_before_folding(edit, match):
+    """Folding a value must not skip the checks the tensor would have had."""
+    scale = _tensor(10, (1,), "float", value_type="Float32Value", value=0.5)
+    scale.update(edit)
+    with pytest.raises(ValueError, match=match):
+        _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
 
 
 def test_runtime_by_value_scale_tensor_is_not_baked():
@@ -324,18 +355,64 @@ def test_field_reaches_features(kwargs, feature):
     assert feature in req.features()
 
 
-def test_ragged_and_dtypes_map():
-    graph = _graph()
-    for t in graph["tensors"]:
+def _ragged_graph(offset_dtype="int32"):
+    graph = _graph(tensors=[_tensor(10, (B + 1, 1, 1, 1), offset_dtype)])
+    for t in graph["tensors"][:4]:
         t["data_type"] = "BFLOAT16"  # flatc spells enums in upper case
         t["strides"] = [S * H * D, D, H * D, 1]
         t["ragged_offset_tensor_uid"] = 10
         t["ragged_offset_multiplier"] = H * D
     graph["nodes"][0]["compute_data_type"] = "half"
-    req = from_hipdnn_graph(graph, "gfx950")
+    return graph
+
+
+def test_ragged_and_dtypes_map():
+    req = from_hipdnn_graph(_ragged_graph(), "gfx950")
     assert req.q.dtype == "bf16" and req.compute_dtype == "fp16"
     assert req.q.ragged and req.q.ragged_offset_multiplier == H * D
+    assert req.q.ragged_offset.dtype == "int32"
+    assert req.q.ragged_offset.dims == (B + 1, 1, 1, 1)
     assert {"ragged", "layout_bshd", "compute_dtype"} <= req.features()
+
+
+def test_ragged_offset_dtype_reaches_the_request():
+    """hipDNN accepts int32 and int64 offsets; a kernel must know which it loads."""
+    narrow = from_hipdnn_graph(_ragged_graph("int32"), "gfx950")
+    wide = from_hipdnn_graph(_ragged_graph("int64"), "gfx950")
+    assert wide.q.ragged_offset.dtype == "int64"
+    assert wide != narrow and wide.normalized() != narrow.normalized()
+
+
+def test_ragged_offset_uid_is_not_part_of_the_identity():
+    graph = _ragged_graph()
+    graph["tensors"][-1]["uid"] = 42
+    for t in graph["tensors"][:4]:
+        t["ragged_offset_tensor_uid"] = 42
+    assert from_hipdnn_graph(graph, "gfx950") == from_hipdnn_graph(
+        _ragged_graph(), "gfx950"
+    )
+
+
+@pytest.mark.parametrize(
+    "graph_edit, match",
+    [
+        (
+            lambda g: g["tensors"][0].update(ragged_offset_tensor_uid=99),
+            "ragged offset uid 99, which is not in the graph",
+        ),
+        (
+            lambda g: g["tensors"][-1].update(ragged_offset_tensor_uid=10),
+            "is itself ragged",
+        ),
+        (lambda g: g["tensors"][-1].update(data_type="float"), "ragged_offset dtype"),
+        (lambda g: g["tensors"][-1].update(dims=[B, 1, 1, 1]), "B \\+ 1"),
+    ],
+)
+def test_invalid_ragged_offsets_are_rejected(graph_edit, match):
+    graph = _ragged_graph()
+    graph_edit(graph)
+    with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
 
 
 @pytest.mark.parametrize(

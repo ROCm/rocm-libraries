@@ -200,7 +200,8 @@ worked example is SDPA forward:
 [tests/sdpa/](library/tests/sdpa/).
 
 - [ ] **Lossless request type.** Every field of the hipDNN node, and every
-      operand's dtype, dims, strides and ragged flag, has a field on the request.
+      operand's dtype, dims, strides and ragged-offset descriptor, has a field
+      on the request.
       A field no kernel implements yet is still represented. It is never dropped.
 - [ ] **Unsupported is a feature, not an error.** `__post_init__` rejects only
       what the hipDNN frontend rejects. Valid but unimplemented fields are

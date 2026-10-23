@@ -148,16 +148,32 @@ def _tensor_table(tensors_json: Iterable[Mapping] | Mapping) -> dict[int, Mappin
     return {int(entry["uid"]): entry for entry in tensors_json}
 
 
-def _sdpa_tensor(entry: Mapping) -> SdpaTensor:
-    _reject_unknown_keys(f"tensor uid {entry.get('uid')}", entry, _TENSOR_KEYS)
+def _sdpa_tensor(entry: Mapping, table: Mapping[int, Mapping]) -> SdpaTensor:
+    """``entry`` as an :class:`SdpaTensor`, its ragged offset resolved from ``table``."""
+    uid = entry.get("uid")
+    _reject_unknown_keys(f"tensor uid {uid}", entry, _TENSOR_KEYS)
     dtype = _dtype(entry["data_type"])
     if dtype is None:
-        raise ValueError(f"tensor uid {entry.get('uid')} has data_type unset")
+        raise ValueError(f"tensor uid {uid} has data_type unset")
+    ragged_offset = None
+    offset_uid = entry.get("ragged_offset_tensor_uid")
+    if offset_uid is not None:
+        offset_entry = table.get(int(offset_uid))
+        if offset_entry is None:
+            raise ValueError(
+                f"tensor uid {uid} references ragged offset uid {offset_uid}, "
+                "which is not in the graph"
+            )
+        if offset_entry.get("ragged_offset_tensor_uid") is not None:
+            raise ValueError(
+                f"tensor uid {uid}: ragged offset uid {offset_uid} is itself ragged"
+            )
+        ragged_offset = _sdpa_tensor(offset_entry, table)
     return SdpaTensor(
         dtype=dtype,
         dims=tuple(entry["dims"]),
         strides=tuple(entry["strides"]),
-        ragged=entry.get("ragged_offset_tensor_uid") is not None,
+        ragged_offset=ragged_offset,
         ragged_offset_multiplier=entry.get("ragged_offset_multiplier", 1),
         by_value=bool(entry.get("is_runtime_pass_by_value", False)),
         alignment=entry.get("alignment", 16),
@@ -210,7 +226,7 @@ def from_hipdnn(
 
     def tensor(group: Mapping, key: str) -> SdpaTensor | None:
         found = entry(group.get(key))
-        return None if found is None else _sdpa_tensor(found)
+        return None if found is None else _sdpa_tensor(found, table)
 
     def required(group: Mapping, key: str) -> SdpaTensor:
         if group.get(key) is None:
@@ -236,11 +252,18 @@ def from_hipdnn(
         # as a host pointer at execution, so any stored value is only the
         # build-time one: baking it would freeze a number the caller may change
         # per call and split the cache key per value. That one stays a tensor.
+        # Either way the descriptor is validated first, so folding cannot hide
+        # an invalid dtype, an unknown key, or a non-scalar shape.
+        scale_tensor = _sdpa_tensor(scale_entry, table)
         folded = scale_entry.get("value")
-        if folded is not None and not scale_entry.get("is_runtime_pass_by_value"):
+        if folded is not None and not scale_tensor.by_value:
+            if scale_tensor.volume != 1:
+                raise ValueError(
+                    f"scale tensor must have volume 1, got dims {scale_tensor.dims}"
+                )
             kwargs.update(scale_source="value", scale=float(folded))
         else:
-            kwargs.update(scale_source="tensor", scale_tensor=_sdpa_tensor(scale_entry))
+            kwargs.update(scale_source="tensor", scale_tensor=scale_tensor)
     elif scale_value is not None:
         kwargs.update(scale_source="value", scale=float(scale_value))
 

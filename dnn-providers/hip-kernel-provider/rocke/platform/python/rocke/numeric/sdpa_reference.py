@@ -45,6 +45,7 @@ backward: it consumes the natural-log LSE of the forward, recomputes
 from __future__ import annotations
 
 import math
+import operator
 
 import numpy as np
 
@@ -89,6 +90,21 @@ def resolve_diagonal_band(
     return left, right, bool(top_left)
 
 
+def _hipdnn_bound(value, name):
+    """A hipDNN band bound: ``None`` is unbounded (-1); a non-integer is an error.
+
+    Truncating would change the band: ``int(-1.75)`` is the unbounded ``-1``.
+    """
+    if value is None:
+        return -1
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+    try:
+        return operator.index(value)
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from None
+
+
 def resolve_hipdnn_band(
     *,
     left_bound=None,
@@ -120,8 +136,8 @@ def resolve_hipdnn_band(
     alignment = str(diagonal_alignment or "TOP_LEFT").upper()
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
         raise ValueError(f"unknown diagonal_alignment {alignment!r}")
-    left = -1 if left_bound is None else int(left_bound)
-    right = -1 if right_bound is None else int(right_bound)
+    left = _hipdnn_bound(left_bound, "left_bound")
+    right = _hipdnn_bound(right_bound, "right_bound")
     if left < -1 or right < -1:
         raise ValueError(
             "left_bound and right_bound must be >= -1 "

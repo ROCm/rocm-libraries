@@ -116,16 +116,18 @@ def _seq_lengths(name: str, array: Any, batch: int, extent: int) -> np.ndarray:
 
 
 def _descale(
-    name: str, tensors: Mapping, present: bool, batch: int, heads_kv: int, h_q: int
+    name: str, tensors: Mapping, tensor: Any, batch: int, heads_kv: int, h_q: int
 ) -> np.ndarray:
-    """Per ``(batch, query head)`` descale factor; 1 when the descale is absent.
+    """Per ``(batch, query head)`` descale factor; 1 when ``tensor`` is ``None``.
 
     hipDNN indexes a ``(B, H_kv, 1, 1)`` descale by the KV head the query head
-    reads, so the Q descale follows K's grouping, not Q's own head.
+    reads, so the Q descale follows K's grouping, not Q's own head. The array
+    is decoded through ``tensor``'s strides like any other dense operand.
     """
-    if not present:
+    if tensor is None:
         return np.ones((batch, h_q), dtype=np.float64)
-    values = np.asarray(tensors[name], dtype=np.float64).reshape(-1)
+    logical = _dense_operand(name, tensors[name], tensor)
+    values = np.asarray(logical, dtype=np.float64).reshape(-1)
     if values.size == 1:
         return np.full((batch, h_q), values[0], dtype=np.float64)
     if values.size != batch * heads_kv:
@@ -174,9 +176,10 @@ def sdpa_reference_from_request(
     ``scale`` when ``req.scale_source == "tensor"``; ``bias``; ``seq_len_q`` /
     ``seq_len_kv``; ``descale_q`` / ``descale_k`` / ``descale_v``; and
     ``ragged_offset_q`` / ``ragged_offset_k`` / ``ragged_offset_v`` (V defaults to
-    K's) for ragged operands. A dense operand is either its logical array or a
-    1-D buffer read through the request's strides; a ragged one is the packed
-    buffer. Pass fp8 and bf16 data as float32 values.
+    K's) for ragged operands. A dense operand, ``seq_len_*`` and the descales
+    included, is either its logical array or a 1-D buffer read through the
+    request's strides; a ragged one is the packed buffer, and ragged K and V
+    must hold the same lengths. Pass fp8 and bf16 data as float32 values.
 
     Per batch, the effective lengths come from ``seq_len_*`` when present, else
     from the ragged offsets, else the full extent; the diagonal offset uses the
@@ -210,11 +213,24 @@ def sdpa_reference_from_request(
     v_offsets = "ragged_offset_v" if "ragged_offset_v" in tensors else "ragged_offset_k"
     q, q_lengths = operand("q", "ragged_offset_q")
     k, k_lengths = operand("k", "ragged_offset_k")
-    v, _ = operand("v", v_offsets)
+    v, v_lengths = operand("v", v_offsets)
+    # As CpuFpReferenceSdpaRagged: K and V must pack the same tokens per batch,
+    # or a key would be paired with a zero-filled value row.
+    if (
+        k_lengths is not None
+        and v_lengths is not None
+        and not np.array_equal(k_lengths, v_lengths)
+    ):
+        raise ValueError(
+            f"ragged K lengths {k_lengths.tolist()} and V lengths "
+            f"{v_lengths.tolist()} differ"
+        )
 
     def lengths(key: str, ragged: np.ndarray | None, extent: int) -> np.ndarray:
-        if getattr(req, key) is not None:
-            chosen = _seq_lengths(key, tensors[key], batch, extent)
+        tensor = getattr(req, key)
+        if tensor is not None:
+            logical = _dense_operand(key, tensors[key], tensor)
+            chosen = _seq_lengths(key, logical, batch, extent)
             if ragged is not None and np.any(chosen > ragged):
                 raise ValueError(
                     f"{key} {chosen.tolist()} exceeds the ragged lengths {ragged.tolist()}"
@@ -231,13 +247,13 @@ def sdpa_reference_from_request(
         scale = float(req.scale)
     fp8 = getattr(req, "fp8", None)
 
-    def has(field: str) -> bool:
-        return fp8 is not None and getattr(fp8, field) is not None
+    def descriptor(field: str) -> Any:
+        return None if fp8 is None else getattr(fp8, field)
 
     descale_qk = _descale(
-        "descale_q", tensors, has("descale_q"), batch, h_k, h_q
-    ) * _descale("descale_k", tensors, has("descale_k"), batch, h_k, h_q)
-    descale_v = _descale("descale_v", tensors, has("descale_v"), batch, h_v, h_q)
+        "descale_q", tensors, descriptor("descale_q"), batch, h_k, h_q
+    ) * _descale("descale_k", tensors, descriptor("descale_k"), batch, h_k, h_q)
+    descale_v = _descale("descale_v", tensors, descriptor("descale_v"), batch, h_v, h_q)
 
     bias = None
     if req.bias is not None:
