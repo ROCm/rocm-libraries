@@ -38,7 +38,7 @@ the selection's `authored_subpath`.
 
 - Selection: `projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_unified_3d.yaml`,
   expanded from the manifest `gfx942_attention_unified_3d.engine.yaml` (rocKE dispatcher
-  registry, `attention_strided_decode` candidate). AICK-2683.
+  registry, `attention_strided_decode` candidate).
 - Generated at rocm-libraries `4b59b88b9ea` with:
 
   ```bash

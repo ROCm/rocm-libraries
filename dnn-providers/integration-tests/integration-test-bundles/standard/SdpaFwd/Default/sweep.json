@@ -3299,7 +3299,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b1_hq16_kv4_sq1_skv4096_d256_bf16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3384,7 +3384,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b1_hq32_kv8_sq1_skv1024_d128_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3469,7 +3469,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b1_hq32_kv8_sq1_skv16384_d128_bf16_bshd_nomask",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3554,7 +3554,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b1_hq8_kv4_sq1_skv64_d64_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3639,7 +3639,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b2_hq16_kv1_sq1_skv1024_d64_bf16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3724,7 +3724,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b2_hq32_kv4_sq1_skv4096_d128_bf16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3809,7 +3809,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b2_hq64_kv4_sq1_skv1024_d256_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3894,7 +3894,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b4_hq32_kv8_sq1_skv16384_d64_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -3979,7 +3979,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b4_hq8_kv8_sq1_skv512_d128_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -4064,7 +4064,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b8_hq32_kv8_sq1_skv64_d128_bf16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"
@@ -4149,7 +4149,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d, AICK-2683: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
         "notes": "b8_hq8_kv1_sq1_skv512_d128_fp16_bshd_causal_br",
         "seed": 42,
         "generator": "import_graph.py"

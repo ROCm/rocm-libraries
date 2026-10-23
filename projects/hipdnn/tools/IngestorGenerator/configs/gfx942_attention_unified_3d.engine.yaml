@@ -14,7 +14,7 @@
 # derived from the segment spec inside build_unified_attention_3d_module, so the
 # one segment spec below fully identifies both kernels.
 #
-# Scope (AICK-2683 owner decisions D3/D6): dense (strided) KV, seqlen_q == 1, no
+# Scope (v1): dense (strided) KV, seqlen_q == 1, no
 # sliding window, no stats (LSE) output. Admission is parity with rocKE's
 # `attention_strided_decode` candidate (dispatch/attention/strided_decode.py).
 #
@@ -137,7 +137,7 @@ enumerate:
   # it changes only which num_segments the split rule emits, never admission.
   fixed: {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
   # Crossed in order, first group outermost (the catalog order). Every cell is
-  # admitted by the candidate (AICK-2683 Task 6 Step 0): D 64/128/256 x fp16/bf16
+  # admitted by the candidate: D 64/128/256 x fp16/bf16
   # x kv_block_size 16/32/64 x every GQA ratio it takes (1/2/4/8/16).
   #
   # List order is the default-arm mechanism: a merged cell's default is its first
