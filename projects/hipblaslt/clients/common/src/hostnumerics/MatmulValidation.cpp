@@ -87,7 +87,7 @@ namespace hipblaslt::hostnumerics
                 if(validation.compareAllClose)
                     options = tolerance.absolute != 0.0 || tolerance.relative != 0.0
                                   ? allCloseComparisonOptions(
-                                        tolerance.absolute, tolerance.relative, true)
+                                      tolerance.absolute, tolerance.relative, true)
                                   : unitComparisonOptions(expected.type());
                 else
                     options.allClose = false;
