@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.27
 
+### Changed
+
+* Minor internal changes.
+
 ## hipFFT 1.0.26 for ROCm 10.1
 
 ### Added

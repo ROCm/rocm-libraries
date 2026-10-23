@@ -108,6 +108,17 @@ class TestRoundTrip:
             k.kernel_source.spec for k in want
         ]
 
+    def test_a_vocabulary_field_outside_the_spec_round_trips(self, tmp_path):
+        """A vocabulary field the spec does not carry reaches the compact form as a
+        matcher-spelling `resolved` value, which the expansion must accept."""
+        long_form = copy.deepcopy(SAMPLE)
+        for kernel in long_form["packs"][0]["kernels"]:
+            del kernel["kernel_source"]["spec"]["dtype"]
+        got = _expand(tmp_path, _compact(long_form))
+        want = _enumerate(tmp_path, long_form)
+        assert [k.name for k in got] == [k.name for k in want]
+        assert [k.metadata for k in got] == [k.metadata for k in want]
+
     def test_spec_key_order_survives(self, tmp_path):
         """Key order reaches the emitted descriptor, so it is part of the bytes."""
         got = _expand(tmp_path, _compact())
@@ -130,6 +141,47 @@ class TestRoundTrip:
         broken["packs"][0]["variants"][0]["shapes"][0]["seqlen_q"] = 99
         with pytest.raises(factorise_config.FactoriseError, match="round trip"):
             factorise_config._round_trip(SAMPLE, broken)
+
+    def test_constant_launches_survive_the_compaction(self, tmp_path):
+        long_form = copy.deepcopy(SAMPLE)
+        launches = {"segment": {}, "reduce": {"role": "reduce"}}
+        for kernel in long_form["packs"][0]["kernels"]:
+            kernel["kernel_source"]["launches"] = copy.deepcopy(launches)
+        compact = _compact(long_form)
+        assert compact["packs"][0]["kernel_defaults"]["launches"] == launches
+        factorise_config._round_trip(long_form, compact)
+        for kernel in _expand(tmp_path, compact):
+            assert list(kernel.kernel_source.launches) == ["segment", "reduce"]
+            assert kernel.kernel_source.launches["reduce"].role == "reduce"
+
+    def test_launches_the_compact_form_cannot_carry_are_refused(self):
+        """Every kernel names the same launches but one states a different override,
+        so the launches are not constant across the set and the compact form would
+        give every kernel the same launches (or none); the round trip must not let
+        that ship."""
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {
+                    "role": "reduce",
+                    **({"builder": "build_x"} if not index else {}),
+                },
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
+
+    def test_launches_differing_only_in_a_role_are_refused(self):
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {"role": "reduce" if index else "merge"},
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
 
 
 class TestHoisting:
@@ -226,7 +278,7 @@ class TestTriState:
 
 #: The SAME four kernels as `SAMPLE`, with the policy-decided knob PRESENT AND None
 #: rather than omitted. Both spellings mean the kernel's policy decides at build time:
-#: a hand-authored spec omits the key, while `dispatch_parity.build_config` dumps the
+#: a hand-authored spec omits the key, while `registry_enumerator.build_config` dumps the
 #: builder's dataclass wholesale, so every declared-but-unset knob arrives as None.
 SAMPLE_NONE_SPELLING = _enumerated(
     [
@@ -489,6 +541,16 @@ class TestCommandLine:
         assert factorise_config.main(argv) != 0
         assert not out.exists()
 
+    def test_main_refuses_an_input_that_repeats_a_key(self, tmp_path, capsys):
+        """YAML keeps the later of two equal keys, so a repeat is dropped before the
+        round trip can see it, even when both values agree."""
+        src = self._write(tmp_path, SAMPLE)
+        src.write_text(src.read_text() + "kernel_source_kind: rocke\n")
+        out = tmp_path / "compact.yaml"
+        assert factorise_config.main(self._argv(src, out)) != 0
+        assert "'kernel_source_kind'" in capsys.readouterr().err
+        assert not out.exists()
+
     def test_main_parses_the_vocabulary_flag(self, tmp_path):
         src = self._write(tmp_path, SAMPLE)
         out = tmp_path / "compact.yaml"
@@ -544,3 +606,33 @@ class TestTheSpecializationDeclarationSurvives:
         )
         assert yaml.safe_load(out.read_text())["specialization"] == self.DECLARATION
         assert load_config(out).specialization == self.DECLARATION
+
+
+class TestTheReductionCarriersSurvive:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype", "seqlen_q"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": [],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def test_main_keeps_the_block_and_every_marker(self, tmp_path):
+        source = copy.deepcopy(SAMPLE)
+        source["reduction"] = copy.deepcopy(self.REDUCTION)
+        source["packs"][0]["kernels"][0]["default"] = True
+        source["packs"][0]["kernels"][3]["default"] = True
+        path = tmp_path / "long.yaml"
+        path.write_text(yaml.safe_dump(source, sort_keys=False))
+        out = tmp_path / "compact.yaml"
+        argv = ["--config", str(path), "--out", str(out), "--knobs", ",".join(KNOBS)]
+        assert factorise_config.main(argv + ["--vocabulary", "dtype:bf16=BF16"]) == 0
+        compact = load_config(out)
+        assert compact.reduction == self.REDUCTION
+        assert [k.default for k in compact.packs[0].kernels] == [
+            True,
+            False,
+            False,
+            True,
+        ]

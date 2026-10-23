@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_TYPES_H_
-#define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
 #ifdef __cplusplus
@@ -401,6 +399,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
 #endif
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 107,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -501,6 +500,20 @@ struct RocblasltContractionProblem
         Block_32_UE5M3,
         Block_16_UE5M3,
         Block_32_UE8M0_32_8_EXT,
+        // w4a16: dense [M][ceil(K/G)] scales; _ZP adds packed int4 zero-points.
+        // Scale type must equal B's (validateW4A16Args).
+        Block_32_BF16,
+        Block_64_BF16,
+        Block_128_BF16,
+        Block_32_BF16_ZP,
+        Block_64_BF16_ZP,
+        Block_128_BF16_ZP,
+        Block_32_F16,
+        Block_64_F16,
+        Block_128_F16,
+        Block_32_F16_ZP,
+        Block_64_F16_ZP,
+        Block_128_F16_ZP,
     };
 
     hipblasOperation_t trans_a;
@@ -595,6 +608,8 @@ struct RocblasltContractionProblem
     // constructor parameter: the object API builds the problem before it knows
     // its stream, so this is assigned once the stream is available rather than
     // threaded through a 60-argument constructor that every caller spells out.
+    // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
+    int32_t     int4EncodingA = 0;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
@@ -617,6 +632,15 @@ struct RocblasltContractionProblem
     // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
     // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // The four below are set post-construction, not through the constructor.
+    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    uint32_t                                       fused_a2a_world     = 0;
+    uint32_t                                       fused_a2a_rank      = 0;
+    void* const*                                   fused_a2a_peer_flag = nullptr;
+#endif
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -689,6 +713,23 @@ struct RocblasltContractionProblem
                                 int32_t                uniform_summation_order = 0);
 };
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
+struct RocblasltFusedEpilogueInfo
+{
+    bool                         hasA2APrefix      = false;
+    const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
+    void* const*                 a2aRecvPtrs       = nullptr;
+    int64_t                      a2aExtent         = 0;
+    hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
+    uint32_t                     commChannel       = 0;
+};
+
+// Returns false when desc is nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+                                      RocblasltFusedEpilogueInfo&                    out);
+#endif
+
 namespace rocblaslt
 {
 
@@ -711,6 +752,9 @@ namespace rocblaslt
         rocblaslt_compute_type type_compute;
         hipblasLtOrder_t       order_a;
         hipblasLtOrder_t       order_b;
+        // Mirrors GemmProblemType::GemmProblemTypeImpl, which is
+        // reinterpret_cast to this; keep the two field lists identical.
+        int32_t int4_encoding_a = 0;
     };
 
     class RocGemmEpilogueV2
@@ -756,5 +800,3 @@ namespace rocblaslt
         void* amaxD         = nullptr;
     };
 } // End of namespace rocblaslt
-
-#endif /* _ROCBLASLT_TYPES_H_ */

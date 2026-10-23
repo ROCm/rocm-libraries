@@ -5,13 +5,19 @@ installed trees. Exits non-zero on any failure. The numbered sections in
   1. BINARY NESTING -- the larger set can still choose every binary the
      smaller one could.
   2. LOADER-TUPLE UNIQUENESS -- with absent keys filled from the KMD
-     `default_value`, each tuple is unique per device. A duplicate rejects the
-     whole engine at load.
+     `default_value`, each tuple is unique per device and tier (explicit,
+     generic, unrestricted). A duplicate rejects the whole engine at load.
   3. NO SENTINEL -- `-1` never reaches a shipped descriptor.
   4. METADATA MATCHES ITS BINARY -- the matcher selects on metadata, the spec
      decides what was built.
   5. VOCABULARY -- metadata uses the matcher's spelling ("BF16"), the spec the
      builder's ("bf16").
+
+A descriptor with `sources` (several launches under one metadata tuple) is checked
+launch by launch: its binary identity is the launch names with each launch's
+(builder, spec, role), a failure of a spec, symbol or code object names the launch,
+and the checks that read only metadata (2, 3, 5) run once per descriptor. A
+descriptor is one selection, so it pins a knob when ANY launch spec pins it.
 
 `--mode` is required, not defaulted: the two modes make different claims.
 Schemas are reached by reference through the id chain the documents declare,
@@ -21,6 +27,7 @@ never by filename.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -31,6 +38,15 @@ SENTINEL = -1
 
 #: The two claims this gate can make, selected explicitly on every run.
 MODES = ("full", "structural")
+
+#: Searched for rocm_kpack when `--kpack-python-dir` is not given and the installed
+#: package cannot be imported. Mirrors KpackPython.cmake's
+#: HIPKERNELPROVIDER_KPACK_DEFAULT_DIRS, where the dev image stages it.
+DEFAULT_KPACK_PYTHON_DIRS = (Path("/opt/rocm-kpack/python"),)
+
+#: Exit code for an environment that cannot run a requested check (rocm_kpack not
+#: importable). 1 is a gate failure about the descriptors; 2 is argparse's.
+EXIT_ENVIRONMENT = 3
 
 
 def _agreement_python_root() -> Path:
@@ -48,10 +64,16 @@ def _agreement_python_root() -> Path:
     )
 
 
+#: The IngestorGenerator root, for the engine naming rules in `codegen.models`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(_agreement_python_root()))
 
+from codegen import json_input  # noqa: E402
+from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
+from hkp_pack import generic_targets as gtmod  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
+from hkp_pack.sources import kernel_sources  # noqa: E402
 
 
 class GateError(RuntimeError):
@@ -59,99 +81,192 @@ class GateError(RuntimeError):
     failures, which are reported and counted."""
 
 
-class Profile:
-    """Per-kernel facts the descriptors do not carry.
+class KpackUnavailable(RuntimeError):
+    """rocm_kpack cannot be imported, so no payload can be read. An environment
+    problem, reported once with its own exit code, never as a failure of every
+    packed descriptor."""
 
-    A profile is a small JSON/YAML document beside the generator config::
 
-        bundle: <bundle-folder-name>
-        vocabulary:
-          dtype: [BF16, FP16]
+def _forget_rocm_kpack() -> None:
+    """Drop the rocm_kpack modules a failed import attempt left cached. A broken
+    installed package leaves its parent `rocm_kpack` in sys.modules, and the next
+    candidate's import would then resolve submodules against that package instead
+    of the candidate directory."""
+    for name in [
+        n for n in sys.modules if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+    ]:
+        del sys.modules[name]
+    importlib.invalidate_caches()
 
-    ``bundle`` names the engine to gate when a tree holds more than one (see
-    `select`). ``vocabulary`` declares the matcher's legal spellings for a
-    field, as a builder-to-matcher mapping or the legal set; a UKD's
-    ``specialization_contract`` is merged in automatically, so a profile need
-    only cover fields no declaration does.
+
+class Manifest:
+    """Per-kernel facts the descriptors do not carry, read from the engine
+    manifest (`configs/<slug>.engine.yaml`)::
+
+        engine:
+          name: hipkernel:Gfx950AttentionDense
+        specialization:
+          vocabulary:
+            dtype: {bf16: BF16, fp16: FP16}
+
+    ``engine.name`` selects the bundles to gate, by the UED ``name`` their KDPs
+    reference, when a tree holds more than one engine (see `select`).
+    ``specialization.vocabulary`` declares the matcher's legal spellings for a field,
+    as a builder-to-matcher mapping or the legal set; a UKD's
+    ``specialization_contract`` is merged in automatically, so a manifest need only
+    cover fields no declaration does. Nothing else in the manifest is read.
     """
 
     def __init__(self, raw: dict, path: str | None = None):
         self.path = path
-        self.bundle = raw.get("bundle")
-        self.vocabulary = dict(raw.get("vocabulary") or {})
+        legacy = sorted({"bundle", "vocabulary"} & raw.keys())
+        if legacy:
+            raise SystemExit(
+                f"FAIL: manifest {path}: top-level {', '.join(legacy)} is a retired "
+                f"tool profile; pass the engine manifest (configs/<slug>.engine.yaml)."
+            )
+        engine = {} if raw.get("engine") is None else raw["engine"]
+        specialization = (
+            {} if raw.get("specialization") is None else raw["specialization"]
+        )
+        if not isinstance(engine, dict) or not isinstance(specialization, dict):
+            raise SystemExit(
+                f"FAIL: manifest {path}: 'engine' and 'specialization' must be "
+                f"mappings."
+            )
+        name = engine.get("name")
+        if name is not None and not (
+            isinstance(name, str) and ENGINE_NAME_PATTERN.match(name)
+        ):
+            raise SystemExit(
+                f"FAIL: manifest {path}: engine.name {name!r} is not "
+                f"'<namespace>:<Name>'."
+            )
+        self.engine_name = name
+        vocabulary = specialization.get("vocabulary", {})
+        if not isinstance(vocabulary, dict):
+            raise SystemExit(
+                f"FAIL: manifest {path}: specialization.vocabulary must be a "
+                f"mapping of field to spellings."
+            )
+        self.vocabulary = dict(vocabulary)
         # Absent and explicitly empty are different claims: (4a) treats an
         # undeclared string field as ambiguous only when no vocabulary block
         # exists at all, which `bool(self.vocabulary)` cannot distinguish.
-        self.vocabulary_declared = "vocabulary" in raw
+        self.vocabulary_declared = "vocabulary" in specialization
 
     @classmethod
-    def load(cls, path: str) -> "Profile":
-        with open(path) as fh:
-            text = fh.read()
+    def load(cls, path: str) -> "Manifest":
+        """Read a manifest as JSON, else as YAML. Only the YAML fallback needs PyYAML,
+        so a JSON manifest loads where it is not installed."""
         try:
-            raw = json.loads(text)
-        except json.JSONDecodeError:
-            try:
-                import yaml
-            except ImportError:  # pragma: no cover - environment-dependent
-                raise SystemExit(
-                    f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
-                    f"as YAML."
-                )
-            raw = yaml.safe_load(text)
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
+        try:
+            raw = json_input.loads(text)
+        except json_input.RepeatedJsonKey as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {path}: {exc}")
+        except ValueError:
+            raw = cls._read_yaml(path)
         if not isinstance(raw, dict):
-            raise SystemExit(f"FAIL: profile {path} must be a mapping.")
+            raise SystemExit(f"FAIL: manifest {path} must be a mapping.")
         return cls(raw, path)
 
+    @staticmethod
+    def _read_yaml(path: str):
+        try:
+            import yaml
+
+            from codegen.config_loader import read_yaml
+        except ImportError:
+            raise SystemExit(
+                f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
+                f"as YAML."
+            )
+        try:
+            return read_yaml(Path(path))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
+
     @classmethod
-    def empty(cls) -> "Profile":
+    def empty(cls) -> "Manifest":
         return cls({})
 
 
 def select(
-    bundles: list[descriptor_context.Bundle], profile: Profile
+    bundles: list[descriptor_context.Bundle], manifest: Manifest
 ) -> list[descriptor_context.Bundle]:
     """The bundles of the one engine this run gates. Several KDPs may declare
     one engine, but two engines under one root is a question only the author
     can answer."""
     if not bundles:
         raise GateError("no *.kdp.json under this root -- is this a descriptor tree?")
-    if profile.bundle:
-        wanted = f"{profile.bundle}.kdp.json"
-        bundles = [b for b in bundles if os.path.basename(b.kdp_path) == wanted]
+    if manifest.engine_name is not None:
+        bundles = [b for b in bundles if b.engine.get("name") == manifest.engine_name]
         if not bundles:
-            raise GateError(f"no {wanted} under this root")
+            raise GateError(f"no KDP of engine {manifest.engine_name} under this root")
     engines = sorted({b.engine["id"] for b in bundles})
     if len(engines) > 1:
         names = ", ".join(
             sorted(os.path.basename(b.kdp_path)[: -len(".kdp.json")] for b in bundles)
         )
         raise GateError(
-            f"{len(engines)} engines under this root ({names}). Set 'bundle' in the "
-            f"profile to say which one this gate is about -- checking the wrong "
+            f"{len(engines)} engines under this root ({names}). Set engine.name in "
+            f"the manifest to say which one this gate is about -- checking the wrong "
             f"engine would pass while the one under test is broken."
         )
     return bundles
 
 
-def _binary_key(descriptor: dict) -> str:
-    """Identity of the compiled artifact this descriptor names: a packed
-    descriptor's symbol sha256, or, pre-build, the builder plus the spec as
-    written, where an omitted key stays omitted."""
-    source = descriptor["kernel_source"]
+def _launch_label(descriptor: dict, launch: str | None) -> str:
+    """The descriptor's name, with its launch when it has several."""
+    name = descriptor.get("name")
+    return name if launch is None else f"{name} launch '{launch}'"
+
+
+def _source_key(source: dict, with_role: bool) -> str:
+    """Identity of the compiled artifact one `kernel_source` names: a packed
+    entry's symbol sha256, or, pre-build, the builder plus the spec as written,
+    where an omitted key stays omitted. A launch of a multi-launch descriptor also
+    names its role, the kernel of the builder's module it takes."""
     if source.get("sha256") or source.get("symbol"):
         return json.dumps(
             {"sha256": source.get("sha256"), "symbol": source.get("symbol")},
             sort_keys=True,
         )
     spec = dict(source.get("spec") or {})
-    return json.dumps(
-        {
-            "builder": source.get("builder"),
-            "spec": sorted((k, repr(v)) for k, v in spec.items()),
-        },
-        sort_keys=True,
+    key = {
+        "builder": source.get("builder"),
+        "spec": sorted((k, repr(v)) for k, v in spec.items()),
+    }
+    if with_role:
+        key["role"] = source.get("role")
+    return json.dumps(key, sort_keys=True)
+
+
+def _binary_key(descriptor: dict):
+    """Identity of what this descriptor ships. A single-launch descriptor's key is
+    its one artifact's string; a multi-launch descriptor's is the tuple of
+    `(launch name, per-launch key)` sorted by name, so the two never match and two
+    multi-launch descriptors match only when every launch does."""
+    launches = kernel_sources(descriptor)
+    if None in launches:
+        return _source_key(launches[None], with_role=False)
+    return tuple(
+        (name, _source_key(launches[name], with_role=True)) for name in sorted(launches)
     )
+
+
+def _launch_specs(descriptor: dict) -> list[dict]:
+    """The spec of every launch of the descriptor."""
+    return [source.get("spec") or {} for source in kernel_sources(descriptor).values()]
+
+
+def _pins(descriptor: dict, knob: str) -> bool:
+    """A descriptor is one selection, so it pins `knob` when any launch spec does
+    and leaves it to the kernel when none does."""
+    return any(spec.get(knob) is not None for spec in _launch_specs(descriptor))
 
 
 def _shape_key(descriptor: dict, knob: str) -> str:
@@ -183,8 +298,7 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
             for c in big_descs:
                 big_by_shape.setdefault(_shape_key(c, knob), []).append(c)
             for d in small_descs:
-                spec = d["kernel_source"].get("spec") or {}
-                if not spec or spec.get(knob) is not None:
+                if not any(_launch_specs(d)) or _pins(d, knob):
                     continue  # nothing to settle, or this descriptor pins it itself
                 candidates = big_by_shape.get(_shape_key(d, knob))
                 if not candidates:
@@ -192,10 +306,7 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
                 candidate_keys = {_binary_key(c) for c in candidates}
                 if _binary_key(d) in candidate_keys:
                     continue  # the twin is present, or the override resolves the same
-                if any(
-                    (c["kernel_source"].get("spec") or {}).get(knob) is None
-                    for c in candidates
-                ):
+                if any(not _pins(c, knob) for c in candidates):
                     continue  # a differently-settled twin already covers it
                 shape = {k: v for k, v in d["metadata"].items() if k != knob}
                 violations.append(
@@ -206,6 +317,17 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
                     f"candidate list"
                 )
     return violations
+
+
+def _shared_devices(left: list, right: list, table) -> str:
+    """The devices both competing arch lists admit."""
+    left_devices = gtmod.expand(left, table)
+    right_devices = gtmod.expand(right, table)
+    if left_devices is None or right_devices is None:
+        shared = left_devices or right_devices
+    else:
+        shared = left_devices & right_devices
+    return ", ".join(sorted(shared)) if shared else "every arch"
 
 
 def effective_arch(
@@ -232,55 +354,86 @@ class Payloads:
     descriptor that cannot produce them has not shown its evidence is about the
     artifact it ships, so that is a failure rather than an unchecked property."""
 
-    def __init__(self, kpack_python_dir: str | None = None):
+    def __init__(self, kpack_python_dir: str | None = None, generic_targets=None):
         self._dir = kpack_python_dir
+        self._table = generic_targets
         self._archives: dict = {}
         self._module = None
+
+    def _load_kpack(self):
+        """rocm_kpack from the named directory; or, with none named, the installed
+        package, then each existing DEFAULT_KPACK_PYTHON_DIRS entry."""
+        from hkp_pack.kpack_resolver import load_kpack  # noqa: PLC0415
+
+        if self._dir is not None:
+            candidates = [self._dir]
+        else:
+            candidates = [None] + [
+                str(d) for d in DEFAULT_KPACK_PYTHON_DIRS if d.is_dir()
+            ]
+        errors = []
+        for candidate in candidates:
+            try:
+                module, _compression = load_kpack(candidate)
+                return module
+            except HkpPackError as exc:
+                errors.append(f"{candidate or 'installed package'}: {exc}")
+                _forget_rocm_kpack()
+        searched = ", ".join(str(d) for d in DEFAULT_KPACK_PYTHON_DIRS)
+        raise KpackUnavailable(
+            "rocm_kpack is not importable, so --mode full cannot read the payload "
+            "bytes packed descriptors name. This is an environment problem, not a "
+            f"descriptor failure. Tried: {'; '.join(errors)}. Pass --kpack-python-dir "
+            f"<rocm-kpack>/python (default search when omitted: {searched})."
+        )
 
     def _archive(self, path: Path):
         key = str(path)
         if key not in self._archives:
             if self._module is None:
-                from hkp_pack.kpack_resolver import load_kpack  # noqa: PLC0415
-
-                self._module, _compression = load_kpack(self._dir)
+                self._module = self._load_kpack()
             self._archives[key] = self._module.PackedKernelArchive.read(path)
         return self._archives[key]
 
-    def read(self, entry: descriptor_context.Entry, arch: str) -> bytes:
-        source = entry.ukd["kernel_source"]
+    def read(
+        self, entry: descriptor_context.Entry, arch: str, launch: str | None = None
+    ) -> bytes:
+        """The code object of `launch` (None for a single-launch descriptor)."""
+        source = kernel_sources(entry.ukd)[launch]
+        who = _launch_label(entry.ukd, launch)
         kind = source.get("kind")
         if kind != "kpack":
             raise GateError(
-                f"{entry.ukd.get('name')}: --mode full needs the packed dialect, and "
+                f"{who}: --mode full needs the packed dialect, and "
                 f"kernel_source.kind is {kind!r}. The producing compiler's evidence "
                 f"exists only once the bytes do; check the packed tree."
             )
         library, toc_key = source.get("library"), source.get("toc_key")
         if not library or not toc_key:
             raise GateError(
-                f"{entry.ukd.get('name')}: packed kernel_source names no "
+                f"{who}: packed kernel_source names no "
                 f"library/toc_key, so there are no payload bytes to bind the "
                 f"evidence to."
             )
         archive_path = (Path(entry.origin_dir) / library).resolve()
         if not archive_path.is_file():
             raise GateError(
-                f"{entry.ukd.get('name')}: kernel_source.library resolves to "
+                f"{who}: kernel_source.library resolves to "
                 f"{archive_path}, which does not exist."
             )
+        # A generic document's archive is keyed by the generic's name.
+        if self._table is None:
+            self._table = gtmod.GenericTargets.load(gtmod.DEFAULT_TABLE_PATH)
+        key = descriptor_context.archive_arch(entry.arch, arch, self._table)
         try:
-            blob = self._archive(archive_path).get_kernel(toc_key, arch)
-        except HkpPackError:
+            blob = self._archive(archive_path).get_kernel(toc_key, key)
+        except (HkpPackError, KpackUnavailable):
             raise
         except Exception as exc:
-            raise GateError(
-                f"{entry.ukd.get('name')}: cannot read {archive_path}: {exc}"
-            ) from exc
+            raise GateError(f"{who}: cannot read {archive_path}: {exc}") from exc
         if blob is None:
             raise GateError(
-                f"{entry.ukd.get('name')}: {archive_path} carries no member "
-                f"{toc_key!r} for {arch}."
+                f"{who}: {archive_path} carries no member " f"{toc_key!r} for {key}."
             )
         return blob
 
@@ -299,10 +452,13 @@ def _comparable(value):
 def check(
     label: str,
     root: str,
-    profile: Profile,
+    manifest: Manifest,
     mode: str,
     arch: str | None = None,
     payloads: Payloads | None = None,
+    generic_targets=None,
+    *,
+    provenance_root: str | None = None,
 ):
     """Run every property this mode can honestly claim, and name the rest.
 
@@ -311,28 +467,34 @@ def check(
     `unchecked` is a check this run could not run, a gap that fails the gate
     under `--mode full`; `unverified` is a check that ran and found nothing to
     bind, which neither fails the gate nor joins the pass line.
+
+    `provenance_root` is as for `descriptor_context.Index`.
     """
-    index = descriptor_context.Index(root)
+    if generic_targets is None:
+        generic_targets = gtmod.GenericTargets.load(gtmod.DEFAULT_TABLE_PATH)
+    index = descriptor_context.Index(root, provenance_root=provenance_root)
     schemas = index.schemas()
     all_bundles = descriptor_context.resolve_bundles(index)
-    bundles = select(all_bundles, profile)
+    bundles = select(all_bundles, manifest)
     kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
+    for descriptor in descriptors:
+        kernel_sources(descriptor)  # refuses both or neither before any check reads one
     failures: list[str] = []
     unchecked: list[str] = []
     unverified: list[str] = []
 
     declared = descriptor_context.declarations(bundles, schemas)
     knobs = {f for d in declared.values() for f in d["metadata_fields"]}
-    vocabulary = dict(profile.vocabulary)
+    vocabulary = dict(manifest.vocabulary)
     for declaration in declared.values():
         vocabulary.update(declaration["vocabulary"])
     # A declaration's vocabulary speaks only for the fields it specialises on,
     # so it is merged into the translations above but does not answer whether
     # there was a place to declare a translation for a given field. Only the
-    # profile's block does that.
-    vocabulary_declared = profile.vocabulary_declared
+    # manifest's block does that.
+    vocabulary_declared = manifest.vocabulary_declared
 
     # (2) Loader-tuple uniqueness, engine-wide because the loader assembles one
     # catalog per engine per device, arch-aware because disjoint coverages
@@ -353,16 +515,11 @@ def check(
     collisions = []
     for i, (left, left_key) in enumerate(completed):
         for right, right_key in completed[i + 1 :]:
-            if left_key != right_key or not agreement.overlap(left.arch, right.arch):
+            if left_key != right_key or not gtmod.compete(
+                left.arch, right.arch, generic_targets
+            ):
                 continue
-            # A wildcard covers whatever the other side names, so the overlap it
-            # reports is that side's list rather than an empty intersection.
-            both = set(left.arch) & set(right.arch)
-            either = set(left.arch) | set(right.arch)
-            where = (
-                ", ".join(sorted(both if left.arch and right.arch else either))
-                or "every arch"
-            )
+            where = _shared_devices(left.arch, right.arch, generic_targets)
             collisions.append(
                 f"{left.ukd.get('name')} and {right.ukd.get('name')} complete to one "
                 f"tuple on {where}"
@@ -390,7 +547,7 @@ def check(
         for field, declared_spellings in vocabulary.items():
             # A mapping declares builder-spelling -> matcher-spelling and its VALUES
             # are the legal set; a bare list declares the legal set directly. Both are
-            # accepted so one profile serves this tool and the parity generator.
+            # accepted so one manifest serves this tool and the descriptor generator.
             allowed = (
                 declared_spellings.values()
                 if isinstance(declared_spellings, dict)
@@ -411,7 +568,7 @@ def check(
                     f"(the matcher compares {sorted(allowed_set)})"
                 )
     else:
-        unchecked.append("vocabulary (no 'vocabulary' in profile or declaration)")
+        unchecked.append("vocabulary (no 'vocabulary' in manifest or declaration)")
 
     # (4) Metadata matches the binary it names, in two kinds of field.
     #
@@ -428,8 +585,12 @@ def check(
 
     plain_mismatches = []
     undeclared_string_fields = set()
-    for descriptor in descriptors:
-        spec = descriptor["kernel_source"].get("spec") or {}
+    plain_checks = [
+        (descriptor, launch, source.get("spec") or {})
+        for descriptor in descriptors
+        for launch, source in kernel_sources(descriptor).items()
+    ]
+    for descriptor, launch, spec in plain_checks:
         if not spec:
             continue
         for field, meta_value in descriptor["metadata"].items():
@@ -455,7 +616,7 @@ def check(
                     continue
             if _comparable(spec_value) != _comparable(meta_value):
                 plain_mismatches.append(
-                    f"{descriptor['name']}: {field} spec={spec_value!r} "
+                    f"{_launch_label(descriptor, launch)}: {field} spec={spec_value!r} "
                     f"metadata={meta_value!r}"
                 )
     if plain_mismatches:
@@ -470,7 +631,7 @@ def check(
         unchecked.append(
             "metadata-matches-binary for UNDECLARED STRING field(s) "
             f"{', '.join(sorted(undeclared_string_fields))} (no 'vocabulary' in "
-            f"profile or declaration to judge them against)"
+            f"manifest or declaration to judge them against)"
         )
 
     # (4b) Compiled specialization: the fields a declaration marks as settled
@@ -478,7 +639,9 @@ def check(
     # producing compile's evidence says what the binary was built with. Full
     # mode checks it against the payload bytes; structural mode names it.
     if mode == "full":
-        records = descriptor_context.consumer_records(all_bundles, schemas, arch)
+        records = descriptor_context.consumer_records(
+            all_bundles, schemas, arch, generic_targets
+        )
         for bundle in bundles:
             for entry in bundle.entries:
                 name = entry.ukd.get("name")
@@ -493,12 +656,16 @@ def check(
                 agreement.select_declaration(
                     entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
                 )
-                kind = entry.ukd.get("kernel_source", {}).get("kind")
-                if kind != "kpack":
-                    failures.append(
-                        f"{name}: --mode full needs the packed dialect, and "
-                        f"kernel_source.kind is {kind!r}. Check the packed tree."
-                    )
+                launches = kernel_sources(entry.ukd)
+                unpacked = [
+                    f"{_launch_label(entry.ukd, launch)}: --mode full needs the "
+                    f"packed dialect, and kernel_source.kind is "
+                    f"{source.get('kind')!r}. Check the packed tree."
+                    for launch, source in launches.items()
+                    if source.get("kind") != "kpack"
+                ]
+                if unpacked:
+                    failures.extend(unpacked)
                     continue
                 if entry.ukd["id"] not in records:
                     failures.append(
@@ -539,13 +706,21 @@ def check(
                     )
                     continue
                 try:
-                    payload = payloads.read(entry, arch)
-                    agreement.verify(entry.ukd, bound, payload)
-                except GateError as exc:
-                    # Already names the descriptor it is about; the payload reader
-                    # is reached from other callers too and says so itself.
-                    failures.append(str(exc))
-                    continue
+                    # One code object per launch; each read names its launch.
+                    read = {}
+                    for launch in launches:
+                        try:
+                            read[launch] = payloads.read(entry, arch, launch)
+                        except GateError as exc:
+                            # Already names the descriptor and launch it is about;
+                            # the payload reader is reached from other callers too
+                            # and says so itself.
+                            failures.append(str(exc))
+                    if len(read) != len(launches):
+                        continue
+                    agreement.verify(
+                        entry.ukd, bound, read[None] if None in read else read
+                    )
                 except HkpPackError as exc:
                     failures.append(f"{name}: {exc}")
                     continue
@@ -600,40 +775,86 @@ def main(argv=None) -> int:
         "Required when the tree does not pin exactly one.",
     )
     parser.add_argument(
-        "--profile",
-        help="Per-kernel profile (JSON or YAML) declaring the bundle name to gate "
-        "and the matcher's vocabulary for fields no descriptor declaration covers.",
+        "--manifest",
+        help="Engine manifest (`configs/<slug>.engine.yaml`, JSON or YAML). Only "
+        "engine.name (which engine's KDPs to gate) and specialization.vocabulary are "
+        "read; the rest of the file is not checked.",
     )
     parser.add_argument(
         "--kpack-python-dir",
         help="Directory holding the rocm_kpack package, for reading the payload "
         "bytes a packed descriptor names under --mode full. Omit it to use the "
-        "installed one.",
+        "installed one, falling back to /opt/rocm-kpack/python when that exists. "
+        f"Exits {EXIT_ENVIRONMENT} when rocm_kpack cannot be imported.",
+    )
+    parser.add_argument(
+        "--generic-targets-json",
+        default=str(gtmod.DEFAULT_TABLE_PATH),
+        help="The generic GPU target table (gpu_generic_targets.json).",
+    )
+    parser.add_argument(
+        "--provenance-root",
+        action="append",
+        default=[],
+        metavar="LABEL=DIR",
+        help="Where one packed root's provenance sidecars live when they are not "
+        "beside its descriptors, as in an installed production tree; repeatable, "
+        "one per LABEL. DIR mirrors that label's ROOT: the sidecar of "
+        "<ROOT>/<rel>/<name>.kdp.json is "
+        "<DIR>/<rel>/<name>.kdp.provenance.json.gz. Every descriptor directory "
+        "under ROOT must hold the packer's hkp-packed.marker.",
     )
     args = parser.parse_args(argv)
 
     if len(args.pairs) % 2:
         parser.error("arguments must be LABEL ROOT pairs")
     roots = list(zip(args.pairs[::2], args.pairs[1::2]))
+    labels = dict(roots)
 
-    profile = Profile.load(args.profile) if args.profile else Profile.empty()
+    provenance_roots = {}
+    for text in args.provenance_root:
+        label, separator, directory = text.partition("=")
+        if not separator or not label or not directory:
+            parser.error(f"--provenance-root {text!r} is not LABEL=DIR")
+        if label not in labels:
+            parser.error(
+                f"--provenance-root names label {label!r}, which no LABEL ROOT "
+                "pair does"
+            )
+        provenance_roots[label] = directory
+
+    manifest = Manifest.load(args.manifest) if args.manifest else Manifest.empty()
 
     print("variant-set gate")
     print(f"  mode: {args.mode}")
 
     sets, by_label, bad, skipped, knobs = {}, {}, [], [], set()
     unverified: list[str] = []
-    payloads = Payloads(args.kpack_python_dir) if args.mode == "full" else None
     try:
+        generic_targets = gtmod.GenericTargets.load(args.generic_targets_json)
+        payloads = (
+            Payloads(args.kpack_python_dir, generic_targets)
+            if args.mode == "full"
+            else None
+        )
         arch = None
         if args.mode == "full":
             probe = descriptor_context.resolve_bundles(
-                descriptor_context.Index(roots[0][1])
+                descriptor_context.Index(
+                    roots[0][1], provenance_root=provenance_roots.get(roots[0][0])
+                )
             )
             arch = effective_arch(probe, args.arch)
         for label, root in roots:
             binaries, descriptors, failures, unchecked, unbound, declared = check(
-                label, root, profile, args.mode, arch, payloads
+                label,
+                root,
+                manifest,
+                args.mode,
+                arch,
+                payloads,
+                generic_targets,
+                provenance_root=provenance_roots.get(label),
             )
             sets[label] = binaries
             by_label[label] = descriptors
@@ -641,6 +862,9 @@ def main(argv=None) -> int:
             skipped += unchecked
             unverified += [f"{label}: {u}" for u in unbound]
             knobs |= declared
+    except KpackUnavailable as exc:
+        print(f"ENVIRONMENT ERROR: {exc}", file=sys.stderr)
+        return EXIT_ENVIRONMENT
     except (GateError, HkpPackError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

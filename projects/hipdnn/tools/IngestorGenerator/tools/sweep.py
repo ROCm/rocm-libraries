@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from device_probe import ARCH_TOKEN, ProbeUnavailable, device_info
+from device_probe import ProbeUnavailable, device_info, is_arch_token
 
 
 class ConfigError(ValueError):
@@ -219,7 +219,7 @@ def load_config(path):
         config["sweep_root"]
     ):
         raise ConfigError("output_dir must be a dedicated child of sweep_root")
-    if not re.fullmatch(ARCH_TOKEN, _text(config["arch"], "arch")):
+    if not is_arch_token(_text(config["arch"], "arch")):
         raise ConfigError("arch must be an exact gfx token")
     for key in ("engine_name", "engine_ued_name"):
         _text(config[key], key)
@@ -273,7 +273,8 @@ def load_config(path):
     benchmark = config["benchmark"]
     _fields(benchmark, ("argv", "warmup", "iters"))
     benchmark["argv"] = _argv(benchmark["argv"], base)
-    # Phase flags are owned by this driver, so duplicate options cannot redirect evidence.
+    # Phase flags and the benchmark cache the rankings are read from are owned by this
+    # driver, so duplicate options cannot redirect evidence.
     reserved = {
         "--graph",
         "--plugin-path",
@@ -284,6 +285,8 @@ def load_config(path):
         "--validate",
         "--engine",
         "--backend",
+        "--autotune",
+        "--hipdnn-cache-dir",
     }
     if any(arg.split("=", 1)[0] in reserved for arg in benchmark["argv"][1:]):
         raise ConfigError("benchmark.argv must not override phase-owned options")
@@ -306,10 +309,21 @@ def load_config(path):
     return config
 
 
+def semantic_identity(graph):
+    """Digest of what a graph computes: every key but its ``name``, ``provenance``
+    and private ``_`` keys, which label a graph without changing it."""
+    return digest(
+        {
+            k: v
+            for k, v in graph.items()
+            if k not in ("name", "provenance") and not k.startswith("_")
+        }
+    )
+
+
 def corpus_inventory(corpus, exclusions):
     root = Path(corpus["path"])
     inventory = []
-    names = set()
     for path in sorted(root.rglob("*.json")):
         try:
             graph = read_json(path)
@@ -319,31 +333,39 @@ def corpus_inventory(corpus, exclusions):
                 raise ValueError("expected a graph mapping with tensors")
             name = graph.get("name", path.stem)
             _text(name, "graph name")
-            if name in names:
-                raise ValueError(f"ambiguous duplicate graph name {name!r}")
-            names.add(name)
             tensor_names = {str(t.get("name", "")).lower() for t in graph["tensors"]}
             if exclusions != "none" and tensor_names & set(exclusions):
                 raise ValueError(
                     f"excluded tensor hazard: {sorted(tensor_names & set(exclusions))}"
                 )
-            semantic = {
-                k: v
-                for k, v in graph.items()
-                if k not in ("name", "provenance") and not k.startswith("_")
-            }
             inventory.append(
                 {
                     "graph_name": name,
+                    "source_name": name,
                     "source_path": str(path),
                     "relative_path": str(path.relative_to(root)),
                     "sha256": file_hash(path),
-                    "semantic_identity": digest(semantic),
+                    "semantic_identity": semantic_identity(graph),
                     "provenance": graph.get("_provenance", graph.get("provenance", {})),
                 }
             )
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             raise ConfigError(f"{path}: {exc}") from exc
+    # graph_name is the identity the benchmark reports back (staging writes it into
+    # each graph's `name`), so it has to be unique. Sources often reuse a name (two
+    # corpora shipping the same shape), so a name shared by several files is replaced
+    # by each file's corpus-relative path; a unique name is kept as is.
+    shared = Counter(g["source_name"] for g in inventory)
+    for graph in inventory:
+        if shared[graph["source_name"]] > 1:
+            graph["graph_name"] = Path(graph["relative_path"]).as_posix()
+    keys = Counter(g["graph_name"] for g in inventory)
+    clashes = sorted(g["relative_path"] for g in inventory if keys[g["graph_name"]] > 1)
+    if clashes:
+        raise ConfigError(
+            f"{root}: graphs {clashes} cannot be told apart: a graph name equals "
+            "another graph's corpus-relative path; rename one"
+        )
     if len(inventory) != corpus["expected_graphs"]:
         raise ConfigError(
             f"{root}: {len(inventory)} graphs, expected {corpus['expected_graphs']}"
@@ -477,12 +499,11 @@ def discover_engine(config, arm, env, destination):
             "installed engine discovery did not uniquely identify engine_ued_name"
         )
     engine_id = selected[0]
-    if config["engine_name"] not in (
-        config["engine_ued_name"],
-        f"engine_{engine_id:#x}",
-    ):
+    labels = engine_labels(config["engine_ued_name"], engine_id)
+    if config["engine_name"] not in labels:
         raise GateError(
-            "engine_name does not match the installed name or exact engine-ID fallback"
+            f"engine_name {config['engine_name']!r} is not a label of the installed "
+            f"engine; use one of {list(labels)}"
         )
     return engine_id
 
@@ -498,6 +519,21 @@ def descriptor_count(arm):
     return count
 
 
+def _from_plugin_dir(reported, plugin_dir):
+    """True when a result row's plugin_path attributes it to this arm's engines dir.
+
+    `plugin_dir` is the resolved engines directory the provenance gate also uses.
+
+    Benchmarks spell the same fact two ways: some report the individual plugin they
+    loaded, whose parent is the engines directory, and some echo back the directory
+    they were handed. Both mean "this row came from this arm"; nothing looser does, so
+    a sibling tree sharing a name prefix and a plugin nested below the engines
+    directory both fail attribution.
+    """
+    resolved = Path(reported).resolve()
+    return resolved == plugin_dir or resolved.parent == plugin_dir
+
+
 def _positive(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0
 
@@ -510,6 +546,41 @@ def signed64(engine_id):
     identity, two spellings, converted here rather than in each caller.
     """
     return engine_id - (1 << 64) if engine_id >= (1 << 63) else engine_id
+
+
+def engine_labels(ued_name, engine_id):
+    """Every `engine_name` dnn-benchmark can give this engine's rows.
+
+    The benchmark labels a row with the registered name when the bindings resolve one,
+    else `engine_{id:#x}` of the ID its bindings return, which is signed int64: an ID
+    with the top bit set (hipkernel:Gfx950AttentionDense is 0x89C9139111D7C3A5) is
+    printed as `engine_-0x7636ec6eee283c5b`. The unsigned spelling is what discovery
+    prints. All three name one engine; the row's engine_id still has to agree.
+    """
+    return (
+        ued_name,
+        f"engine_{engine_id:#x}",
+        f"engine_{signed64(engine_id):#x}",
+    )
+
+
+def _is_reference(row, provider):
+    """True when a result row is the validation provider's row, not an engine's.
+
+    An explicit `role` decides. dnn-benchmark through at least 73fff8a never writes
+    one (its timed reference row keeps the default role, which to_dict omits), so a
+    row without `role` is the reference when it is the configured provider's row with
+    the reference engine_id 0. Any other unlabelled row is an engine row.
+    """
+    if "role" in row:
+        return row["role"] == "reference"
+    engine_id = row.get("engine_id")
+    return (
+        provider is not None
+        and row.get("provider") == provider
+        and type(engine_id) is int
+        and engine_id == 0
+    )
 
 
 def evaluate_phase(
@@ -543,7 +614,9 @@ def evaluate_phase(
         gates["descriptors"] = descriptor_count(arm) == arm["expected_descriptors"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         errors.append(f"descriptor census: {exc}")
-    plugin_dir = Path(arm["install_tree"]) / "lib" / "hipdnn_plugins" / "engines"
+    plugin_dir = (
+        Path(arm["install_tree"]) / "lib" / "hipdnn_plugins" / "engines"
+    ).resolve()
     try:
         loaded = re.findall(r"load plugin from \[([^\]]+)\]", Path(hip_log).read_text())
         gates["provenance"] = any(
@@ -574,6 +647,8 @@ def evaluate_phase(
         errors.append(f"result parse: {exc}")
         rows = {}
         metadata = None
+    labels = engine_labels(config["engine_ued_name"], engine_id)
+    wanted = config["correctness"]["reference"]
     for source in inventory:
         name = source["graph_name"]
         entry = {
@@ -593,15 +668,14 @@ def evaluate_phase(
             if not isinstance(row, dict):
                 entry.update(outcome="ambiguous", reason="non-mapping result row")
                 continue
-            if row.get("role", "engine") == "reference":
+            if _is_reference(row, wanted):
                 references.append(row)
                 continue
-            if row.get("engine_name") == config["engine_name"]:
+            if row.get("engine_name") in labels:
                 candidates.append(row)
         # A reference row is only evidence when it names the requested provider and
         # actually ran: a silently skipped reference leaves every engine row with
         # tolerance_match null, which the suite counts as a pass.
-        wanted = config["correctness"]["reference"]
         chosen = [
             r
             for r in references
@@ -631,9 +705,8 @@ def evaluate_phase(
                 or (observed_id & ((1 << 64) - 1)) != engine_id
             ):
                 entry.update(outcome="ambiguous", reason="engine name/ID disagreement")
-            elif (
-                row.get("plugin_path")
-                and Path(row["plugin_path"]).resolve().parent != plugin_dir
+            elif row.get("plugin_path") and not _from_plugin_dir(
+                row["plugin_path"], plugin_dir
             ):
                 entry.update(
                     outcome="ambiguous",

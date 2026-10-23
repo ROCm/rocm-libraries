@@ -7,21 +7,30 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agreement, toolchain
+from . import agreement, provenance_sidecar, sources, toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
     hip_variant_key,
 )
-from .rocke_compile import compile_rocke_variant, rocke_variant_key
+from .hsaco_source import hsaco_file_identity, hsaco_variant_key, resolve_hsaco_file
+from .rocke_compile import (
+    ROCKE_TARGET_NATIVE,
+    compile_rocke_variant,
+    rocke_compile_arch,
+    rocke_variant_key,
+)
 from .descriptors import (
     KPACK_DIR_NAME,
-    arch_matches,
+    canonical_id,
+    _selected_entries,
+    kdp_arch_matches,
     kdp_survives,
     load_flat_input,
     reachable_generic_ids,
 )
 from .errors import HkpPackError
+from .generic_targets import GenericTargets
 from .kernel_signature import kernel_signature
 from .kpack_resolver import load_kpack
 
@@ -55,6 +64,30 @@ class InlineUKD:
     provenance: dict = field(default_factory=dict)
     observations: dict = field(default_factory=dict)
     consumers: list = field(default_factory=list)
+    # hsaco only: the authored file's resolved root-relative identity.
+    rel_file: object = None
+    # rocke only: the processor the code object was compiled for -- the shard
+    # arch for target "native", its LLVM generic processor for "generic".
+    compile_target: object = None
+    # rocke `sources` only: `{launch name: LaunchEntry}`, in authored order. Then
+    # `variant_key`, `symbol`, `source`, `builder`, `spec`, `observations` and
+    # `compile_target` above belong to the launches, not to the UKD.
+    launches: dict = field(default_factory=dict)
+
+
+@dataclass
+class LaunchEntry:
+    """One launch of a `sources` UKD, as compiled."""
+
+    variant_key: str
+    symbol: str
+    source: str
+    builder: str
+    spec: dict
+    compile_target: str
+    observations: dict
+    # The builder's companion kernel this launch takes; None is the primary.
+    role: object = None
 
 
 @dataclass
@@ -121,6 +154,19 @@ class ArchResult:
     out_dir: Path
     kpack_path: Path
     skipped: bool = False
+    # Generic-pass archives copied into this member's folder.
+    generic_kpack_paths: tuple = ()
+
+
+_EXC_TEXT_LIMIT = 200
+
+
+def _bounded_repr(exc):
+    """repr(exc), cut to a length that keeps one error message readable."""
+    text = repr(exc)
+    if len(text) <= _EXC_TEXT_LIMIT:
+        return text
+    return f"{text[:_EXC_TEXT_LIMIT]}... ({len(text)} chars)"
 
 
 def _sha256(data):
@@ -181,6 +227,7 @@ def _ukd_extra(ukd):
             "id",
             "name",
             "kernel_source",
+            "sources",
             "metadata",
             "priority",
             "build",
@@ -188,6 +235,173 @@ def _ukd_extra(ukd):
             "provenance",
         )
     }
+
+
+def _compile_rocke_launch(
+    ks,
+    vk,
+    where,
+    arch,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+    observation_requests,
+    variant_observations,
+    origins,
+):
+    """Compile one rocke kernel_source once per variant key, then check the result.
+
+    Returns `(primary symbol, observations, compile_target)`. A reused compile
+    result is checked as hard as a fresh one, for EVERY consumer: the first's
+    agreement says nothing about a second completing different metadata from the
+    same decisions. The shard binding stays the shard arch even for a generic
+    compile: the object is packed for, and its evidence bound to, this shard alone.
+    """
+    target = ks.get("target", ROCKE_TARGET_NATIVE)
+    if vk not in variant_co:
+        co_path, captured, observations = compile_rocke_variant(
+            ks["source"],
+            ks["builder"],
+            ks["spec"],
+            arch,
+            inter_arch_dir,
+            observation_requests.get(vk, {}),
+            origins,
+            target,
+            # The variant may serve a `sources` UKD, for which a field one launch's
+            # spec lacks is simply not reported by it. The compare that follows holds
+            # a single-launch UKD to every field.
+            tolerate_missing=True,
+        )
+        variant_co[vk] = co_path
+        variant_symbol[vk] = captured
+        variant_observations[vk] = observations
+    observations = variant_observations[vk]
+    symbol = variant_symbol[vk]
+    if observations.get("arch") != arch:
+        raise HkpPackError(
+            f"{where}: compile observations were taken for "
+            f"'{observations.get('arch')}', not '{arch}'"
+        )
+    compile_target = rocke_compile_arch(arch, target)
+    if observations.get("compile_target") != compile_target:
+        raise HkpPackError(
+            f"{where}: compile observations were compiled for "
+            f"'{observations.get('compile_target')}', not '{compile_target}' "
+            f"(kernel_source.target '{target}' on shard '{arch}')"
+        )
+    if observations.get("symbol") != symbol:
+        raise HkpPackError(
+            f"{where}: compile observations name symbol "
+            f"'{observations.get('symbol')}', not '{symbol}'"
+        )
+    return symbol, observations, compile_target
+
+
+def _launch_label(names):
+    """`launch 'a'` or `launches ['a', 'b']`, for a message about one compile."""
+    if len(names) == 1:
+        return f"launch '{names[0]}'"
+    return f"launches {sorted(names)}"
+
+
+def _compile_sources_ukd(
+    ukd,
+    where,
+    arch,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+    observation_requests,
+    consumer_records,
+    variant_observations,
+    origins,
+):
+    """Compile every launch of a `sources` UKD; entries naming one (source,
+    builder, spec, target) compile once and share a code object.
+
+    Returns `(None, None, record_fields)`: the UKD has no variant key or symbol of
+    its own, only `launches`. The claim check runs per variant the UKD uses, per
+    consumer like the checks above it: the variant key does not include the roles
+    a UKD claims, so each UKD is held to the compiled kernel set.
+    """
+    entries = sources.kernel_sources(ukd)
+    by_variant = {}
+    for name, ks in entries.items():
+        if ks.get("kind") != "rocke":
+            raise sources.refuse_authored_kind(where, name, ks.get("kind"))
+        by_variant.setdefault(_source_variant_key(ks), []).append(name)
+    compiled = {}
+    for vk, names in by_variant.items():
+        try:
+            compiled[vk] = _compile_rocke_launch(
+                entries[names[0]],
+                vk,
+                where,
+                arch,
+                inter_arch_dir,
+                variant_co,
+                variant_symbol,
+                observation_requests,
+                variant_observations,
+                origins,
+            )
+        except HkpPackError as exc:
+            # One declaration speaks for every launch, so a field a launch's own
+            # builder cannot show fails here, and must say which launch.
+            raise HkpPackError(f"{where}: {_launch_label(names)}: {exc}") from exc
+        first = entries[names[0]]
+        sources.check_claims(
+            where,
+            first["builder"],
+            names,
+            [entries[n].get("role") for n in names],
+            compiled[vk][1],
+        )
+    consumers = consumer_records.get(ukd["id"], [])
+    # One declaration speaks for every launch: each field must be reported by at
+    # least one launch and match wherever reported.
+    for record in consumers:
+        try:
+            agreement.compare_launches(
+                record["declaration"],
+                record["kmd"],
+                ukd["metadata"],
+                {
+                    name: compiled[_source_variant_key(ks)][1]
+                    for name, ks in entries.items()
+                },
+            )
+        except HkpPackError as exc:
+            raise HkpPackError(f"{where}: {exc}") from exc
+    launches = {}
+    for name, ks in entries.items():
+        vk = _source_variant_key(ks)
+        _symbol, observations, compile_target = compiled[vk]
+        role = ks.get("role")
+        launches[name] = LaunchEntry(
+            variant_key=vk,
+            symbol=sources.entry_symbol(role, observations),
+            source=ks["source"],
+            builder=ks["builder"],
+            spec=ks["spec"],
+            compile_target=compile_target,
+            observations=observations,
+            role=role,
+        )
+    fields = {
+        "origin_kind": "rocke",
+        "source": None,
+        "entry": None,
+        "build": None,
+        "builder": None,
+        "spec": None,
+        "observations": {},
+        "consumers": consumers,
+        "launches": launches,
+        "provenance": copy.deepcopy(ukd.get("provenance", {})),
+    }
+    return None, None, fields
 
 
 def _compile_ukd_variant(
@@ -212,9 +426,26 @@ def _compile_ukd_variant(
     (`source_root / rel_dir / source`) and keys on (source, build). rocke keys on
     (source, builder, spec) and is location-independent (its source is a dotted
     module resolved by import), so source_root/rel_dir are accepted only for
-    signature uniformity. Returns (variant_key, symbol, record_fields).
+    signature uniformity. hsaco resolves its `file` the way hip resolves its
+    source, keys on the file's resolved root-relative path, and runs no
+    producer: the authored path itself is recorded as the variant's code object.
+    Returns (variant_key, symbol, record_fields).
     """
-    ks = ukd["kernel_source"]
+    entries = sources.kernel_sources(ukd)
+    if None not in entries:
+        return _compile_sources_ukd(
+            ukd,
+            where,
+            arch,
+            inter_arch_dir,
+            variant_co,
+            variant_symbol,
+            observation_requests,
+            consumer_records,
+            variant_observations,
+            origins,
+        )
+    ks = entries[None]
     kind = ks["kind"]
     # Only the two producer kinds carry a `source`, so it is read per-arm:
     # hoisting the read above the dispatch turns the unsupported-kind raise
@@ -249,34 +480,22 @@ def _compile_ukd_variant(
         builder = ks["builder"]
         spec = ks["spec"]
         vk = _variant_key_for(ukd, rel_dir)
-        if vk not in variant_co:
-            co_path, captured, observations = compile_rocke_variant(
-                source,
-                builder,
-                spec,
-                arch,
-                inter_arch_dir,
-                observation_requests.get(vk, {}),
-                origins,
-            )
-            variant_co[vk] = co_path
-            variant_symbol[vk] = captured
-            variant_observations[vk] = observations
-        observations = variant_observations[vk]
-        symbol = variant_symbol[vk]
-        # A reused compile result is checked as hard as a fresh one, for EVERY
-        # consumer: the first's agreement says nothing about a second completing
-        # different metadata from the same decisions.
-        if observations.get("arch") != arch:
-            raise HkpPackError(
-                f"{where}: compile observations were taken for "
-                f"'{observations.get('arch')}', not '{arch}'"
-            )
-        if observations.get("symbol") != symbol:
-            raise HkpPackError(
-                f"{where}: compile observations name symbol "
-                f"'{observations.get('symbol')}', not '{symbol}'"
-            )
+        symbol, observations, compile_target = _compile_rocke_launch(
+            ks,
+            vk,
+            where,
+            arch,
+            inter_arch_dir,
+            variant_co,
+            variant_symbol,
+            observation_requests,
+            variant_observations,
+            origins,
+        )
+        # A builder returning a module also compiled its companions, which a plain
+        # `kernel_source` has no way to claim: that is `sources`, and shipping only
+        # the primary would leave them unreachable behind evidence naming them.
+        sources.check_claims(where, builder, ["kernel_source"], [None], observations)
         # Empty only for a UKD whose pack authors no engine, which `_agreement_inputs`
         # has already established carries no catalog to disagree with.
         consumers = consumer_records.get(ukd["id"], [])
@@ -292,7 +511,34 @@ def _compile_ukd_variant(
             "builder": builder,
             "spec": spec,
             "observations": observations,
+            "compile_target": compile_target,
             "consumers": consumers,
+        }
+    elif kind == "hsaco":
+        # The packer never reads the object's target processor; hsaco kernels declare
+        # `arch` and are tested on device (descriptor-packaging/README.md,
+        # "hsaco kernels and arch").
+        file = ks["file"]
+        symbol = ks["symbol"]
+        path = resolve_hsaco_file(source_root, rel_dir, file, where)
+        rel_file = hsaco_file_identity(Path(source_root).resolve(), path)
+        vk = hsaco_variant_key(rel_file)
+        if vk not in variant_co:
+            variant_co[vk] = path
+            variant_symbol[vk] = symbol
+        elif variant_co[vk] != path:
+            raise HkpPackError(
+                f"{where}: toc_key collision: hsaco key '{vk}' already names "
+                f"'{variant_co[vk]}', and this UKD resolves to '{path}'"
+            )
+        fields = {
+            "origin_kind": "hsaco",
+            "source": None,
+            "entry": None,
+            "build": None,
+            "builder": None,
+            "spec": None,
+            "rel_file": rel_file,
         }
     else:
         raise HkpPackError(f"{where} kernel_source has unsupported kind '{kind}'")
@@ -302,25 +548,7 @@ def _compile_ukd_variant(
 
 def _is_passthrough(ukd):
     """Whether a UKD ships as authored instead of through a producer."""
-    return ukd["kernel_source"]["kind"] in _PASSTHROUGH_KINDS
-
-
-def _root_holds_compiling_source(flat):
-    """Whether the authored root holds a UKD that a producer compiles.
-
-    The complement of _is_passthrough over both authoring forms -- a standalone
-    `<name>.ukd.json` and an inline entry of a KDP's kernelDescriptors -- so the
-    two spellings of the same distinction cannot drift. Only such a UKD yields a
-    code object, so only a root holding one implies an archive.
-    """
-    for desc in flat.ukds():
-        if not _is_passthrough(desc.doc):
-            return True
-    for kdp in flat.kdps():
-        for entry in kdp.doc.get("kernelDescriptors", []):
-            if isinstance(entry, dict) and not _is_passthrough(entry):
-                return True
-    return False
+    return sources.kind_of(ukd) in _PASSTHROUGH_KINDS
 
 
 def _dest_at(base, rel_dir, name):
@@ -344,6 +572,31 @@ def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
 
+def _compact_json(doc):
+    """`doc` as compact JSON, its key order kept.
+
+    A packed KDP keeps `kernelDescriptors` as its last key (pack_arch builds it
+    so): the runtime loader reads the header in the same single pass that
+    streams the kernels, and falls back to a second full parse when a header key
+    follows them. Sorting keys would put header keys after it: the load would
+    only be slower, nothing would fail.
+    """
+    return json.dumps(doc, separators=(",", ":")) + "\n"
+
+
+def _write_packed_at(base, rel_dir, name, doc):
+    """Write one packed descriptor compact, its UKDs' provenance to its sidecar,
+    and the packed marker into its directory.
+
+    `doc` is final here: detach digests each UKD exactly as it is written, so
+    nothing may change it between the two.
+    """
+    sidecar_name, data = provenance_sidecar.detach(name, doc)
+    _dest_at(base, rel_dir, sidecar_name).write_bytes(data)
+    _dest_at(base, rel_dir, provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+    _write_text_at(base, rel_dir, name, _compact_json(doc))
+
+
 @dataclass(frozen=True)
 class _VariantJob:
     """One distinct variant the prewarm compiles, as a picklable record.
@@ -363,32 +616,70 @@ class _VariantJob:
     hipcc: str
     arch: str
     requests: dict = field(default_factory=dict)
+    # The launch of a `sources` UKD this variant was first needed by; None for a
+    # single-launch UKD.
+    launch: object = None
 
 
-def _selected_entries(doc, arch, ukd_by_id):
-    """Yield the entries of doc that ship for arch.
+def shipped_engines(flat, arches):
+    """The engine names each arch's shard would carry: `{arch: [name, ...]}`.
 
-    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
-    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
-    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
-    because the walk needs its `path.name` for the error context and for the
-    shipped filename as well as its `rel_dir` for the variant key.
-
-    All three arch filters live here and nowhere else, so the prewarm and the
-    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
-    parameter rather than being reached for through `flat`, which leaves the
-    generator no way to enumerate a standalone UKD no KDP references: an orphan
-    is legal input the walk never compiles.
+    What configure asks before wiring a pack. Uses the same survival rule as the
+    walk, over the same filtered input, so a root whose every arch maps to an
+    empty list is one the pack would skip, and an engine absent for an arch is one
+    that shard does not ship. A shard carries what survives its own pass and what
+    survives the pass of each generic that `generic_passes` merges into it. A KDP
+    whose engine names no UED contributes its Id.
     """
-    if not arch_matches(doc, arch):
-        return
-    for entry in doc["kernelDescriptors"]:
-        if isinstance(entry, str):
-            sdesc = ukd_by_id[entry]
-            if arch_matches(sdesc.doc, arch):
-                yield entry, sdesc.doc, sdesc
-        elif arch_matches(entry, arch):
-            yield None, entry, None
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    table = flat.generic_targets
+    generics = generic_passes(flat, arches)
+    return {
+        arch: sorted(
+            {
+                names.get(k.doc.get("engine"), k.doc.get("engine"))
+                for k in flat.kdps()
+                if any(
+                    kdp_survives(k.doc, flat, p)
+                    for p in (
+                        arch,
+                        *(g for g in generics if arch in table.members(g)),
+                    )
+                )
+            }
+        )
+        for arch in arches
+    }
+
+
+def offered_engines(flat):
+    """The engine names `flat` carries for at least one arch, sorted.
+
+    The answer is independent of the build's arches: it is what host-side gates
+    read, since the host must not depend on which arch content a build packs. A
+    KDP is offered iff it survives some arch named anywhere under `flat` (a KDP or
+    UKD `arch` list, inline or standalone; a generic's own name is such an arch) or
+    the wildcard sentinel `"*"`, which `arch_matches` accepts only for wildcards.
+    Names are built as in `shipped_engines`, and `shipped_engines(flat, arches)`
+    values are always a subset of this list.
+    """
+    candidates = {"*"}
+    ukd_docs = [d.doc for d in flat.ukds()]
+    for k in flat.kdps():
+        candidates.update(k.doc.get("arch") or ())
+        ukd_docs.extend(
+            e for e in k.doc.get("kernelDescriptors", []) if isinstance(e, dict)
+        )
+    for doc in ukd_docs:
+        candidates.update(doc.get("arch") or ())
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    return sorted(
+        {
+            names.get(k.doc.get("engine"), k.doc.get("engine"))
+            for k in flat.kdps()
+            if any(kdp_survives(k.doc, flat, a) for a in sorted(candidates))
+        }
+    )
 
 
 def _agreement_inputs(flat, arch):
@@ -402,8 +693,9 @@ def _agreement_inputs(flat, arch):
     authoring `engine` as null leaves an EMPTY obligation, not a waived one, so a
     contract declared under it is rejected.
     """
-    generics = {d.id: d.doc for d in flat.generics()}
-    schemas = {d.id: d.doc for d in flat.generics() if d.type == "kmd"}
+    generics = flat.generic_by_id()
+    # Keyed as authored: specialization consumers name their KMD by that spelling.
+    schemas = {d.id: d.doc for d in generics.values() if d.type == "kmd"}
     ukd_by_id = flat.ukd_by_id()
     records, requests = {}, {}
     for kdp in flat.kdps():
@@ -416,31 +708,36 @@ def _agreement_inputs(flat, arch):
                 )
             # The KDP declares nothing (just checked), so there is nothing for a
             # kernel to inherit and each speaks only for itself.
-            for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+            for _sid, ukd, _sdesc in _selected_entries(
+                kdp.doc, arch, ukd_by_id, flat.generic_targets
+            ):
                 if agreement.resolved_contract(ukd) is not None:
                     raise HkpPackError(
                         f"UKD {ukd['id']} in {kdp.path.name}: a specialization "
                         "contract names an engine, and this KDP authors none"
                     )
             continue
-        if engine_id not in generics:
+        if canonical_id(engine_id) not in generics:
             raise HkpPackError(
                 f"KDP {kdp.path.name}: engine '{engine_id}' resolves to no descriptor"
             )
-        engine = generics[engine_id]
+        engine = generics[canonical_id(engine_id)].doc
         kmd_id = engine.get("metadata")
-        if kmd_id not in schemas:
+        kmd_desc = generics.get(canonical_id(kmd_id))
+        if kmd_desc is None or kmd_desc.type != "kmd":
             raise HkpPackError(
                 f"engine '{engine_id}': metadata '{kmd_id}' resolves to no KMD"
             )
-        kmd = schemas[kmd_id]
+        kmd = kmd_desc.doc
         header = _kdp_header(kdp.doc)
         header["arch"] = [arch]
-        for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+        for sid, ukd, sdesc in _selected_entries(
+            kdp.doc, arch, ukd_by_id, flat.generic_targets
+        ):
             # Completion is checked against the KMD the chain actually resolved to,
             # so a mis-typed or missing mandatory value fails before a compile.
             agreement.complete_metadata(ukd["metadata"], kmd)
-            kind = ukd["kernel_source"]["kind"]
+            kind = sources.kind_of(ukd)
             # A passthrough kind runs no producer, so there is no producing compiler
             # whose specialization a contract could state.
             if kind in _PASSTHROUGH_KINDS:
@@ -463,9 +760,12 @@ def _agreement_inputs(flat, arch):
             if kind != "rocke":
                 continue
             rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
-            vk = _variant_key_for(ukd, rel_dir)
             request = agreement.observation_request(declaration, kmd)
-            requests.setdefault(vk, {})[agreement.digest(request)] = request
+            # Every launch's compile observes the same request: one declaration
+            # speaks for the whole UKD, so a field a launch's builder cannot show
+            # fails that compile loudly rather than being exempted.
+            for vk, _name, _launch in _launch_variants(ukd, rel_dir):
+                requests.setdefault(vk, {})[agreement.digest(request)] = request
     return (
         {uid: agreement.canonical_records(entries) for uid, entries in records.items()},
         requests,
@@ -478,7 +778,8 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
     Selection comes from the generator the walk consumes, and dedup on the variant
     key keeps first-seen (walk) order. A kind `_variant_key_for` declines is dropped
     here, leaving the walk to report it; `out_dir` and `hipcc` are filled in by
-    `_prewarm_variants`.
+    `_prewarm_variants`. hsaco is declined deliberately: it has no compile, so it
+    yields no job, and the walk keys it via `hsaco_variant_key`.
     """
     ukd_by_id = flat.ukd_by_id()
     if observation_requests is None:
@@ -486,25 +787,28 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
     jobs = []
     seen = set()
     for kdp in flat.kdps():
-        for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+        for sid, ukd, sdesc in _selected_entries(
+            kdp.doc, arch, ukd_by_id, flat.generic_targets
+        ):
             rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
-            vk = _variant_key_for(ukd, rel_dir)
-            if vk is None or vk in seen:
-                continue
-            seen.add(vk)
-            jobs.append(
-                _VariantJob(
-                    vk=vk,
-                    kind=ukd["kernel_source"]["kind"],
-                    ukd=ukd,
-                    rel_dir=Path(rel_dir).as_posix(),
-                    source_root=str(source_root),
-                    out_dir="",
-                    hipcc="",
-                    arch=arch,
-                    requests=observation_requests.get(vk, {}),
+            for vk, name, launch in _launch_variants(ukd, rel_dir):
+                if vk is None or vk in seen:
+                    continue
+                seen.add(vk)
+                jobs.append(
+                    _VariantJob(
+                        launch=name,
+                        vk=vk,
+                        kind=launch["kernel_source"]["kind"],
+                        ukd=launch,
+                        rel_dir=Path(rel_dir).as_posix(),
+                        source_root=str(source_root),
+                        out_dir="",
+                        hipcc="",
+                        arch=arch,
+                        requests=observation_requests.get(vk, {}),
+                    )
                 )
-            )
     return jobs
 
 
@@ -551,6 +855,8 @@ def _compile_one_variant(job):
                 job.out_dir,
                 job.requests,
                 origins,
+                ks.get("target", ROCKE_TARGET_NATIVE),
+                tolerate_missing=True,
             )
         else:
             # Unreachable while `_variant_key_for` keys only these two kinds. A
@@ -689,8 +995,8 @@ def _pack_jobs():
 def _variant_key_for(ukd, rel_dir):
     """Content-hash variant key, or None for a kind the prewarm skips.
 
-    The single place either key function is called, so the walk and the prewarm
-    cannot key one variant two ways.
+    The single place the hip and rocke key functions are called, so the walk and
+    the prewarm cannot key one variant two ways.
 
     `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
     module on every call -- never through a function-local import, an alias
@@ -702,14 +1008,48 @@ def _variant_key_for(ukd, rel_dir):
     The walk stays the sole reporter of whatever failure such a UKD produces:
     were this to raise, the prewarm would pre-empt it with an error of its own,
     from a different call site and with a different traceback.
+
+    hsaco is deliberately None as well: it has no compile, so there is no
+    prewarm job, and the walk keys it via `hsaco_variant_key`.
     """
-    ks = ukd["kernel_source"]
+    ks = sources.kernel_sources(ukd).get(None)
+    if ks is None:
+        raise HkpPackError(
+            f"UKD '{ukd.get('id', '?')}' has sources, which key one variant per "
+            "launch; key each launch's own kernel_source instead"
+        )
+    return _source_variant_key(ks, rel_dir)
+
+
+def _source_variant_key(ks, rel_dir=None):
+    """The variant key of one kernel_source: hip needs the descriptor's `rel_dir`."""
     kind = ks["kind"]
     if kind == "hip":
         return hip_variant_key(hip_source_relpath(rel_dir, ks["source"]), ks["build"])
     if kind == "rocke":
-        return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
+        return rocke_variant_key(
+            ks["source"],
+            ks["builder"],
+            ks["spec"],
+            ks.get("target", ROCKE_TARGET_NATIVE),
+        )
     return None
+
+
+def _launch_variants(ukd, rel_dir):
+    """`(variant key, launch name, single-launch UKD document)` per launch of a UKD.
+
+    A single-launch UKD yields itself. Each entry of `sources` yields the UKD
+    with that entry as its `kernel_source`, minus the authored-only `role`, which
+    is no part of what gets compiled. Entries on one compiled module repeat a key.
+    """
+    for name, ks in sources.kernel_sources(ukd).items():
+        if name is None:
+            yield _variant_key_for(ukd, rel_dir), None, ukd
+            continue
+        doc = {k: v for k, v in ukd.items() if k != "sources"}
+        doc["kernel_source"] = {k: v for k, v in ks.items() if k != "role"}
+        yield _source_variant_key(doc["kernel_source"], rel_dir), name, doc
 
 
 def _prewarm_variants(
@@ -795,9 +1135,15 @@ def _prewarm_variants(
         # rather than how many variants are broken. Named by UKD id, which is
         # what a reader can look up in the descriptors; the content-hash key is
         # not.
-        named = next((job.ukd.get("id") for job in jobs if job.vk == failure[0]), None)
+        failed = next((job for job in jobs if job.vk == failure[0]), None)
+        named = None if failed is None else failed.ukd.get("id")
+        launch = (
+            ""
+            if failed is None or failed.launch is None
+            else (f" launch '{failed.launch}'")
+        )
         raise HkpPackError(
-            f"variant '{named or failure[0]}' failed to compile for {arch}: "
+            f"variant '{named or failure[0]}'{launch} failed to compile for {arch}: "
             f"{failure[3]}"
         )
 
@@ -811,7 +1157,7 @@ def _prewarm_variants(
 
 
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
-    """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
+    """Compile every hip and rocke UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
     hip->hsaco, build lifted to top-level) + one .co per distinct (source,build)
@@ -823,6 +1169,10 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
 
     A UKD of a pass-through kind runs no producer. It stays in the intermediate
     JSON as authored and is recorded for verbatim emission.
+
+    An hsaco UKD runs no producer either and keeps its authored form in the
+    intermediate JSON. No copy of its code object is staged: its bytes are read
+    from the authored file at pack time.
     """
     inter_arch_dir = Path(inter_arch_dir)
     inter_arch_dir.mkdir(parents=True, exist_ok=True)
@@ -854,7 +1204,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
 
     for kdp in flat.kdps():
         doc = kdp.doc
-        if not arch_matches(doc, arch):
+        if not kdp_arch_matches(doc, arch, flat.generic_targets):
             _write_bytes_at(
                 inter_arch_dir, kdp.rel_dir, kdp.path.name, kdp.path.read_bytes()
             )
@@ -864,7 +1214,9 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         ukds = []
         entries = []
         new_kds = []
-        for sid, entry, sdesc in _selected_entries(new_doc, arch, ukd_by_id):
+        for sid, entry, sdesc in _selected_entries(
+            new_doc, arch, ukd_by_id, flat.generic_targets
+        ):
             if sid is not None:
                 # A reference to a standalone UKD: compile it once per arch and
                 # keep the string in the KDP; it ships as its own file. Listing
@@ -872,14 +1224,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 # reference appears in both and is compiled for the first only.
                 entries.append(sid)
                 new_kds.append(sid)
-                if sid in passthrough_standalone_ukds:
+                key = canonical_id(sid)
+                if key in passthrough_standalone_ukds:
                     continue
                 sukd = entry
                 where = f"standalone UKD {sdesc.path.name}"
                 if _is_passthrough(sukd):
-                    kind = sukd["kernel_source"]["kind"]
+                    kind = sources.kind_of(sukd)
                     log(f"{where}: emitting kind '{kind}' as authored")
-                    passthrough_standalone_ukds[sid] = PassthroughUKD(
+                    passthrough_standalone_ukds[key] = PassthroughUKD(
                         doc=copy.deepcopy(sukd),
                         filename=sdesc.path.name,
                         rel_dir=sdesc.rel_dir,
@@ -900,9 +1253,9 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     variant_observations,
                     origins,
                 )
-                if sid in standalone_ukds:
+                if key in standalone_ukds:
                     continue
-                standalone_ukds[sid] = StandaloneUKD(
+                standalone_ukds[key] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
                     metadata=sukd.get("metadata"),
@@ -919,7 +1272,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             ukd = entry
             where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
             if _is_passthrough(ukd):
-                kind = ukd["kernel_source"]["kind"]
+                kind = sources.kind_of(ukd)
                 log(f"{where}: emitting kind '{kind}' as authored")
                 new_kds.append(ukd)
                 entries.append(PassthroughUKD(doc=ukd, rel_dir=kdp.rel_dir))
@@ -939,11 +1292,21 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 variant_observations,
                 origins,
             )
-            ukd["kernel_source"] = {
-                "kind": "hsaco",
-                "file": f"{vk}.co",
-                "symbol": symbol,
-            }
+            if fields.get("launches"):
+                ukd["sources"] = {
+                    name: {
+                        "kind": "hsaco",
+                        "file": f"{launch.variant_key}.co",
+                        "symbol": launch.symbol,
+                    }
+                    for name, launch in fields["launches"].items()
+                }
+            elif fields["origin_kind"] != "hsaco":
+                ukd["kernel_source"] = {
+                    "kind": "hsaco",
+                    "file": f"{vk}.co",
+                    "symbol": symbol,
+                }
             if fields["build"] is not None:
                 ukd["build"] = fields["build"]
             new_kds.append(ukd)
@@ -970,7 +1333,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             inter_arch_dir,
             kdp.rel_dir,
             kdp.path.name,
-            json.dumps(new_doc, indent=2) + "\n",
+            _compact_json(new_doc),
         )
         arch_kdps.append(
             ArchKDP(
@@ -989,6 +1352,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.rel_dir,
             generic.path.name,
             generic.path.read_bytes(),
+        )
+
+    # Sidecars are copied unpruned like their generics; pruning happens in pack_arch.
+    for sidecar in flat.sidecars_for(flat.generics()):
+        _write_bytes_at(
+            inter_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
         )
 
     origins.stable()
@@ -1025,29 +1397,66 @@ def _rewrite_ukd_kpack(
     sha256,
     *,
     signature,
+    packed_launches=None,
     toolchain_fields=None,
     rel_dir=Path("."),
     group=GROUP_NAME,
 ):
     """Rewrite a compiled UKD into shipped kpack form.
 
+    A UKD with `launches` ships `sources` instead of `kernel_source`: each entry a
+    full kpack kernel_source (no `role`), its symbol read off the compiled launch
+    and its `toc_key`, `sha256` and `signature` from `packed_launches`
+    (`{launch: {toc_key, sha256, signature}}`, read off the object). Then
+    `toc_key`, `sha256` and `signature` above are unused, and the UKD reads at
+    document version 1.1.
+
     `toolchain_fields` carries the fields describing what actually produced the kernel
     (hipcc version, resolved comgr, rocKE wheel digest) as opposed to what the
     descriptor asked for. Merged into provenance rather than the variant key: in
     the key, a wheel bump would rename every rocKE artifact including ones it
     could not affect.
+
+    An hsaco UKD records the authored file, its digest and its symbol.
     """
     if "effective_spec" in ukd.provenance:
         raise HkpPackError(
             f"UKD '{ukd.id}': authored input supplies provenance.effective_spec, "
             "which only the producing compiler creates"
         )
-    if ukd.origin_kind == "rocke":
+    if ukd.launches:
+        provenance = {
+            "origin_kind": "rocke",
+            # Per launch, since launches may differ in builder and spec. `role` is
+            # recorded only where authored: it is what binds an entry's symbol to
+            # its own kernel in the compiled module.
+            "sources": {
+                name: {
+                    "source": launch.source,
+                    "builder": launch.builder,
+                    "spec": launch.spec,
+                    "compile_target": launch.compile_target,
+                    **({} if launch.role is None else {"role": launch.role}),
+                }
+                for name, launch in ukd.launches.items()
+            },
+        }
+    elif ukd.origin_kind == "rocke":
         provenance = {
             "origin_kind": "rocke",
             "source": ukd.source,
             "builder": ukd.builder,
             "spec": ukd.spec,
+            # The processor the shipped object was built for: the shard arch for a
+            # native compile, the family's generic processor for a generic one.
+            "compile_target": ukd.compile_target,
+        }
+    elif ukd.origin_kind == "hsaco":
+        provenance = {
+            "origin_kind": "hsaco",
+            "file": ukd.rel_file,
+            "sha256": sha256,
+            "symbol": ukd.symbol,
         }
     else:
         provenance = {
@@ -1059,17 +1468,34 @@ def _rewrite_ukd_kpack(
     provenance = {**ukd.provenance, **provenance}
     if toolchain_fields:
         provenance.update(toolchain_fields)
-    doc = {
-        "id": ukd.id,
-        "name": ukd.name,
-        "kernel_source": {
+    library = _kpack_rel(arch, rel_dir, group)
+    if ukd.launches:
+        kernel_key = "sources"
+        kernel = {
+            name: {
+                "kind": "kpack",
+                "library": library,
+                "toc_key": packed_launches[name]["toc_key"],
+                "symbol": launch.symbol,
+                "sha256": packed_launches[name]["sha256"],
+                "signature": packed_launches[name]["signature"],
+            }
+            for name, launch in ukd.launches.items()
+        }
+    else:
+        kernel_key = "kernel_source"
+        kernel = {
             "kind": "kpack",
-            "library": _kpack_rel(arch, rel_dir, group),
+            "library": library,
             "toc_key": toc_key,
             "symbol": ukd.symbol,
             "sha256": sha256,
             "signature": signature,
-        },
+        }
+    doc = {
+        "id": ukd.id,
+        "name": ukd.name,
+        kernel_key: kernel,
         "metadata": ukd.metadata,
         "priority": ukd.priority,
         "provenance": provenance,
@@ -1080,13 +1506,21 @@ def _rewrite_ukd_kpack(
             f"{sorted(set(doc) & ukd.extra.keys())}"
         )
     doc.update(ukd.extra)
+    if ukd.launches and not sources.reads_sources(doc["version"]):
+        # Before `publish`, so the digest binds the version that ships.
+        doc["version"] = sources.SOURCES_VERSION
     # Every shipped UKD carries the single shard arch, matching the KDP. Set it
     # after the extra passthrough so a source multi-arch list can't leak through.
     doc["arch"] = [arch]
     if ukd.origin_kind == "rocke":
         # Published last, onto the finished document, so `descriptor_digest` binds
         # the bytes that actually ship.
-        agreement.publish(doc, ukd.observations, ukd.consumers)
+        observations = (
+            {name: launch.observations for name, launch in ukd.launches.items()}
+            if ukd.launches
+            else ukd.observations
+        )
+        agreement.publish(doc, observations, ukd.consumers)
     return doc
 
 
@@ -1101,8 +1535,8 @@ def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
     build output. `rewritten` names the fields whose emitted value differs from
     the authored one. It holds nothing machine-specific and nothing
     time-varying, so two runs over one source tree write the same bytes. Nothing
-    at runtime reads it. It sits at the top level, because `kernel_source`
-    accepts only the keys the loader parses.
+    at runtime reads it. The caller moves it to the descriptor's provenance
+    sidecar, because `kernel_source` accepts only the keys the loader parses.
     """
     authored = passthrough.doc
     rel_dir = Path(passthrough.rel_dir).as_posix()
@@ -1141,7 +1575,12 @@ def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
 
 
 def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
-    """Toolchain provenance for one UKD, dispatched on its producer."""
+    """Toolchain provenance for one UKD, dispatched on its producer.
+
+    A prebuilt hsaco object carries no toolchain claim: nothing here produced it.
+    """
+    if ukd.origin_kind == "hsaco":
+        return None
     if ukd.origin_kind == "rocke":
         return toolchain.rocke_provenance(rocke_wheel_stamp)
     return toolchain.hip_provenance(hipcc)
@@ -1161,16 +1600,21 @@ def pack_arch(
 ):
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
-    Each distinct (source,build) variant .co is packed once under its own
-    toc_key; inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256 +
-    signature and moving build into a sibling provenance block. Guarded against
-    toc_key collisions (distinct inputs mapping to one key).
+    Each distinct (source,build) variant .co staged by compile_intermediate is
+    packed once under its own toc_key; an authored hsaco UKD is packed from its
+    own file instead. Both are rewritten to kpack; inline compiled UKDs go
+    hsaco->kpack, stamping toc_key + sha256 + signature and moving build into
+    provenance. Guarded against toc_key collisions (distinct inputs mapping to
+    one key).
 
     A UKD of a pass-through kind takes the shard arch, keeps its authored
-    kernel_source, and carries a provenance block naming its authored values. A
-    shard with no compiled variant holds no archive and no `kpack/` directory,
-    and its ArchResult carries kpack_path=None.
+    kernel_source, and gets a provenance block naming its authored values. No
+    packed UKD carries provenance inline: each descriptor file's UKD provenance
+    ships in a sidecar beside the file (see provenance_sidecar). A shard with no
+    compiled variant holds no archive and no `kpack/` directory, and its
+    ArchResult carries kpack_path=None.
 
+    An hsaco UKD's bytes are read from its authored file and packed as-is.
     """
     arch = inter.arch
     out_arch_dir = Path(out_arch_dir)
@@ -1185,61 +1629,130 @@ def pack_arch(
         for ukd in standalone:
             yield ukd
 
-    variant_bytes = {}
-    variant_sha = {}
-    variant_signature = {}
-    variant_source_build = {}
-    for ukd in _all_ukds():
-        vk = ukd.variant_key
-        toc_key = vk
-        # The signature must cover everything that determines the compiled
-        # bytes, per producer. Keying on (source, build) alone is blind on the
-        # rocke path, where build is ALWAYS None: two rocke UKDs sharing a
-        # source module but differing in builder or spec would present identical
-        # signatures, so a genuine toc_key collision would pass undetected and
-        # one kernel would silently ship the other's bytes -- the same
-        # silent-substitution class as the cross-root collision this work
-        # removed.
+    def _units(ukd):
+        """`(who, variant key, symbol, input signature)` per compiled kernel.
+
+        The signature must cover everything that determines the compiled bytes,
+        per producer. Keying on (source, build) alone is blind on the rocke path,
+        where build is ALWAYS None: two rocke UKDs sharing a source module but
+        differing in builder or spec would present identical signatures, so a
+        genuine toc_key collision would pass undetected and one kernel would
+        silently ship the other's bytes -- the same silent-substitution class as
+        the cross-root collision this work removed. An hsaco UKD's bytes are its
+        authored file, so the file's root-relative identity is its signature.
+        """
+        who = f"UKD '{ukd.id}'"
+        if ukd.launches:
+            return [
+                (
+                    f"{who} launch '{name}'",
+                    launch.variant_key,
+                    launch.symbol,
+                    (
+                        launch.source,
+                        launch.builder,
+                        json.dumps(launch.spec, sort_keys=True),
+                        launch.compile_target,
+                    ),
+                )
+                for name, launch in ukd.launches.items()
+            ]
         if ukd.origin_kind == "rocke":
             sig = (
                 ukd.source,
                 ukd.builder,
                 json.dumps(ukd.spec, sort_keys=True),
+                ukd.compile_target,
             )
+        elif ukd.origin_kind == "hsaco":
+            sig = ("hsaco", ukd.rel_file)
         else:
             sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
-        if vk in variant_source_build and variant_source_build[vk] != sig:
-            raise HkpPackError(
-                f"toc_key collision: '{vk}' maps to two distinct "
-                f"inputs {variant_source_build[vk]} and {sig}"
-            )
-        variant_source_build[vk] = sig
-        if vk not in variant_bytes:
-            data = inter.variant_co[vk].read_bytes()
-            digest = _sha256(data)
-            if expected_sha256 and toc_key in expected_sha256:
-                if digest != expected_sha256[toc_key]:
+        return [(who, ukd.variant_key, ukd.symbol, sig)]
+
+    variant_bytes = {}
+    variant_sha = {}
+    variant_signature = {}
+    variant_source_build = {}
+    for ukd in _all_ukds():
+        for who, vk, symbol, sig in _units(ukd):
+            toc_key = vk
+            if vk in variant_source_build and variant_source_build[vk] != sig:
+                raise HkpPackError(
+                    f"toc_key collision: '{vk}' maps to two distinct "
+                    f"inputs {variant_source_build[vk]} and {sig}"
+                )
+            variant_source_build[vk] = sig
+            if vk not in variant_bytes:
+                try:
+                    data = inter.variant_co[vk].read_bytes()
+                except OSError as exc:
+                    if ukd.origin_kind != "hsaco":
+                        raise
                     raise HkpPackError(
-                        f"sha256 mismatch for toc_key '{toc_key}': expected "
-                        f"{expected_sha256[toc_key]}, packed blob is {digest}"
+                        f"UKD '{ukd.id}': cannot read hsaco file "
+                        f"'{ukd.rel_file}': {exc}"
+                    ) from exc
+                digest = _sha256(data)
+                if expected_sha256 and toc_key in expected_sha256:
+                    if digest != expected_sha256[toc_key]:
+                        raise HkpPackError(
+                            f"sha256 mismatch for toc_key '{toc_key}': expected "
+                            f"{expected_sha256[toc_key]}, packed blob is {digest}"
+                        )
+                variant_bytes[vk] = data
+                variant_sha[vk] = digest
+            if symbol.encode("ascii") not in variant_bytes[vk]:
+                raise HkpPackError(
+                    f"{who} declares symbol '{symbol}' not present "
+                    f"in code object for variant '{vk}'"
+                )
+            # Keyed on (variant, symbol), not on the variant alone: two UKDs
+            # differing only by entry point share one blob and one toc_key, and
+            # each has its own argument list. Caching per variant would give the
+            # second one the first's signature, which no fixture with one symbol
+            # per variant can catch. The launches of one `sources` UKD are that
+            # case by construction.
+            signature_key = (vk, symbol)
+            if signature_key not in variant_signature:
+                if ukd.origin_kind == "hsaco":
+                    # Authored bytes are arbitrary: a truncated or corrupt object
+                    # fails the metadata parse with a parser-specific exception.
+                    try:
+                        variant_signature[signature_key] = kernel_signature(
+                            variant_bytes[vk], symbol, who
+                        )
+                    except HkpPackError:
+                        raise
+                    except Exception as exc:
+                        raise HkpPackError(
+                            f"{who}: cannot read the AMDGPU metadata of "
+                            f"hsaco file '{ukd.rel_file}': {_bounded_repr(exc)}"
+                        ) from exc
+                else:
+                    variant_signature[signature_key] = kernel_signature(
+                        variant_bytes[vk], symbol, who
                     )
-            variant_bytes[vk] = data
-            variant_sha[vk] = digest
-        if ukd.symbol.encode("ascii") not in variant_bytes[vk]:
-            raise HkpPackError(
-                f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
-                f"in code object for variant '{vk}'"
-            )
-        # Keyed on (variant, symbol), not on the variant alone: two UKDs
-        # differing only by entry point share one blob and one toc_key, and each
-        # has its own argument list. Caching per variant would give the second
-        # one the first's signature, which no fixture with one symbol per
-        # variant can catch.
-        signature_key = (vk, ukd.symbol)
-        if signature_key not in variant_signature:
-            variant_signature[signature_key] = kernel_signature(
-                variant_bytes[vk], ukd.symbol, f"UKD '{ukd.id}'"
-            )
+
+    def _packed(ukd):
+        """The `_rewrite_ukd_kpack` arguments read off the packed objects."""
+        if ukd.launches:
+            return (None, None), {
+                "signature": None,
+                "packed_launches": {
+                    name: {
+                        "toc_key": launch.variant_key,
+                        "sha256": variant_sha[launch.variant_key],
+                        "signature": variant_signature[
+                            (launch.variant_key, launch.symbol)
+                        ],
+                    }
+                    for name, launch in ukd.launches.items()
+                },
+            }
+        return (ukd.variant_key, variant_sha[ukd.variant_key]), {
+            "signature": variant_signature[(ukd.variant_key, ukd.symbol)]
+        }
 
     kpack_path = None
     if variant_bytes:
@@ -1285,13 +1798,13 @@ def pack_arch(
                 # the loader reject the whole KDP.
                 out_kds.append(_rewrite_passthrough_ukd(e, arch, source_label))
             else:
+                args, packed = _packed(e)
                 out_kds.append(
                     _rewrite_ukd_kpack(
                         e,
                         arch,
-                        e.variant_key,
-                        variant_sha[e.variant_key],
-                        signature=variant_signature[(e.variant_key, e.symbol)],
+                        *args,
+                        **packed,
                         toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
                         # An inline UKD ships INSIDE this KDP file, so the
                         # runtime anchors its library on the KDP's directory,
@@ -1301,57 +1814,115 @@ def pack_arch(
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
-        _write_text_at(
-            out_arch_dir,
-            kdp.rel_dir,
-            kdp.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, kdp.rel_dir, kdp.filename, out_doc)
 
     # A standalone UKD stays its own file in the shard, rewritten to kpack form
     # with this arch's kpack details. It is emitted only for arches whose
     # surviving KDPs referenced it (compile_intermediate only records those).
     for ukd in standalone:
+        args, packed = _packed(ukd)
         out_doc = _rewrite_ukd_kpack(
             ukd,
             arch,
-            ukd.variant_key,
-            variant_sha[ukd.variant_key],
-            signature=variant_signature[(ukd.variant_key, ukd.symbol)],
+            *args,
+            **packed,
             toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
             # A standalone UKD is its own file, so it anchors on its own dir.
             rel_dir=ukd.rel_dir,
             group=group,
         )
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
     # A pass-through standalone UKD is its own file. It takes this shard's arch,
     # matching the KDP that references it.
     for ukd in inter.passthrough_standalone_ukds.values():
         out_doc = _rewrite_passthrough_ukd(ukd, arch, source_label)
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
     prune_result = prune(flat, arch)
-    for generic in flat.generics():
-        if generic.id in prune_result.reachable_generic_ids:
-            _write_bytes_at(
-                out_arch_dir,
-                generic.rel_dir,
-                generic.path.name,
-                generic.path.read_bytes(),
-            )
+    surviving_generics = [
+        generic
+        for generic in flat.generics()
+        if canonical_id(generic.id) in prune_result.reachable_generic_ids
+    ]
+    for generic in surviving_generics:
+        _write_bytes_at(
+            out_arch_dir,
+            generic.rel_dir,
+            generic.path.name,
+            generic.path.read_bytes(),
+        )
+
+    # Derived from the surviving descriptors: reachable_generic_ids holds ids only, so a
+    # sidecar's fate is exactly its descriptor's.
+    for sidecar in flat.sidecars_for(surviving_generics):
+        _write_bytes_at(
+            out_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
+
+
+def _merge_generic_into_member(generic_dir, member_dir, staging_dir):
+    """Merge a generic pass's tree into a member folder atomically via `staging_dir`.
+
+    An existing destination file is skipped when byte-identical and refused when
+    it differs. Any failure leaves `member_dir` untouched.
+    """
+    generic_dir, member_dir, staging_dir = (
+        Path(generic_dir),
+        Path(member_dir),
+        Path(staging_dir),
+    )
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    try:
+        if member_dir.exists():
+            shutil.copytree(member_dir, staging_dir, copy_function=shutil.copyfile)
+        else:
+            staging_dir.mkdir(parents=True)
+        for src in sorted(p for p in generic_dir.rglob("*") if p.is_file()):
+            rel = src.relative_to(generic_dir)
+            dest = staging_dir / rel
+            if dest.exists():
+                if dest.read_bytes() == src.read_bytes():
+                    continue
+                raise HkpPackError(
+                    f"{rel.as_posix()} would be written by shard "
+                    f"'{member_dir.name}' ({member_dir / rel}) and shard "
+                    f"'{generic_dir.name}' ({src}) with different bytes; the "
+                    "shards' member sets intersect"
+                )
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+        if member_dir.exists():
+            shutil.rmtree(member_dir)
+        staging_dir.rename(member_dir)
+    except HkpPackError:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+    except OSError as exc:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise HkpPackError(
+            f"cannot merge '{generic_dir.name}' into '{member_dir}': {exc}"
+        ) from exc
+
+
+def generic_passes(flat, arches):
+    """The generics `run_pipeline` compiles for @arches, in table order.
+
+    A generic is compiled when one of @arches is its member and a KDP ships for it.
+    """
+    table = flat.generic_targets
+    return [
+        generic
+        for generic in table.names()
+        if any(a in table.members(generic) for a in arches)
+        and any(kdp_survives(k.doc, flat, generic) for k in flat.kdps())
+    ]
 
 
 def run_pipeline(
@@ -1359,12 +1930,15 @@ def run_pipeline(
     arches,
     out_root,
     hipcc,
+    generic_targets_json,
     rocm_kpack_dir=None,
     inter_root=None,
     expected_sha256=None,
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
     source_label=None,
+    exclude_folders=(),
+    disabled_kinds=(),
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -1374,12 +1948,21 @@ def run_pipeline(
     prunes, and packs. Producer selection is per-UKD on `kernel_source.kind`, so
     hip and rocKE descriptors coexist under one root (in child folders that scope
     them) and combine into one kpack per arch. A hip UKD's source resolves
-    relative to the descriptor that named it. A UKD of a pass-through kind runs
-    no producer and is emitted as authored, so a root that holds only
-    pass-through UKDs writes descriptors and no archive. An arch with no
+    relative to the descriptor that named it. An hsaco UKD's `file` resolves the
+    same way, and its prebuilt bytes are packed as-is into the same kpack. A UKD
+    of a pass-through kind runs no producer and is emitted as authored, so a
+    root that holds only pass-through UKDs writes descriptors and no archive. An arch with no
     surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
-    kernels for <arch>, skipping'; every arch skipping is a failure, not a
-    pack. Empty arch list installs nothing (exit 0).
+    kernels for <arch>, skipping'; every arch skipping packs nothing, which is a
+    clean skip too. Empty arch list installs nothing (exit 0).
+
+    `generic_targets_json` is the generic target table; generic passes are
+    merged into member folders (descriptor-packaging/README.md).
+
+    `exclude_folders` names top-level child folders of the root this build does
+    not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
+    both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
+    nothing downstream sees them.
     """
     out_root = Path(out_root)
     results = {}
@@ -1387,7 +1970,14 @@ def run_pipeline(
         return results
 
     kpack_mod, comp = load_kpack(rocm_kpack_dir)
-    flat = load_flat_input(source_root, log=log)
+    generic_targets = GenericTargets.load(generic_targets_json)
+    flat = load_flat_input(
+        source_root,
+        generic_targets,
+        log=log,
+        exclude_folders=exclude_folders,
+        disabled_kinds=disabled_kinds,
+    )
 
     if inter_root is None:
         raise HkpPackError(
@@ -1469,45 +2059,100 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
 
+    for generic in generic_passes(flat, arches):
+        members = [a for a in arches if a in generic_targets.members(generic)]
+        generic_out = inter_root / ".generic-out" / generic
+        try:
+            inter = compile_intermediate(
+                flat, source_root, generic, hipcc, inter_root / generic, log=log
+            )
+            if generic_out.exists():
+                shutil.rmtree(generic_out)
+            generic_result = pack_arch(
+                flat,
+                inter,
+                generic_out,
+                kpack_mod,
+                comp,
+                expected_sha256=expected_sha256,
+                hipcc=hipcc,
+                rocke_wheel_stamp=rocke_wheel_stamp,
+                group=group,
+                source_label=source_label,
+            )
+        except HkpPackError as exc:
+            failures[generic] = str(exc)
+            log(f"ERROR: {generic} failed: {exc}")
+            if generic_out.exists():
+                shutil.rmtree(generic_out)
+            continue
+        for member in members:
+            if member in failures:
+                continue
+            member_dir = out_root / member
+            try:
+                _merge_generic_into_member(
+                    generic_out, member_dir, out_root / f".{member}.merge.staging"
+                )
+            except HkpPackError as exc:
+                failures[member] = str(exc)
+                log(f"ERROR: {member} failed merging {generic}: {exc}")
+                break
+            previous = results.get(member)
+            kpack_path = None if previous is None else previous.kpack_path
+            copied = ()
+            if generic_result.kpack_path is not None:
+                copied = (
+                    member_dir / KPACK_DIR_NAME / _kpack_filename(generic, group),
+                )
+            results[member] = ArchResult(
+                arch=member,
+                out_dir=member_dir,
+                kpack_path=kpack_path,
+                skipped=False,
+                generic_kpack_paths=(
+                    (() if previous is None else previous.generic_kpack_paths) + copied
+                ),
+            )
+
     if failures:
         # Non-zero exit with partial output: the build fails loudly, but a
         # developer can still inspect what did succeed. Exiting 0 here would
         # resurrect the silent-empty-package class of defect.
         detail = "; ".join(f"{a}: {r}" for a, r in sorted(failures.items()))
         raise HkpPackError(
-            f"packing failed for {len(failures)} of {len(arches)} arch(es) "
-            f"[{detail}]. Arches that succeeded were written; the failed arches' "
-            "output was discarded."
+            f"packing failed for {len(failures)} failure(s) across {len(arches)} "
+            f"requested arch(es) [{detail}]. Arches that succeeded were written; "
+            "the failed arches' output was discarded."
         )
 
-    # The archive clause keys on what the root holds rather than on what survived
-    # pruning: a compiling UKD that prunes out of every requested arch is
-    # indistinguishable downstream from one whose archive went missing. Nothing
-    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
-    # recipe touches unconditionally, and a staged tree holding nothing reads the
-    # same there as a root that is legitimately empty. Only the packer knows the
-    # kinds it walked and which arches pruned.
+    # Nothing surviving any arch is a root with nothing to pack for this build --
+    # arch-pruned, or all in disabled folders or kinds -- so it packs nothing and that
+    # is not an error. Configure asks shipped_engines() first and leaves such a root
+    # dormant rather than wiring it.
     arch_list = ", ".join(arches)
     if all(r.skipped for r in results.values()):
-        raise HkpPackError(
-            f"packing '{source_root}' produced nothing: no KDP survived arch "
-            f"pruning for any of the {len(arches)} requested arch(es) "
-            f"[{arch_list}], so every arch was skipped. A root wired to a pack "
-            "was wired to ship descriptors, so this is a failure and not a "
-            "clean skip. Check each KDP's 'arch' list against the requested "
-            "arches. Archives are a separate matter and are not always "
-            "required -- a root of only pass-through kinds legitimately packs "
-            "descriptors and no archive -- but descriptors always are."
-        )
+        log(f"packing '{source_root}': nothing to pack for [{arch_list}], skipping")
+        return results
 
-    if _root_holds_compiling_source(flat) and not any(
-        r.kpack_path for r in results.values()
-    ):
-        raise HkpPackError(
-            f"packing '{source_root}' wrote descriptors but no archive, while "
-            "the root holds at least one UKD of a compiling kind ('hip' or "
-            f"'rocke'). Requested arch(es) [{arch_list}]; none produced a "
-            "kpack. Either those UKDs pruned out of every shard that shipped, "
-            "or their KDPs ship without them."
-        )
+    # An internal invariant no input reaches: a shard that shipped an archive-producing UKD
+    # always writes an archive. Only the packer knows which shards shipped and
+    # what each selected.
+    ukd_by_id = flat.ukd_by_id()
+    for arch, result in results.items():
+        if result.skipped or result.kpack_path is not None:
+            continue
+        for kdp in flat.kdps():
+            if not kdp_survives(kdp.doc, flat, arch):
+                continue
+            for sid, ukd, _sdesc in _selected_entries(
+                kdp.doc, arch, ukd_by_id, generic_targets
+            ):
+                if not _is_passthrough(ukd):
+                    raise HkpPackError(
+                        f"packing '{source_root}' wrote descriptors but no "
+                        f"archive for {arch}, whose shard selected UKD "
+                        f"'{sid or ukd.get('id')}' of an archive-producing kind "
+                        "('hip', 'rocke' or 'hsaco')."
+                    )
     return results

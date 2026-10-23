@@ -52,12 +52,14 @@ int main(int argc, char** argv)
     {
         for(int i = 1; i < argc; ++i)
         {
-            char target[1024], base[1024], compiler[1024], arch[1024];
+            char target[1024], base[1024], compiler[1024], arch[1024], generic[1024];
             rocke_target_id_from_isa(argv[i], target, sizeof(target));
             rocke_base_arch_from_target_id(target, base, sizeof(base));
             rocke_compiler_target_from_target_id(target, compiler, sizeof(compiler));
             rocke_arch_from_isa(argv[i], arch, sizeof(arch));
-            printf("%s\t%s\t%s\t%s\n", target, base, compiler, arch);
+            if(rocke_generic_arch_from_target_id(target, generic, sizeof(generic)) == NULL)
+                strcpy(generic, "-");
+            printf("%s\t%s\t%s\t%s\t%s\n", target, base, compiler, arch, generic);
         }
         return 0;
     }
@@ -73,6 +75,24 @@ int main(int argc, char** argv)
     check_target("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-");
     check_target("gfx1250-strict:xnack-", "gfx1250", "gfx1250:xnack-");
     check_target("gfx11-generic-strict:xnack-", "gfx11-generic", "gfx11-generic:xnack-");
+    check_target("gfx1100", "gfx11-generic", "gfx1100");
+    check_target("gfx1101", "gfx11-generic", "gfx1101");
+    check_target("gfx1101:unknown+", "gfx11-generic", "gfx1101:unknown+");
+    check_target("gfx1101-strict", "gfx11-generic", "gfx1101");
+    check_target("gfx1101-strict:unknown+", "gfx11-generic", "gfx1101:unknown+");
+    check_target("gfx1102", "gfx11-generic", "gfx1102");
+    check_target("gfx1103", "gfx11-generic", "gfx1103");
+    check_target("gfx1150", "gfx11-generic", "gfx1150");
+    check_target("gfx1151", "gfx1151", "gfx1151");
+    check_target("gfx1151-strict:unknown+", "gfx1151", "gfx1151:unknown+");
+    check_target("gfx1152", "gfx11-generic", "gfx1152");
+    check_target("gfx1153", "gfx11-generic", "gfx1153");
+    check_target("gfx1154", "gfx11-generic", "gfx1154");
+    check_target("gfx1170", "gfx1170", "gfx1170");
+    check_target("gfx1200", "gfx12-generic", "gfx1200");
+    check_target("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-");
+    check_target("gfx1201", "gfx1201", "gfx1201");
+    check_target("gfx1101_bad", "gfx1101", "gfx1101_bad");
     check_target("gfx00a-profile:unknown+", "gfx00a", "gfx00a:unknown+");
     check_target("gfx942:", "gfx942", "gfx942:");
     check(rocke_arch_from_isa, "unexpected-target", "unexpected-target");
@@ -86,5 +106,13 @@ int main(int argc, char** argv)
     check(rocke_base_arch_from_target_id, "", "");
     check(rocke_compiler_target_from_target_id, "", "");
     check(rocke_arch_from_isa, "", "");
+    check(rocke_generic_arch_from_target_id, "gfx1100", "gfx11-generic");
+    check(rocke_generic_arch_from_target_id, "gfx1151-strict:xnack-", "gfx11-generic");
+    check(rocke_generic_arch_from_target_id, "gfx11-generic", "gfx11-generic");
+    char generic[32] = "#";
+    if(rocke_generic_arch_from_target_id("gfx942", generic, sizeof(generic)) != NULL
+       || rocke_generic_arch_from_target_id("gfx11000", generic, sizeof(generic)) != NULL
+       || generic[0] != '#')
+        ++failures;
     return failures == 0 ? 0 : 1;
 }

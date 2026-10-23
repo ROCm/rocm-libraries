@@ -7,76 +7,10 @@
 
 using namespace stinkytofu;
 
-TEST(InFlightQueue, ThrottleTransitionUsesHalfIntervalForOneQueueDepth) {
-    InFlightQueue queue(/*depth=*/4);
-    queue.setThrottleInterval(/*issueInterval=*/4.0, /*transitionFactor=*/0.5,
-                              /*transitionEntries=*/4);
-
-    for (int i = 0; i < 3; ++i) {
-        queue.pushWithThrottle(/*drainLatency=*/100);
-        EXPECT_EQ(queue.throttleWait(), 0);
-    }
-
-    // Reaching depth starts the transition at half the real interval.
-    queue.pushWithThrottle(/*drainLatency=*/100);
-    EXPECT_EQ(queue.throttleWait(), 2);
-
-    // Three more pushes remain in the transition range (occupancies 5, 6, and 7).
-    for (int i = 0; i < 3; ++i) {
-        queue.advance(queue.throttleWait());
-        queue.pushWithThrottle(/*drainLatency=*/100);
-        EXPECT_EQ(queue.throttleWait(), 2);
-    }
-
-    // The fourth extra push reaches 2 * depth and enables the real interval.
-    queue.advance(queue.throttleWait());
-    queue.pushWithThrottle(/*drainLatency=*/100);
-    EXPECT_EQ(queue.size(), 8);
-    EXPECT_EQ(queue.throttleWait(), 4);
-}
-
-TEST(InFlightQueue, DefaultConfigurationHasNoTransitionRange) {
-    InFlightQueue queue(/*depth=*/2);
-    queue.setThrottleInterval(/*issueInterval=*/4.0);
-
-    queue.pushWithThrottle(/*drainLatency=*/100);
-    EXPECT_EQ(queue.throttleWait(), 0);
-
-    queue.pushWithThrottle(/*drainLatency=*/100);
-    EXPECT_EQ(queue.throttleWait(), 4);
-}
-
-TEST(InFlightQueue, AdvancingThrottleDoesNotDrainEntries) {
-    InFlightQueue queue(/*depth=*/1);
-    queue.setThrottleInterval(/*issueInterval=*/4.0);
-
-    queue.pushWithThrottle(/*drainLatency=*/10);
-    ASSERT_EQ(queue.throttleWait(), 4);
-    ASSERT_EQ(queue.minResidual(), 10);
-
-    queue.advanceThrottle(/*cycles=*/4);
-    EXPECT_EQ(queue.throttleWait(), 0);
-    EXPECT_EQ(queue.minResidual(), 10);
-    EXPECT_EQ(queue.size(), 1);
-
-    queue.advance(/*cycles=*/10);
-    EXPECT_TRUE(queue.empty());
-}
-
 // ---------------------------------------------------------------------------
-// Rule (4) ds_load cap, as CDNA5ReadyQueue composes it: a second InFlightQueue
-// whose depth is the ceiling N and whose entry lifetime is the window span, so
-// full() means "N already issued within the last span cycles".
-//
-// These cover the window semantics the cap is built on. The scheduler currently
-// keeps the cap ANCHORED (cleared on WMMA issue, span set past any window
-// length), so only full() and clear() are live there and this commit changes no
-// behaviour. Span-based retirement -- everything below about sliding -- becomes
-// live when the cap is unanchored, which is the follow-up; these tests pin the
-// semantics that change will depend on.
-//
-// Throughout: the cap rides the real clock (advance), never the throttle clock,
-// because only real cycles age entries out of a queue.
+// Credit window semantics: depth is the number of credits, entry lifetime is how long one stays
+// in flight, so full() means "depth credits issued within the last lifetime cycles". The ds_load
+// credit queue of CDNA5ReadyQueue is built on this. Time advances only on the real clock.
 // ---------------------------------------------------------------------------
 
 TEST(InFlightQueue, IssueCapAdmitsNBackToBackThenWaits) {
@@ -129,21 +63,6 @@ TEST(InFlightQueue, IssueCapNeverAdmits2NAcrossAWindowEdge) {
                                "window, never 2N back-to-back";
 }
 
-TEST(InFlightQueue, IssueCapIgnoresThrottleOnlyTime) {
-    InFlightQueue cap(/*depth=*/2);
-    const int span = 8;
-    cap.push(span);
-    cap.push(span);
-    ASSERT_TRUE(cap.full());
-
-    // Throttle debt is pacing bookkeeping, not elapsed execution: it ages
-    // nothing, so it must not hand out cap allowance either.
-    cap.advanceThrottle(64);
-    EXPECT_TRUE(cap.full())
-        << "only real elapsed cycles may retire a cap entry -- evict() compares "
-           "against currentTime_, which advanceThrottle() does not move";
-}
-
 TEST(InFlightQueue, IssueCapSeedsAcrossRegionBoundary) {
     InFlightQueue next(/*depth=*/3);
     next.seed(/*count=*/3, /*residual=*/5);
@@ -152,4 +71,48 @@ TEST(InFlightQueue, IssueCapSeedsAcrossRegionBoundary) {
 
     InFlightQueue noCarry(/*depth=*/3);
     EXPECT_FALSE(noCarry.full()) << "without the carry the window starts empty";
+}
+
+// ---------------------------------------------------------------------------
+// Per-entry residual carry (residuals() / seed(vector<int>)): a cross-BB carry
+// that keeps each credit's own remaining drain latency instead of collapsing
+// every entry to one worst-case value.
+// ---------------------------------------------------------------------------
+
+TEST(InFlightQueue, ResidualsReportsEachEntrysOwnRemainingLatency) {
+    InFlightQueue queue(/*depth=*/0);
+    queue.push(/*drainLatency=*/2);
+    queue.push(/*drainLatency=*/4);
+    queue.push(/*drainLatency=*/10);
+
+    EXPECT_EQ(queue.residuals(), (std::vector<int>{2, 4, 10}))
+        << "oldest-first, matching push order, not sorted or collapsed to one value";
+}
+
+TEST(InFlightQueue, SeedFromResidualsRecreatesEachEntrysOwnLatency) {
+    InFlightQueue prev(/*depth=*/0);
+    prev.push(/*drainLatency=*/2);
+    prev.push(/*drainLatency=*/4);
+    prev.push(/*drainLatency=*/10);
+
+    InFlightQueue next(/*depth=*/3);
+    next.seed(prev.residuals());
+
+    // A (count, worst-case) seed would have reported minResidual == maxResidual
+    // == 10 for all three; the per-entry carry preserves the spread instead.
+    EXPECT_EQ(next.size(), 3);
+    EXPECT_EQ(next.minResidual(), 2);
+    EXPECT_EQ(next.maxResidual(), 10);
+}
+
+TEST(InFlightQueue, SeedFromResidualsDrainsEntriesAtTheirOwnTimeNotTheWorstCase) {
+    InFlightQueue next(/*depth=*/3);
+    next.seed(std::vector<int>{2, 4, 10});
+    ASSERT_TRUE(next.full());
+
+    // The (count, worst-case) form would keep all three around for 10 cycles;
+    // the shortest-lived carried entry must retire on its own schedule.
+    next.advance(2);
+    EXPECT_EQ(next.size(), 2) << "the entry seeded with residual 2 has drained";
+    EXPECT_FALSE(next.full());
 }
