@@ -17425,7 +17425,7 @@ class KernelWriterAssembly(KernelWriter):
         # Per-batch look-ahead: boundary delta vs first real row jump (primer).
         next_rowInc_per_batch = [0] * numBatches
         next_firing_per_batch = [0] * numBatches
-        if kernel["CompactLoopStore"] and not atomic:
+        if kernel["CompactLoopStore"]:
           # Coord1 from getStoreElementsInfoForBatch (one formula for all elts).
           _, _coord1All = ss.getStoreElementsInfoForBatch(kernel, element)
           for _bIdx in range(numBatches):
