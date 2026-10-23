@@ -52,11 +52,10 @@ static const char ROCKE_DATALAYOUT_LLVM23[]
 /* ================================ registry ============================== */
 
 /* gfx -> backend descriptor. Adding a CDNA gfx is one row here (Python
- * BACKEND_REGISTRY). vmcnt_bits records arch.vmcnt_bits; it is a hardware fact
- * the lowerer keys future divergence on. The wired CDNA targets all share the
- * gfx9/10 split waitcnt layout and 6-bit VMCNT today (gfx942's potential
- * 4-bit compv4 partial-waitcnt is recorded as vmcnt_bits but does not change
- * the encoder selection). */
+ * BACKEND_REGISTRY). vmcnt_bits records arch.vmcnt_bits, the hardware width of
+ * the s_waitcnt VMCNT field; the lowerer keys future divergence on it. The
+ * wired CDNA targets all share the gfx9/10 split waitcnt layout and its 6-bit
+ * VMCNT field. */
 typedef struct registry_row
 {
     const char* gfx;
@@ -76,6 +75,12 @@ static const registry_row_t REGISTRY[] = {
     {"gfx1201", ROCKE_ISA_GFX12_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
     {"gfx11-generic",
      ROCKE_ISA_GFX11_RDNA,
+     6,
+     ROCKE_BUFFER_RSRC_WORD3_RDNA,
+     ROCKE_WAITCNT_GFX11,
+     32},
+    {"gfx12-generic",
+     ROCKE_ISA_GFX12_RDNA,
      6,
      ROCKE_BUFFER_RSRC_WORD3_RDNA,
      ROCKE_WAITCNT_GFX11,
@@ -124,7 +129,8 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
              * sorted-list suffix is reproducible from rocke_backend_is_known if
              * a caller wants it, so we keep this allocation-free. */
             *err = "no ISA backend registered for the given gfx target; known: "
-                   "gfx11-generic, gfx1151, gfx1201, gfx1250, gfx908, gfx90a, gfx942, gfx950";
+                   "gfx11-generic, gfx1151, gfx12-generic, gfx1201, gfx1250, gfx908, gfx90a, "
+                   "gfx942, gfx950";
         }
         return be;
     }
@@ -589,7 +595,8 @@ int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
         return -1;
     }
     /* signedA=1, signedB=1 (our quantized data is signed), clamp=0 (values stay
-     * within i32 range). Operands arrive as <op_vec x i32> in SSA, no bitcast. */
+     * within i32 range). a_name and b_name already name <op_vec x i32> values;
+     * the lowerer reinterprets an operand of another shape before the call. */
     if(rocke_strbuf_appendf(out,
                             "  %s = call <%d x i32> @%s("
                             "i1 1, <%d x i32> %s, "

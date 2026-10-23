@@ -37,7 +37,6 @@ import ctypes
 import math
 import os
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -48,7 +47,9 @@ from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
     build_wmma_fmha_fwd,
     wmma_fmha_fwd_grid,
+    wmma_fmha_fwd_signature,
 )
+from rocke.runtime.packing import pack_args
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
@@ -139,7 +140,7 @@ def _isa_counts(hsaco: bytes, kernel_name: str, objdump: str | None) -> dict:
 def _make_packed(rt, args, spec):
     import numpy as np
 
-    B, Hq, Hk, D = args.batch, args.heads, spec.kv_heads, args.head_size
+    B, Hq, Hk, D = args.batch, args.heads, args.kv_heads or args.heads, args.head_size
     Sq, Sk = args.seqlen_q, args.seqlen_k
     rng = np.random.default_rng(0xA11E)
     Q = (rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np.float16)
@@ -158,24 +159,38 @@ def _make_packed(rt, args, spec):
     rt.memcpy_h2d(vd, u8(V), V.nbytes)
     rt.memset(od, 0, Out.nbytes)
 
-    packed = struct.pack(
-        "<QQQQfiiiiiiiiii",
-        qd,
-        kd,
-        vd,
-        od,
-        scale_log2,
-        Sq,
-        Sk,
-        Hq * D,
-        D,  # stride_q_token, stride_q_head
-        Hk * D,
-        D,  # stride_k_token, stride_k_head
-        Hk * D,
-        D,  # stride_v_token, stride_v_head
-        Hq * D,
-        D,  # stride_o_token, stride_o_head
-    )
+    values = {
+        "Q": qd,
+        "K": kd,
+        "V": vd,
+        "O": od,
+        "LSE": od,
+        "scale_log2": scale_log2,
+        "seqlen_q": Sq,
+        "seqlen_k": Sk,
+        "num_query_heads": Hq,
+        "num_kv_heads": Hk,
+        "bottom_right": 0,
+        "window_left": -1,
+        "window_right": 0 if args.causal else -1,
+        "write_lse": 0,
+        "stride_q_batch": Sq * Hq * D,
+        "stride_q_token": Hq * D,
+        "stride_q_head": D,
+        "stride_k_batch": Sk * Hk * D,
+        "stride_k_token": Hk * D,
+        "stride_k_head": D,
+        "stride_v_batch": Sk * Hk * D,
+        "stride_v_token": Hk * D,
+        "stride_v_head": D,
+        "stride_o_batch": Sq * Hq * D,
+        "stride_o_token": Hq * D,
+        "stride_o_head": D,
+        "stride_lse_batch": 0,
+        "stride_lse_token": 0,
+        "stride_lse_head": 0,
+    }
+    packed = pack_args(wmma_fmha_fwd_signature(spec), values)
     bufs = {"Q": Q, "K": K, "V": V, "Out": Out, "ptrs": (qd, kd, vd, od), "od": od}
     return packed, bufs
 
@@ -184,7 +199,7 @@ def _verify(args, spec, bufs, rt):
     import numpy as np
 
     Q, K, V, Out = bufs["Q"], bufs["K"], bufs["V"], bufs["Out"]
-    B, Hq, Hk = args.batch, args.heads, spec.kv_heads
+    B, Hq, Hk = args.batch, args.heads, args.kv_heads or args.heads
 
     def u8(a):
         return (ctypes.c_uint8 * int(a.nbytes)).from_buffer(np.ascontiguousarray(a))
@@ -203,11 +218,8 @@ def _verify(args, spec, bufs, rt):
 
 
 def _run_variant(args, label, v_lds_stage, objdump):
-    kvh = args.kv_heads or args.heads
     spec = WmmaFmhaFwdSpec(
         head_size=args.head_size,
-        num_query_heads=args.heads,
-        num_kv_heads=kvh,
         mask_mode="causal" if args.causal else "none",
         v_lds_stage=v_lds_stage,
         name=f"fmha_case_{label}",
@@ -215,7 +227,9 @@ def _run_variant(args, label, v_lds_stage, objdump):
     art = compile_kernel(build_wmma_fmha_fwd(spec, arch=args.arch), arch=args.arch)
     isa = _isa_counts(art.hsaco, art.kernel_name, objdump)
 
-    grid = wmma_fmha_fwd_grid(spec, seqlen_q=args.seqlen_q, batch=args.batch)
+    grid = wmma_fmha_fwd_grid(
+        spec, seqlen_q=args.seqlen_q, num_query_heads=args.heads, batch=args.batch
+    )
     block = (spec.block_size, 1, 1)
 
     rt = Runtime()

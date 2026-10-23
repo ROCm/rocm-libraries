@@ -66,7 +66,7 @@ def test_preloop_init_binding_is_true():
     assembler_stub = types.SimpleNamespace()
     debugConfig_stub = types.SimpleNamespace()
 
-    from Tensile.KernelWriter import KernelWriter  # noqa: PLC0415
+    from tensilelite.KernelWriter import KernelWriter  # noqa: PLC0415
 
     # KernelWriter is an abstract base; instantiate the minimal concrete subclass
     # that exists in the package — KernelWriterAssembly — but only import what

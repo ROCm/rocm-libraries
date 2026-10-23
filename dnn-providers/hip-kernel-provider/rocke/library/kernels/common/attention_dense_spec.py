@@ -80,6 +80,21 @@ class AttentionDenseSpec:
         """Decode values the concrete kernel type can actually emit."""
         return _COMMON_PERSIST_DECODES
 
+    def _supports_noncausal_window(self) -> bool:
+        """Whether this arch's body implements ``causal=False`` + ``sliding_window``
+        (a left-only band). Off here so an arch that has not implemented it rejects
+        the combination instead of silently dropping the window."""
+        return False
+
+    def _supports_noncausal_cross_length_ragged(self) -> bool:
+        """Whether this arch's ragged body handles ``seqlen_q != seqlen_kv`` without
+        a causal mask (cross-attention)."""
+        return False
+
+    def _band_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for band options beyond causal / window (none in the base)."""
+        return ()
+
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
             raise ValueError(
@@ -111,10 +126,14 @@ class AttentionDenseSpec:
         if self.ragged:
             if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
                 raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
+            if (
+                self.seqlen_q != self.seqlen_kv
+                and not self.causal
+                and not self._supports_noncausal_cross_length_ragged()
+            ):
                 raise ValueError(
                     "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
-                    "causal_bottom_right is set, got "
+                    "causal (top-left or bottom-right) is set, got "
                     f"{self.seqlen_q} != {self.seqlen_kv}"
                 )
             if self.varlen:
@@ -151,7 +170,7 @@ class AttentionDenseSpec:
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
-            if not self.causal:
+            if not self.causal and not self._supports_noncausal_window():
                 raise ValueError("sliding_window>0 requires causal=True")
             if self.sliding_window % self.block_n:
                 raise ValueError(
@@ -312,6 +331,7 @@ class AttentionDenseSpec:
         parts.append("causal" if self.causal else "full")
         if self.causal_bottom_right:
             parts.append("br")
+        parts.extend(self._band_name_parts())
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:

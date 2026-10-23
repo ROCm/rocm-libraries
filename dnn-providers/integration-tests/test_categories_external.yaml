@@ -28,6 +28,9 @@ test_categories:
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
       - "hipdnn_support_sidecar_python_tests"
+      - "hipdnn_bundle_discovery_python_tests"
+      - "hipdnn_support_matrix_renderer_python_tests"
+      - "hipdnn_support_features_python_tests"
       - "hipdnn_golden_generator_python_tests"
     labels:
       - "quick"
@@ -41,6 +44,9 @@ test_categories:
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
       - "hipdnn_support_sidecar_python_tests"
+      - "hipdnn_bundle_discovery_python_tests"
+      - "hipdnn_support_matrix_renderer_python_tests"
+      - "hipdnn_support_features_python_tests"
       - "hipdnn_golden_generator_python_tests"
     labels:
       - "ffm-full"

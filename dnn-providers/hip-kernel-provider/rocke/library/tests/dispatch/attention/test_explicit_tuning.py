@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from itertools import islice
 from unittest import mock
 
@@ -92,6 +93,75 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
             )
         self.assertEqual(segment.num_segments, 32)
         self.assertEqual(reduce.num_segments, 32)
+
+    def test_3d_segments_take_any_count_or_the_split_rule(self):
+        decode = _problem(max_seqlen_q=1, total_q=64, num_seqs=64, num_cus=256)
+        for arch in ("gfx950", "gfx942"):
+            rule = au._num_segments(decode, arch)
+            for num_segments, want in ((0, rule), (4, 4), (9, 9)):
+                with self.subTest(arch=arch, num_segments=num_segments):
+                    segment, reduce = make_explicit_attention_3d_specs(
+                        decode,
+                        ExplicitAttention3DConfig(num_segments=num_segments),
+                        arch=arch,
+                    )
+                    self.assertEqual(segment.num_segments, want)
+                    self.assertEqual(reduce.num_segments, want)
+            with self.subTest(arch=arch), self.assertRaisesRegex(ValueError, ">= 1"):
+                make_explicit_attention_3d_specs(
+                    decode, ExplicitAttention3DConfig(num_segments=-1), arch=arch
+                )
+
+    def test_gfx950_3d_multipage_tile_policy(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        segment, _ = make_explicit_attention_3d_specs(
+            decode,
+            ExplicitAttention3DConfig(num_segments=16, tile_policy="2x"),
+            arch="gfx950",
+        )
+        self.assertEqual(segment.tile_size_override, 32)
+        self.assertEqual(segment.tile_size, 32)
+        with self.assertRaises(ValueError):
+            make_explicit_attention_3d_specs(
+                _problem(block_size=32, max_seqlen_q=1, total_q=4, num_seqs=4),
+                ExplicitAttention3DConfig(num_segments=16, tile_policy="8x"),
+                arch="gfx950",
+            )
+
+    def test_3d_decode_grid_is_derived_from_the_problem(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        cfg = ExplicitAttention3DConfig(num_segments=32)
+        segment, _ = make_explicit_attention_3d_specs(decode, cfg, arch="gfx950")
+        self.assertTrue(segment.use_decode_grid)
+        segment, _ = make_explicit_attention_3d_specs(_problem(), cfg, arch="gfx950")
+        self.assertFalse(segment.use_decode_grid)
+        segment, _ = make_explicit_attention_3d_specs(decode, cfg, arch="gfx942")
+        self.assertTrue(segment.use_decode_grid)
+        # Derived, never a knob.
+        with self.assertRaisesRegex(ValueError, "semantic fields"):
+            make_explicit_attention_3d_specs(
+                decode,
+                ExplicitAttention3DConfig(
+                    num_segments=32, knobs=(("use_decode_grid", False),)
+                ),
+                arch="gfx950",
+            )
+
+    def test_3d_decode_grid_launch_and_legality(self):
+        decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
+        segment, _ = make_explicit_attention_3d_specs(
+            decode, ExplicitAttention3DConfig(num_segments=32), arch="gfx950"
+        )
+        # BLOCK_Q = 16 // NQK(4) = 4.
+        self.assertEqual(au._num_q_blocks(decode, 4, decode_grid=True), 4)
+        mixed = _problem(max_seqlen_q=2, total_q=8, num_seqs=4)
+        self.assertEqual(au._num_q_blocks(mixed, 4), 8 // 4 + 4)
+        with self.assertRaisesRegex(ValueError, "all-decode"):
+            au._num_q_blocks(mixed, 4, decode_grid=True)
+        tuned = SimpleNamespace(kernel_spec=segment, allow_unsupported=False)
+        ok, why = au._explicit_path_supported(mixed, tuned, "3d", "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("all-decode", why)
 
     def test_invalid_geometry_is_rejected_not_fixed(self):
         with self.assertRaises(ValueError):

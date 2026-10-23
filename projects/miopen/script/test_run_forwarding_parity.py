@@ -151,9 +151,9 @@ class ParityRunnerTest(unittest.TestCase):
             self.assertEqual(Path(first).resolve(), (self.tree / "lib").resolve())
             self.assertEqual(rest, ["/already/set"])
 
-    def test_each_replay_gets_its_own_database_and_kernel_cache(self):
-        """A cache shared between the replays lets the enabled one reuse the disabled one's
-        find results and compiled kernels instead of producing its own."""
+    def test_each_replay_gets_its_own_database_but_shares_the_kernel_cache(self):
+        """A shared find database would let the enabled replay reuse the disabled one's
+        find results."""
         shared = {
             "MIOPEN_USER_DB_PATH": "/shared",
             "MIOPEN_CUSTOM_CACHE_DIR": "/shared",
@@ -164,10 +164,14 @@ class ParityRunnerTest(unittest.TestCase):
             json.loads((self.tree / f"env_{mode}.json").read_text())
             for mode in ("disabled", "enabled")
         ]
-        for variable in shared:
-            values = [r[variable] for r in recorded]
-            self.assertNotIn("/shared", values, variable)
-            self.assertEqual(len(set(values)), 2, variable)
+        databases = [r["MIOPEN_USER_DB_PATH"] for r in recorded]
+        self.assertNotIn("/shared", databases)
+        self.assertEqual(len(set(databases)), 2)
+        kernel_caches = [r["MIOPEN_CUSTOM_CACHE_DIR"] for r in recorded]
+        self.assertNotIn("/shared", kernel_caches)
+        self.assertNotIn(None, kernel_caches)
+        self.assertEqual(len(set(kernel_caches)), 1)
+        self.assertNotIn(kernel_caches[0], databases)
 
     def test_nothing_is_written_into_the_working_directory(self):
         workdir = self.tree / "bin" / "MIOpen"

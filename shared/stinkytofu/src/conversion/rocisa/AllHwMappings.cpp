@@ -25,6 +25,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "instruction/branch.hpp"
@@ -43,6 +44,9 @@ std::vector<StinkyInstruction*> lowerRocisaMFMA(rocisa::Instruction& inst,
                                                 AsmIRBuilder& irBuilder) {
     std::string mnemonic = inst.preStr();
     uint16_t opcode = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
+    if (opcode == GFX::INVALID)
+        throw std::runtime_error("No ISA opcode for mnemonic '" + mnemonic + "' on " +
+                                 getArchName(irBuilder.arch));
 
     StinkyInstruction* stinkyInst = irBuilder.create(getMCIDByIsaOp(opcode, irBuilder.arch));
 

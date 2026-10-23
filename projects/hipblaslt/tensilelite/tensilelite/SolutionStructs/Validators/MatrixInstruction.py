@@ -135,7 +135,7 @@ def matrixInstructionToMIParameters(
     result['MIInputPerThread'] = mi[0] * mi[2] * mi[3] // wavefrontSize
     result['MIInputPerThreadA'] = mi[0] * mi[2] * mi[3] // wavefrontSize
     result['MIInputPerThreadB'] = mi[1] * mi[2] * mi[3] // wavefrontSize
-    if (not hasMFMA) and hasWMMA and (isa[0] == 10 or isa[0] == 11):
+    if (not hasMFMA) and hasWMMA and (IsaVersion(10, 0, 0) <= isa <= IsaVersion(11, 5, 3)):
       result['MIInputPerThread'] = mi[2]
       result['MIInputPerThreadA'] = mi[2]
       result['MIInputPerThreadB'] = mi[2]
@@ -253,6 +253,13 @@ def validateMIParameters(
     Raises:
         AssertionError: If any of the validation checks fail.
     """
+    # A custom kernel is prebuilt assembly. MatrixInstruction on that
+    # solution is descriptive and does not carry the derived keys
+    # (EnableMatrixInstruction, MatrixInstM, MIWaveTile, ...) that the
+    # generator checks below.
+    if solution.get("CustomKernel"):
+        return True
+
     validMatrixInstructions = makeValidMatrixInstructions()
     validMFMA = makeValidMFMA()
     validSMFMA = makeValidSMFMA()
@@ -390,7 +397,7 @@ def validateMIParameters(
         elif hasSWMMAC and (not mi4 in validSWMMAC):
             return not reject(
                 solution, printSolutionRejectionReason, f"Invalid SWMMAC configuration: {solution}"
-            ) 
+            )
 
     # Check MIBlock
     assert miBlock[0] == mi4[0], elineno()
@@ -412,7 +419,7 @@ def validateMIParameters(
     miInputPerThread = solution["MIInputPerThread"]
 
     if (not hasMFMA) and hasWMMA:
-        if isa[0] == 10 or isa[0] == 11:
+        if IsaVersion(10, 0, 0) <= isa <= IsaVersion(11, 5, 3):
             assert miInputPerThread == mi4[2], elineno()
 
     # If Navi architecture, the input per thread is different

@@ -75,6 +75,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.chiplet_chunk_size = 64;
     s.split_k = 1;
     s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
+    s.prefetch_addr = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -343,7 +344,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
      *     flags={"async": async_dma, "kouter": lds_k_outer, "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
-     *            "wsr{N}": ..., "unroll": unroll_k},
+     *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
      */
     if(s == NULL || out == NULL)
@@ -371,10 +372,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll */
+    /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
+     * sk, skpers, skr{reduction} */
     char pad_flag[32] = {0};
-    const char* flag_names[10];
-    int flag_on[10];
+    const char* flag_names[11];
+    int flag_on[11];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -447,6 +449,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_on[n_flags] = s->unroll_k ? 1 : 0;
     n_flags++;
 
+    /* prefetch_addr is a different K-loop body; only tagged when set. */
+    flag_names[n_flags] = "pfa";
+    flag_on[n_flags] = s->prefetch_addr ? 1 : 0;
+    n_flags++;
     /* Stream-K tags, in the Python flag order: sk, skpers, skr<reduction>
      * (the last only when not the default "linear"). The CTA pool is a launch
      * parameter and so is NOT in the name, same as the split-K degree. */
@@ -521,6 +527,9 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
     if(s->async_dma || s->unroll_k)
         SK_REJECT("streamk runs one plain K loop per work item; async_dma/unroll_k "
                   "pipeline the K loop across items");
+    if(s->prefetch_addr)
+        SK_REJECT("streamk runs its own K loop per work item; prefetch_addr rewrites "
+                  "the data-parallel K loop, which stream-K never reaches");
     const char* epi = s->epilogue ? s->epilogue : "default";
     if(strcmp(epi, "default") != 0)
         SK_REJECT("streamk requires epilogue='default' (got '%s'): the epilogue runs once "
@@ -962,6 +971,19 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
+    /* prefetch_addr rewrites the single-buffer synchronous K loop; the
+     * async_dma ping-pong and the unroll_k loop never reach it. Mirrors Python
+     * _prefetch_addr_conflict. */
+    if(s->prefetch_addr && (s->async_dma || s->unroll_k))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "prefetch_addr is not supported with %s",
+                     s->async_dma ? "async_dma" : "unroll_k");
+        return false;
+    }
+
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
      * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
     if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
@@ -1075,6 +1097,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
 
     if(!rocke_implicit_gemm_conv_is_valid_spec(&fwd, arch, reason, reason_cap))
         return false;
+
+    /* The forward validator has pinned wave_size to the arch, so wave32 is the
+     * WMMA family here. Mirrors the Python WMMA flag gate. */
+    if(s->prefetch_addr && s->wave_size == 32)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "WMMA wgrad does not support prefetch_addr on %s", arch);
+        return false;
+    }
 
     return true;
 }
@@ -3227,6 +3258,128 @@ static rocke_value_t* wgrad_declare_ptr(rocke_ir_builder_t* b,
     }
 }
 
+// ---------------------------------------------------------------------------
+// prefetch_addr K loop
+// ---------------------------------------------------------------------------
+
+/* Mirrors the Python ``elif spec.prefetch_addr:`` K-loop branch: the simple
+ * single-buffer loop with the current tile's global byte offsets carried as
+ * iteration arguments. Each iteration issues every buffer load from the
+ * carried offsets, derives the next tile's offsets while those loads are in
+ * flight, then writes LDS. The (row, col) slot decode is loop-invariant and is
+ * emitted once ahead of the loop. */
+
+/* Iteration arguments of that loop: the accumulators plus one byte offset per
+ * staged A and B vector. Python has no fixed cap, so this one must cover every
+ * plan the loaders can produce. */
+#define WGRAD_PFA_MAX_ITER_ARGS (ROCKE_CONV_MAX_ACCS + 2 * ROCKE_CTL_MAX_VECS_PER_THREAD)
+
+static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int num_accs = ctx->num_accs;
+
+    /* _split_desc_fns(): the wgrad descriptors, coordinate-swapped on the
+     * K-outer tile. ctx->a_descriptor_fn / b_descriptor_fn already carry that
+     * choice. */
+    rocke_loads_descriptor_fn a_fn = ctx->a_descriptor_fn;
+    rocke_loads_descriptor_fn b_fn = ctx->b_descriptor_fn;
+
+    rocke_ctl_staged_t a_slots;
+    rocke_ctl_staged_t b_slots;
+    rocke_coalesced_tile_loader_plan_slots(b, &ctx->a_sync_loader, ctx->tid, &a_slots);
+    rocke_coalesced_tile_loader_plan_slots(b, &ctx->b_sync_loader, ctx->tid, &b_slots);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    const int n_a = a_slots.count;
+    const int n_off = a_slots.count + b_slots.count;
+    if(num_accs + n_off > WGRAD_PFA_MAX_ITER_ARGS)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "prefetch_addr: %d accumulators + %d offsets exceed %d iter args",
+                        num_accs,
+                        n_off,
+                        WGRAD_PFA_MAX_ITER_ARGS);
+        return;
+    }
+
+    /* _tile_offsets(k_lo): A offsets then B offsets. */
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* offs0[WGRAD_PFA_MAX_ITER_ARGS];
+    ctx->k_off_capture = k_lo;
+    rocke_coalesced_tile_loader_slot_offsets(b, &ctx->a_sync_loader, &a_slots, a_fn, ctx, offs0);
+    rocke_coalesced_tile_loader_slot_offsets(
+        b, &ctx->b_sync_loader, &b_slots, b_fn, ctx, offs0 + n_a);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    rocke_iter_arg_t iter_args[WGRAD_PFA_MAX_ITER_ARGS];
+    char off_names[WGRAD_PFA_MAX_ITER_ARGS][24];
+    for(int i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    for(int i = 0; i < n_off; ++i)
+    {
+        snprintf(off_names[i], sizeof(off_names[i]), "pfa_off%d", i);
+        iter_args[num_accs + i].name = off_names[i];
+        iter_args[num_accs + i].init = offs0[i];
+    }
+
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              k_lo,
+                                              ctx->c_K_gemm,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              num_accs + n_off,
+                                              "k0",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/true);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    rocke_value_t* iter_vars[WGRAD_PFA_MAX_ITER_ARGS];
+    for(int i = 0; i < for_op.num_iter_vars; ++i)
+        iter_vars[i] = for_op.iter_vars[i];
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_ctl_staged_t a_staged;
+        rocke_ctl_staged_t b_staged;
+        rocke_coalesced_tile_loader_issue_slots(
+            b, &ctx->a_sync_loader, ctx->a_rsrc, &a_slots, iter_vars + num_accs, &a_staged);
+        rocke_coalesced_tile_loader_issue_slots(
+            b, &ctx->b_sync_loader, ctx->b_rsrc, &b_slots, iter_vars + num_accs + n_a, &b_staged);
+
+        /* _tile_offsets(k0 + block_k) */
+        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];
+        ctx->k_off_capture = k_next;
+        rocke_coalesced_tile_loader_slot_offsets(
+            b, &ctx->a_sync_loader, &a_slots, a_fn, ctx, yields + num_accs);
+        rocke_coalesced_tile_loader_slot_offsets(
+            b, &ctx->b_sync_loader, &b_slots, b_fn, ctx, yields + num_accs + n_a);
+
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
+        rocke_b_sync(b);
+        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iter_vars, num_accs, yields);
+        rocke_b_sync(b);
+        rocke_b_scf_yield(b, yields, num_accs + n_off);
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    /* final_accs = for_op.results[:n_acc] */
+    ctx->num_final_accs = num_accs;
+    for(int i = 0; i < num_accs; ++i)
+        ctx->final_accs[i] = for_op.op->results[i];
+}
+
 rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_ir_builder_t* b, const rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char* arch)
 {
@@ -3639,6 +3792,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
+    else if(spec->prefetch_addr)
+        wgrad_emit_kloop_prefetch_addr(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else

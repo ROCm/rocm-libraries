@@ -18,9 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from Tensile.ductile.algorithm import GeneticAlgorithm
-from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
-from Tensile.ductile.core.mating import MatingExhaustedError
+from tensilelite.ductile.algorithm import GeneticAlgorithm
+from tensilelite.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from tensilelite.ductile.core.mating import MatingExhaustedError
 
 pytestmark = pytest.mark.unit
 
@@ -44,7 +44,7 @@ def _make_mating(space, max_iters=3):
 
 def _make_ga(space=None, pop_size=8, n_gen=2, soo=False, period=0, tol=0.0,
              div_thr=0.5, seed=1, evaluate=None, verbose=0, weights=None,
-             weight_beta=0.25, checkpoint_path=None):
+             weight_beta=0.25, checkpoint_path=None, on_generation_end=None):
     if space is None:
         space = _make_space()
     mating = _make_mating(space)
@@ -66,6 +66,7 @@ def _make_ga(space=None, pop_size=8, n_gen=2, soo=False, period=0, tol=0.0,
         weights=weights,
         weight_beta=weight_beta,
         checkpoint_path=checkpoint_path,
+        on_generation_end=on_generation_end,
     )
 
 
@@ -220,6 +221,23 @@ class TestGAPopSizeDecay:
         )
         assert ga.pop_size < 100
 
+    def test_small_space_keeps_pop_size_when_auto_pop_size_false(self):
+        # Same space/pop_size as test_small_space_reduces_pop_size, but with
+        # auto_pop_size=False the caller pinned pop_size explicitly, so the
+        # shrink heuristic must not fire.
+        keys = {"A": list(range(3)), "B": list(range(18)), "C": list(range(2))}
+        space = _make_space(keys=keys)
+        mating = _make_mating(space)
+        ga = GeneticAlgorithm(
+            space, mating,
+            evaluate=lambda x: np.ones((1, len(x))),
+            pop_size=100,
+            n_gen=1, seed=1, verbose=0,
+            auto_pop_size=False,
+        )
+        assert ga.pop_size == 100
+        assert ga._decay_type == "none"
+
 
 # ---------------------------------------------------------------------------
 # Weights processing
@@ -292,7 +310,7 @@ class TestGAOptimize:
 
     def test_max_iterations_reached_fallback(self, monkeypatch):
         """When initial sampling raises MaxIterationsReached, GA retries with half pop."""
-        from Tensile.ductile.core.space import MaxIterationsReached
+        from tensilelite.ductile.core.space import MaxIterationsReached
 
         call_count = [0]
         original_sample = SearchSpace.sample
@@ -351,6 +369,28 @@ class TestGAOptimize:
         assert len(X) > 0
         assert F.size > 0
 
+    def test_on_generation_end_called_once_per_generation(self):
+        calls = []
+        ga = _make_ga(n_gen=3, pop_size=8, on_generation_end=calls.append)
+        ga.optimize()
+        assert calls == [1, 2, 3]
+
+    def test_on_generation_end_not_required(self):
+        # Default (None) must not be invoked and must not raise.
+        ga = _make_ga(n_gen=2, pop_size=8)
+        assert ga.on_generation_end is None
+        X, F = ga.optimize()
+        assert isinstance(X, list)
+
+    def test_on_generation_end_called_before_termination_check(self, monkeypatch):
+        # Even when termination fires (constant fitness => early convergence),
+        # the callback must still have run for every completed generation.
+        calls = []
+        ga = _make_ga(n_gen=20, period=2, tol=0.0, on_generation_end=calls.append)
+        ga.optimize()
+        assert len(calls) == len(ga.stats["f_max"])
+        assert calls == list(range(1, len(calls) + 1))
+
 
 # ---------------------------------------------------------------------------
 # save() and load()
@@ -363,7 +403,7 @@ class TestGASaveLoad:
 
         ckpt = tmp_path / "ckpt.pkl"
         # Manually build a valid checkpoint dict
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         import random as _random
         pop = Population([Individual({"DepthU": 0, "SourceSwap": 0}, F=1.0)])
         state = {
@@ -470,7 +510,7 @@ class TestGAUpdate:
     def test_update_with_none_best_initializes_best(self):
         ga = _make_ga(n_gen=1, pop_size=8)
         space = ga.space
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([
             Individual({"DepthU": 0, "SourceSwap": 0}, F=0.0),
             Individual({"DepthU": 1, "SourceSwap": 1}, F=0.0),
@@ -484,7 +524,7 @@ class TestGAUpdate:
 
     def test_update_replaces_best_on_improvement(self):
         ga = _make_ga(n_gen=1, pop_size=8)
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([
             Individual({"DepthU": 0, "SourceSwap": 0}, F=1.0),
             Individual({"DepthU": 1, "SourceSwap": 1}, F=2.0),
@@ -499,7 +539,7 @@ class TestGAUpdate:
 
     def test_negative_scores_clipped_to_minus_one(self):
         ga = _make_ga(n_gen=1, pop_size=8)
-        from Tensile.ductile.core.population import Population, Individual
+        from tensilelite.ductile.core.population import Population, Individual
         pop = Population([Individual({"DepthU": 0, "SourceSwap": 0})])
         scores = np.array([[-5.0]], dtype=np.float32)
         best, _ = ga.update(None, pop, Population(), scores)

@@ -36,19 +36,21 @@ the data type, and the problem. The architectures which default to hipBLASLt, an
     * - **Architecture**
       - **Data types defaulting to hipBLASLt**
 
-    * - gfx1200, gfx1201, gfx1250
+    * - gfx1170, gfx1171, gfx1200, gfx1201, gfx1250
       - All data types.
 
     * - gfx950
-      - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
-        default to Tensile.
+      - All data types except a real single-precision input (``f32_r``). This includes ``f16_r``, ``bf16_r``,
+        ``f64_r``, ``f32_c``, ``f64_c``, ``i8_r``, and mixed-precision ``gemm_ex`` forms whose input type is not
+        ``f32_r``. Real single precision defaults to Tensile.
 
     * - gfx942 (MI300X, 304 CUs)
       - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
         default to Tensile.
 
     * - gfx942 (MI300A, 228 CUs)
-      - ``f64_r`` only. ``f16_r``, ``bf16_r``, and all other data types default to Tensile.
+      - ``f16_r``, ``bf16_r``, ``f64_r``, ``f32_r``, ``f32_c``, and ``f64_c``, including their mixed-precision
+        ``gemm_ex`` forms. All other data types default to Tensile.
 
     * - All others
       - None. Tensile is always the default.
@@ -58,7 +60,8 @@ to Tensile. Source code GEMMs internal to the rocBLAS library also
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
-The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used for non-batched, _strided_batched, and _batched GEMM. It provides the following settings:
+The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used for non-batched, _strided_batched, and _batched GEMM, including calls made while a stream is capturing.
+Batched GEMM uses the same selection as other GEMM during capture. It provides the following settings:
 
 *  ``ROCBLAS_USE_HIPBLASLT`` is not set: the GEMM backend is automatically selected.
 *  ``ROCBLAS_USE_HIPBLASLT=0``: Tensile is always used as the GEMM backend.

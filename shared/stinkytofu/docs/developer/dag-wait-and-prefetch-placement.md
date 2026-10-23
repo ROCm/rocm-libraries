@@ -11,8 +11,8 @@ pass does not, the pass inserts an `s_wait_alu`.
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it
-belongs with. Develop avoided that by accident: WaitAwareScheduleRepairPass carried the
-prefetch forward to the segment end, the barrier right before the tensor_load.
+belongs with. The former WaitAwareScheduleRepairPass (now removed) hid that by accident: it
+carried the prefetch forward to the segment end, the barrier right before the tensor_load.
 
 ## Rules, in order of measured impact
 
@@ -25,9 +25,7 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
      the stage barrier waits until the ready group has issued, so the group lands just
      before `s_barrier_wait -3`. A group that is not fully ready never holds the barrier.
    - With a lead set, prefetches have their own ready queue; they are not fillers and never
-     count against the filler quota. WaitAwareScheduleRepairPass pins each prefetch, and the
-     VALU chain computing its address, ahead of the next WMMA so the repair does not carry
-     them off.
+     count against the filler quota.
 2. **Wait-prone fillers** (`WaitAluHoldStrictCount`, only with ESM2, the only mode in which
    InsertWaitAlu runs). `WaitAluTracker` is InsertWaitAlu's
    own scoreboard (shared `stepInstruction()`, so the answers cannot diverge); `query(inst)`
@@ -36,10 +34,14 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
    older LDS reads whatever its count) is held until the two windows before the next
    `s_barrier_wait`. Not held when it is the last pending predecessor of real work, or when
    it feeds a prefetch's address.
-3. **ds_load pacing** (`DsSlotFirst`). In a ds stream of 2+ ds_loads per WMMA window, a
-   ds_load that still fits the window goes before fillers and prefetches, and a hazard-hoisted
-   VALU that cannot co-issue now is not forced. Otherwise each stolen slot shifts the stream,
-   and the tensor_load, one window late.
+3. **ds_load pacing** (`DsSpread`, `DsReadQueueDepth`). The ds credit queue bounds the
+   ds_loads in flight, and with `DsSpread` each batch of `DsBatchWmmas` WMMAs takes the even
+   share of its stage's ds_loads (`ceil(stage loads / stage batches)`, a stage running between
+   the two barriers a load sits behind and feeds), so the stream stays even and the
+   tensor_load is not pushed a window late. A held ds_load is released early only when no WMMA
+   is ready in its place. See `DsSpreadPacer.hpp` and `DsSpread` in
+   [scheduler-tuning-parameters](../user/scheduler-tuning-parameters.md); the
+   [spread plan](wmma-batch-ds-spread-plan.md) is the earlier slot design.
 4. **Critical chains.** A filler whose consumer (prefetch, tensor_load, ds_load) is planned
    within 20 windows skips the filler quota and takes the earliest window with a free
    co-issue slot, or issues as soon as it is ready once every remaining window is full.
@@ -58,13 +60,13 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 
 | ModuleOption | default | stinkytofu-opt flag | meaning |
 |---|---|---|---|
-| `PrefetchLeadWmmas` | 25 (KernelWriter: stage < 64 WMMAs 0; no HalfPLR 4; else 25 sub-byte A, 40 otherwise) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
+| `PrefetchLeadWmmas` | 25 (KernelWriter: no HalfPLR 4; else 25 sub-byte A, 40 otherwise; a lead of 8 or more is dropped where a stage has < 64 WMMAs) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
 | `WaitAluHoldStrictCount` | 2 | `--wait-alu-hold-strict-count=N` | strict-wait threshold; < 0 = no hold |
-| `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | spread the region's ds_loads evenly over its WMMAs |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
-| `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time. > 1 also merges the waits of back-to-back WMMAs onto the first one |
-| `WmmaQueueCoverCycles` | 0 (off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
+| `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time (queue model off). > 1 also merges the waits of back-to-back WMMAs onto the first one |
+| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
 
 ## Measured effect
 
@@ -87,9 +89,14 @@ Findings behind the rules:
 - A prefetch early in its stage costs 2–5%; a single-stage loop wants the group right
   before the stage barrier (+2% over develop on medium mxf4 in a hand edit), a multi-stage
   loop a staggered lead. A lead of 80 on henry is −14%.
-- A stage under 64 WMMAs (MAB, medium mxf8) has no room for a lead: the address chain is
-  ready only a few windows before the tensor_load, and a prefetch issued there is worse
-  than one grouped at the tensor_load (lead 0, develop's placement).
+- A stage under 64 WMMAs (MAB, medium mxf8) has no room for a multi-stage lead: the address
+  chain is ready only a few windows before the tensor_load, and a prefetch issued there is
+  worse than one grouped at the tensor_load. That grouping used to come from the former
+  WaitAwareScheduleRepairPass, which moved the prefetches next to the stage barrier. Without
+  the pass, lead 0 issues them mid-stage among the ds_loads, and the next WMMAs wait longer
+  for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4 0.63%. The single-stage grouping
+  (lead below 8) is therefore kept at any stage length; it brings MAB nvf4 level with
+  develop and MAB bf16 to 0.25% behind.
 - An LDS-address swap (`v_xor`) issued while ds_loads still read the old address pays a
   `vm_vsrc` wait (about 100 cycles/iteration on medium mxf4). Moving it after the barrier
   is worse: the next stage's first ds_loads read the new address right after the barrier.

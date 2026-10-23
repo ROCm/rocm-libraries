@@ -22,8 +22,8 @@ import pytest
 
 from codegen_harness import _isolated_globals  # shared isolation context
 
-from Tensile.SolutionStructs import Solution as _SolutionMod
-from Tensile.SolutionStructs.Solution import Solution as _Solution
+from tensilelite.SolutionStructs import Solution as _SolutionMod
+from tensilelite.SolutionStructs.Solution import Solution as _Solution
 
 pytestmark = pytest.mark.unit
 

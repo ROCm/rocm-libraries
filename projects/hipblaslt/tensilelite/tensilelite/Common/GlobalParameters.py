@@ -30,7 +30,8 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from .. import __version__
+from Tensile import __version__
+from Tensile.Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -197,6 +198,13 @@ globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+# Where A/B data come from. None keeps the default: mxDataGenerator for MX inputs only.
+# True:  A/B come from mxDataGenerator whether MX or not (non-MX A/B must be FP8/BF8), so F8 and
+#        MXF8 runs of the same problem get the same A/B bytes.
+# False: A/B use DataInitTypeA/B through the non-MX init path whether MX or not (Trig gives the
+#        plain F8 pattern) and MX scales use DataInitTypeMXSA/MXSB. MX data must be FP8/BF8/FP4
+#        (MXF8, MXF4, NVF4).
+globalParameters["MXDataGenerator"] = None
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
 # does not select a compiled tile-processing or work-assignment family.
@@ -408,14 +416,8 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
 
-# StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
-# DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
-# its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
-# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
-globalParameters["StinkyTofuDsIssueCapMode"] = 0
-globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
@@ -569,6 +571,7 @@ defaultBenchmarkCommonParameters = [
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
+    {"LDSSegmentBRotate": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},
@@ -667,6 +670,10 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
+    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
+    # -2 reads each cluster's XCC from the hardware.
+    {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
 ]
@@ -777,6 +784,7 @@ globalParameterTypeOverrides = {
     "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
+    "MXDataGenerator":         {type(None), bool},  # unset keeps the per-problem default
 }
 
 
@@ -974,24 +982,12 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     # The alternative would be to install the `distro` package.
     # See https://docs.python.org/3.7/library/platform.html#platform.linux_distribution
 
-    # The following try except block computes the hipcc version
-    # TODO: hipcc is deprecated, this block should be removed.
     try:
-        compiler = "hipcc"
-        output = subprocess.run(
-            [compiler, "--version"], check=True,
-            stdout=subprocess.PIPE,
-            # Avoids some warning spam on Windows.
-            stderr=subprocess.DEVNULL,
-        ).stdout.decode()
-
-        for line in output.split("\n"):
-            if "HIP version" in line:
-                globalParameters["HipClangVersion"] = line.split()[2]
-                print1("# Found hipcc version " + globalParameters["HipClangVersion"])
-
-    except (subprocess.CalledProcessError, OSError) as e:
-        printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
+        version = get_rocm_version()
+        globalParameters["HipClangVersion"] = f"{version.major}.{version.minor}.{version.patch}"
+        print1("# Found ROCm version " + globalParameters["HipClangVersion"])
+    except RuntimeError as e:
+        printWarning("Failed to determine ROCm version: {}".format(e))
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 

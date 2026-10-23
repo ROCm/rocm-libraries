@@ -138,15 +138,19 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
 
   # NOTE(hipccl2): ${PROJECT_BINARY_DIR}, not ${CMAKE_BINARY_DIR}, so a nested
   # build writes to <build>/rocprim/benchmark rather than sharing one
-  # directory with the other components (hipCUB ships 26 benchmarks with
-  # filenames identical to rocPRIM's, which would silently overwrite each
-  # other). PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a top-level
+  # directory with the other components. PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a top-level
   # project, so standalone builds land in the same place as before. This also
   # matches the DLL copy destination below, which already used
   # PROJECT_BINARY_DIR - when nested those two previously diverged, leaving
   # Windows benchmarks unable to find their DLLs.
+  # NOTE(hipccl2): installed as benchmark_rocprim_<name>, so names are unique
+  # across components in a shared bin/ (hipCUB shares 26 source names with
+  # rocPRIM). Set via OUTPUT_NAME, not the target name, which is also the
+  # .parallel.cpp.in and ConfigAutotuneSettings.cmake lookup key.
+  string(REGEX REPLACE "^benchmark_" "benchmark_rocprim_" BENCHMARK_OUTPUT_NAME "${BENCHMARK_TARGET}")
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
+      OUTPUT_NAME "${BENCHMARK_OUTPUT_NAME}"
       RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/benchmark"
   )
 
