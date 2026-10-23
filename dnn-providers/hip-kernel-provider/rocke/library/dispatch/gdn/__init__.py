@@ -109,10 +109,14 @@ def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ..
             continue
         if not selector_matches(req, candidate)[0]:
             continue
-        probe = replace(opt_in_probe(req, candidate), tuning_id="auto", tuning_knobs=())
+        # Admit the request as pinned to this candidate, tuning fields
+        # included, so an unknown tuning_id or a malformed knob is refused
+        # here exactly as dispatch_gdn_decode_all refuses it; only then drop
+        # them to select the tile's base configuration.
+        probe = opt_in_probe(req, candidate)
         if not candidate.admits(probe)[0]:
             continue
-        spec = candidate.select_spec(probe)
+        spec = candidate.select_spec(replace(probe, tuning_id="auto", tuning_knobs=()))
         pinned = pin_to_spec(req, candidate, spec)
         out.append(
             make_dispatch_result(

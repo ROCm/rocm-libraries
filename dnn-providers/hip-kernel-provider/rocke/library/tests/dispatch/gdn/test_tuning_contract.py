@@ -425,8 +425,31 @@ def test_pinned_xcd_remap_keeps_the_launch_grid():
         _req(gate_kind="kda", state_dtype="f32", heads=16, **_FUSED),
         _req(gate_kind="gdn", heads=16, fuse_out_norm=True),
         _req(gate_kind="gdn", spec_id="nw4_wtk16_bpv8"),
+        _req(
+            gate_kind="gdn", spec_id="nw2_wtk16_bpv8", tuning_knobs={"dpp_reduce": True}
+        ),
+        # Refused pins list nothing in either function, never a base row.
+        _req(
+            gate_kind="gdn",
+            spec_id="nw2_wtk16_bpv8",
+            tuning_id="nw2_wtk16_bpv8_wpe0@deadbeefdeadbeef",
+        ),
+        _req(
+            gate_kind="gdn",
+            spec_id="nw2_wtk16_bpv8",
+            tuning_knobs={"dpp_reduce": "yes"},
+        ),
     ),
-    ids=("gdn", "gdn_d64", "kda_f32_fused", "gdn_norm_only", "gdn_pinned"),
+    ids=(
+        "gdn",
+        "gdn_d64",
+        "kda_f32_fused",
+        "gdn_norm_only",
+        "gdn_pinned",
+        "gdn_knob_pin",
+        "gdn_unknown_tuning_id",
+        "gdn_invalid_knob",
+    ),
 )
 def test_bases_equal_the_knob_free_rows_of_all(req):
     """dispatch_gdn_decode_bases builds only each tile's base configuration
