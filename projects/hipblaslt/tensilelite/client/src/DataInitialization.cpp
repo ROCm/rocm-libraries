@@ -1974,8 +1974,7 @@ namespace TensileLite
                                   completeDataLayout.offset())
                                   .elementOffset(batchCoordinates);
                         if(!offset)
-                            throw std::runtime_error(
-                                roc::hostnumerics::detail::message(offset.error()));
+                            throw std::runtime_error(offset.error().message());
                         batchOffset = *offset;
                     }
                     auto dataOutput = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
