@@ -138,7 +138,7 @@ namespace hipblaslt::hostnumerics
 
             if(searchAllClose && expected.elementCount() != 0)
             {
-                ComparisonOptions options            = allCloseComparisonOptions();
+                ComparisonOptions options            = allCloseComparisonOptions(1e-8, 1e-5, false);
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = 0;

@@ -16,12 +16,14 @@ TEST(ExactVerification, ActivationUsesDivisionAndExplicitOutputRounding) {
             auxiliary.storeFrom({i, j}, 5.0);
             observed.storeFrom({i, j}, 5.0 / 3.0);
         }
-    auto result = verifyExactActivation(observed, auxiliary, Tensor(3.0), Tensor(1.0));
+    auto result = verifyExactActivation(observed, auxiliary, Tensor(3.0), Tensor(1.0),
+                                        IdentityActivation{}, 10);
     EXPECT_EQ(result.status, VerificationStatus::Passed) << result.reason;
     ASSERT_TRUE(result.maximumAbsolute);
     EXPECT_EQ(result.maximumAbsolute->item<double>(), 5.0 / 3.0);
     observed.storeFrom({1, 0}, 5.0 * (1.0 / 3.0));
-    result = verifyExactActivation(observed, auxiliary, Tensor(3.0), Tensor(1.0));
+    result = verifyExactActivation(observed, auxiliary, Tensor(3.0), Tensor(1.0),
+                                   IdentityActivation{}, 10);
     EXPECT_EQ(result.status, VerificationStatus::Mismatch);
     ASSERT_EQ(result.comparison.reportedMismatches.size(), 1);
     EXPECT_EQ(result.comparison.reportedMismatches.front().coordinates,
@@ -29,10 +31,12 @@ TEST(ExactVerification, ActivationUsesDivisionAndExplicitOutputRounding) {
     // Halfway integer output is rounded to even; large results saturate.
     const auto five = Tensor(5.0).reshapeSharingStorage(Shape{1});
     auto two = Tensor(int8_t{2}).reshapeSharingStorage(Shape{1});
-    EXPECT_EQ(verifyExactActivation(two, five, Tensor(2.0), Tensor(1.0)).status,
-              VerificationStatus::Passed);
+    EXPECT_EQ(
+        verifyExactActivation(two, five, Tensor(2.0), Tensor(1.0), IdentityActivation{}, 10).status,
+        VerificationStatus::Passed);
     two.storeFrom({0}, int8_t{127});
-    EXPECT_EQ(verifyExactActivation(two, five, Tensor(1.0), Tensor(100.0)).status,
+    EXPECT_EQ(verifyExactActivation(two, five, Tensor(1.0), Tensor(100.0), IdentityActivation{}, 10)
+                  .status,
               VerificationStatus::Passed);
 }
 
@@ -41,25 +45,31 @@ TEST(ExactVerification, ActivationRejectsUncertifiedAuxiliaryAndUnsupportedPolic
     for (double bad : {0.5, 0x1p24, std::numeric_limits<double>::infinity(),
                        std::numeric_limits<double>::quiet_NaN()}) {
         auxiliary.storeFrom({1}, bad);
-        auto result = verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0));
+        auto result = verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0),
+                                            IdentityActivation{}, 10);
         EXPECT_EQ(result.status, VerificationStatus::Unsupported);
         EXPECT_EQ(result.uncertifiedElements, 1);
         EXPECT_FALSE(result.maximumAbsolute);
     }
     auxiliary.storeFrom({1}, 0);
     for (double scale : {0.0, std::numeric_limits<double>::infinity()})
-        EXPECT_EQ(verifyExactActivation(observed, auxiliary, Tensor(scale), Tensor(1.0)).status,
+        EXPECT_EQ(verifyExactActivation(observed, auxiliary, Tensor(scale), Tensor(1.0),
+                                        IdentityActivation{}, 10)
+                      .status,
                   VerificationStatus::Unsupported);
-    EXPECT_EQ(verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0), GeluActivation{})
-                  .status,
-              VerificationStatus::Unsupported);
     EXPECT_EQ(
-        verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0), ClampActivation{2, -2})
+        verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0), GeluActivation{}, 10)
             .status,
         VerificationStatus::Unsupported);
-    EXPECT_THROW(verifyExactActivation(Tensor(0.0), auxiliary, Tensor(1.0), Tensor(1.0)),
+    EXPECT_EQ(verifyExactActivation(observed, auxiliary, Tensor(1.0), Tensor(1.0),
+                                    ClampActivation{2, -2}, 10)
+                  .status,
+              VerificationStatus::Unsupported);
+    EXPECT_THROW(verifyExactActivation(Tensor(0.0), auxiliary, Tensor(1.0), Tensor(1.0),
+                                       IdentityActivation{}, 10),
                  std::runtime_error);
-    EXPECT_THROW(verifyExactActivation(observed, auxiliary, auxiliary, Tensor(1.0)),
+    EXPECT_THROW(verifyExactActivation(observed, auxiliary, auxiliary, Tensor(1.0),
+                                       IdentityActivation{}, 10),
                  std::runtime_error);
 }
 
@@ -72,13 +82,13 @@ TEST(ExactVerification, ActivationHandlesNegativeScalesAndFractionalClamp) {
     observed.storeFrom({0, 0}, 0);
     observed.storeFrom({0, 1}, -9 * bound);
     auto result = verifyExactActivation(observed, auxiliary, Tensor(-3.0), Tensor(-9.0),
-                                        ClampActivation{0, bound});
+                                        ClampActivation{0, bound}, 10);
     EXPECT_EQ(result.status, VerificationStatus::Passed);
     ASSERT_TRUE(result.maximumAbsolute);
     EXPECT_EQ(result.maximumAbsolute->item<double>(), bound);
     observed.storeFrom({0, 1}, -27);
-    result =
-        verifyExactActivation(observed, auxiliary, Tensor(-3.0), Tensor(-9.0), ReluActivation{});
+    result = verifyExactActivation(observed, auxiliary, Tensor(-3.0), Tensor(-9.0),
+                                   ReluActivation{}, 10);
     EXPECT_EQ(result.status, VerificationStatus::Passed);
     EXPECT_EQ(result.maximumAbsolute->item<double>(), 3);
 }
@@ -93,15 +103,15 @@ TEST(ExactVerification, SumCertifiesAbsoluteBoundBeforeCancellingTerms) {
     Tensor output(ScalarType::Float32, Shape{2});
     output.storeFrom({0}, 1);
     output.storeFrom({1}, 1);
-    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float32).status,
+    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float32, 10).status,
               VerificationStatus::Unsupported);
-    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64).status,
+    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64, 10).status,
               VerificationStatus::Passed);
     input.storeFrom({0, 2}, 0.5);
-    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64).status,
+    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64, 10).status,
               VerificationStatus::Unsupported);
     input.storeFrom({0, 2}, std::numeric_limits<float>::quiet_NaN());
-    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64).status,
+    EXPECT_EQ(verifyExactSum(output, input, {1}, ScalarType::Float64, 10).status,
               VerificationStatus::Unsupported);
 }
 
@@ -116,14 +126,14 @@ TEST(ExactVerification, SumUsesLogicalAxesRoundingSaturationAndBoundedReports) {
     Tensor half(ScalarType::Float16, Shape{2});
     half.storeFrom({0}, 2048);
     half.storeFrom({1}, -180);
-    EXPECT_EQ(verifyExactSum(half, input, {1, 2}, ScalarType::Float32).status,
+    EXPECT_EQ(verifyExactSum(half, input, {1, 2}, ScalarType::Float32, 10).status,
               VerificationStatus::Passed);
-    EXPECT_EQ(verifyExactSum(half, input, {1, 2}, ScalarType::Float16).status,
+    EXPECT_EQ(verifyExactSum(half, input, {1, 2}, ScalarType::Float16, 10).status,
               VerificationStatus::Unsupported);
     Tensor narrow(ScalarType::Int8, Shape{2});
     narrow.storeFrom({0}, 127);
     narrow.storeFrom({1}, -128);
-    EXPECT_EQ(verifyExactSum(narrow, input, {2, 1}, ScalarType::Float32).status,
+    EXPECT_EQ(verifyExactSum(narrow, input, {2, 1}, ScalarType::Float32, 10).status,
               VerificationStatus::Passed);
     narrow.storeFrom({0}, 0);
     narrow.storeFrom({1}, 0);
@@ -131,8 +141,9 @@ TEST(ExactVerification, SumUsesLogicalAxesRoundingSaturationAndBoundedReports) {
     EXPECT_EQ(result.status, VerificationStatus::Mismatch);
     EXPECT_EQ(result.comparison.mismatches, 2);
     EXPECT_EQ(result.comparison.reportedMismatches.size(), 1);
-    EXPECT_THROW(verifyExactSum(narrow, input, {1, 1}, ScalarType::Float32), std::runtime_error);
-    EXPECT_THROW(verifyExactSum(narrow, input, {3}, ScalarType::Float32), std::runtime_error);
+    EXPECT_THROW(verifyExactSum(narrow, input, {1, 1}, ScalarType::Float32, 10),
+                 std::runtime_error);
+    EXPECT_THROW(verifyExactSum(narrow, input, {3}, ScalarType::Float32, 10), std::runtime_error);
 }
 
 TEST(ExactVerification, MaximumRejectsNonfiniteFractionalAndSaturatedStorage) {

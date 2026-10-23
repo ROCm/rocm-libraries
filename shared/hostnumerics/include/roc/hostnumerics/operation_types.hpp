@@ -150,19 +150,20 @@ inline size_t nextPrimeStride(size_t value) {
 // Describes which logical tensor elements an operation or comparison should
 // visit. Linear indices use indexOrder. Explicit indices are normalized when
 // constructed and validated against the tensor's logical element count when
-// consumed. Orders list axes from slowest to fastest; empty selects NumPy/C
-// identity order. Factories copy the supplied span, so selections own their axes.
+// consumed. As in Shape and Layout, orders list axes from slowest to fastest.
+// An empty order is resolved to ascending axes (C order) when the tensor rank is
+// known. A nonempty order must contain each axis exactly once; consumers validate
+// it against that rank. Factories copy the supplied order.
 class OutputSelection {
    public:
-    static OutputSelection all(std::span<const size_t> indexOrder = {}) {
+    static OutputSelection all(std::span<const size_t> indexOrder) {
         OutputSelection result;
         result.m_indexOrder.assign(indexOrder.begin(), indexOrder.end());
         return result;
     }
 
-    static OutputSelection strided(size_t first, size_t stride,
-                                   size_t maxElements = std::numeric_limits<size_t>::max(),
-                                   std::span<const size_t> indexOrder = {}) {
+    static OutputSelection strided(size_t first, size_t stride, size_t maxElements,
+                                   std::span<const size_t> indexOrder) {
         if (stride == 0) throw std::runtime_error("Output selection stride must be nonzero.");
         OutputSelection result;
         result.m_kind = OutputSelectionKind::Strided;
@@ -174,7 +175,7 @@ class OutputSelection {
     }
 
     static OutputSelection explicitIndices(std::vector<size_t> indices,
-                                           std::span<const size_t> indexOrder = {}) {
+                                           std::span<const size_t> indexOrder) {
         OutputSelection result;
         result.m_kind = OutputSelectionKind::Explicit;
         std::sort(indices.begin(), indices.end());
@@ -188,7 +189,7 @@ class OutputSelection {
     // requestedElements. The resulting sample size is approximate.
     static OutputSelection primeStride(size_t logicalElements, size_t allocatedElements,
                                        size_t requestedElements,
-                                       std::span<const size_t> indexOrder = {}) {
+                                       std::span<const size_t> indexOrder) {
         if (requestedElements == 0 || requestedElements >= logicalElements) return all(indexOrder);
         const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
         return strided(0, detail::nextPrimeStride(candidate), std::numeric_limits<size_t>::max(),

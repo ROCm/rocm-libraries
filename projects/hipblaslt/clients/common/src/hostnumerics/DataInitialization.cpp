@@ -279,8 +279,8 @@ namespace hipblaslt::hostnumerics
 
         GenerationRecipe sentinelRecipe(GenerationRecipe::Component component, bool complexOutput)
         {
-            return complexOutput ? GenerationRecipe::replicated(std::move(component))
-                                 : GenerationRecipe::realOnly(std::move(component));
+            return complexOutput ? GenerationRecipe::replicated(std::move(component), {})
+                                 : GenerationRecipe::realOnly(std::move(component), {});
         }
 
         bool supportsExplicitFloatingSentinel(ScalarType type)
@@ -398,15 +398,15 @@ namespace hipblaslt::hostnumerics
             {
                 if(role == MatrixRole::A)
                     return GenerationRecipe::realOnly(
-                        GenerationRecipe::constant({.value = specialInitializationAValue}));
+                        GenerationRecipe::constant({.value = specialInitializationAValue}), {});
                 if(role == MatrixRole::B)
                     return GenerationRecipe::realOnly(
-                        GenerationRecipe::constant({.value = specialInitializationBValue}));
+                        GenerationRecipe::constant({.value = specialInitializationBValue}), {});
                 return GenerationRecipe::realOnly(
                     GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}), {.seed = seed});
             }
             case hipblaslt_initialization::zero:
-                return GenerationRecipe::realOnly(GenerationRecipe::zero());
+                return GenerationRecipe::realOnly(GenerationRecipe::zero(), {});
             case hipblaslt_initialization::norm_dist:
                 return normalRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             case hipblaslt_initialization::norm_dist_one_special:
@@ -437,13 +437,16 @@ namespace hipblaslt::hostnumerics
                     throw std::runtime_error(
                         "hipBLASLt FP16 accumulator probe requires Float16 storage.");
                 if(role == MatrixRole::A)
-                    return GenerationRecipe::realOnly(GenerationRecipe::constant(
-                        {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}));
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant(
+                            {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}),
+                        {});
                 if(role == MatrixRole::B)
                     return GenerationRecipe::realOnly(
                         GenerationRecipe::constant({.value = 2.0})
-                            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}));
-                return GenerationRecipe::realOnly(GenerationRecipe::zero());
+                            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}),
+                        {});
+                return GenerationRecipe::realOnly(GenerationRecipe::zero(), {});
             }
             case hipblaslt_initialization::inf:
                 if(!supportsExplicitFloatingSentinel(type))
@@ -476,7 +479,7 @@ namespace hipblaslt::hostnumerics
                 throw std::runtime_error(
                     "Sparse-K initialization requires a matrix with an optional batch axis.");
 
-            generate(destination, GenerationRecipe::realOnly(GenerationRecipe::zero()));
+            generate(destination, GenerationRecipe::realOnly(GenerationRecipe::zero(), {}));
             const size_t kExtent = shape[reductionAxis];
             if(kExtent == 0)
                 return;

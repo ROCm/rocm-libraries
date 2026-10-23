@@ -189,7 +189,7 @@ namespace TensileLite
                                                               InitMode dataInitialization,
                                                               InitMode scaleInitialization,
                                                               uint64_t seed,
-                                                              bool     independentData = false)
+                                                              bool     independentData)
             {
                 using roc::hostnumerics::generateMx;
                 using roc::hostnumerics::MxDataGeneration;

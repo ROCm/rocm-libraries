@@ -2196,7 +2196,8 @@ namespace TensileLite
                     32,
                     m_vdata[dataTensorEnum].init,
                     m_vdata[scaleTensorEnum].init,
-                    seed + (batchBytes == 0 ? 0 : batch));
+                    seed + (batchBytes == 0 ? 0 : batch),
+                    false);
                 auto* output
                     = static_cast<std::byte*>(pristine.cpuInput.valid.get()) + batch * batchBytes;
                 const auto destination

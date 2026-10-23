@@ -175,7 +175,7 @@ int main(int argc, char** argv)
     std::vector<float> A_clean(M * K);
     std::vector<float> B(K * N);
     const auto         ones = roc::hostnumerics::GenerationRecipe::realOnly(
-        roc::hostnumerics::GenerationRecipe::constant({.value = 1.0}));
+        roc::hostnumerics::GenerationRecipe::constant({.value = 1.0}), {});
     roc::hostnumerics::Tensor cleanTensor = roc::hostnumerics::generate(
         roc::hostnumerics::ScalarType::Float32, roc::hostnumerics::Shape{A_clean.size()}, ones);
     std::memcpy(A_clean.data(),
@@ -188,7 +188,7 @@ int main(int argc, char** argv)
                 bTensor.rawEncodedBackingStorage().size());
     std::vector<float> A_dirty = A_clean;
     const auto         nan     = roc::hostnumerics::GenerationRecipe::realOnly(
-        roc::hostnumerics::GenerationRecipe::typeNaN());
+        roc::hostnumerics::GenerationRecipe::typeNaN(), {});
     roc::hostnumerics::Tensor dirtyTensor = cleanTensor.deepCopy();
     roc::hostnumerics::generateAt(dirtyTensor, 0, nan);
     std::memcpy(A_dirty.data(),

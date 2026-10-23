@@ -32,7 +32,7 @@ void testComparisonProgram() {
     encodedEquality.computeElementwiseStatistics = false;
     encodedEquality.computeFrobenius = false;
     encodedEquality.maxReportedMismatches = 0;
-    encodedEquality.selection = OutputSelection::all();
+    encodedEquality.selection = OutputSelection::all({});
 
     const float quietNaN = std::numeric_limits<float>::quiet_NaN();
     const std::array<float, 4> identicalValues{quietNaN, -0.0f, 1.0f, -2.0f};
@@ -186,7 +186,7 @@ void testComparisonProgram() {
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
     bool rejectedZeroSelectionStride = false;
     try {
-        (void)OutputSelection::strided(0, 0);
+        (void)OutputSelection::strided(0, 0, std::numeric_limits<size_t>::max(), {});
     } catch (const std::runtime_error&) {
         rejectedZeroSelectionStride = true;
     }
@@ -284,7 +284,7 @@ void testComparisonProgram() {
 
     const auto runtimeIntegerComparison =
         compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
-                Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)));
+                Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)), {});
     require(!runtimeIntegerComparison.passed() && runtimeIntegerComparison.mismatches == 1,
             "Runtime detailed comparison rounded distinct wide integers together.");
 

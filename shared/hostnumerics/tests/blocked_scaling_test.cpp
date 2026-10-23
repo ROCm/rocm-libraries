@@ -50,10 +50,10 @@ void testOneSidedBlockScaling() {
         }
 
         runAndCheck(blockedProblem, blockedOutput, "One-sided block scaling result mismatch.");
-        require(
-            compare(blockedOutput, Tensor::copyNativeValues<float>(Shape{rows, columns}, expected))
-                .passed(),
-            "One-sided block scaling produced an incorrect result.");
+        require(compare(blockedOutput,
+                        Tensor::copyNativeValues<float>(Shape{rows, columns}, expected), {})
+                    .passed(),
+                "One-sided block scaling produced an incorrect result.");
     };
 
     checkOneSide(true, {40.0f, 40.0f, 72.0f, 72.0f});
@@ -75,7 +75,8 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
                 "One-sided block scaling read scales for an empty reduction dimension.");
     require(compare(blockedOutput,
                     Tensor::copyNativeValues<float>(Shape{rows, columns},
-                                                    std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}))
+                                                    std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}),
+                    {})
                 .passed(),
             "One-sided zero-K block scaling did not produce a null product.");
 }

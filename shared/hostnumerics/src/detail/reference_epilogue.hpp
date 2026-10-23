@@ -321,7 +321,7 @@ inline void initializeOwnedEpilogueTensor(Tensor tensor) {
                  [&](std::span<const size_t> indices, size_t) { writer.store(indices, 0.0); });
 }
 
-template <typename Accumulator, bool QuantizeResult = false>
+template <typename Accumulator, bool QuantizeResult>
 void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const RuntimeMatrixReader<Accumulator> input(problem.input);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);

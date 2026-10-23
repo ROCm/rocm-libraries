@@ -26,7 +26,7 @@ Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType output
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulIntoWithBlasBackend(a, b, output, options);
+    matmulIntoWithBlasBackend(a, b, output, options, OutputSelection::all({}));
     return output;
 }
 

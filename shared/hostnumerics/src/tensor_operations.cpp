@@ -15,7 +15,7 @@ Tensor binary(detail::BinaryOperation operation, const Tensor& left, const Tenso
     if (layout.shape() != outputShape)
         throw std::runtime_error("Elementwise output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runBinary({left, right, output, computeType, OutputSelection::all()}, operation);
+    detail::runBinary({left, right, output, computeType, OutputSelection::all({})}, operation);
     return output;
 }
 
@@ -85,7 +85,8 @@ void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, Scalar
 
 Tensor activate(const Tensor& input, ActivationFunction function) {
     const ScalarType type = input.type();
-    return activate(input, std::move(function), type, detail::implicitElementwiseComputeType(type));
+    return activate(input, std::move(function), type, detail::implicitElementwiseComputeType(type),
+                    std::nullopt);
 }
 
 Tensor activate(const Tensor& input, ActivationFunction function, ScalarType outputType,
@@ -96,7 +97,7 @@ Tensor activate(const Tensor& input, ActivationFunction function, ScalarType out
         throw std::runtime_error("Activation output layout shape mismatch.");
     Tensor output(outputType, layout);
     detail::runActivation(
-        {input, output, std::move(function), computeType, OutputSelection::all()});
+        {input, output, std::move(function), computeType, OutputSelection::all({})});
     return output;
 }
 

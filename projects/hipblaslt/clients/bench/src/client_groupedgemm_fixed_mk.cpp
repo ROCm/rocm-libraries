@@ -986,8 +986,14 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                                               i3 * stride_b[i]));
                     Tensor c = hc[i].shareStorageWithLayout(
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}, i3 * stride_c[i]));
-                    const Tensor    product = matmul(a, b, ScalarType::Float32);
-                    EpilogueOptions options;
+                    const Tensor product = matmul(
+                        a,
+                        b,
+                        ScalarType::Float32,
+                        roc::hostnumerics::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                        std::nullopt,
+                        roc::hostnumerics::GemmBackend::Automatic);
+                    EpilogueOptions options(ScalarType::Float32);
                     options.inputScale
                         = Tensor::scalar(ScalarType::Float32, static_cast<float>(alpha[i]));
                     if(beta[i] != 0)

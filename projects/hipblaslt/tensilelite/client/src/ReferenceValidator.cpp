@@ -222,14 +222,14 @@ namespace TensileLite
                 if(!problem.stridedBatched())
                     throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
                 auto translated = hostnumerics::translateGemmInvocation(
-                    problem, inputs, OutputSelection::all());
+                    problem, inputs, OutputSelection::all({}));
                 if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
                     throw std::invalid_argument("Freivalds: " + failure->reason);
                 const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
                 std::vector<FreivaldsBatch> batches;
                 for(size_t batch = 0; batch < adapter.batchCount(); ++batch)
                 {
-                    auto prepared = adapter.prepareFreivalds(batch);
+                    auto prepared = adapter.prepareFreivalds(batch, {}, {});
                     if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&prepared))
                         throw std::invalid_argument("Freivalds: " + failure->reason);
                     batches.emplace_back(std::get<FreivaldsPlan>(std::move(prepared)),
@@ -306,7 +306,7 @@ namespace TensileLite
                                             output.d,
                                             output.maxElements.at(index),
                                             output.gpu,
-                                            OutputSelection::explicitIndices({}),
+                                            OutputSelection::explicitIndices({}, {}),
                                             -1);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());

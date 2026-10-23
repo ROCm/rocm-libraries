@@ -44,7 +44,7 @@ namespace {
 }
 
 std::vector<size_t> testStrides(const std::vector<size_t>& sizes,
-                                const std::vector<size_t>& dimensionOrder = {}) {
+                                const std::vector<size_t>& dimensionOrder) {
     std::vector<size_t> strides(sizes.size());
     size_t stride = 1;
     if (dimensionOrder.empty()) {
@@ -70,7 +70,7 @@ class MultiIndex {
 
     explicit MultiIndex(const std::vector<size_t>& sizes) : sizes(sizes) {
         indexes.resize(sizes.size(), 0);
-        strides = testStrides(this->sizes);
+        strides = testStrides(this->sizes, {});
     }
 
     MultiIndex(const std::vector<size_t>& sizes, const std::vector<size_t>& dimensionOrder)

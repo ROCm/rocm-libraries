@@ -907,14 +907,14 @@ namespace TensileLite::Client::hostnumerics
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedD.error())));
                 detail::BatchPlan plan{
-                    .a            = std::move(*borrowedA),
-                    .b            = std::move(*borrowedB),
-                    .c            = std::move(*borrowedC),
-                    .d            = std::move(*borrowedD),
-                    .outputLayout = layoutD,
-                    .outputSelection
-                    = selectAllOutputs ? OutputSelection::all()
-                                       : OutputSelection::explicitIndices(selectedByBatch[batch]),
+                    .a               = std::move(*borrowedA),
+                    .b               = std::move(*borrowedB),
+                    .c               = std::move(*borrowedC),
+                    .d               = std::move(*borrowedD),
+                    .outputLayout    = layoutD,
+                    .outputSelection = selectAllOutputs ? OutputSelection::all({})
+                                                        : OutputSelection::explicitIndices(
+                                                            selectedByBatch[batch], {}),
                 };
 
                 if(problem.useBias())
@@ -1373,10 +1373,10 @@ namespace TensileLite::Client::hostnumerics
             {source.dDestination, productOutput, source.outputSelection});
         if(m_state->amax && m_state->amaxDestination)
             translated.copyBacks.push_back(
-                {*m_state->amaxDestination, *m_state->amax, OutputSelection::all()});
+                {*m_state->amaxDestination, *m_state->amax, OutputSelection::all({})});
         if(source.biasOutput && source.biasOutputDestination)
             translated.copyBacks.push_back(
-                {*source.biasOutputDestination, *source.biasOutput, OutputSelection::all()});
+                {*source.biasOutputDestination, *source.biasOutput, OutputSelection::all({})});
         if(source.auxiliaryOutput && source.auxiliaryOutputDestination)
             translated.copyBacks.push_back({*source.auxiliaryOutputDestination,
                                             *source.auxiliaryOutput,
@@ -1437,8 +1437,11 @@ namespace TensileLite::Client::hostnumerics
             if(m_state->beta != std::complex<double>(0.0, 0.0))
             {
                 epilogue.options.addend      = translated.c;
-                epilogue.options.addendScale = multiply(
-                    translated.beta, translated.scaleC, accumulatorType, accumulatorType);
+                epilogue.options.addendScale = multiply(translated.beta,
+                                                        translated.scaleC,
+                                                        accumulatorType,
+                                                        accumulatorType,
+                                                        std::nullopt);
             }
             epilogue.options.activation = m_state->activation;
             std::visit(

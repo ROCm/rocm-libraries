@@ -27,51 +27,49 @@ void registerGenerationBindings(nb::module_& module) {
     nb::class_<GenerationRecipeSettings>(
         module, "GenerationRecipeSettings",
         "Seed and logical index order shared by one immutable recipe.")
-        .def(nb::init<uint64_t, std::vector<size_t>>(), "seed"_a = uint64_t{0},
-             "index_order"_a = std::vector<size_t>{})
+        .def(nb::init<uint64_t, std::vector<size_t>>(), "seed"_a, "index_order"_a)
         .def_rw("seed", &GenerationRecipeSettings::seed)
         .def_rw("index_order", &GenerationRecipeSettings::indexOrder);
 
     nb::class_<ConstantGenerationParameters>(module, "ConstantGenerationParameters",
                                              "One numerical value for constant generation.")
-        .def(nb::init<double>(), "value"_a = 0.0)
+        .def(nb::init<double>(), "value"_a)
         .def_rw("value", &ConstantGenerationParameters::value);
 
     nb::class_<ChoiceGenerationParameters>(
         module, "ChoiceGenerationParameters",
         "Candidate values; repeated entries increase selection frequency.")
-        .def(nb::init<std::vector<double>>(), "values"_a = std::vector<double>{})
+        .def(nb::init<std::vector<double>>(), "values"_a)
         .def_rw("values", &ChoiceGenerationParameters::values);
 
     nb::class_<UniformIntegerGenerationParameters>(module, "UniformIntegerGenerationParameters",
                                                    "Inclusive integer generation bounds.")
-        .def(nb::init<int, int>(), "lower"_a = 0, "upper"_a = 1)
+        .def(nb::init<int, int>(), "lower"_a, "upper"_a)
         .def_rw("lower", &UniformIntegerGenerationParameters::lower)
         .def_rw("upper", &UniformIntegerGenerationParameters::upper);
 
     nb::class_<UniformRealGenerationParameters>(module, "UniformRealGenerationParameters",
                                                 "Numerical bounds for uniform real generation.")
-        .def(nb::init<double, double>(), "lower"_a = 0.0, "upper"_a = 1.0)
+        .def(nb::init<double, double>(), "lower"_a, "upper"_a)
         .def_rw("lower", &UniformRealGenerationParameters::lower)
         .def_rw("upper", &UniformRealGenerationParameters::upper);
 
     nb::class_<NormalGenerationParameters>(module, "NormalGenerationParameters",
                                            "Mean and standard deviation for normal generation.")
-        .def(nb::init<double, double>(), "mean"_a = 0.0, "standard_deviation"_a = 1.0)
+        .def(nb::init<double, double>(), "mean"_a, "standard_deviation"_a)
         .def_rw("mean", &NormalGenerationParameters::mean)
         .def_rw("standard_deviation", &NormalGenerationParameters::standardDeviation);
 
     nb::class_<DimensionGenerationParameters>(module, "DimensionGenerationParameters",
                                               "Zero-based tensor dimension.")
-        .def(nb::init<size_t>(), "dimension"_a = 0)
+        .def(nb::init<size_t>(), "dimension"_a)
         .def_rw("dimension", &DimensionGenerationParameters::dimension);
 
     nb::class_<AffineIndexRemainderGenerationParameters>(
         module, "AffineIndexRemainderGenerationParameters",
         "Signed affine coordinate expression and positive remainder divisor.")
-        .def(nb::init<std::vector<int64_t>, int64_t, int64_t>(),
-             "dimension_coefficients"_a = std::vector<int64_t>{}, "offset"_a = int64_t{0},
-             "positive_divisor"_a = int64_t{1})
+        .def(nb::init<std::vector<int64_t>, int64_t, int64_t>(), "dimension_coefficients"_a,
+             "offset"_a, "positive_divisor"_a)
         .def_rw("dimension_coefficients",
                 &AffineIndexRemainderGenerationParameters::dimensionCoefficients)
         .def_rw("offset", &AffineIndexRemainderGenerationParameters::offset)
@@ -80,8 +78,8 @@ void registerGenerationBindings(nb::module_& module) {
     nb::class_<RandomEncodedExponentGenerationParameters>(
         module, "RandomEncodedExponentGenerationParameters",
         "Inclusive unbiased exponent bounds and optional source encoding.")
-        .def(nb::init<int, int, std::optional<ScalarType>>(), "lower_unbiased_exponent"_a = 0,
-             "upper_unbiased_exponent"_a = 0, "source_type"_a = std::optional<ScalarType>{})
+        .def(nb::init<int, int, std::optional<ScalarType>>(), "lower_unbiased_exponent"_a,
+             "upper_unbiased_exponent"_a, "source_type"_a)
         .def_rw("lower_unbiased_exponent",
                 &RandomEncodedExponentGenerationParameters::lowerUnbiasedExponent)
         .def_rw("upper_unbiased_exponent",
@@ -90,21 +88,20 @@ void registerGenerationBindings(nb::module_& module) {
 
     nb::class_<RawConstantGenerationParameters>(module, "RawConstantGenerationParameters",
                                                 "Low destination storage bits to write.")
-        .def(nb::init<uint64_t>(), "bits"_a = uint64_t{0})
+        .def(nb::init<uint64_t>(), "bits"_a)
         .def_rw("bits", &RawConstantGenerationParameters::bits);
 
     nb::class_<GenerationAffineValueParameters>(
         module, "GenerationAffineValueParameters",
         "Numerical postprocessing as generated_value * scale + offset.")
-        .def(nb::init<double, double>(), "scale"_a = 1.0, "offset"_a = 0.0)
+        .def(nb::init<double, double>(), "scale"_a, "offset"_a)
         .def_rw("scale", &GenerationAffineValueParameters::scale)
         .def_rw("offset", &GenerationAffineValueParameters::offset);
 
     nb::class_<AlternatingSignGenerationParameters>(
         module, "AlternatingSignGenerationParameters",
         "Dimensions whose coordinate parity controls the generated sign.")
-        .def(nb::init<std::vector<size_t>, bool>(), "dimensions"_a = std::vector<size_t>{},
-             "negative_when_odd"_a = false)
+        .def(nb::init<std::vector<size_t>, bool>(), "dimensions"_a, "negative_when_odd"_a)
         .def_rw("dimensions", &AlternatingSignGenerationParameters::dimensions)
         .def_rw("negative_when_odd", &AlternatingSignGenerationParameters::negativeWhenOdd);
 
@@ -159,12 +156,10 @@ void registerGenerationBindings(nb::module_& module) {
         .def_static("uniform_finite_encoded_value", &GenerationRecipe::uniformFiniteEncodedValue)
         .def_static("random_raw_bits", &GenerationRecipe::randomRawBits)
         .def_static("raw_serial_dimension", &GenerationRecipe::rawSerialDimension, "parameters"_a)
-        .def_static("real_only", &GenerationRecipe::realOnly, "component"_a,
-                    "settings"_a = GenerationRecipeSettings{})
-        .def_static("replicated", &GenerationRecipe::replicated, "component"_a,
-                    "settings"_a = GenerationRecipeSettings{})
+        .def_static("real_only", &GenerationRecipe::realOnly, "component"_a, "settings"_a)
+        .def_static("replicated", &GenerationRecipe::replicated, "component"_a, "settings"_a)
         .def_static("cartesian", &GenerationRecipe::cartesian, "real"_a, "imaginary"_a,
-                    "settings"_a = GenerationRecipeSettings{})
+                    "settings"_a)
         .def_prop_ro("seed", &GenerationRecipe::seed)
         .def_prop_ro("index_order",
                      [](const GenerationRecipe& recipe) {

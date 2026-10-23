@@ -32,8 +32,9 @@ TEST(PeriodicMatmul, ExactDenseOracleChunksAndEpilogue) {
         constexpr size_t m = 17, n = 13;
         const std::array segments{segment(m, n, 0, k / 2, 3, 5, 17),
                                   segment(m, n, k / 2, k - k / 2, 5, 3, 91)};
-        auto plan = requirePlan(preparePeriodicMatmul(Shape{m, n}, k, segments, MatmulOptions{},
-                                                      PeriodicMatmulMode::ExactInteger));
+        auto plan = requirePlan(preparePeriodicMatmul(Shape{m, n}, k, segments,
+                                                      MatmulOptions{ScalarType::Float32},
+                                                      PeriodicMatmulMode::ExactInteger, {}));
         Tensor a(ScalarType::BFloat16, Layout(Shape{m, k}, {1, m + 3}, 0));
         Tensor b(ScalarType::BFloat16, Layout(Shape{k, n}, {1, static_cast<ptrdiff_t>(k + 2)}, 0));
         for (const auto& s : segments) {
@@ -61,7 +62,7 @@ TEST(PeriodicMatmul, ExactDenseOracleChunksAndEpilogue) {
                 bias.storeFrom({i, 0}, int(3 * i));
                 for (size_t j = 0; j < width; ++j) c.storeFrom({i, j}, int(i + 2 * (start + j)));
             }
-            EpilogueOptions e;
+            EpilogueOptions e(ScalarType::Float32);
             e.inputScale = Tensor(2.0f);
             e.addendScale = Tensor(-1.0f);
             e.addend = c;
@@ -84,16 +85,21 @@ TEST(PeriodicMatmul, ReferenceUsesStoredBFloat16) {
     b.storeFrom({1, 0}, 1.0f);
     const std::array segments{PeriodicMatmulSegment{0, PeriodicInitialization(a, Shape{3, 2}),
                                                     PeriodicInitialization(b, Shape{2, 4})}};
-    auto plan = requirePlan(preparePeriodicMatmul(Shape{3, 4}, 2, segments));
+    auto plan = requirePlan(preparePeriodicMatmul(Shape{3, 4}, 2, segments,
+                                                  MatmulOptions{ScalarType::Float32},
+                                                  PeriodicMatmulMode::FloatingPoint, {}));
     a.storeFrom({0, 0}, 100.0f);
     const auto reference = plan.productRegion(std::array<size_t, 2>{2, 3}, Shape{1, 1});
     EXPECT_EQ(reference.loadAs<double>({0, 0}), 2);
     Tensor observed(ScalarType::Float32, Shape{1, 1});
     observed.storeFrom({0, 0}, 2.0f);
-    EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{2, 3}).status,
+    EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{2, 3},
+                               EpilogueOptions{ScalarType::Float32})
+                  .status,
               VerificationStatus::Passed);
     observed.storeFrom({0, 0}, 2.002f);
-    const auto bad = plan.checkRegion(observed, std::array<size_t, 2>{2, 3});
+    const auto bad = plan.checkRegion(observed, std::array<size_t, 2>{2, 3},
+                                      EpilogueOptions{ScalarType::Float32});
     EXPECT_EQ(bad.status, VerificationStatus::Mismatch);
     ASSERT_EQ(bad.comparison.reportedMismatches.size(), 1);
     EXPECT_EQ(bad.comparison.reportedMismatches[0].coordinates, (std::vector<size_t>{2, 3}));
@@ -113,7 +119,9 @@ TEST(PeriodicMatmul, FloatingCancellationAndDifferentReductionOrders) {
         segments.push_back({2 * s, PeriodicInitialization(a, Shape{1, 2}),
                             PeriodicInitialization(b, Shape{2, 1})});
     }
-    auto plan = requirePlan(preparePeriodicMatmul(Shape{1, 1}, 4, segments));
+    auto plan = requirePlan(preparePeriodicMatmul(Shape{1, 1}, 4, segments,
+                                                  MatmulOptions{ScalarType::Float32},
+                                                  PeriodicMatmulMode::FloatingPoint, {}));
     EXPECT_EQ(plan.productRegion(std::array<size_t, 2>{0, 0}, Shape{1, 1}).loadAs<double>({0, 0}),
               1.75);
     float sequential = 0;
@@ -123,37 +131,48 @@ TEST(PeriodicMatmul, FloatingCancellationAndDifferentReductionOrders) {
     for (float result : {sequential, split}) {
         Tensor observed(ScalarType::Float32, Shape{1, 1});
         observed.storeFrom({0, 0}, result);
-        const auto report = plan.checkRegion(observed, std::array<size_t, 2>{0, 0});
+        const auto report = plan.checkRegion(observed, std::array<size_t, 2>{0, 0},
+                                             EpilogueOptions{ScalarType::Float32});
         EXPECT_EQ(report.status, VerificationStatus::Passed) << report.reason;
         EXPECT_GT(report.absoluteTolerance, 0);
         observed.storeFrom({0, 0}, float(1.75 + 4 * report.absoluteTolerance));
-        EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{0, 0}).status,
+        EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{0, 0},
+                                   EpilogueOptions{ScalarType::Float32})
+                      .status,
                   VerificationStatus::Mismatch);
     }
-    auto exact = preparePeriodicMatmul(Shape{1, 1}, 4, segments, MatmulOptions{},
-                                       PeriodicMatmulMode::ExactInteger);
+    auto exact = preparePeriodicMatmul(Shape{1, 1}, 4, segments, MatmulOptions{ScalarType::Float32},
+                                       PeriodicMatmulMode::ExactInteger, {});
     ASSERT_TRUE(std::holds_alternative<VerificationFailure>(exact));
     EXPECT_EQ(std::get<VerificationFailure>(exact).status, VerificationStatus::Unsupported);
 }
 
 TEST(PeriodicMatmul, UnsupportedIncompleteAndInvalidAreDistinct) {
     const std::array segments{segment(17, 13, 0, 5, 3, 5, 7)};
-    MatmulOptions scaled;
+    MatmulOptions scaled(ScalarType::Float32);
     scaled.preQuantizationScalesA.push_back(Tensor(2.0f));
-    auto unsupported = preparePeriodicMatmul(Shape{17, 13}, 5, segments, scaled);
+    auto unsupported = preparePeriodicMatmul(Shape{17, 13}, 5, segments, scaled,
+                                             PeriodicMatmulMode::FloatingPoint, {});
     EXPECT_EQ(std::get<VerificationFailure>(unsupported).status, VerificationStatus::Unsupported);
     PeriodicMatmulLimits limits;
     limits.maxReferenceMultiplyAdds = 1;
-    auto incomplete = preparePeriodicMatmul(Shape{17, 13}, 5, segments, MatmulOptions{},
-                                            PeriodicMatmulMode::FloatingPoint, limits);
+    auto incomplete =
+        preparePeriodicMatmul(Shape{17, 13}, 5, segments, MatmulOptions{ScalarType::Float32},
+                              PeriodicMatmulMode::FloatingPoint, limits);
     EXPECT_EQ(std::get<VerificationFailure>(incomplete).status, VerificationStatus::Incomplete);
-    EXPECT_THROW(preparePeriodicMatmul(Shape{17, 13}, 6, segments), std::runtime_error);
+    EXPECT_THROW(
+        preparePeriodicMatmul(Shape{17, 13}, 6, segments, MatmulOptions{ScalarType::Float32},
+                              PeriodicMatmulMode::FloatingPoint, {}),
+        std::runtime_error);
     limits.maxReferenceMultiplyAdds = 1000;
     limits.maxCheckBytes = 32;
-    auto plan = requirePlan(preparePeriodicMatmul(Shape{17, 13}, 5, segments, MatmulOptions{},
+    auto plan = requirePlan(preparePeriodicMatmul(Shape{17, 13}, 5, segments,
+                                                  MatmulOptions{ScalarType::Float32},
                                                   PeriodicMatmulMode::FloatingPoint, limits));
     Tensor observed(ScalarType::Float32, Shape{2, 2});
-    EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{0, 0}).status,
+    EXPECT_EQ(plan.checkRegion(observed, std::array<size_t, 2>{0, 0},
+                               EpilogueOptions{ScalarType::Float32})
+                  .status,
               VerificationStatus::Incomplete);
     EXPECT_THROW(plan.productRegion(std::array<size_t, 2>{0, 12}, Shape{2, 2}), std::runtime_error);
 }
@@ -167,11 +186,13 @@ TEST(PeriodicMatmul, ExactBoundRejectsCancellationAndFractionalEpilogue) {
     b.storeFrom({1, 0}, 1.0f);
     const std::array segments{PeriodicMatmulSegment{0, PeriodicInitialization(a, Shape{1, 2}),
                                                     PeriodicInitialization(b, Shape{2, 1})}};
-    EXPECT_TRUE(std::holds_alternative<VerificationFailure>(preparePeriodicMatmul(
-        Shape{1, 1}, 2, segments, MatmulOptions{}, PeriodicMatmulMode::ExactInteger)));
-    const auto zero = requirePlan(preparePeriodicMatmul(Shape{1, 1}, 0, {}, MatmulOptions{},
-                                                        PeriodicMatmulMode::ExactInteger));
-    EpilogueOptions e;
+    EXPECT_TRUE(std::holds_alternative<VerificationFailure>(
+        preparePeriodicMatmul(Shape{1, 1}, 2, segments, MatmulOptions{ScalarType::Float32},
+                              PeriodicMatmulMode::ExactInteger, {})));
+    const auto zero =
+        requirePlan(preparePeriodicMatmul(Shape{1, 1}, 0, {}, MatmulOptions{ScalarType::Float32},
+                                          PeriodicMatmulMode::ExactInteger, {}));
+    EpilogueOptions e(ScalarType::Float32);
     e.addend = Tensor(0.5f);
     Tensor observed(ScalarType::Float32, Shape{1, 1});
     observed.storeFrom({0, 0}, 0.5f);
@@ -180,8 +201,10 @@ TEST(PeriodicMatmul, ExactBoundRejectsCancellationAndFractionalEpilogue) {
 }
 
 TEST(PeriodicMatmul, EmptyOutputAndUnderflowRisk) {
-    auto empty = requirePlan(preparePeriodicMatmul(Shape{0, 7}, 0, {}));
-    EpilogueOptions e;
+    auto empty =
+        requirePlan(preparePeriodicMatmul(Shape{0, 7}, 0, {}, MatmulOptions{ScalarType::Float32},
+                                          PeriodicMatmulMode::FloatingPoint, {}));
+    EpilogueOptions e(ScalarType::Float32);
     e.addend = Tensor(std::numeric_limits<float>::quiet_NaN());
     Tensor observed(ScalarType::Float32, Shape{0, 7});
     EXPECT_EQ(empty.checkRegion(observed, std::array<size_t, 2>{0, 0}, e).status,
@@ -193,7 +216,9 @@ TEST(PeriodicMatmul, EmptyOutputAndUnderflowRisk) {
         a.storeFrom({0, 0}, value);
         const std::array segments{PeriodicMatmulSegment{0, PeriodicInitialization(a, Shape{1, 1}),
                                                         PeriodicInitialization(a, Shape{1, 1})}};
-        auto rejected = preparePeriodicMatmul(Shape{1, 1}, 1, segments);
+        auto rejected =
+            preparePeriodicMatmul(Shape{1, 1}, 1, segments, MatmulOptions{ScalarType::Float32},
+                                  PeriodicMatmulMode::FloatingPoint, {});
         EXPECT_EQ(std::get<VerificationFailure>(rejected).status, VerificationStatus::Unsupported);
     }
 }

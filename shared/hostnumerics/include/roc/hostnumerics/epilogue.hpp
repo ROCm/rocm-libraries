@@ -17,7 +17,7 @@ enum class ActivationApplication {
 
 // Numerical policy and optional inputs for the standalone rank-two epilogue.
 struct EpilogueOptions {
-    explicit EpilogueOptions(ScalarType compute = ScalarType::Float32)
+    explicit EpilogueOptions(ScalarType compute)
         : computeType(compute),
           outputScale(Tensor::scalar(compute, 1)),
           auxiliaryScale(Tensor::scalar(compute, 1)) {}
@@ -37,7 +37,7 @@ struct EpilogueOptions {
     OutputConversion outputConversion = OutputConversion::Default;
     ActivationFunction activation;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    OutputSelection outputSelection = OutputSelection::all();
+    OutputSelection outputSelection = OutputSelection::all({});
     bool accumulateAmax = false;
 };
 
@@ -57,12 +57,12 @@ struct EpilogueOutputs {
     std::optional<Tensor> amax;
 };
 
-EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes = {},
-                                  const EpilogueOptions& options = EpilogueOptions{});
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options);
 
 // Writes selected coordinates into caller-owned destinations. The primary
 // output may exactly alias input; other overlapping input/output or
 // output/output storage is rejected.
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
-                           const EpilogueOptions& options = EpilogueOptions{});
+                           const EpilogueOptions& options);
 }  // namespace roc::hostnumerics

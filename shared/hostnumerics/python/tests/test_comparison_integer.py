@@ -17,6 +17,7 @@ class ComparisonIntegerTests(unittest.TestCase):  # noqa: F405
         unsigned_report = hv.compare(
             hv.from_numpy(observed_unsigned),
             hv.from_numpy(expected_unsigned),
+            options=hv.ComparisonOptions(),
         )
         self.assertEqual(
             unsigned_report.mismatches,
@@ -35,6 +36,7 @@ class ComparisonIntegerTests(unittest.TestCase):  # noqa: F405
         signed_report = hv.compare(
             hv.from_numpy(observed_signed),
             hv.from_numpy(expected_signed),
+            options=hv.ComparisonOptions(),
         )
         self.assertEqual(
             signed_report.mismatches,

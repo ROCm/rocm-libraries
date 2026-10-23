@@ -76,8 +76,14 @@ namespace
                             sum += (int(i + z + batch) - 3) * (int((z + j) % 3) - 1);
                         stored.storeFrom({batch, i, j}, sum, conversion);
                     }
-                auto prepared
-                    = hn::prepareFreivalds(a, b, hn::MatmulOptions{}, hn::EpilogueOptions{}, type);
+                auto prepared = hn::prepareFreivalds(
+                    a,
+                    b,
+                    hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                    hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
+                    type,
+                    {},
+                    {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 plans.push_back(std::get<hn::FreivaldsPlan>(std::move(prepared)));
             }
@@ -120,11 +126,14 @@ namespace
                 a.storeFrom({0, 3}, 1);
                 for(size_t k = 0; k < 4; ++k)
                     b.storeFrom({k, 0}, 1);
-                auto prepared = hn::prepareFreivalds(a,
-                                                     b,
-                                                     hn::MatmulOptions{},
-                                                     hn::EpilogueOptions{},
-                                                     hipblaslt::hostnumerics::scalarType(apiType));
+                auto prepared = hn::prepareFreivalds(
+                    a,
+                    b,
+                    hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                    hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
+                    hipblaslt::hostnumerics::scalarType(apiType),
+                    {},
+                    {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const std::vector plans{std::get<hn::FreivaldsPlan>(std::move(prepared))};
                 auto              policy = [&](int            architecture,
@@ -252,7 +261,7 @@ namespace
         for(size_t i = 0; i < 7; ++i)
             for(size_t j = 0; j < 11; ++j)
                 expected.storeFrom({i, j}, int((i + j) % 5) - 2);
-        hn::EpilogueOptions epilogue;
+        hn::EpilogueOptions epilogue(hn::ScalarType::Float32);
         epilogue.addend = expected;
         for(auto type : {hn::ScalarType::Float32, hn::ScalarType::Float8E4M3})
             for(const auto& layout : {hn::Layout(shape, {1, 10}, 3),
@@ -260,8 +269,14 @@ namespace
                                       hn::Layout(shape, {-1, 10}, 9),
                                       hn::Layout(shape, {3, 25}, 3)})
             {
-                const auto prepared
-                    = hn::prepareFreivalds(a, b, hn::MatmulOptions{}, epilogue, type);
+                const auto prepared = hn::prepareFreivalds(
+                    a,
+                    b,
+                    hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                    epilogue,
+                    type,
+                    {},
+                    {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const auto&     plan   = std::get<hn::FreivaldsPlan>(prepared);
                 auto            stored = expected.copyConvertedTo(type, layout);
@@ -280,7 +295,10 @@ namespace
                     const auto observation = hipblaslt::client::observeFreivalds(
                         plan.copyRequest(), device.buf(), layout, stream.value);
                     const auto check = std::visit(
-                        [&](const auto& output) { return plan.check(output); }, observation.output);
+                        [&](const auto& output) {
+                            return plan.check(output, std::numeric_limits<size_t>::max(), {});
+                        },
+                        observation.output);
                     EXPECT_EQ(check.status,
                               corrupt ? hn::VerificationStatus::Mismatch
                                       : hn::VerificationStatus::Passed);
@@ -292,11 +310,14 @@ namespace
         // A saturated integer output requires exact recomputation. Exhausting the
         // exception budget must fail, even if the stored value is correct.
         hn::Tensor largeA(256.0f), one(1.0f);
-        const auto prepared = hn::prepareFreivalds(largeA.reshapeSharingStorage(hn::Shape{1, 1}),
-                                                   one.reshapeSharingStorage(hn::Shape{1, 1}),
-                                                   hn::MatmulOptions{},
-                                                   hn::EpilogueOptions{},
-                                                   hn::ScalarType::Int8);
+        const auto prepared
+            = hn::prepareFreivalds(largeA.reshapeSharingStorage(hn::Shape{1, 1}),
+                                   one.reshapeSharingStorage(hn::Shape{1, 1}),
+                                   hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                                   hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
+                                   hn::ScalarType::Int8,
+                                   {},
+                                   {});
         ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
         const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
         HipDeviceBuffer  device(HIP_R_8I, size_t(1));

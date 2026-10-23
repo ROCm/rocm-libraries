@@ -206,18 +206,21 @@ namespace
         if(alphaTensor.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
            && inputA.shape()[1] != 0)
         {
-            const Tensor product = matmulWithBlasBackend(inputA, inputB, accumulatorType, options);
-            referenceAccumulator = multiply(product, alphaTensor, accumulatorType, accumulatorType);
+            const Tensor product
+                = matmulWithBlasBackend(inputA, inputB, accumulatorType, options, std::nullopt);
+            referenceAccumulator
+                = multiply(product, alphaTensor, accumulatorType, accumulatorType, std::nullopt);
         }
         if(betaTensor.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
         {
-            const Tensor cScale
-                = multiply(betaTensor, scaleCTensor, accumulatorType, accumulatorType);
-            Tensor addend = multiply(inputC, cScale, accumulatorType, accumulatorType);
+            const Tensor cScale = multiply(
+                betaTensor, scaleCTensor, accumulatorType, accumulatorType, std::nullopt);
+            Tensor addend
+                = multiply(inputC, cScale, accumulatorType, accumulatorType, std::nullopt);
             referenceAccumulator
-                = referenceAccumulator
-                      ? add(*referenceAccumulator, addend, accumulatorType, accumulatorType)
-                      : std::move(addend);
+                = referenceAccumulator ? add(
+                      *referenceAccumulator, addend, accumulatorType, accumulatorType, std::nullopt)
+                                       : std::move(addend);
         }
         if(!referenceAccumulator)
             referenceAccumulator.emplace(accumulatorType,
@@ -242,10 +245,22 @@ TEST(HostNumericsInitialization, UnsignedFloatingPointMatrixBDoesNotAlternateSig
         SCOPED_TRACE(std::string(scalarTypeName(type)));
         Tensor a(type, Shape{4, 8});
         Tensor b(type, a.shape());
-        hipblaslt::hostnumerics::initializeMatrix(
-            a, hipblaslt::hostnumerics::MatrixRole::A, hipblaslt_initialization::rand_int, 37);
-        hipblaslt::hostnumerics::initializeMatrix(
-            b, hipblaslt::hostnumerics::MatrixRole::B, hipblaslt_initialization::rand_int, 37);
+        hipblaslt::hostnumerics::initializeMatrix(a,
+                                                  hipblaslt::hostnumerics::MatrixRole::A,
+                                                  hipblaslt_initialization::rand_int,
+                                                  37,
+                                                  false,
+                                                  std::nullopt,
+                                                  false,
+                                                  {});
+        hipblaslt::hostnumerics::initializeMatrix(b,
+                                                  hipblaslt::hostnumerics::MatrixRole::B,
+                                                  hipblaslt_initialization::rand_int,
+                                                  37,
+                                                  false,
+                                                  std::nullopt,
+                                                  false,
+                                                  {});
         for(size_t row = 0; row < 4; ++row)
             for(size_t column = 0; column < 8; ++column)
             {
@@ -565,7 +580,7 @@ TEST(HostNumericsMatrixTransformBridge, MapsLayoutsAndTransposes)
             rows, columns, batches, 4, batchStride, true, false));
 
     const auto comparison = hipblaslt::hostnumerics::referenceMatrixTransform(
-        observedTensor, aTensor, bTensor, 2.0, -1.0);
+        observedTensor, aTensor, bTensor, 2.0, -1.0, {});
     EXPECT_EQ(comparison.compared, rows * columns * batches);
     EXPECT_TRUE(comparison.passed());
 }
@@ -609,7 +624,11 @@ TEST(HostNumericsDataInitializationBridge, DirectMatrixNormalGenerationIsRepeata
         initializeMatrix(result,
                          MatrixRole::A,
                          hipblaslt_initialization::norm_dist,
-                         seedForMatrixRole(defaultInitializationSeed, MatrixRole::A));
+                         seedForMatrixRole(defaultInitializationSeed, MatrixRole::A),
+                         false,
+                         std::nullopt,
+                         false,
+                         {});
         return result;
     };
     const Tensor first  = initialize();
@@ -625,11 +644,13 @@ TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToCompon
     using namespace hipblaslt::hostnumerics;
 
     const Layout layout(Shape{2, 2}, {1, 3}, 0);
-    const Tensor values = generate(ScalarType::Float32,
-                                   layout,
-                                   initializationRecipe(ScalarType::Float32,
-                                                        hipblaslt_initialization::rand_int,
-                                                        defaultInitializationSeed));
+    const Tensor values
+        = generate(ScalarType::Float32,
+                   layout,
+                   initializationRecipe(ScalarType::Float32,
+                                        hipblaslt_initialization::rand_int,
+                                        defaultInitializationSeed,
+                                        hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
 
     for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
     {
@@ -641,11 +662,13 @@ TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToCompon
     }
     EXPECT_EQ(values.shareStorageWithLayout(Layout(Shape{5}, {1}, 0)).loadAs<float>({2}), 0);
 
-    const Tensor nanValues = generate(ScalarType::Float32,
-                                      Shape{8},
-                                      initializationRecipe(ScalarType::Float32,
-                                                           hipblaslt_initialization::nan,
-                                                           defaultInitializationSeed));
+    const Tensor nanValues
+        = generate(ScalarType::Float32,
+                   Shape{8},
+                   initializationRecipe(ScalarType::Float32,
+                                        hipblaslt_initialization::nan,
+                                        defaultInitializationSeed,
+                                        hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
     for(size_t index = 0; index < nanValues.elementCount(); ++index)
         EXPECT_TRUE(std::isnan(nanValues.loadAs<float>({index})));
 
@@ -664,7 +687,12 @@ TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToCompon
     for(const ScalarType type : integerTypes)
     {
         const Tensor zeroOrOne = generate(
-            type, Shape{64}, initializationRecipe(type, hipblaslt_initialization::uniform_01, 17));
+            type,
+            Shape{64},
+            initializationRecipe(type,
+                                 hipblaslt_initialization::uniform_01,
+                                 17,
+                                 hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
         for(size_t index = 0; index < zeroOrOne.elementCount(); ++index)
         {
             const int64_t value = zeroOrOne.loadAs<int64_t>({index});
@@ -687,7 +715,7 @@ TEST(HostNumericsDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encodi
         using namespace roc::hostnumerics;
         const Tensor value = generate(hipblaslt::hostnumerics::scalarType(type),
                                       Shape{1},
-                                      GenerationRecipe::realOnly(GenerationRecipe::zero()));
+                                      GenerationRecipe::realOnly(GenerationRecipe::zero(), {}));
         EXPECT_EQ(value.rawEncodedBackingStorage().front(), std::byte{0})
             << "hipDataType=" << static_cast<int>(type);
     }
@@ -704,7 +732,11 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
         initializeMatrix(result,
                          MatrixRole::B,
                          hipblaslt_initialization::integer_exact,
-                         seedForMatrixRole(defaultInitializationSeed, MatrixRole::B));
+                         seedForMatrixRole(defaultInitializationSeed, MatrixRole::B),
+                         false,
+                         std::nullopt,
+                         false,
+                         {});
         return result;
     };
     const Tensor exactMatrix = initializeExact();
@@ -743,7 +775,11 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     initializeMatrix(probeMatrix,
                      MatrixRole::B,
                      hipblaslt_initialization::fp16_accumulator_probe,
-                     seedForMatrixRole(defaultInitializationSeed, MatrixRole::B));
+                     seedForMatrixRole(defaultInitializationSeed, MatrixRole::B),
+                     false,
+                     std::nullopt,
+                     false,
+                     {});
     for(size_t column = 0; column < 2; ++column)
         for(size_t row = 0; row < 4; ++row)
             EXPECT_EQ(probeMatrix.loadAs<float>({row, column}), row % 2 == 0 ? 2 : -2);
@@ -760,7 +796,11 @@ TEST(HostNumericsDataInitializationBridge,
     initializeMatrix(actual,
                      MatrixRole::A,
                      hipblaslt_initialization::norm_dist_one_special,
-                     seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A));
+                     seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
+                     false,
+                     std::nullopt,
+                     false,
+                     {});
     EXPECT_EQ(actual.layout(), expectedLayout);
     EXPECT_EQ(actual.rawEncodedBackingStorage().size(),
               storageBytesForLayout(ScalarType::Float32, expectedLayout));
@@ -769,7 +809,8 @@ TEST(HostNumericsDataInitializationBridge,
     generate(baseline,
              initializationRecipe(ScalarType::Float32,
                                   hipblaslt_initialization::norm_dist,
-                                  seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A))
+                                  seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
+                                  hipblaslt::hostnumerics::TrigonometricComponent::Cosine)
                  .withIndexOrder(std::vector<size_t>{2, 1, 0}));
 
     constexpr size_t  expectedSpecialLogicalIndex = 6;
@@ -811,7 +852,9 @@ TEST(HostNumericsDataInitializationBridge,
                      hipblaslt_initialization::norm_dist_one_special,
                      seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
                      false,
-                     OneSpecialValue::NegativeInfinity);
+                     OneSpecialValue::NegativeInfinity,
+                     false,
+                     {});
     const float negativeInfinity = negative.loadAs<float>({0, 0, 1});
     EXPECT_TRUE(std::isinf(negativeInfinity));
     EXPECT_TRUE(std::signbit(negativeInfinity));
@@ -822,14 +865,20 @@ TEST(HostNumericsDataInitializationBridge,
                      hipblaslt_initialization::norm_dist_one_special,
                      seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
                      false,
-                     OneSpecialValue::NaN);
+                     OneSpecialValue::NaN,
+                     false,
+                     {});
     EXPECT_TRUE(std::isnan(nan.loadAs<float>({0, 0, 1})));
 
     Tensor fiveElements(ScalarType::Float32, Layout(Shape{5, 1}, {1, 7}, 0));
     initializeMatrix(fiveElements,
                      MatrixRole::A,
                      hipblaslt_initialization::norm_dist_one_special,
-                     seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A));
+                     seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A),
+                     false,
+                     std::nullopt,
+                     false,
+                     {});
     for(size_t row = 0; row < 5; ++row)
         EXPECT_EQ(std::isinf(fiveElements.loadAs<float>({row, 0})), row == 4);
 }
@@ -860,7 +909,14 @@ TEST(HostNumericsDataInitializationBridge, StochasticMatrixModesUseRoleSpecificS
             const uint64_t baseSeed = mode == hipblaslt_initialization::norm_dist_one_special
                                           ? oneSpecialInitializationSeed
                                           : defaultInitializationSeed;
-            initializeMatrix(result, role, mode, seedForMatrixRole(baseSeed, role));
+            initializeMatrix(result,
+                             role,
+                             mode,
+                             seedForMatrixRole(baseSeed, role),
+                             false,
+                             std::nullopt,
+                             false,
+                             {});
             return result;
         };
 
@@ -884,7 +940,14 @@ TEST(HostNumericsDataInitializationBridge, MatrixInitializationUsesTheExactCalle
 
     const auto initialized = [](MatrixRole role, uint64_t seed) {
         Tensor result(ScalarType::Float32, Shape{8, 8});
-        initializeMatrix(result, role, hipblaslt_initialization::norm_dist, seed);
+        initializeMatrix(result,
+                         role,
+                         hipblaslt_initialization::norm_dist,
+                         seed,
+                         false,
+                         std::nullopt,
+                         false,
+                         {});
         return result;
     };
 
@@ -907,14 +970,22 @@ TEST(HostNumericsDataInitializationBridge, PositiveOnlyMatrixPolicyIsExplicit)
     Tensor         signedMatrix(ScalarType::Float32, Shape{8, 8});
     Tensor         positiveMatrix(ScalarType::Float32, Shape{8, 8});
     const uint64_t seed = seedForMatrixRole(defaultInitializationSeed, MatrixRole::A);
-    initializeMatrix(signedMatrix, MatrixRole::A, hipblaslt_initialization::hpl, seed);
+    initializeMatrix(signedMatrix,
+                     MatrixRole::A,
+                     hipblaslt_initialization::hpl,
+                     seed,
+                     false,
+                     std::nullopt,
+                     false,
+                     {});
     initializeMatrix(positiveMatrix,
                      MatrixRole::A,
                      hipblaslt_initialization::hpl,
                      seed,
                      false,
                      std::nullopt,
-                     true);
+                     true,
+                     {});
     for(size_t column = 0; column < 8; ++column)
         for(size_t row = 0; row < 8; ++row)
         {
@@ -932,14 +1003,22 @@ TEST(HostNumericsDataInitializationBridge, UnsupportedModesThrowInsteadOfProduci
     EXPECT_THROW(initializeMatrix(value,
                                   MatrixRole::A,
                                   hipblaslt_initialization::fp16_accumulator_probe,
-                                  defaultInitializationSeed),
+                                  defaultInitializationSeed,
+                                  false,
+                                  std::nullopt,
+                                  false,
+                                  {}),
                  std::runtime_error);
 
     EXPECT_THROW(
         initializeMatrix(value,
                          MatrixRole::A,
                          static_cast<hipblaslt_initialization>(std::numeric_limits<int>::max()),
-                         defaultInitializationSeed),
+                         defaultInitializationSeed,
+                         false,
+                         std::nullopt,
+                         false,
+                         {}),
         std::runtime_error);
 
     EXPECT_THROW(initializationRecipe(ScalarType::Float32,
@@ -961,7 +1040,11 @@ TEST(HostNumericsDataInitializationBridge, PinnedTensorInitializationUploadsToDe
     initializeMatrix(expected,
                      MatrixRole::B,
                      hipblaslt_initialization::integer_exact,
-                     seedForMatrixRole(defaultInitializationSeed, MatrixRole::B));
+                     seedForMatrixRole(defaultInitializationSeed, MatrixRole::B),
+                     false,
+                     std::nullopt,
+                     false,
+                     {});
 
     HipDeviceBuffer device(HIP_R_32F, elements);
     ASSERT_EQ(device.memcheck(), hipSuccess);
@@ -1030,7 +1113,15 @@ TEST(HostNumericsCblasBridge, ComposesAlphaMatmulAndBetaCWithTensorOperations)
     const Tensor               inputA = Tensor::copyNativeValues<float>(Shape{2, 2}, a);
     const Tensor               inputB = Tensor::copyNativeValues<float>(Shape{2, 2}, b);
     const Tensor               inputC = Tensor::copyNativeValues<float>(Shape{2, 2}, c);
-    const Tensor output = matmul(inputA, inputB, ScalarType::Float32) * 2.0f + inputC * 3.0f;
+    const Tensor               output
+        = matmul(inputA,
+                 inputB,
+                 ScalarType::Float32,
+                 roc::hostnumerics::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                 std::nullopt,
+                 roc::hostnumerics::GemmBackend::Automatic)
+              * 2.0f
+          + inputC * 3.0f;
 
     EXPECT_FLOAT_EQ(output.loadAs<float>({0, 0}), 41.0f);
     EXPECT_FLOAT_EQ(output.loadAs<float>({0, 1}), 47.0f);
@@ -2055,17 +2146,27 @@ TEST(HostNumericsDataInitializationBridge, ExplicitOrderPreservesVectorAndBatche
     for(const Shape& shape : {Shape{5}, Shape{2, 3, 2}})
     {
         Tensor output(ScalarType::Float32, shape);
-        initializeMatrix(output, MatrixRole::A, hipblaslt_initialization::rand_int, 17);
+        initializeMatrix(output,
+                         MatrixRole::A,
+                         hipblaslt_initialization::rand_int,
+                         17,
+                         false,
+                         std::nullopt,
+                         false,
+                         {});
         std::vector<size_t> order(shape.rank());
         for(size_t axis = 0; axis < order.size(); ++axis)
             order[axis] = order.size() - 1 - axis;
         Tensor     expected(ScalarType::Float32, shape);
         const auto recipe
-            = initializationRecipe(ScalarType::Float32, hipblaslt_initialization::rand_int, 17)
+            = initializationRecipe(ScalarType::Float32,
+                                   hipblaslt_initialization::rand_int,
+                                   17,
+                                   hipblaslt::hostnumerics::TrigonometricComponent::Cosine)
                   .withIndexOrder(order);
         for(size_t index = 0; index < expected.elementCount(); ++index)
             generateAt(expected, index, recipe);
-        EXPECT_TRUE(compare(output, expected).passed());
+        EXPECT_TRUE(compare(output, expected, {}).passed());
     }
 }
 
@@ -2078,7 +2179,7 @@ TEST(HostNumericsDataInitializationBridge, MatmulValidationAcceptsScalarVectorAn
         const Tensor expected
             = generate(ScalarType::Float32,
                        shape,
-                       GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0})));
+                       GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0}), {}));
         MatmulValidationCase testCase;
         testCase.outputs.emplace_back(expected, expected.deepCopy());
         MatmulValidationOptions options;

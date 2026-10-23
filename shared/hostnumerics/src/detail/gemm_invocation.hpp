@@ -22,9 +22,8 @@ struct GemmSupportInfo {
 // implementations. Epilogue inputs are intentionally absent: callers compose
 // coefficient, addend, bias, activation, and output conversion operations.
 struct GemmInvocation : MatmulOptions {
-    GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor,
-                   const MatmulOptions& options = MatmulOptions{},
-                   OutputSelection selection = OutputSelection::all())
+    GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor, const MatmulOptions& options,
+                   OutputSelection selection)
         : MatmulOptions(options),
           a(std::move(aTensor)),
           b(std::move(bTensor)),

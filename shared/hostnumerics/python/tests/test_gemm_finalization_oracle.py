@@ -34,17 +34,25 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 output_conversion=hv.OutputConversion.SaturatingInt8,
                 include_raw_output=True,
                 output_selection=selection,
+                activation_application=hv.ActivationApplication.Forward,
+                auxiliary_scale=complex(1.0, 0.0),
+                activation_parameter1=0.0,
+                include_amax=False,
             )
 
-        full = run(hv.OutputSelection.all())
-        partial = run(hv.OutputSelection.explicit_indices(selected))
+        full = run(hv.OutputSelection.all(index_order=[]))
+        partial = run(hv.OutputSelection.explicit_indices(selected, index_order=[]))
 
         self.assertIsNotNone(full.raw_output)
-        np.testing.assert_array_equal(hv.to_numpy(full.raw_output), expected_raw)
-        np.testing.assert_array_equal(hv.to_numpy(full.output), expected_output)
         np.testing.assert_array_equal(
-            hv.to_numpy(partial.output),
-            selected_values(hv.to_numpy(full.output), selected),
+            hv.to_numpy(full.raw_output, dtype=None), expected_raw
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(full.output, dtype=None), expected_output
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(partial.output, dtype=None),
+            selected_values(hv.to_numpy(full.output, dtype=None), selected),
         )
 
     def test_int32_wrapping_precedes_saturating_conversion(self):
@@ -85,8 +93,19 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             beta=1,
             output_scale=output_scale,
             output_conversion=hv.OutputConversion.SaturatingInt8,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), saturating_int8(targets))
+        np.testing.assert_array_equal(
+            hv.to_numpy(observed, dtype=None), saturating_int8(targets)
+        )
 
     def test_selected_float_results_match_full_result_and_numpy(self):
         rows = 35
@@ -121,7 +140,17 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 alpha=float(alpha),
                 beta=float(beta),
                 backend=hv.GemmBackend.Blocked,
-            )
+                compute_type_a=None,
+                compute_type_b=None,
+                math_mode=hv.MathMode.Default,
+                output_selection=hv.OutputSelection.all([]),
+                output_conversion=hv.OutputConversion.Default,
+                accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                conjugate_a=False,
+                conjugate_b=False,
+                output_layout=None,
+            ),
+            dtype=None,
         )
         partial = hv.to_numpy(
             reference_gemm(
@@ -130,9 +159,20 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 hv.ScalarType.Float32,
                 alpha=float(alpha),
                 beta=float(beta),
-                output_selection=hv.OutputSelection.explicit_indices(selected),
+                output_selection=hv.OutputSelection.explicit_indices(
+                    selected, index_order=[]
+                ),
                 backend=hv.GemmBackend.Blocked,
-            )
+                compute_type_a=None,
+                compute_type_b=None,
+                math_mode=hv.MathMode.Default,
+                output_conversion=hv.OutputConversion.Default,
+                accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                conjugate_a=False,
+                conjugate_b=False,
+                output_layout=None,
+            ),
+            dtype=None,
         )
         np.testing.assert_allclose(
             full, expected, rtol=relative_tolerance, atol=absolute_tolerance

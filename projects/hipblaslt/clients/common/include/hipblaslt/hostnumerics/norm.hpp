@@ -57,8 +57,8 @@ inline bool norm_check(double normError, roc::hostnumerics::ScalarType type)
 inline bool norm_check(double                                       normError,
                        roc::hostnumerics::ScalarType                outputType,
                        hipblasComputeType_t                         computeType,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeA = std::nullopt,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeB = std::nullopt)
+                       std::optional<roc::hostnumerics::ScalarType> inputTypeA,
+                       std::optional<roc::hostnumerics::ScalarType> inputTypeB)
 {
     double tolerance = norm_tolerance(outputType);
     if(computeType == HIPBLAS_COMPUTE_32F_FAST_16BF

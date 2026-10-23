@@ -180,7 +180,7 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         stagedOptions.conjugateA = conjugateA;
         stagedOptions.conjugateB = conjugateB;
         GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
-                                     stagedOptions);
+                                     stagedOptions, OutputSelection::all({}));
 
         blas.run(stagedProblem);
     }

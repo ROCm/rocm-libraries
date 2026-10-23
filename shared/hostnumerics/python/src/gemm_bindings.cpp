@@ -42,7 +42,7 @@ void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
 
 void registerGemmBindings(nb::module_& module) {
     nb::class_<MatmulOptions>(module, "_MatmulOptions")
-        .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
+        .def(nb::init<ScalarType>(), "accumulator_type"_a)
         .def_rw("accumulator_type", &MatmulOptions::accumulatorType)
         .def_rw("accumulation_rounding", &MatmulOptions::accumulationRounding)
         .def_rw("math_mode", &MatmulOptions::mathMode)
@@ -57,11 +57,9 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("conjugate_a", &MatmulOptions::conjugateA)
         .def_rw("conjugate_b", &MatmulOptions::conjugateB);
 
-    module.def("_matmul", &matmulOwned, "a"_a, "b"_a, "output_type"_a = ScalarType::Float32,
-               "options"_a = MatmulOptions{}, "output_layout"_a = std::optional<Layout>{},
-               "backend"_a = GemmBackend::Automatic);
-    module.def("_matmul_into", &matmulIntoBound, "a"_a, "b"_a, "output"_a,
-               "options"_a = MatmulOptions{}, "output_selection"_a = OutputSelection::all(),
-               "backend"_a = GemmBackend::Automatic);
+    module.def("_matmul", &matmulOwned, "a"_a, "b"_a, "output_type"_a, "options"_a,
+               "output_layout"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound, "a"_a, "b"_a, "output"_a, "options"_a,
+               "output_selection"_a, "backend"_a);
 }
 }  // namespace roc::hostnumerics::python_bindings

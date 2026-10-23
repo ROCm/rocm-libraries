@@ -22,7 +22,7 @@ struct StructuredSparsityPlan {
 
 struct StructuredSparsitySpecification {
     StructuredSparsitySpecification(Tensor inputTensor, StructuredSparsityPattern sparsityPattern,
-                                    StructuredSparsityOutputOptions requestedOutputs = {})
+                                    StructuredSparsityOutputOptions requestedOutputs)
         : input(std::move(inputTensor)),
           pattern(std::move(sparsityPattern)),
           outputs(requestedOutputs) {}

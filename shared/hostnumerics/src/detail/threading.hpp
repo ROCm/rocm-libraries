@@ -54,8 +54,8 @@ inline size_t saturatedProduct(size_t left, size_t right) {
     return left * right;
 }
 
-inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread = 4096,
-                                int defaultMaximumThreadCount = 8) {
+inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread,
+                                int defaultMaximumThreadCount) {
 #ifdef _OPENMP
     if (workItemCount == 0 || omp_in_parallel()) return 1;
 
@@ -80,7 +80,7 @@ template <typename Function>
 void forEachParallelIndex(size_t count, size_t workItemCount, bool canParallelize,
                           size_t minimumWorkItemsPerThread, Function&& function) {
     const int threadCount = std::min<int>(
-        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread) : 1,
+        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread, 8) : 1,
         static_cast<int>(std::min(count, static_cast<size_t>(std::numeric_limits<int>::max()))));
 #ifdef _OPENMP
     if (threadCount > 1 && count <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
@@ -111,7 +111,7 @@ Value transformReduceParallelIndices(size_t count, size_t workItemCount, bool ca
                                      Transform&& transform, Reduction&& reduction) {
     if (count == 0) return initial;
     const int threadCount = std::min<int>(
-        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread) : 1,
+        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread, 8) : 1,
         static_cast<int>(std::min(count, static_cast<size_t>(std::numeric_limits<int>::max()))));
 #ifdef _OPENMP
     if (threadCount > 1 && count <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {

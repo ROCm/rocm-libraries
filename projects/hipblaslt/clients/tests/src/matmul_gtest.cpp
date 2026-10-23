@@ -320,7 +320,10 @@ TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
     const Tensor         inputTensor = Tensor::copyNativeStorage<float>(layout, input);
     Tensor               output(ScalarType::Float32, layout);
     Tensor               auxiliary(ScalarType::Float32, layout);
-    referenceEpilogueInto(inputTensor, {.output = output, .auxiliaryOutput = auxiliary});
+    referenceEpilogueInto(
+        inputTensor,
+        {.output = output, .auxiliaryOutput = auxiliary},
+        roc::hostnumerics::EpilogueOptions{roc::hostnumerics::ScalarType::Float32});
 
     for(size_t index = 0; index < input.size(); ++index)
     {

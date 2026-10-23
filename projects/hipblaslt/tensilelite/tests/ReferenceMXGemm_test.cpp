@@ -219,7 +219,8 @@ TEST(ReferenceMXGemm, TreatsE8RawZeroAsZero)
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
 
-    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1);
+    executeReferenceGemm(
+        problem, inputs, /*elementsToValidate=*/-1, roc::hostnumerics::GemmBackend::Automatic);
     EXPECT_EQ(d[0], 0.0f);
 }
 

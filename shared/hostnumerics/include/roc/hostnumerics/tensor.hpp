@@ -265,9 +265,9 @@ class Tensor {
     [[nodiscard]] Tensor relu() const;
     [[nodiscard]] Tensor gelu() const;
     [[nodiscard]] Tensor sigmoid() const;
-    [[nodiscard]] Tensor tanh(double inputScale = 1.0, double outputScale = 1.0) const;
+    [[nodiscard]] Tensor tanh(double inputScale, double outputScale) const;
     [[nodiscard]] Tensor silu() const;
-    [[nodiscard]] Tensor swish(double beta = 1.0) const;
+    [[nodiscard]] Tensor swish(double beta) const;
     [[nodiscard]] Tensor clip(double minimum, double maximum) const;
 
     // Copies only logical tensor elements into their encoded destination

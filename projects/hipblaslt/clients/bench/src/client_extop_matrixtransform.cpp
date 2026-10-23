@@ -337,11 +337,11 @@ void validation(hipDataType                      datatype,
         return roc::hostnumerics::Tensor::takeOwnershipOfEncodedBackingStorage(
             type, layout, std::move(storage));
     };
-    const roc::hostnumerics::Tensor observed = readDeviceTensor(c, outputLayout);
-    const roc::hostnumerics::Tensor inputA   = readDeviceTensor(a, aLayout);
-    const roc::hostnumerics::Tensor inputB   = readDeviceTensor(b, bLayout);
-    const auto                      comparison
-        = hipblaslt::hostnumerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
+    const roc::hostnumerics::Tensor observed   = readDeviceTensor(c, outputLayout);
+    const roc::hostnumerics::Tensor inputA     = readDeviceTensor(a, aLayout);
+    const roc::hostnumerics::Tensor inputB     = readDeviceTensor(b, bLayout);
+    const auto                      comparison = hipblaslt::hostnumerics::referenceMatrixTransform(
+        observed, inputA, inputB, alpha, beta, {});
     if(!comparison.passed())
     {
         hipblaslt::hostnumerics::reportMatrixTransformMismatches(std::cerr, comparison);

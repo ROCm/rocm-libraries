@@ -66,7 +66,7 @@ class PeriodicMatmulPlan {
     // zero tolerance. FloatingPoint uses the documented forward-error bound.
     // Mismatch coordinates/indices are rebased to the full output shape.
     PeriodicMatmulCheck checkRegion(const Tensor& observed, std::span<const size_t> origin,
-                                    const EpilogueOptions& epilogue = EpilogueOptions{}) const;
+                                    const EpilogueOptions& epilogue) const;
 
    private:
     struct Data;
@@ -82,9 +82,9 @@ class PeriodicMatmulPlan {
 // empty segment list. Each segment's full M/N must match outputShape. The
 // verifier uses the same definitions that the caller used to initialize A/B;
 // it does not infer periodicity from a few samples of arbitrary arrays.
-PeriodicMatmulPreparation preparePeriodicMatmul(
-    Shape outputShape, size_t reductionLength, std::span<const PeriodicMatmulSegment> segments,
-    const MatmulOptions& operation = MatmulOptions{},
-    PeriodicMatmulMode mode = PeriodicMatmulMode::FloatingPoint,
-    const PeriodicMatmulLimits& limits = {});
+PeriodicMatmulPreparation preparePeriodicMatmul(Shape outputShape, size_t reductionLength,
+                                                std::span<const PeriodicMatmulSegment> segments,
+                                                const MatmulOptions& operation,
+                                                PeriodicMatmulMode mode,
+                                                const PeriodicMatmulLimits& limits);
 }  // namespace roc::hostnumerics

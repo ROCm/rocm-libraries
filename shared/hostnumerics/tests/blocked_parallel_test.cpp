@@ -20,7 +20,7 @@ void testParallelSparseSelection() {
     Tensor output = makeOutput(rows, columns, sentinel);
     GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
     problem.outputSelection =
-        OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128);
+        OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128, {});
 
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 

@@ -30,7 +30,7 @@ class HostNumericsTutorial(unittest.TestCase):
         tensor = hn.from_numpy(values)
         self.assertEqual(tensor.type, hn.ScalarType.Float32)
         self.assertEqual(tensor.shape, [2, 2])
-        np.testing.assert_array_equal(hn.to_numpy(tensor), values)
+        np.testing.assert_array_equal(hn.to_numpy(tensor, dtype=None), values)
 
         fp4 = hn.from_numpy(
             np.asarray([0.0, 0.5, 1.0, 6.0], dtype=np.float32),
@@ -38,7 +38,8 @@ class HostNumericsTutorial(unittest.TestCase):
         )
         self.assertEqual(len(fp4.storage), 2)
         np.testing.assert_array_equal(
-            hn.to_numpy(fp4), np.asarray([0.0, 0.5, 1.0, 6.0], dtype=np.float32)
+            hn.to_numpy(fp4, dtype=None),
+            np.asarray([0.0, 0.5, 1.0, 6.0], dtype=np.float32),
         )
 
     def test_02_generate_reproducible_tensors(self):
@@ -62,7 +63,7 @@ class HostNumericsTutorial(unittest.TestCase):
                 seed=27,
             ),
         )
-        self.assertTrue(np.any(hn.to_numpy(integers) != 0))
+        self.assertTrue(np.any(hn.to_numpy(integers, dtype=None) != 0))
 
         complex_values = hn.generate_tensor(
             hn.ScalarType.ComplexFloat32,
@@ -74,38 +75,61 @@ class HostNumericsTutorial(unittest.TestCase):
                 hn.GenerationRecipe.uniform_integer(
                     hn.UniformIntegerGenerationParameters(lower=-4, upper=-1)
                 ),
-                hn.GenerationRecipeSettings(seed=37),
+                hn.GenerationRecipeSettings(seed=37, index_order=[]),
             ),
         )
-        self.assertTrue(np.all(hn.to_numpy(complex_values).imag != 0))
+        self.assertTrue(np.all(hn.to_numpy(complex_values, dtype=None).imag != 0))
 
     def test_03_compose_broadcast_tensor_operations(self):
         column = hn.from_numpy(np.asarray([[1.0], [2.0]], dtype=np.float32))
         row = hn.from_numpy(np.asarray([[10.0, 20.0, 30.0]], dtype=np.float32))
         result = 2.0 * column + row
         np.testing.assert_array_equal(
-            hn.to_numpy(result),
+            hn.to_numpy(result, dtype=None),
             np.asarray([[12.0, 22.0, 32.0], [14.0, 24.0, 34.0]], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hn.to_numpy(hn.relu(hn.clip(result, -20.0, 20.0))),
+            hn.to_numpy(hn.relu(hn.clip(result, -20.0, 20.0)), dtype=None),
             np.asarray([[12.0, 20.0, 20.0], [14.0, 20.0, 20.0]], dtype=np.float32),
         )
 
     def test_04_multiply_matrices(self):
         a_values = np.asarray([[1, 2, 3], [4, 5, 6]], dtype=np.float32)
         b_values = np.asarray([[7, 8], [9, 10], [11, 12]], dtype=np.float32)
-        product = hn.matmul(hn.from_numpy(a_values), hn.from_numpy(b_values))
-        np.testing.assert_array_equal(hn.to_numpy(product), a_values @ b_values)
+        product = hn.matmul(
+            hn.from_numpy(a_values),
+            hn.from_numpy(b_values),
+            output_type=hn.ScalarType.Float32,
+            accumulator_type=hn.ScalarType.Float32,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hn.MathMode.Default,
+            accumulation_rounding=hn.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hn.GemmBackend.Automatic,
+        )
+        np.testing.assert_array_equal(
+            hn.to_numpy(product, dtype=None), a_values @ b_values
+        )
 
         integer_product = hn.matmul(
             hn.from_numpy(np.asarray([[2, 3]], dtype=np.int8)),
             hn.from_numpy(np.asarray([[4], [5]], dtype=np.int8)),
             output_type=hn.ScalarType.Int32,
             accumulator_type=hn.ScalarType.Int32,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hn.MathMode.Default,
+            accumulation_rounding=hn.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hn.GemmBackend.Automatic,
         )
         np.testing.assert_array_equal(
-            hn.to_numpy(integer_product), np.asarray([[23]], dtype=np.int32)
+            hn.to_numpy(integer_product, dtype=None), np.asarray([[23]], dtype=np.int32)
         )
 
         complex_a = np.asarray([[1 + 1j, 2 - 1j]], dtype=np.complex64)
@@ -116,17 +140,35 @@ class HostNumericsTutorial(unittest.TestCase):
             output_type=hn.ScalarType.ComplexFloat32,
             accumulator_type=hn.ScalarType.ComplexFloat32,
             conjugate_a=True,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hn.MathMode.Default,
+            accumulation_rounding=hn.AccumulationRounding.TypeDefault,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hn.GemmBackend.Automatic,
         )
         np.testing.assert_array_equal(
-            hn.to_numpy(complex_product), np.conjugate(complex_a) @ complex_b
+            hn.to_numpy(complex_product, dtype=None),
+            np.conjugate(complex_a) @ complex_b,
         )
 
         empty_product = hn.matmul(
             hn.from_numpy(np.empty((2, 0), dtype=np.float32)),
             hn.from_numpy(np.empty((0, 3), dtype=np.float32)),
+            output_type=hn.ScalarType.Float32,
+            accumulator_type=hn.ScalarType.Float32,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hn.MathMode.Default,
+            accumulation_rounding=hn.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hn.GemmBackend.Automatic,
         )
         np.testing.assert_array_equal(
-            hn.to_numpy(empty_product), np.zeros((2, 3), dtype=np.float32)
+            hn.to_numpy(empty_product, dtype=None), np.zeros((2, 3), dtype=np.float32)
         )
 
     def test_05_generate_mxfp4_data_and_scales(self):
@@ -160,11 +202,20 @@ class HostNumericsTutorial(unittest.TestCase):
             accumulator_type=hn.ScalarType.Float32,
             axes=[1],
         )
-        np.testing.assert_array_equal(hn.to_numpy(sums), np.asarray([3.0, 7.0]))
+        np.testing.assert_array_equal(
+            hn.to_numpy(sums, dtype=None), np.asarray([3.0, 7.0])
+        )
 
-        probabilities = hn.reference_softmax(values, axis=1)
+        probabilities = hn.reference_softmax(
+            values,
+            axis=1,
+            output_type=hn.ScalarType.Float32,
+            accumulator_type=hn.ScalarType.Float32,
+        )
         np.testing.assert_allclose(
-            np.sum(hn.to_numpy(probabilities), axis=1), np.ones(2), rtol=1e-6
+            np.sum(hn.to_numpy(probabilities, dtype=None), axis=1),
+            np.ones(2),
+            rtol=1e-6,
         )
 
         normalized = hn.reference_layer_norm(
@@ -172,6 +223,8 @@ class HostNumericsTutorial(unittest.TestCase):
             output_type=hn.ScalarType.Float32,
             statistics_type=hn.ScalarType.Float32,
             axis=1,
+            accumulator_type=hn.ScalarType.Float32,
+            epsilon=1e-5,
         )
         self.assertEqual(normalized.mean.shape, [2])
 
@@ -183,14 +236,14 @@ class HostNumericsTutorial(unittest.TestCase):
             pattern,
             emit_two_of_four_metadata=True,
         )
-        self.assertEqual(hn.to_numpy(sparse.pruned)[0, 1], 0.0)
+        self.assertEqual(hn.to_numpy(sparse.pruned, dtype=None)[0, 1], 0.0)
         self.assertIsNotNone(sparse.retained_indices)
         self.assertIsNotNone(sparse.two_of_four_metadata)
 
     def test_07_inspect_a_comparison_failure(self):
         expected = hn.from_numpy(np.asarray([1.0, 2.0, 3.0], dtype=np.float32))
         observed = hn.from_numpy(np.asarray([1.0, 9.0, 3.0], dtype=np.float32))
-        report = hn.compare(observed, expected)
+        report = hn.compare(observed, expected, options=hn.ComparisonOptions())
         self.assertFalse(report.passed)
         self.assertEqual(report.mismatches, 1)
         self.assertTrue(

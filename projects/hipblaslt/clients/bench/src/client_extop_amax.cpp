@@ -121,7 +121,7 @@ void reportComparison(const char*                      title,
                       const roc::hostnumerics::Tensor& observed,
                       const roc::hostnumerics::Tensor& expected)
 {
-    const auto report = roc::hostnumerics::compare(observed, expected);
+    const auto report = roc::hostnumerics::compare(observed, expected, {});
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 

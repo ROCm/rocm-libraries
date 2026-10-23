@@ -55,8 +55,16 @@ class GemmComplexOracleTests(unittest.TestCase):  # noqa: F405
             alpha=complex(alpha),
             beta=complex(beta),
             conjugate_a=True,
-            output_selection=hv.OutputSelection.explicit_indices(selected),
+            output_selection=hv.OutputSelection.explicit_indices(
+                selected, index_order=[]
+            ),
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_b=False,
         )
 
         expected_complete = np.complex64(alpha) * (np.conjugate(left) @ right)
@@ -65,7 +73,7 @@ class GemmComplexOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
 
         expected_storage = np.zeros(14, dtype=np.complex64)
         expected_storage[[2, 13]] = expected_complete.reshape(-1)[selected]

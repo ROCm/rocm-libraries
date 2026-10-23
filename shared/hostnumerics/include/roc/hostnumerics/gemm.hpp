@@ -30,8 +30,7 @@ enum class AccumulationRounding {
 
 // Numerical and execution policy intrinsic to one matrix multiplication.
 struct MatmulOptions {
-    explicit MatmulOptions(ScalarType accumulator = ScalarType::Float32)
-        : accumulatorType(accumulator) {}
+    explicit MatmulOptions(ScalarType accumulator) : accumulatorType(accumulator) {}
 
     ScalarType accumulatorType;  // Dot-product arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
@@ -51,12 +50,8 @@ struct MatmulOptions {
 
 // NumPy-style matrix multiplication. The owning form allocates output; the
 // `Into` form writes selected coordinates of caller-owned output.
-void matmulInto(const Tensor& a, const Tensor& b, Tensor output,
-                const MatmulOptions& options = MatmulOptions{},
-                OutputSelection selection = OutputSelection::all(),
-                GemmBackend backend = GemmBackend::Automatic);
-Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType,
-              const MatmulOptions& options = MatmulOptions{},
-              std::optional<Layout> outputLayout = std::nullopt,
-              GemmBackend backend = GemmBackend::Automatic);
+void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
+                OutputSelection selection, GemmBackend backend);
+Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,
+              std::optional<Layout> outputLayout, GemmBackend backend);
 }  // namespace roc::hostnumerics

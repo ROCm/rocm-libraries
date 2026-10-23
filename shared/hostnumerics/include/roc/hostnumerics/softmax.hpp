@@ -9,11 +9,10 @@
 namespace roc::hostnumerics {
 // Allocates a contiguous output and computes a numerically stabilized softmax
 // over axis. The selected axis must be nonempty.
-Tensor referenceSoftmax(Tensor input, size_t axis, ScalarType outputType = ScalarType::Float32,
-                        ScalarType accumulatorType = ScalarType::Float32);
+Tensor referenceSoftmax(Tensor input, size_t axis, ScalarType outputType,
+                        ScalarType accumulatorType);
 
 // Writes every logical element of output. Exact same-layout input/output
 // aliasing is allowed; differently mapped overlapping storage is rejected.
-void referenceSoftmaxInto(Tensor input, Tensor output, size_t axis,
-                          ScalarType accumulatorType = ScalarType::Float32);
+void referenceSoftmaxInto(Tensor input, Tensor output, size_t axis, ScalarType accumulatorType);
 }  // namespace roc::hostnumerics

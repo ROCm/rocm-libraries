@@ -74,7 +74,7 @@ integer stored values strictly below the threshold contribute to both sums.
 Other values are omitted from both sums and recorded once, with their logical
 coordinate and decoded stored value. Padding is outside this protocol.
 
-`plan.check(observation)` checks the identity, dimensions, element count,
+`plan.check(observation, exceptionLimit, checkOptions)` checks the identity, dimensions, element count,
 canonical residues, budgets, and unique in-range exception coordinates before
 accepting the observation. Each exceptional element is recomputed exactly from
 the immutable inputs, converted to the requested output encoding, and compared
@@ -85,7 +85,7 @@ that is the conversion's correct result. NaNs compare unequal. This work costs
 
 The adapter's completeness claim is trusted: host metadata cannot prove that a
 device kernel actually scanned every element. Adapter tests must exercise that
-contract. The HIP-free `plan.check(tensor)` is a reference implementation of the
+contract. The HIP-free `plan.check(tensor, exceptionLimit, checkOptions)` is a reference implementation of the
 same observation protocol and numerical check.
 
 ### Optional computation error

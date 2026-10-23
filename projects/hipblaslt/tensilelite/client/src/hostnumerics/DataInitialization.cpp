@@ -508,6 +508,7 @@ namespace TensileLite::Client
             StructuredSparseTensor{.pruned            = prunedTensor,
                                    .compressed        = compressedTensor,
                                    .twoOfFourMetadata = metadataTensor},
-            sparsePattern(mode, dim));
+            sparsePattern(mode, dim),
+            {});
     }
 } // namespace TensileLite::Client

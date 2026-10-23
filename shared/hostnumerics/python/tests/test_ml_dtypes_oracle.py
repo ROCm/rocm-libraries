@@ -72,6 +72,8 @@ class MlDtypesOracleTests(unittest.TestCase):
                     scalar_type,
                     [raw.size],
                     pack_host_codes(raw, bits),
+                    strides=None,
+                    offset=0,
                 )
                 observed = hv.to_numpy(tensor, np.float32)
                 self.assert_same_float_values(observed, expected)

@@ -132,7 +132,7 @@ GemmTestRunInfo runAndCheck(GemmTestCase& problem, const Tensor& output,
     const Tensor expected = expectedFloatResult(problem);
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
     require(run.backendUsed == GemmBackend::Blocked, "Blocked backend run information mismatch.");
-    require(compare(output, expected).passed(), mismatchMessage);
+    require(compare(output, expected, {}).passed(), mismatchMessage);
     return run;
 }
 
