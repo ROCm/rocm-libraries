@@ -22,8 +22,12 @@
 
 #  include _THRUST_STD_INCLUDE(__cccl/exceptions.h)
 
-#  ifdef _CCCL_NO_EXCEPTIONS
+#  if defined(_CCCL_NO_EXCEPTIONS)
 #    define THRUST_NO_EXCEPTIONS
+#  elif defined(_CCCL_HAS_EXCEPTIONS)
+#    if !_CCCL_HAS_EXCEPTIONS()
+#      define THRUST_NO_EXCEPTIONS
+#    endif
 #  endif
 
 #else
