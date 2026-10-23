@@ -52,27 +52,18 @@
 
 #include "rocsparse.h"
 
-#include <cmath>
-
 using namespace rocsparse_ut;
 
 namespace
 {
-    // Loose-enough tolerance for the float computations below. Most of the
-    // matrices are built from small powers of two so the host reference and
-    // the device result usually match exactly; this only guards against
-    // summation-order differences.
-    constexpr double kTol = 1e-4;
-
-    void expect_vectors_near(const std::vector<float>& expected,
-                             const std::vector<float>& actual,
-                             double                    tol = kTol)
+    // Every input is a small integer or dyadic fraction and every partial sum
+    // stays below 2^24, so float results are exact regardless of summation order.
+    void expect_vectors_eq(const std::vector<float>& expected, const std::vector<float>& actual)
     {
         ASSERT_EQ(expected.size(), actual.size());
         for(size_t i = 0; i < expected.size(); ++i)
         {
-            EXPECT_NEAR(static_cast<double>(actual[i]), static_cast<double>(expected[i]), tol)
-                << "index " << i;
+            EXPECT_EQ(actual[i], expected[i]) << "index " << i;
         }
     }
 
@@ -579,7 +570,7 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        expect_vectors_near(expected, to_host(y));
+        expect_vectors_eq(expected, to_host(y));
 
         EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv_descr), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
@@ -602,7 +593,6 @@ class EllSv : public HandleTest
 //   [2       ]   [y0]   [4 ]
 //   [1  4    ] * [y1] = [12]
 //   [  2  8  ]   [y2]   [40]
-// All constants are small powers of two, so the float arithmetic is exact.
 TEST_F(EllSv, lower_non_unit)
 {
     const int64_t m = 3, n = 3, width = 2;
@@ -661,7 +651,7 @@ TEST_F(EllSv, lower_non_unit)
     std::vector<float> expected
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, -1);
-    expect_vectors_near(expected, to_host(y));
+    expect_vectors_eq(expected, to_host(y));
 
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
@@ -731,7 +721,7 @@ TEST_F(EllSv, lower_unit_diagonal)
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, -1);
     // y = {2, 3, 7.25}: the garbage diagonal values must not leak in.
-    expect_vectors_near(expected, to_host(y));
+    expect_vectors_eq(expected, to_host(y));
 
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
@@ -807,7 +797,7 @@ TEST_F(EllSv, zero_pivot)
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, 1);
     // y = {2, 8, -1}, using the library's "treat a zero diagonal as 1" rule.
-    expect_vectors_near(expected, to_host(y));
+    expect_vectors_eq(expected, to_host(y));
 
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
