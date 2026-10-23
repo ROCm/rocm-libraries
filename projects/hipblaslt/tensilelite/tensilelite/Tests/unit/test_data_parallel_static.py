@@ -433,6 +433,7 @@ def test_tdm_apply_streamk_offset_subtile_noop_under_dp_only():
     dp_mod = tdmApplyTileKOffsetSubtile(writer, {"TileProcessingStrategy": "DataParallel"}, tp)
     nodp_mod = tdmApplyTileKOffsetSubtile(writer, {"TileProcessingStrategy": "StreamK"}, tp)
 
+    assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
 
 
