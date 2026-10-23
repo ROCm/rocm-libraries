@@ -76,27 +76,27 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
-            int         m_useBias;
-            int         m_biasSrc;
+            int         m_useBias = 0;
+            int         m_biasSrc = static_cast<int>(ContractionProblemGemm::TENSOR::D);
             std::string m_useScaleAB;
-            bool        m_useScaleCD;
-            int         m_useScaleAlphaVec;
-            bool        m_useSynchronizer;
-            bool        m_useE;
-            bool        m_useGradient     = false;
-            bool        m_useGateResidual = false;
-            bool        m_outputAmaxD;
+            bool        m_useScaleCD       = false;
+            int         m_useScaleAlphaVec = 0;
+            bool        m_useSynchronizer  = false;
+            bool        m_useE             = false;
+            bool        m_useGradient      = false;
+            bool        m_useGateResidual  = false;
+            bool        m_outputAmaxD      = false;
 
-            int                              m_sparse;
-            KernelLanguage                   m_kernelLanguage;
-            PerformanceMetric                m_performanceMetric;
-            ActivationType                   m_activationType;
-            std::vector<rocisa::DataType>    m_biasTypeArgs;
-            std::vector<rocisa::DataType>    m_gateTypeArgs;
-            std::vector<int>                 m_factorDimArgs;
-            std::vector<bool>                m_icacheFlushArgs;
-            bool                             m_activationNoGuard;
-            std::vector<ActivationType>      m_activationEnumArg;
+            int                           m_sparse;
+            KernelLanguage                m_kernelLanguage;
+            PerformanceMetric             m_performanceMetric;
+            ActivationType                m_activationType;
+            std::vector<rocisa::DataType> m_biasTypeArgs;
+            std::vector<rocisa::DataType> m_gateTypeArgs;
+            std::vector<int>              m_factorDimArgs;
+            std::vector<bool>             m_icacheFlushArgs;
+            bool                          m_activationNoGuard;
+            std::vector<ActivationType>   m_activationEnumArg;
             // StreamK=5 hybrid-mode toggle values to test. Each element
             // generates a separate ContractionProblemGemm variant with
             // setParams().setStreamKTileSchedulingMode(value); the SK5
