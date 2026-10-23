@@ -1,0 +1,397 @@
+# Buildable MatrixInstructions for CCC_TT on gfx942:
+# MIs with at least one kernel TensileLite builds within geko's generic (GA) ranges.
+# MI Designer proposes only these. Each line: MI, macro tile, DepthUs it builds at.
+# 295 of 385 candidates buildable; the rest are at the end.
+# From scripts/generate_buildable_mis.py; rerun when TensileLite or geko changes.
+
+Architecture: gfx942
+GemmType: CCC_TT
+Source: rocm-libraries a292e397cf, 2026-10-22
+MatrixInstructions:
+  - [16, 16, 4, 1, 1, 1, 1, 4, 1]  # MT64x16  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 2, 4, 1]  # MT64x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 3, 4, 1]  # MT64x48  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 4, 4, 1]  # MT64x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 5, 4, 1]  # MT64x80  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 6, 4, 1]  # MT64x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 7, 4, 1]  # MT64x112  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 8, 4, 1]  # MT64x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 9, 4, 1]  # MT64x144  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 10, 4, 1]  # MT64x160  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 11, 4, 1]  # MT64x176  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 12, 4, 1]  # MT64x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 13, 4, 1]  # MT64x208  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 14, 4, 1]  # MT64x224  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 15, 4, 1]  # MT64x240  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 16, 4, 1]  # MT64x256  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 17, 4, 1]  # MT64x272  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 18, 4, 1]  # MT64x288  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 19, 4, 1]  # MT64x304  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 20, 4, 1]  # MT64x320  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 21, 4, 1]  # MT64x336  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 22, 4, 1]  # MT64x352  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 23, 4, 1]  # MT64x368  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 24, 4, 1]  # MT64x384  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 25, 4, 1]  # MT64x400  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 26, 4, 1]  # MT64x416  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 27, 4, 1]  # MT64x432  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 28, 4, 1]  # MT64x448  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 1, 4, 1]  # MT128x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 2, 4, 1]  # MT128x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 3, 4, 1]  # MT128x48  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 4, 4, 1]  # MT128x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 5, 4, 1]  # MT128x80  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 6, 4, 1]  # MT128x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 7, 4, 1]  # MT128x112  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 8, 4, 1]  # MT128x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 9, 4, 1]  # MT128x144  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 10, 4, 1]  # MT128x160  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 11, 4, 1]  # MT128x176  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 12, 4, 1]  # MT128x192  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 13, 4, 1]  # MT128x208  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 14, 4, 1]  # MT128x224  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 15, 4, 1]  # MT128x240  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 16, 4, 1]  # MT128x256  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 1, 4, 1]  # MT192x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 2, 4, 1]  # MT192x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 3, 4, 1]  # MT192x48  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 4, 4, 1]  # MT192x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 5, 4, 1]  # MT192x80  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 6, 4, 1]  # MT192x96  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 7, 4, 1]  # MT192x112  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 8, 4, 1]  # MT192x128  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 9, 4, 1]  # MT192x144  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 10, 4, 1]  # MT192x160  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 1, 4, 1]  # MT256x16  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 2, 4, 1]  # MT256x32  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 3, 4, 1]  # MT256x48  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 4, 4, 1]  # MT256x64  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 5, 4, 1]  # MT256x80  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 6, 4, 1]  # MT256x96  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 7, 4, 1]  # MT256x112  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 8, 4, 1]  # MT256x128  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 1, 4, 1]  # MT320x16  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 2, 4, 1]  # MT320x32  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 3, 4, 1]  # MT320x48  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 4, 4, 1]  # MT320x64  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 5, 4, 1]  # MT320x80  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 6, 4, 1]  # MT320x96  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 1, 4, 1]  # MT384x16  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 2, 4, 1]  # MT384x32  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 3, 4, 1]  # MT384x48  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 4, 4, 1]  # MT384x64  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 5, 4, 1]  # MT384x80  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 1, 4, 1]  # MT448x16  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 2, 4, 1]  # MT448x32  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 3, 4, 1]  # MT448x48  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 4, 4, 1]  # MT448x64  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 1, 2, 2]  # MT32x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 2, 2, 2]  # MT32x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 3, 2, 2]  # MT32x96  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 4, 2, 2]  # MT32x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 5, 2, 2]  # MT32x160  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 6, 2, 2]  # MT32x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 7, 2, 2]  # MT32x224  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 8, 2, 2]  # MT32x256  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 9, 2, 2]  # MT32x288  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 10, 2, 2]  # MT32x320  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 11, 2, 2]  # MT32x352  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 12, 2, 2]  # MT32x384  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 13, 2, 2]  # MT32x416  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 14, 2, 2]  # MT32x448  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 15, 2, 2]  # MT32x480  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 1, 2, 2]  # MT64x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 2, 2, 2]  # MT64x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 3, 2, 2]  # MT64x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 4, 2, 2]  # MT64x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 5, 2, 2]  # MT64x160  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 6, 2, 2]  # MT64x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 7, 2, 2]  # MT64x224  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 8, 2, 2]  # MT64x256  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 9, 2, 2]  # MT64x288  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 10, 2, 2]  # MT64x320  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 11, 2, 2]  # MT64x352  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 12, 2, 2]  # MT64x384  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 13, 2, 2]  # MT64x416  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 14, 2, 2]  # MT64x448  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 1, 2, 2]  # MT96x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 2, 2, 2]  # MT96x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 3, 2, 2]  # MT96x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 4, 2, 2]  # MT96x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 5, 2, 2]  # MT96x160  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 6, 2, 2]  # MT96x192  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 7, 2, 2]  # MT96x224  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 8, 2, 2]  # MT96x256  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 9, 2, 2]  # MT96x288  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 10, 2, 2]  # MT96x320  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 1, 2, 2]  # MT128x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 2, 2, 2]  # MT128x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 3, 2, 2]  # MT128x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 4, 2, 2]  # MT128x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 5, 2, 2]  # MT128x160  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 6, 2, 2]  # MT128x192  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 7, 2, 2]  # MT128x224  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 8, 2, 2]  # MT128x256  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 1, 2, 2]  # MT160x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 2, 2, 2]  # MT160x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 3, 2, 2]  # MT160x96  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 4, 2, 2]  # MT160x128  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 5, 2, 2]  # MT160x160  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 6, 2, 2]  # MT160x192  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 1, 2, 2]  # MT192x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 2, 2, 2]  # MT192x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 3, 2, 2]  # MT192x96  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 4, 2, 2]  # MT192x128  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 5, 2, 2]  # MT192x160  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 1, 2, 2]  # MT224x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 7, 2, 2, 2]  # MT224x64  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 3, 2, 2]  # MT224x96  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 4, 2, 2]  # MT224x128  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 1, 2, 2]  # MT256x32  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 2, 2, 2]  # MT256x64  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 3, 2, 2]  # MT256x96  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 4, 2, 2]  # MT256x128  DepthU 16
+  - [16, 16, 4, 1, 1, 9, 1, 2, 2]  # MT288x32  DepthU 16
+  - [16, 16, 4, 1, 1, 9, 2, 2, 2]  # MT288x64  DepthU 16
+  - [16, 16, 4, 1, 1, 9, 3, 2, 2]  # MT288x96  DepthU 16
+  - [16, 16, 4, 1, 1, 10, 1, 2, 2]  # MT320x32  DepthU 16
+  - [16, 16, 4, 1, 1, 10, 2, 2, 2]  # MT320x64  DepthU 16
+  - [16, 16, 4, 1, 1, 10, 3, 2, 2]  # MT320x96  DepthU 16
+  - [16, 16, 4, 1, 1, 11, 1, 2, 2]  # MT352x32  DepthU 16
+  - [16, 16, 4, 1, 1, 11, 2, 2, 2]  # MT352x64  DepthU 16
+  - [16, 16, 4, 1, 1, 12, 1, 2, 2]  # MT384x32  DepthU 16
+  - [16, 16, 4, 1, 1, 12, 2, 2, 2]  # MT384x64  DepthU 16
+  - [16, 16, 4, 1, 1, 13, 1, 2, 2]  # MT416x32  DepthU 16
+  - [16, 16, 4, 1, 1, 13, 2, 2, 2]  # MT416x64  DepthU 16
+  - [16, 16, 4, 1, 1, 14, 1, 2, 2]  # MT448x32  DepthU 16
+  - [16, 16, 4, 1, 1, 14, 2, 2, 2]  # MT448x64  DepthU 16
+  - [16, 16, 4, 1, 1, 15, 1, 2, 2]  # MT480x32  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 1, 1, 4]  # MT16x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 2, 1, 4]  # MT16x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 3, 1, 4]  # MT16x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 4, 1, 4]  # MT16x256  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 5, 1, 4]  # MT16x320  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 6, 1, 4]  # MT16x384  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 7, 1, 4]  # MT16x448  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 1, 1, 4]  # MT32x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 2, 1, 4]  # MT32x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 3, 1, 4]  # MT32x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 4, 1, 4]  # MT32x256  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 5, 1, 4]  # MT32x320  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 6, 1, 4]  # MT32x384  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 7, 1, 4]  # MT32x448  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 1, 1, 4]  # MT48x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 2, 1, 4]  # MT48x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 3, 1, 4]  # MT48x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 4, 1, 4]  # MT48x256  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 5, 1, 4]  # MT48x320  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 6, 1, 4]  # MT48x384  DepthU 16
+  - [16, 16, 4, 1, 1, 3, 7, 1, 4]  # MT48x448  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 1, 1, 4]  # MT64x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 4, 2, 1, 4]  # MT64x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 3, 1, 4]  # MT64x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 4, 1, 4]  # MT64x256  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 5, 1, 4]  # MT64x320  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 6, 1, 4]  # MT64x384  DepthU 16
+  - [16, 16, 4, 1, 1, 4, 7, 1, 4]  # MT64x448  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 1, 1, 4]  # MT80x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 2, 1, 4]  # MT80x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 3, 1, 4]  # MT80x192  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 4, 1, 4]  # MT80x256  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 5, 1, 4]  # MT80x320  DepthU 16
+  - [16, 16, 4, 1, 1, 5, 6, 1, 4]  # MT80x384  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 1, 1, 4]  # MT96x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 2, 1, 4]  # MT96x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 3, 1, 4]  # MT96x192  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 4, 1, 4]  # MT96x256  DepthU 16
+  - [16, 16, 4, 1, 1, 6, 5, 1, 4]  # MT96x320  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 1, 1, 4]  # MT112x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 7, 2, 1, 4]  # MT112x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 7, 3, 1, 4]  # MT112x192  DepthU 16
+  - [16, 16, 4, 1, 1, 7, 4, 1, 4]  # MT112x256  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 1, 1, 4]  # MT128x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 8, 2, 1, 4]  # MT128x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 8, 3, 1, 4]  # MT128x192  DepthU 16
+  - [16, 16, 4, 1, 1, 8, 4, 1, 4]  # MT128x256  DepthU 16
+  - [16, 16, 4, 1, 1, 9, 1, 1, 4]  # MT144x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 9, 2, 1, 4]  # MT144x128  DepthU 16
+  - [16, 16, 4, 1, 1, 9, 3, 1, 4]  # MT144x192  DepthU 16
+  - [16, 16, 4, 1, 1, 10, 1, 1, 4]  # MT160x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 10, 2, 1, 4]  # MT160x128  DepthU 16
+  - [16, 16, 4, 1, 1, 10, 3, 1, 4]  # MT160x192  DepthU 16
+  - [16, 16, 4, 1, 1, 11, 1, 1, 4]  # MT176x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 11, 2, 1, 4]  # MT176x128  DepthU 16
+  - [16, 16, 4, 1, 1, 12, 1, 1, 4]  # MT192x64  DepthU 16,32
+  - [16, 16, 4, 1, 1, 12, 2, 1, 4]  # MT192x128  DepthU 16
+  - [16, 16, 4, 1, 1, 13, 1, 1, 4]  # MT208x64  DepthU 16
+  - [16, 16, 4, 1, 1, 13, 2, 1, 4]  # MT208x128  DepthU 16
+  - [16, 16, 4, 1, 1, 14, 1, 1, 4]  # MT224x64  DepthU 16
+  - [16, 16, 4, 1, 1, 14, 2, 1, 4]  # MT224x128  DepthU 16
+  - [16, 16, 4, 1, 1, 15, 1, 1, 4]  # MT240x64  DepthU 16
+  - [16, 16, 4, 1, 1, 15, 2, 1, 4]  # MT240x128  DepthU 16
+  - [16, 16, 4, 1, 1, 16, 1, 1, 4]  # MT256x64  DepthU 16
+  - [16, 16, 4, 1, 1, 16, 2, 1, 4]  # MT256x128  DepthU 16
+  - [16, 16, 4, 1, 1, 17, 1, 1, 4]  # MT272x64  DepthU 16
+  - [16, 16, 4, 1, 1, 18, 1, 1, 4]  # MT288x64  DepthU 16
+  - [16, 16, 4, 1, 1, 19, 1, 1, 4]  # MT304x64  DepthU 16
+  - [16, 16, 4, 1, 1, 20, 1, 1, 4]  # MT320x64  DepthU 16
+  - [16, 16, 4, 1, 1, 21, 1, 1, 4]  # MT336x64  DepthU 16
+  - [16, 16, 4, 1, 1, 22, 1, 1, 4]  # MT352x64  DepthU 16
+  - [16, 16, 4, 1, 1, 23, 1, 1, 4]  # MT368x64  DepthU 16
+  - [16, 16, 4, 1, 1, 24, 1, 1, 4]  # MT384x64  DepthU 16
+  - [16, 16, 4, 1, 1, 25, 1, 1, 4]  # MT400x64  DepthU 16
+  - [16, 16, 4, 1, 1, 26, 1, 1, 4]  # MT416x64  DepthU 16
+  - [16, 16, 4, 1, 1, 27, 1, 1, 4]  # MT432x64  DepthU 16
+  - [16, 16, 4, 1, 1, 28, 1, 1, 4]  # MT448x64  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 1, 1, 2]  # MT16x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 2, 1, 2]  # MT16x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 3, 1, 2]  # MT16x96  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 4, 1, 2]  # MT16x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 5, 1, 2]  # MT16x160  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 6, 1, 2]  # MT16x192  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 7, 1, 2]  # MT16x224  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 8, 1, 2]  # MT16x256  DepthU 16
+  - [16, 16, 4, 1, 1, 2, 1, 1, 2]  # MT32x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 2, 2, 1, 2]  # MT32x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 3, 1, 2]  # MT32x96  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 4, 1, 2]  # MT32x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 3, 1, 1, 2]  # MT48x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 2, 1, 2]  # MT48x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 4, 1, 1, 2]  # MT64x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 4, 2, 1, 2]  # MT64x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 5, 1, 1, 2]  # MT80x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 6, 1, 1, 2]  # MT96x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 7, 1, 1, 2]  # MT112x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 8, 1, 1, 2]  # MT128x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 1, 2, 1]  # MT32x16  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 2, 2, 1]  # MT32x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 3, 2, 1]  # MT32x48  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 4, 2, 1]  # MT32x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 5, 2, 1]  # MT32x80  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 6, 2, 1]  # MT32x96  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 7, 2, 1]  # MT32x112  DepthU 16,32
+  - [16, 16, 4, 1, 1, 1, 8, 2, 1]  # MT32x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 1, 2, 1]  # MT64x16  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 2, 2, 1]  # MT64x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 3, 2, 1]  # MT64x48  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 4, 2, 1]  # MT64x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 1, 2, 1]  # MT96x16  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 2, 2, 1]  # MT96x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 4, 1, 2, 1]  # MT128x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 2, 2, 1]  # MT128x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 5, 1, 2, 1]  # MT160x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 1, 2, 1]  # MT192x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 7, 1, 2, 1]  # MT224x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 8, 1, 2, 1]  # MT256x16  DepthU 16
+  - [16, 16, 4, 1, 1, 1, 1, 1, 1]  # MT16x16  DepthU 16,32,64,128,256
+  - [16, 16, 4, 1, 1, 1, 2, 1, 1]  # MT16x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 3, 1, 1]  # MT16x48  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 1, 4, 1, 1]  # MT16x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 5, 1, 1]  # MT16x80  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 6, 1, 1]  # MT16x96  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 7, 1, 1]  # MT16x112  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 1, 8, 1, 1]  # MT16x128  DepthU 16,32
+  - [16, 16, 4, 1, 1, 2, 1, 1, 1]  # MT32x16  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 2, 2, 1, 1]  # MT32x32  DepthU 16,32,64,128
+  - [16, 16, 4, 1, 1, 2, 3, 1, 1]  # MT32x48  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 2, 4, 1, 1]  # MT32x64  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 1, 1, 1]  # MT48x16  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 3, 2, 1, 1]  # MT48x32  DepthU 16,32
+  - [16, 16, 4, 1, 1, 4, 1, 1, 1]  # MT64x16  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 4, 2, 1, 1]  # MT64x32  DepthU 16,32,64
+  - [16, 16, 4, 1, 1, 5, 1, 1, 1]  # MT80x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 6, 1, 1, 1]  # MT96x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 7, 1, 1, 1]  # MT112x16  DepthU 16,32
+  - [16, 16, 4, 1, 1, 8, 1, 1, 1]  # MT128x16  DepthU 16,32
+
+# Not buildable (closest kernel: overflow of its most over-used resource, and why):
+#   [16, 16, 4, 1, 1, 1, 29, 4, 1]  MT64x464  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 30, 4, 1]  MT64x480  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 31, 4, 1]  MT64x496  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 32, 4, 1]  MT64x512  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 8, 1, 4, 1]  MT512x16  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 8, 2, 4, 1]  MT512x32  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 8, 3, 4, 1]  MT512x48  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 8, 4, 4, 1]  MT512x64  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 9, 1, 4, 1]  MT576x16  +15.6%  needs at least 75776 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 9, 2, 4, 1]  MT576x32  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 9, 3, 4, 1]  MT576x48  +21.9%  needs at least 79872 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 10, 1, 4, 1]  MT640x16  +28.1%  needs at least 83968 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 10, 2, 4, 1]  MT640x32  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 10, 3, 4, 1]  MT640x48  +34.4%  needs at least 88064 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 11, 1, 4, 1]  MT704x16  +40.6%  needs at least 92160 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 11, 2, 4, 1]  MT704x32  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 12, 1, 4, 1]  MT768x16  +53.1%  needs at least 100352 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 12, 2, 4, 1]  MT768x32  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 13, 1, 4, 1]  MT832x16  +65.6%  needs at least 108544 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 13, 2, 4, 1]  MT832x32  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 14, 1, 4, 1]  MT896x16  +78.1%  needs at least 116736 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 14, 2, 4, 1]  MT896x32  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 15, 1, 4, 1]  MT960x16  +90.6%  needs at least 124928 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 15, 2, 4, 1]  MT960x32  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 1, 4, 1]  MT1024x16  +103.1%  needs at least 133120 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 2, 4, 1]  MT1024x32  +106.2%  needs at least 135168 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 16, 2, 2]  MT32x512  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 17, 2, 2]  MT32x544  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 18, 2, 2]  MT32x576  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 19, 2, 2]  MT32x608  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 20, 2, 2]  MT32x640  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 21, 2, 2]  MT32x672  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 22, 2, 2]  MT32x704  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 23, 2, 2]  MT32x736  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 24, 2, 2]  MT32x768  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 25, 2, 2]  MT32x800  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 26, 2, 2]  MT32x832  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 27, 2, 2]  MT32x864  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 28, 2, 2]  MT32x896  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 29, 2, 2]  MT32x928  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 30, 2, 2]  MT32x960  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +106.2%  needs at least 135168 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 15, 2, 2]  MT64x480  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 16, 2, 2]  MT64x512  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 15, 2, 2, 2]  MT480x64  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 1, 2, 2]  MT512x32  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 16, 2, 2, 2]  MT512x64  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 17, 1, 2, 2]  MT544x32  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 18, 1, 2, 2]  MT576x32  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 19, 1, 2, 2]  MT608x32  +25.0%  needs at least 81920 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 20, 1, 2, 2]  MT640x32  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 21, 1, 2, 2]  MT672x32  +37.5%  needs at least 90112 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 22, 1, 2, 2]  MT704x32  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 23, 1, 2, 2]  MT736x32  +50.0%  needs at least 98304 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 24, 1, 2, 2]  MT768x32  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 25, 1, 2, 2]  MT800x32  +62.5%  needs at least 106496 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 26, 1, 2, 2]  MT832x32  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 27, 1, 2, 2]  MT864x32  +75.0%  needs at least 114688 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 28, 1, 2, 2]  MT896x32  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 29, 1, 2, 2]  MT928x32  +87.5%  needs at least 122880 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 30, 1, 2, 2]  MT960x32  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 31, 1, 2, 2]  MT992x32  +100.0%  needs at least 131072 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 32, 1, 2, 2]  MT1024x32  +106.2%  needs at least 135168 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 8, 1, 4]  MT16x512  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 9, 1, 4]  MT16x576  +15.6%  needs at least 75776 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 10, 1, 4]  MT16x640  +28.1%  needs at least 83968 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 11, 1, 4]  MT16x704  +40.6%  needs at least 92160 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 12, 1, 4]  MT16x768  +53.1%  needs at least 100352 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 13, 1, 4]  MT16x832  +65.6%  needs at least 108544 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 14, 1, 4]  MT16x896  +78.1%  needs at least 116736 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 15, 1, 4]  MT16x960  +90.6%  needs at least 124928 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 1, 16, 1, 4]  MT16x1024  +103.1%  needs at least 133120 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 8, 1, 4]  MT32x512  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 9, 1, 4]  MT32x576  +18.8%  needs at least 77824 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 10, 1, 4]  MT32x640  +31.2%  needs at least 86016 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 11, 1, 4]  MT32x704  +43.8%  needs at least 94208 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 12, 1, 4]  MT32x768  +56.2%  needs at least 102400 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 13, 1, 4]  MT32x832  +68.8%  needs at least 110592 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 14, 1, 4]  MT32x896  +81.2%  needs at least 118784 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 15, 1, 4]  MT32x960  +93.8%  needs at least 126976 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 2, 16, 1, 4]  MT32x1024  +106.2%  needs at least 135168 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 8, 1, 4]  MT48x512  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 9, 1, 4]  MT48x576  +21.9%  needs at least 79872 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 3, 10, 1, 4]  MT48x640  +34.4%  needs at least 88064 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 4, 8, 1, 4]  MT64x512  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 29, 1, 1, 4]  MT464x64  +3.1%  needs at least 67584 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 30, 1, 1, 4]  MT480x64  +6.2%  needs at least 69632 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 31, 1, 1, 4]  MT496x64  +9.4%  needs at least 71680 > 65536 bytes of LDS (validation skipped)
+#   [16, 16, 4, 1, 1, 32, 1, 1, 4]  MT512x64  +12.5%  needs at least 73728 > 65536 bytes of LDS (validation skipped)

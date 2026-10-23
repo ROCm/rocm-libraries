@@ -251,6 +251,36 @@ class CodegenChecker:
         self.problem_type = bp.problemType
         self.constant = dict(step.constantParams)
         self.space = self._space(config_path, step)
+        pt = self.problem_type
+        cap = self.constant.get("MaxLDS", -1)
+        self.lds_cap = (
+            cap
+            if isinstance(cap, int) and cap > 0
+            else self.isa_info[gfxToIsa(self.arch)].archCaps["DeviceLDS"]
+        )
+        # Operand bytes for lds_lower_bound; None when sparse metadata or MX scales also use LDS.
+        plain = not (pt["Sparse"] or pt["MXBlockA"] or pt["MXBlockB"])
+        nbytes = (pt["DataTypeA"].numBytes(), pt["DataTypeB"].numBytes())
+        self.lds_bytes = nbytes if plain else None
+
+    def lds_lower_bound(self, perm: Dict[str, Any]) -> Optional[int]:
+        """LDS bytes any kernel for ``perm`` needs at least: one DepthU slice of A and of B, except
+        an operand DirectToVgpr loads straight into registers. Never above TensileLite's own count
+        (checked on 1.39M gfx950 / gfx942 settings), so a bound over the cap cannot build."""
+        du = perm.get("DepthU", self.constant.get("DepthU"))
+        if self.lds_bytes is None or not isinstance(du, int):
+            return None
+        from geko.config_generator.mi_designer import MFMA, MIDesign
+
+        mt = MIDesign.calculate_mfma_parameters(
+            MFMA.from_list(perm[self.space.mi_group]["MatrixInstruction"])
+        )
+        dtv = {
+            ab: perm.get(f"DirectToVgpr{ab}", self.constant.get(f"DirectToVgpr{ab}")) for ab in "AB"
+        }
+        a = 0 if dtv["A"] else mt.MT0 * du * self.lds_bytes[0]
+        b = 0 if dtv["B"] else mt.MT1 * du * self.lds_bytes[1]
+        return int(a + b)
 
     def _space(self, config_path: Path, step) -> TuningSpace:
         fork = {k: list(v) for k, v in dict(step.forkParams).items()}
@@ -287,6 +317,14 @@ class CodegenChecker:
         from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
         perm = dict(perm)
+        lb = self.lds_lower_bound(perm)
+        if lb is not None and lb > self.lds_cap:  # skips TensileLite's validation (~10 ms)
+            return Measurement(
+                err=-1,
+                lds=lb,
+                lds_cap=self.lds_cap,
+                reason=f"needs at least {lb} > {self.lds_cap} bytes of LDS (validation skipped)",
+            )
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
@@ -551,11 +589,12 @@ class Verdict:
 
 def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """Up to MULTI_STARTS failed kernels to start the one-at-a-time stage from: the closest to fitting
-    for each over-used resource, then the next closest overall."""
-    ranked = sorted((f for f in failures if f[0] != math.inf), key=lambda f: f[0])
+    for each over-used resource, then the next closest overall. Refusals with every resource under its
+    cap (negative overflow) rank last: they never led to a build."""
+    ranked = sorted((f for f in failures if f[0] != math.inf), key=lambda f: (f[0] < 0, f[0]))
     starts, resources = [], set()
     for ov, res, s in ranked:
-        if res not in resources:
+        if ov >= 0 and res not in resources:
             resources.add(res)
             starts.append(s)
     for ov, res, s in ranked:
@@ -563,7 +602,7 @@ def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[
             break
         if not any(s is t for t in starts):
             starts.append(s)
-    starts.sort(key=lambda s: next(f[0] for f in ranked if f[2] is s))
+    starts.sort(key=lambda s: next((f[0] < 0, f[0]) for f in ranked if f[2] is s))
     return starts[:MULTI_STARTS]
 
 
