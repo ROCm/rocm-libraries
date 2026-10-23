@@ -66,6 +66,18 @@ PROBLEM_FIELDS = frozenset(
     }
 )
 TILE_FIELDS = frozenset({"num_warps", "warp_threads_k", "blocks_per_v_dim"})
+# Spec fields that are neither problem, tile nor knob: never swept, held at
+# their default (and so part of the defaults fingerprint). A new spec field
+# must join exactly one of these sets or the knob axes; a test enforces it.
+UNTUNABLE_FIELDS = frozenset(
+    {
+        "simple",  # the reference path, not a tuning choice
+        "fuse_gate",  # gate semantics (raw vs precomputed gate inputs)
+        "lower_bound",  # gate semantics (the fused KDA sigmoid's bound)
+        "wave_size",  # fixed by the architecture
+        "name",  # a label; does not change emitted code
+    }
+)
 
 _KNOB_NAMES = axis_knob_names(AXES) | {"waves_per_eu"}
 _FIELD_DEFAULTS = {f.name: f.default for f in dc.fields(GdnDecodeSpec)}

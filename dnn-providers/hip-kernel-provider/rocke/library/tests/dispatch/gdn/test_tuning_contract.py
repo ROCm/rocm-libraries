@@ -371,6 +371,31 @@ def test_a_changed_default_refuses_the_stored_pin_instead_of_drifting():
         assert moved.config_key != stored.config_key
 
 
+def test_every_spec_field_is_classified_exactly_once():
+    """Every GdnDecodeSpec field is a problem field, a tile field, a knob, or
+    a named untunable field, exactly one of them. A new spec field (a future
+    knob) fails here until someone decides whether to sweep it, instead of
+    falling silently into the defaults."""
+    import dataclasses as dc
+
+    from dispatch.gdn.axes import AXES
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+    from rocke.dispatch.tuning import axis_knob_names
+
+    groups = {
+        "problem": rules.PROBLEM_FIELDS,
+        "tile": rules.TILE_FIELDS,
+        "knob": frozenset(axis_knob_names(AXES)) | {"waves_per_eu"},
+        "untunable": rules.UNTUNABLE_FIELDS,
+    }
+    fields = {f.name for f in dc.fields(GdnDecodeSpec)}
+    for name, group in groups.items():
+        assert group <= fields, (name, sorted(group - fields))  # no stale member
+    for field in sorted(fields):
+        owners = [name for name, group in groups.items() if field in group]
+        assert len(owners) == 1, (field, owners)
+
+
 def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
     """``production`` lists waves_per_eu 0 and 4 on every knob set, ``full``
     every legal value 0-8; any legal value is pinnable at either level."""
