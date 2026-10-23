@@ -174,20 +174,26 @@ GraphShape makeShape(DataType dataType,
     return {dataType, headSize, queryHeads, kvHeads, mask, window, batch, seqQ, seqKv};
 }
 
-/// The catalog's tiles at each head size. D128 256/128 fits the LDS budget only with
-/// lds_row_pad 0, so the catalog builds it at that pad alone.
-const std::vector<Tile>& tilesFor(int64_t headSize)
+/// The tiles the reduced catalog keeps for a cell (configs/gfx942_attention_dense.yaml).
+/// Window cells keep their floor -- the 256/64 default and the dividing tiles 64/64 and
+/// 256/32 -- and the causal and unmasked cells keep the tiles the reduction sweep ranked.
+std::vector<Tile> tilesFor(int64_t headSize, DataType dataType, bool causal, int64_t window)
 {
-    static const std::vector<Tile> s_d64{{64, 64}, {128, 64}, {256, 32}, {256, 64}, {256, 128}, {512, 64}};
-    static const std::vector<Tile> s_d128{{64, 64}, {128, 64}, {256, 32}, {256, 64}, {256, 128}, {512, 64}};
-    return headSize == 64 ? s_d64 : s_d128;
-}
-
-/// The lds_row_pad of the kernel the score ranks first for a tile: the policy pad, except
-/// where the catalog carries the tile at another pad only.
-int64_t rankZeroLdsRowPad(int64_t headSize, const Tile& tile)
-{
-    return headSize == 128 && tile.blockM == 256 && tile.blockN == 128 ? 0 : POLICY_LDS_ROW_PAD;
+    std::vector<Tile> tiles{{64, 64}, {256, 32}, {256, 64}};
+    if(window != 0)
+    {
+        return tiles;
+    }
+    tiles.push_back({128, 64});
+    if(headSize == 64 && dataType == DataType::BFLOAT16)
+    {
+        tiles.push_back({256, 128});
+    }
+    if(headSize == 64 && !causal)
+    {
+        tiles.push_back({512, 64});
+    }
+    return tiles;
 }
 
 /// The catalog's mask cells: causal, unmasked, and causal windows of these sizes.
@@ -221,20 +227,27 @@ std::vector<KnobCase> knobCases()
         {
             const std::string prefix = std::string(headSize == 64 ? "D64_" : "D128_")
                                        + (dataType == BF16 ? "Bf16_" : "Fp16_");
-            for(const auto& tile : tilesFor(headSize))
+            for(const auto& tile : tilesFor(headSize, dataType, true, 0))
             {
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
                 cases.push_back({prefix + "Causal_" + tileName(tile),
                                  makeShape(dataType, headSize, hq, hkv, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512),
                                  FORCED,
                                  tile});
+            }
+            for(const auto& tile : tilesFor(headSize, dataType, false, 0))
+            {
+                const auto& [hq, hkv] = heads[row++ % std::size(heads)];
                 cases.push_back({prefix + "NoMask_" + tileName(tile),
                                  makeShape(dataType, headSize, hkv, hkv, Mask::NO_MASK, 0, 1, 512, 512),
                                  FORCED,
                                  tile});
-                for(const int64_t window : catalogWindows())
+            }
+            for(const int64_t window : catalogWindows())
+            {
+                const int64_t seq = std::max<int64_t>(512, 2 * window);
+                for(const auto& tile : tilesFor(headSize, dataType, true, window))
                 {
-                    const int64_t seq = std::max<int64_t>(512, 2 * window);
                     cases.push_back({prefix + "Window" + std::to_string(window) + "_" + tileName(tile),
                                      makeShape(dataType, headSize, 1, 1, Mask::WINDOW_TOP_LEFT, window, 1, seq, seq),
                                      FORCED,
@@ -286,8 +299,8 @@ std::vector<KnobCase> knobCases()
     return cases;
 }
 
-/// D128 at 512 admits 64/64, 128/64, 256/32, 256/64 and 512/64, so block_m=128 and
-/// block_n=32 are each advertised while no D128 kernel is 128/32.
+/// D128 at 512 admits 64/64, 128/64, 256/32 and 256/64, so block_m=128 and block_n=32
+/// are each advertised while no D128 kernel is 128/32.
 std::vector<UnsatisfiableCase> unsatisfiableCases()
 {
     return {
@@ -495,7 +508,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"sliding_window", shape.window},
         {"block_m", tile.blockM},
         {"block_n", tile.blockN},
-        {"lds_row_pad", rankZeroLdsRowPad(shape.headSize, tile)},
+        {"lds_row_pad", POLICY_LDS_ROW_PAD},
         {"pv_priority", POLICY_PV_PRIORITY},
     };
 

@@ -164,17 +164,28 @@ packs:
       - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 128, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 2, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 3, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 128, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 512, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
     shapes:
     - {causal: true, sliding_window: 0, knobs: knobs0}
-    - {causal: false, sliding_window: 0, knobs: knobs0}
-    - {causal: true, sliding_window: 128, knobs: knobs0}
-    - {causal: true, sliding_window: 512, knobs: knobs0}
-    - {causal: true, sliding_window: 1024, knobs: knobs0}
-    - {causal: true, sliding_window: 2048, knobs: knobs0}
+    - {causal: false, sliding_window: 0, knobs: knobs1}
+    - {causal: true, sliding_window: 128, knobs: knobs2}
+    - {causal: true, sliding_window: 512, knobs: knobs2}
+    - {causal: true, sliding_window: 1024, knobs: knobs2}
+    - {causal: true, sliding_window: 2048, knobs: knobs2}
   - name: attention_dense.fp16_d64_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}_lds_row_pad8_pv_{tag}
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority]
     spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
@@ -189,18 +200,25 @@ packs:
       - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 2, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 3, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 128, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 512, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
     shapes:
     - {causal: true, sliding_window: 0, knobs: knobs0}
-    - {causal: false, sliding_window: 0, knobs: knobs0}
-    - {causal: true, sliding_window: 128, knobs: knobs0}
-    - {causal: true, sliding_window: 512, knobs: knobs0}
-    - {causal: true, sliding_window: 1024, knobs: knobs0}
-    - {causal: true, sliding_window: 2048, knobs: knobs0}
+    - {causal: false, sliding_window: 0, knobs: knobs1}
+    - {causal: true, sliding_window: 128, knobs: knobs2}
+    - {causal: true, sliding_window: 512, knobs: knobs2}
+    - {causal: true, sliding_window: 1024, knobs: knobs2}
+    - {causal: true, sliding_window: 2048, knobs: knobs2}
   - name: attention_dense.bf16_d128_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}_lds_row_pad{lds_row_pad}_pv_{tag}
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority]
     spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
@@ -215,25 +233,29 @@ packs:
       - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 0, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 4, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 2, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 3, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 16, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
       - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 32, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 128, lds_row_pad: 0, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 512, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 4, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
     shapes:
     - {causal: true, sliding_window: 0, knobs: knobs0}
-    - {causal: false, sliding_window: 0, knobs: knobs0}
-    - {causal: true, sliding_window: 128, knobs: knobs0}
-    - {causal: true, sliding_window: 512, knobs: knobs0}
-    - {causal: true, sliding_window: 1024, knobs: knobs0}
-    - {causal: true, sliding_window: 2048, knobs: knobs0}
-  - name: attention_dense.fp16_d128_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}_lds_row_pad{lds_row_pad}_pv_{tag}
+    - {causal: false, sliding_window: 0, knobs: knobs1}
+    - {causal: true, sliding_window: 128, knobs: knobs2}
+    - {causal: true, sliding_window: 512, knobs: knobs2}
+    - {causal: true, sliding_window: 1024, knobs: knobs2}
+    - {causal: true, sliding_window: 2048, knobs: knobs2}
+  - name: attention_dense.fp16_d128_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}_lds_row_pad{lds_row_pad}_pv_priority0.gfx942
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n, lds_row_pad, pv_priority]
     spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
     vocabulary:
@@ -243,25 +265,27 @@ packs:
     spec_defaults: {dtype: fp16, head_size: 128, num_query_heads: 8, num_kv_heads: 8, batch: 1, seqlen_q: 512, seqlen_kv: 512, ragged: false, varlen: false, paged: false, persistent: false, waves_per_eu: 2, lds_k_group_pad: 8, lazy_rescale: true, interleave: false, persist_decode: auto, num_persistent: 304, block_size: 0, num_kv_blocks: 0, use_sinks: false, causal_bottom_right: false, v_row_pad: null, use_cfvst: null, use_v_swizzle: null, use_exp2_fast: null, iglp: false, lds_num_buffers: 1, iglp_mode: 0, pv_loop_order: d_major, o_store_width: 4, pv_sched_fence_mask: null, causal_diag_split: false, emit_lse: false}
     knob_sets:
       knobs0:
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942', default: true}
-      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 0, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 4, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 1, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 2, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 3, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 16, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 64, lds_row_pad: 32, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 256, block_n: 128, lds_row_pad: 0, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
-      - {block_m: 512, block_n: 64, lds_row_pad: 8, pv_priority: 0, tag: 'priority{md_pv_priority}.gfx942'}
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 256, block_n: 64, lds_row_pad: 4, pv_priority: 0}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0}
+      knobs1:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 128, block_n: 64, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 256, block_n: 64, lds_row_pad: 12, pv_priority: 0}
+      - {block_m: 256, block_n: 64, lds_row_pad: 24, pv_priority: 0}
+      knobs2:
+      - {block_m: 256, block_n: 64, lds_row_pad: 8, pv_priority: 0, default: true}
+      - {block_m: 64, block_n: 64, lds_row_pad: 8, pv_priority: 0}
+      - {block_m: 256, block_n: 32, lds_row_pad: 8, pv_priority: 0}
     shapes:
     - {causal: true, sliding_window: 0, knobs: knobs0}
-    - {causal: false, sliding_window: 0, knobs: knobs0}
-    - {causal: true, sliding_window: 128, knobs: knobs0}
-    - {causal: true, sliding_window: 512, knobs: knobs0}
-    - {causal: true, sliding_window: 1024, knobs: knobs0}
-    - {causal: true, sliding_window: 2048, knobs: knobs0}
+    - {causal: false, sliding_window: 0, knobs: knobs1}
+    - {causal: true, sliding_window: 128, knobs: knobs2}
+    - {causal: true, sliding_window: 512, knobs: knobs2}
+    - {causal: true, sliding_window: 1024, knobs: knobs2}
+    - {causal: true, sliding_window: 2048, knobs: knobs2}
