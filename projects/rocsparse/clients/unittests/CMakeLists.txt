@@ -37,8 +37,6 @@ if(BUILD_CLIENTS_ONLY)
   return()
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
 # Unit-test sources (the tests themselves + a minimal gtest main).
 #
 # Subsequent per-area unit-test branches append their host-pure sources here.
@@ -292,6 +290,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # sibling branches appending elsewhere. Needs the defining library TU in
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
   unit_test_internal_conversion_csr2ell_batch.cpp
+  # AISPARSE-669: distinct anchor to avoid stacked-branch merge conflicts.
+  # Launches rocsparse::csrsm (csrsm_device.h) directly on an undersized grid;
+  # header-only, so it needs no compile-in library TU.
+  unit_test_internal_level3_csrsm.cpp
   # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
@@ -513,6 +515,14 @@ set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "quick;standard;compr
 add_test(rocsparse-unit-test_gfx1151 "./rocsparse-unit-test")
 set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
+]=])
+  # Windows searches System32 before PATH, so from bin/rocsparse/ the device
+  # binary loads the display driver's amdhip64_7.dll instead of the one in
+  # bin/. That runtime cannot load kpack-split device code, so every kernel
+  # launch fails. Register the device binary on Windows only once it is
+  # installed in bin/ beside the HIP runtime.
+  if(NOT WIN32)
+    file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
 set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
 
@@ -520,16 +530,12 @@ add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
 set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
 ]=])
-  # The device binary imports the HIP runtime. rocsparse-test.exe finds those
-  # DLLs because it lives in bin/; these tests live in bin/rocsparse/. ctest's
-  # working directory is that folder, so ".." is bin/.
-  if(WIN32)
+  else()
+    # ctest's working directory is bin/rocsparse/, so ".." is bin/.
     file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 set_tests_properties(
   rocsparse-unit-test
   rocsparse-unit-test_gfx1151
-  rocsparse-unit-test-device
-  rocsparse-unit-test-device_gfx1151
   PROPERTIES ENVIRONMENT_MODIFICATION
     "PATH=path_list_prepend:../../lib/rocsparse-clients/lib;PATH=path_list_prepend:../../llvm/lib;PATH=path_list_prepend:../../lib;PATH=path_list_prepend:..")
 

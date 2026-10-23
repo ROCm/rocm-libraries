@@ -108,8 +108,15 @@ public:
     // Boolean flags
     bool alibi_mask = false;
     bool padding_mask = false;
-    bool causal_mask = false; // Deprecated
-    bool causal_mask_bottom_right = false; // Deprecated
+    /**
+     * @brief Deprecated; kept for graphs persisted before the causal setters changed. Do not set
+     * directly: use set_causal_mask*() or the diagonal-band setters. Backends resolve them as if
+     * the matching setter ran before every bound and alignment setter, so left_bound, a
+     * right_bound >= 0 or (for causal_mask) diagonal_alignment refines them. Setting both, or any
+     * bound below -1, is invalid.
+     */
+    bool causal_mask = false;
+    bool causal_mask_bottom_right = false;
 
     // Scalar attributes
     std::optional<float> dropout_probability;
@@ -439,16 +446,43 @@ public:
         padding_mask = value;
         return *this;
     }
+    /**
+     * @brief Request a top-left causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to TOP_LEFT and right_bound to 0. The deprecated causal_mask
+     * member is not modified, and later bound or alignment setters take precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask(bool value)
     {
-        causal_mask = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
+    /**
+     * @brief Request a bottom-right causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to BOTTOM_RIGHT and right_bound to 0. The deprecated
+     * causal_mask_bottom_right member is not modified, and later bound or alignment setters take
+     * precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask_bottom_right(bool value)
     {
-        causal_mask_bottom_right = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
