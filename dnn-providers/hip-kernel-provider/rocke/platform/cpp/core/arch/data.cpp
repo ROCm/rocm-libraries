@@ -646,7 +646,8 @@ static const rocke_layout_map_t lm_mfma_4x4x4_f64_b = {ROCKE_MMA_ROLE_B, 1, 64, 
 static const rocke_layout_map_t lm_mfma_4x4x4_f64_c
     = {ROCKE_MMA_ROLE_ACC, 1, 64, _mfma_acc_4x4x4_f64};
 
-/* --- wmma_f32_16x16x16_{f16,bf16}: a/b/c present (frag 16/16/8, wave32) --- */
+/* --- wmma_f32_16x16x16_{f16,bf16}: a/b/c present (frag 16/16/8, wave32);
+ * also the f16 -> f16 and bf16 -> bf16 ops --- */
 static const rocke_layout_map_t lm_wmma_16x16x16_a = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_a_16x16};
 static const rocke_layout_map_t lm_wmma_16x16x16_b = {ROCKE_MMA_ROLE_B, 16, 32, _wmma_b_16x16};
 static const rocke_layout_map_t lm_wmma_16x16x16_c = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_acc_16x16};
@@ -861,6 +862,10 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
     {"wmma_f32_16x16x16_f16", 8},
     {"wmma_f32_16x16x16_bf16", 8},
+    /* --- WMMA f16 -> f16, bf16 -> bf16 (wave32, RDNA3/3.5): eight logical
+     * results --- */
+    {"wmma_f16_16x16x16_f16", 8},
+    {"wmma_bf16_16x16x16_bf16", 8},
     /* --- WMMA iu8 / iu4 (wave32, RDNA3/3.5), every signedness --- */
     {"wmma_i32_16x16x16_iu8", 8},
     {"wmma_i32_16x16x16_iu8_u8_i8", 8},
@@ -2802,6 +2807,39 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
      16,
      16,
      "wmma_f32_16x16x16_bf16",
+     16,
+     16,
+     8,
+     32,
+     &lm_wmma_16x16x16_a,
+     &lm_wmma_16x16x16_b,
+     &lm_wmma_16x16x16_c},
+    /* f16 -> f16 and bf16 -> bf16: the eight logical results sit where the
+     * f32 accumulator's eight slots do (Python target.py), so they take its
+     * map; the lowering keeps them in the even halves of the register. */
+    {"wmma",
+     "fp16",
+     "fp16",
+     "fp16",
+     16,
+     16,
+     16,
+     "wmma_f16_16x16x16_f16",
+     16,
+     16,
+     8,
+     32,
+     &lm_wmma_16x16x16_a,
+     &lm_wmma_16x16x16_b,
+     &lm_wmma_16x16x16_c},
+    {"wmma",
+     "bf16",
+     "bf16",
+     "bf16",
+     16,
+     16,
+     16,
+     "wmma_bf16_16x16x16_bf16",
      16,
      16,
      8,

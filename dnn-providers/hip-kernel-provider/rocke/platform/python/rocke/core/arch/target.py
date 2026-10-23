@@ -1069,6 +1069,18 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "wmma_f32_16x16x16_bf16": _FragInfo(
         16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
     ),
+    # --- WMMA f16 -> f16, bf16 -> bf16 (wave32, RDNA3/3.5) ----------------------
+    # A and B as for f16 -> f32. The instruction keeps its eight results per
+    # lane in the even halves of a <16 x half> (<16 x i16>) register; the
+    # catalog row counts the eight logical results, which sit where the f32
+    # accumulator's eight slots do (public matrix instruction calculator, op_sel
+    # 0), so the result takes the f32 accumulator map.
+    "wmma_f16_16x16x16_f16": _FragInfo(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    ),
+    "wmma_bf16_16x16x16_bf16": _FragInfo(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    ),
     # --- WMMA iu8 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <4 x i32> (16 int8 packed 4-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.

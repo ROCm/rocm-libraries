@@ -117,6 +117,32 @@ static const rocke_matrix_arg_t k_gfx12_16bit_out_args[] = {
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
 };
 
+/* gfx11 16-bit-output WMMA (Python _gfx11_16bit_out_wmma): (A, B, C, op_sel)
+ * with A, B, C and the result all in the <16 x 16-bit> `reg`. The instruction
+ * keeps its eight results per lane in the even 16-bit halves of that register
+ * when op_sel is 0, so the accumulator and the result are the eight logical
+ * values (EvenHalves) and op_sel is always 0. */
+static const rocke_matrix_arg_t k_gfx11_16bit_out_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
+
+static constexpr rocke_matrix_call_t gfx11_16bit_out_wmma(const char* intrinsic,
+                                                          rocke_matrix_register_t reg)
+{
+    return rocke_matrix_call_t{
+        intrinsic,
+        k_gfx11_16bit_out_args,
+        (int)(sizeof(k_gfx11_16bit_out_args) / sizeof(k_gfx11_16bit_out_args[0])),
+        as_is(reg),
+        as_is(reg),
+        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg},
+        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg},
+        NULL};
+}
+
 /* Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
  * same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use). */
 static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
@@ -169,6 +195,13 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
                             reg("i32", 2),
                             reg("i32", 8),
                             "wmma.i32.16x16x16.iu4")),
+    /* gfx11 f16 -> f16 and bf16 -> bf16: sixteen 16-bit values of A and of B
+     * per lane, eight logical results in the even halves of the 16-slot
+     * register; the bf16 form takes and returns them as i16. */
+    {"wmma_f16_16x16x16_f16",
+     gfx11_16bit_out_wmma("llvm.amdgcn.wmma.f16.16x16x16.f16.v16f16.v16f16", reg("f16", 16))},
+    {"wmma_bf16_16x16x16_bf16",
+     gfx11_16bit_out_wmma("llvm.amdgcn.wmma.bf16.16x16x16.bf16.v16i16.v16i16", reg("i16", 16))},
     /* gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words. */
     {"wmma_gfx12_f32_16x16x16_fp8_fp8",
      wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32",

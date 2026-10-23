@@ -515,7 +515,7 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
 | `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
 | `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` | f32, f16, bf16, fp8, bf8, i8, f64 |
-| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`) | f16, bf16, **i8, i4, u8, u4** |
+| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
@@ -530,6 +530,10 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 - The gfx12 fp8 / bf8 -> f32, `iu8`, `iu4` and 16-bit-output (f16 -> f16,
   bf16 -> bf16) WMMA atoms are declared on `gfx12-generic` (and so on
   `gfx1201`); no family uses them yet.
+- The gfx11 16-bit-output (f16 -> f16, bf16 -> bf16) WMMA atoms are declared on
+  `gfx11-generic` (and so on `gfx1151`); their accumulator and result are the
+  eight logical values per lane, laid out as the f32 accumulator. No family uses
+  them yet.
 - In the table, `_u_i`, `_i_u` and `_u_u` stand for the unsigned rows of an
   integer atom: `_u8_i8`, `_i8_u8`, `_u8_u8` for `iu8` and `_u4_i4`, `_i4_u4`,
   `_u4_u4` for `iu4` (section 1). No family uses the unsigned rows yet.

@@ -402,6 +402,23 @@ if(BUILD_TESTING)
                  rocke_gfx12_wmma_ops)
   endif()
 
+  # The gfx11 WMMA catalog rows and lane maps with a 16-bit result.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx11_wmma_ops.cpp")
+    add_executable(rocke_gfx11_wmma_ops core/gfx11_wmma_ops.cpp)
+    target_link_libraries(rocke_gfx11_wmma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx11_wmma_ops
+             COMMAND rocke_gfx11_wmma_ops)
+    set_tests_properties(rocke_gfx11_wmma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx11_wmma_ops)
+    set_target_properties(rocke_gfx11_wmma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx11_wmma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx11_wmma_ops)
+  endif()
+
   # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
   # that rocke_b_mma consults to size a tile.mma result vector.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_frag_ssot.cpp")
