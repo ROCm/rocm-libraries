@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -120,9 +122,22 @@ namespace
 // tensor of that dtype is added under uid 5 and attrs.attn_mask_tensor_uid is set to 5. When
 // disengaged the mask is left as `attrs` has it, so a caller-set attn_mask_tensor_uid dangles
 // (no tensor behind it).
-flatbuffers::FlatBufferBuilder
-    makeRawSdpaFwdGraph(SdpaAttributesT attrs, std::optional<DataType> maskDataType = std::nullopt)
+// When `seqLens` is engaged, seq_len tensors with that dtype and dims are added under uids 6 (Q)
+// and 7 (KV) and wired into attrs; `includeKv = false` adds only the Q one.
+struct RawSeqLenSpec
 {
+    DataType dataType;
+    std::vector<int64_t> dims;
+    bool includeKv = true;
+};
+
+flatbuffers::FlatBufferBuilder
+    makeRawSdpaFwdGraph(SdpaAttributesT attrs,
+                        std::optional<DataType> maskDataType = std::nullopt,
+                        const std::optional<RawSeqLenSpec>& seqLens = std::nullopt)
+{
+    constexpr int64_t SEQ_LEN_Q_UID = 6;
+    constexpr int64_t SEQ_LEN_KV_UID = 7;
     constexpr int64_t Q_UID = 1;
     constexpr int64_t K_UID = 2;
     constexpr int64_t V_UID = 3;
@@ -156,6 +171,24 @@ flatbuffers::FlatBufferBuilder
     {
         tensors.push_back(CreateTensorAttributesDirect(
             builder, MASK_UID, "Mask", maskDataType.value(), &maskStrides, &maskDims));
+    }
+    std::vector<int64_t> seqLenStrides;
+    if(seqLens.has_value())
+    {
+        seqLenStrides = hipdnn_data_sdk::utilities::generateStrides(seqLens->dims);
+        attrs.seq_len_q_tensor_uid = SEQ_LEN_Q_UID;
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, SEQ_LEN_Q_UID, "SeqLenQ", seqLens->dataType, &seqLenStrides, &seqLens->dims));
+        if(seqLens->includeKv)
+        {
+            attrs.seq_len_kv_tensor_uid = SEQ_LEN_KV_UID;
+            tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                           SEQ_LEN_KV_UID,
+                                                           "SeqLenKv",
+                                                           seqLens->dataType,
+                                                           &seqLenStrides,
+                                                           &seqLens->dims));
+        }
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
@@ -491,6 +524,108 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsAlibiMask)
         planBuilder;
     EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
         << "SdpaFwdPlanBuilder must reject nodes with alibi_mask=true";
+}
+
+// Padding (seq_len_q/kv): both INT32 tensors with one value per batch, or neither. padding_mask
+// without the tensors is declined (cuDNN requires them); the tensors without padding_mask are
+// accepted, as hipDNN graphs omit the flag (register SEM-008). The raw graph has batch 1.
+struct FwdPaddingApplicabilityCase
+{
+    const char* name;
+    bool paddingMask;
+    std::optional<RawSeqLenSpec> seqLens;
+    bool applicable;
+};
+
+class TestSdpaFwdPlanPaddingApplicability : public TestWithParam<FwdPaddingApplicabilityCase>
+{
+};
+
+TEST_P(TestSdpaFwdPlanPaddingApplicability, MatchesContract)
+{
+    const auto& p = GetParam();
+    SdpaAttributesT attrs;
+    attrs.padding_mask = p.paddingMask;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs, std::nullopt, p.seqLens);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
+              p.applicable);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaFwdPlanPaddingApplicability,
+    Values(FwdPaddingApplicabilityCase{"SeqLensWithoutFlag",
+                                       false,
+                                       RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}},
+                                       true},
+           FwdPaddingApplicabilityCase{
+               "SeqLensWithFlag", true, RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}}, true},
+           FwdPaddingApplicabilityCase{"FlagWithoutSeqLens", true, std::nullopt, false},
+           FwdPaddingApplicabilityCase{
+               "OnlySeqLenQ", false, RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}, false}, false},
+           FwdPaddingApplicabilityCase{
+               "FloatSeqLens", false, RawSeqLenSpec{DataType::FLOAT, {1, 1, 1, 1}}, false},
+           FwdPaddingApplicabilityCase{
+               "WrongElementCount", false, RawSeqLenSpec{DataType::INT32, {1, 2, 1, 1}}, false}),
+    [](const TestParamInfo<FwdPaddingApplicabilityCase>& info) {
+        return std::string(info.param.name);
+    });
+
+// A padded graph runs through the executor and equals the reference called directly.
+TEST(TestSdpaFwdPlanPadding, ExecuteMatchesDirectReference)
+{
+    SdpaAttributesT attrs;
+    attrs.padding_mask = true;
+    auto graphBuilder
+        = makeRawSdpaFwdGraph(attrs, std::nullopt, RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenQ({1, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenKv({1, 1, 1, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 31);
+    k.fillWithRandomValues(-1.0F, 1.0F, 32);
+    v.fillWithRandomValues(-1.0F, 1.0F, 33);
+    seqLenQ.fillWithValue(3);
+    seqLenKv.fillWithValue(2);
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {6, seqLenQ.memory().hostData()},
+                                                            {7, seqLenKv.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oRef,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(o, oRef));
+    // Row 3 is padding: O = 0 (it was NaN before the run).
+    EXPECT_EQ(o.getHostValue(0, 1, 3, 0), 0.0F);
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
