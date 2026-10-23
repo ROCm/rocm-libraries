@@ -150,6 +150,7 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
     }
 }
 
+
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
                                   const std::vector<size_t>& strides,
                                   size_t                     batch,
@@ -224,6 +225,30 @@ bool data_set_t::has_precision() const
 void data_set_t::set_precision(rocfft_precision p)
 {
     precision = static_cast<std::underlying_type_t<rocfft_precision>>(p);
+}
+
+void data_set_t::set_array_type_and_offsets(rocfft_array_type            new_array_type,
+                                            const std::array<size_t, 2>& new_offsets)
+{
+    if(new_offsets[1] != 0 && !array_type_is_planar(new_array_type))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires a zero second offset for non-planar array types.");
+    array_type = new_array_type;
+    offsets    = new_offsets;
+}
+
+size_t data_set_t::num_planes() const
+{
+    return array_type_is_planar(array_type) ? 2 : 1;
+}
+
+size_t data_set_t::get_offset(data_part part) const
+{
+    if(array_type_is_planar(array_type) == (part == data_part::ALL))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires data_part::ALL for non-planar data sets, and"
+                                      " data_part::REAL or data_part::IMAGINARY for planar ones.");
+    return offsets[part == data_part::IMAGINARY ? 1 : 0];
 }
 
 std::vector<size_t> data_set_t::lengths_and_batches() const
@@ -346,11 +371,10 @@ size_t data_set_t::logical_count() const
 
 size_t data_set_t::buffer_element_count(data_part part) const
 {
-    if(array_type_is_planar(array_type) == (part == data_part::ALL))
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " requires data_part::ALL for non-planar data sets, and"
-                                      " data_part::REAL or data_part::IMAGINARY for planar ones.");
-    return compute_ptrdiff(lengths_and_batches(), strides_and_distances());
+    const auto offset = get_offset(part);
+    const auto count  = compute_ptrdiff(lengths_and_batches(), strides_and_distances());
+    // an empty data set needs no buffer, wherever it would start
+    return count == 0 ? 0 : offset + count;
 }
 
 size_t data_set_t::element_byte_size() const
@@ -400,8 +424,9 @@ data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
     if(!same_format_up_to_hermitian(array_type, new_array_type))
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
                                     + " cannot switch between interleaved and planar formats.");
-    auto ret       = *this;
-    ret.array_type = new_array_type;
+    // allowed relabels keep the number of planes, hence the offsets
+    auto ret = *this;
+    ret.set_array_type_and_offsets(new_array_type, offsets);
     return ret;
 }
 
@@ -410,6 +435,7 @@ data_set_t data_set_t::get_packed_data_set(bool real_inplace_padding) const
     // keeps precision and array type; full_range_reset drops the embedding
     auto ret = *this;
     ret.full_range_reset(lengths(), {}, batches(), {}, real_inplace_padding);
+    ret.offsets = {0, 0};
     for(size_t dim = 0; dim < get_full_rank(); dim++)
     {
         ret[dim].lower = (*this)[dim].lower;
@@ -426,7 +452,8 @@ bool data_set_t::is_contiguous() const
 bool data_set_t::operator==(const data_set_t& other) const
 {
     return len_axes == other.len_axes && batch_axes == other.batch_axes
-           && array_type == other.array_type && precision == other.precision;
+           && array_type == other.array_type && precision == other.precision
+           && offsets == other.offsets;
 }
 
 bool data_set_t::has_same_logical_range_as(const data_set_t& other) const
@@ -482,6 +509,7 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
         else
             ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
     }
+    // zero offsets: the intersection describes a fresh contiguous buffer
     ret.embedding  = first.embedding;
     ret.array_type = first.array_type;
     ret.precision  = first.precision;
@@ -630,6 +658,9 @@ std::string data_set_t::str() const
     ret += has_precision() ? PrintPrecision(get_precision()) : "unset";
     ret += " array type ";
     ret += PrintArrayType(array_type);
+    ret += " offsets";
+    for(size_t plane = 0; plane < num_planes(); plane++)
+        ret += " " + std::to_string(offsets[plane]);
 
     if(is_embedded())
     {
@@ -745,7 +776,7 @@ std::optional<data_set_t>
 
     if(complex_fft)
     {
-        // simple copy
+        // simple copy (identical offsets in all planes)
         return std::make_optional<data_set_t>(*this);
     }
 
@@ -777,10 +808,16 @@ std::optional<data_set_t>
     }
     // copy data set and modify what needs be
     auto ret = std::make_optional<data_set_t>(*this);
-    if(has_array_type())
-        ret->array_type = is_real_domain(fft_type, other_io)
-                              ? rocfft_array_type_real
-                              : rocfft_array_type_hermitian_interleaved;
+    // the returned layout is never planar: a second plane's offset cannot be expressed
+    // and real offsets are twice the hermitian ones
+    if(offsets[1] != 0 || (!is_real_domain(fft_type, other_io) && offsets[0] % 2 != 0))
+        return std::nullopt;
+    const auto ret_array_type = !has_array_type() ? array_type
+                                : is_real_domain(fft_type, other_io)
+                                    ? rocfft_array_type_real
+                                    : rocfft_array_type_hermitian_interleaved;
+    ret->set_array_type_and_offsets(
+        ret_array_type, {is_real_domain(fft_type, other_io) ? 2 * offsets[0] : offsets[0] / 2, 0});
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
               ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
@@ -811,6 +848,7 @@ data_set_t data_set_t::get_data_set_for_len_axes(const std::set<size_t>& len_ind
     data_set_t ret;
     ret.array_type = complex_counterpart(array_type);
     ret.precision  = precision;
+    ret.offsets    = offsets;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
     // Turn non-desired length axes into additional batch axes
@@ -870,6 +908,7 @@ data_set_t data_set_t::get_embedding_data_set() const
     data_set_t ret;
     ret.array_type = is_embedded() ? complex_counterpart(array_type) : array_type;
     ret.precision  = precision;
+    ret.offsets    = offsets;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
     // all other batch axes that aren't part of the embedding remain batch axes

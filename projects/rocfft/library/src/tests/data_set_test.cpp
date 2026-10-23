@@ -24,6 +24,7 @@
 #include "data_set_test_access.h"
 #include "enum_printer.h"
 #include <algorithm>
+#include <array>
 #include <gtest/gtest.h>
 #include <map>
 #include <numeric>
@@ -64,7 +65,14 @@ namespace
     const rocfft_precision  all_precisions[]
         = {rocfft_precision_half, rocfft_precision_single, rocfft_precision_double};
 
-    const auto with_type = data_set_test_access::with_type;
+    // (a function pointer would drop the default offsets)
+    data_set_t with_type(const data_set_t&               data_set,
+                         rocfft_array_type               array_type,
+                         std::optional<rocfft_precision> precision,
+                         const std::array<size_t, 2>&    offsets = {0, 0})
+    {
+        return data_set_test_access::with_type(data_set, array_type, precision, offsets);
+    }
 
     rocfft_array_type type_of(const data_set_t& data_set)
     {
@@ -1174,4 +1182,281 @@ TEST_F(data_set_test, packed_data_set)
         EXPECT_EQ(precision_of(packed), precision_of(data_set));
         EXPECT_FALSE(packed.is_embedded());
     }
+}
+
+namespace
+{
+    // valid offsets for array type t: second offset only set if planar
+    std::array<size_t, 2> offsets_for(rocfft_array_type t, size_t first, size_t second)
+    {
+        return {first, array_type_is_planar(t) ? second : 0};
+    }
+
+    // parts of the stored data of a data set of array type t (see data_part)
+    std::vector<data_part> parts_of(rocfft_array_type t)
+    {
+        if(array_type_is_planar(t))
+            return {data_part::REAL, data_part::IMAGINARY};
+        return {data_part::ALL};
+    }
+}
+
+TEST_F(data_set_test, offsets_default_to_zero_with_one_per_plane)
+{
+    EXPECT_EQ(data_set_t::default_full_range({8}, 2).num_planes(), 1u);
+    EXPECT_EQ(data_set_t::default_full_range({8}, 2).get_offset(), 0u);
+    const auto base = data_set_t::default_full_range({8, 4}, 2);
+    for(auto type : all_array_types)
+    {
+        const auto data_set = with_type(base, type, rocfft_precision_single);
+        SCOPED_TRACE(data_set.str());
+        EXPECT_EQ(data_set.num_planes(), array_type_is_planar(type) ? 2u : 1u);
+        for(auto part : {data_part::ALL, data_part::REAL, data_part::IMAGINARY})
+        {
+            if(array_type_is_planar(type) == (part == data_part::ALL))
+                EXPECT_THROW(data_set.get_offset(part), std::invalid_argument);
+            else
+                EXPECT_EQ(data_set.get_offset(part), 0u);
+        }
+    }
+}
+
+TEST_F(data_set_test, offsets_enforce_invariant)
+{
+    for(auto type : all_array_types)
+    {
+        const auto data_set = with_type(data_set_t({0, 0}, {4, 3}, {1, 4}),
+                                        type,
+                                        rocfft_precision_double,
+                                        offsets_for(type, 3, 5));
+        SCOPED_TRACE(data_set.str());
+        if(array_type_is_planar(type))
+        {
+            EXPECT_EQ(data_set.get_offset(data_part::REAL), 3u);
+            EXPECT_EQ(data_set.get_offset(data_part::IMAGINARY), 5u);
+        }
+        else
+        {
+            EXPECT_EQ(data_set.get_offset(), 3u);
+            EXPECT_THROW(with_type(data_set_t({0, 0}, {4, 3}, {1, 4}),
+                                   type,
+                                   rocfft_precision_double,
+                                   {3, 5}),
+                         std::invalid_argument);
+        }
+    }
+}
+
+TEST_F(data_set_test, offsets_setter_enforces_invariant)
+{
+    auto data_set = data_set_t::default_full_range({8, 4}, 2);
+    data_set_test_access::set_array_type_and_offsets(
+        data_set, rocfft_array_type_complex_planar, {1, 2});
+    EXPECT_EQ(data_set.get_offset(data_part::IMAGINARY), 2u);
+
+    // a violation leaves the object untouched
+    for(auto type : all_array_types)
+    {
+        if(array_type_is_planar(type))
+            continue;
+        EXPECT_THROW(data_set_test_access::set_array_type_and_offsets(data_set, type, {1, 2}),
+                     std::invalid_argument);
+        EXPECT_EQ(data_set.get_array_type(), rocfft_array_type_complex_planar);
+        EXPECT_EQ(data_set.get_offset(data_part::REAL), 1u);
+        EXPECT_EQ(data_set.get_offset(data_part::IMAGINARY), 2u);
+    }
+
+    data_set_test_access::set_array_type_and_offsets(
+        data_set, rocfft_array_type_complex_interleaved, {1, 0});
+    EXPECT_EQ(data_set.get_array_type(), rocfft_array_type_complex_interleaved);
+    EXPECT_EQ(data_set.get_offset(), 1u);
+    EXPECT_THROW(data_set.get_offset(data_part::IMAGINARY), std::invalid_argument);
+}
+
+TEST_F(data_set_test, offsets_survive_reinterpret_as)
+{
+    const auto base = data_set_t::default_full_range({8, 4}, 2);
+    const std::pair<rocfft_array_type, rocfft_array_type> allowed[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_complex_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_real, rocfft_array_type_real}};
+    for(auto [from, to] : allowed)
+    {
+        const auto src = with_type(base, from, rocfft_precision_single, offsets_for(from, 7, 9));
+        const auto dst = src.reinterpret_as(to);
+        SCOPED_TRACE(dst.str());
+        EXPECT_EQ(dst.num_planes(), src.num_planes());
+        for(auto part : parts_of(from))
+            EXPECT_EQ(dst.get_offset(part), src.get_offset(part));
+        EXPECT_TRUE(dst.reinterpret_as(from) == src);
+    }
+}
+
+TEST_F(data_set_test, offsets_inplace_mapping)
+{
+    // complex transforms: identical offsets in all planes
+    for(auto type : {rocfft_array_type_complex_interleaved, rocfft_array_type_complex_planar})
+    {
+        const auto in  = with_type(data_set_t::default_full_range({16}, 4),
+                                  type,
+                                  rocfft_precision_double,
+                                  offsets_for(type, 6, 11));
+        const auto out = in.get_other_inplace_data_set_for(io_data_label::OUTPUT,
+                                                           rocfft_transform_type_complex_forward);
+        ASSERT_TRUE(out.has_value());
+        EXPECT_TRUE(*out == in) << out->str();
+    }
+
+    // real transforms: real offset == 2 * Hermitian offset
+    const auto padded = data_set_t::default_full_range({16}, 4, true);
+    const auto real   = with_type(padded, rocfft_array_type_real, rocfft_precision_single, {6, 0});
+    const auto odd_real
+        = with_type(padded, rocfft_array_type_real, rocfft_precision_single, {7, 0});
+    for(auto [fft_type, herm_io] :
+        {std::pair{rocfft_transform_type_real_forward, io_data_label::OUTPUT},
+         std::pair{rocfft_transform_type_real_inverse, io_data_label::INPUT}})
+    {
+        const auto herm = real.get_other_inplace_data_set_for(herm_io, fft_type);
+        ASSERT_TRUE(herm.has_value());
+        EXPECT_EQ(herm->get_offset(), 3u);
+        const auto back = herm->get_other_inplace_data_set_for(other(herm_io), fft_type);
+        ASSERT_TRUE(back.has_value());
+        EXPECT_TRUE(*back == real) << back->str();
+
+        // an odd real offset cannot be halved
+        EXPECT_FALSE(odd_real.get_other_inplace_data_set_for(herm_io, fft_type).has_value());
+    }
+
+    // planar Hermitian data sets are rejected: in-place real transforms are interleaved only
+    const auto herm_planar = with_type(data_set_t::default_full_range({9}, 4),
+                                       rocfft_array_type_hermitian_planar,
+                                       rocfft_precision_single,
+                                       {4, 2});
+    EXPECT_THROW(herm_planar.get_other_inplace_data_set_for(io_data_label::OUTPUT,
+                                                            rocfft_transform_type_real_inverse),
+                 std::logic_error);
+
+    // any Hermitian offset doubles, odd ones included
+    const auto herm      = with_type(data_set_t::default_full_range({9}, 4),
+                                rocfft_array_type_hermitian_interleaved,
+                                rocfft_precision_single,
+                                     {5, 0});
+    const auto from_herm = herm.get_other_inplace_data_set_for(io_data_label::OUTPUT,
+                                                               rocfft_transform_type_real_inverse);
+    ASSERT_TRUE(from_herm.has_value());
+    EXPECT_EQ(from_herm->get_array_type(), rocfft_array_type_real);
+    EXPECT_EQ(from_herm->get_offset(), 10u);
+
+    // unset array type: offsets derived alike
+    auto unset = padded;
+    data_set_test_access::set_array_type_and_offsets(unset, rocfft_array_type_unset, {4, 0});
+    const auto unset_herm = unset.get_other_inplace_data_set_for(
+        io_data_label::OUTPUT, rocfft_transform_type_real_forward);
+    ASSERT_TRUE(unset_herm.has_value());
+    EXPECT_FALSE(unset_herm->has_array_type());
+    EXPECT_EQ(unset_herm->get_offset(), 2u);
+}
+
+TEST_F(data_set_test, offsets_equality_is_strict)
+{
+    const auto base = data_set_t::default_full_range({8, 4}, 2);
+    const auto make = [&base](const std::array<size_t, 2>& offsets) {
+        return with_type(base, rocfft_array_type_complex_planar, rocfft_precision_single, offsets);
+    };
+    EXPECT_TRUE(make({1, 2}) == make({1, 2}));
+    EXPECT_FALSE(make({1, 2}) == make({1, 3}));
+    EXPECT_FALSE(make({1, 2}) == make({0, 2}));
+    EXPECT_FALSE(make({1, 2}) == make({0, 0}));
+}
+
+TEST_F(data_set_test, offsets_pass_through_subsets_and_embeddings)
+{
+    const auto data_set = with_type(data_set_t::default_full_range({4, 8, 2}, 3),
+                                    rocfft_array_type_complex_planar,
+                                    rocfft_precision_double,
+                                    {3, 5});
+    for(const auto& len_indices : {std::set<size_t>{0, 1, 2}, std::set<size_t>{0, 2}})
+    {
+        const auto sub = data_set.get_data_set_for_len_axes(len_indices);
+        EXPECT_EQ(sub.get_offset(data_part::REAL), 3u);
+        EXPECT_EQ(sub.get_offset(data_part::IMAGINARY), 5u);
+        const auto embedding = sub.get_embedding_data_set();
+        EXPECT_EQ(embedding.get_offset(data_part::REAL), 3u);
+        EXPECT_EQ(embedding.get_offset(data_part::IMAGINARY), 5u);
+    }
+}
+
+TEST_F(data_set_test, offsets_zero_in_intersection)
+{
+    const auto base  = data_set_t::default_full_range({8, 4}, 2);
+    const auto xsect = data_set_t::make_contiguous_intersection_of(
+        with_type(base, rocfft_array_type_complex_planar, rocfft_precision_single, {3, 5}),
+        with_type(base, rocfft_array_type_complex_planar, rocfft_precision_single, {1, 2}));
+    EXPECT_EQ(xsect.get_offset(data_part::REAL), 0u);
+    EXPECT_EQ(xsect.get_offset(data_part::IMAGINARY), 0u);
+}
+
+TEST_F(data_set_test, offsets_survive_clear_and_reset)
+{
+    auto data_set = with_type(data_set_t::default_full_range({8, 4}, 2),
+                              rocfft_array_type_hermitian_planar,
+                              rocfft_precision_half,
+                              {3, 5});
+    data_set_test_access::clear(data_set);
+    EXPECT_EQ(data_set.get_offset(data_part::REAL), 3u);
+    EXPECT_EQ(data_set.get_offset(data_part::IMAGINARY), 5u);
+    data_set_test_access::full_range_reset(data_set, {16}, 3);
+    EXPECT_EQ(data_set.get_offset(data_part::REAL), 3u);
+    EXPECT_EQ(data_set.get_offset(data_part::IMAGINARY), 5u);
+}
+
+TEST_F(data_set_test, offsets_in_str)
+{
+    const auto base = data_set_t::default_full_range({8}, 2);
+    const auto planar
+        = with_type(base, rocfft_array_type_complex_planar, rocfft_precision_single, {3, 5});
+    EXPECT_NE(planar.str().find("offsets 3 5"), std::string::npos) << planar.str();
+    const auto interleaved
+        = with_type(base, rocfft_array_type_complex_interleaved, rocfft_precision_single, {3, 0});
+    EXPECT_NE(interleaved.str().find("offsets 3"), std::string::npos) << interleaved.str();
+    EXPECT_EQ(interleaved.str().find("offsets 3 0"), std::string::npos) << interleaved.str();
+}
+
+// offset_in, is_continuous_in and is_contiguous are relative to the parts' offsets, which
+// they ignore; buffer_element_count includes them
+TEST_F(data_set_test, offsets_ignored_by_relative_queries)
+{
+    const auto whole = with_type(data_set_t::default_full_range({8, 4}, 2),
+                                 rocfft_array_type_complex_planar,
+                                 rocfft_precision_single);
+    const auto chunk = with_type(data_set_t({0, 1, 0}, {8, 3, 2}, whole.strides_and_distances()),
+                                 rocfft_array_type_complex_planar,
+                                 rocfft_precision_single);
+    const auto shifted_whole
+        = with_type(whole, rocfft_array_type_complex_planar, rocfft_precision_single, {3, 5});
+    const auto shifted_chunk
+        = with_type(chunk, rocfft_array_type_complex_planar, rocfft_precision_single, {7, 11});
+    EXPECT_EQ(shifted_chunk.offset_in(shifted_whole), chunk.offset_in(whole));
+    EXPECT_EQ(shifted_chunk.offset_in(whole), chunk.offset_in(whole));
+    EXPECT_EQ(shifted_chunk.is_continuous_in(shifted_whole), chunk.is_continuous_in(whole));
+    EXPECT_EQ(shifted_whole.is_contiguous(), whole.is_contiguous());
+    for(auto part : parts_of(rocfft_array_type_complex_planar))
+    {
+        EXPECT_EQ(shifted_whole.buffer_element_count(part),
+                  shifted_whole.get_offset(part) + whole.buffer_element_count(part));
+        EXPECT_EQ(shifted_chunk.buffer_element_count(part),
+                  shifted_chunk.get_offset(part) + chunk.buffer_element_count(part));
+    }
+    // an empty data set needs no buffer, wherever it would start
+    const auto empty = with_type(data_set_t({0, 0}, {0, 2}, {1, 1}),
+                                 rocfft_array_type_complex_interleaved,
+                                 rocfft_precision_single,
+                                 {4, 0});
+    EXPECT_EQ(empty.buffer_element_count(), 0u);
 }

@@ -51,7 +51,7 @@ rocfft_field_t::rocfft_field_t(std::vector<rocfft_brick_t>     field_bricks,
     for(auto& brick : bricks)
     {
         if(array_type != rocfft_array_type_unset && !brick.layout.has_array_type())
-            brick.layout.array_type = array_type;
+            brick.layout.set_array_type_and_offsets(array_type, brick.layout.offsets);
         if(precision && !brick.layout.has_precision())
             brick.layout.set_precision(*precision);
     }
@@ -232,14 +232,17 @@ std::optional<rocfft_field_t> rocfft_field_t::get_other_embarrassingly_parallel_
             // use default, packed contiguous layout for the other I/O
             if(is_hermitian_domain(fft_type, other_io))
             {
-                ret_bricks[brick_idx].layout[0].upper   = brick.layout[0].upper / 2 + 1;
-                ret_bricks[brick_idx].layout.array_type = rocfft_array_type_hermitian_interleaved;
+                ret_bricks[brick_idx].layout[0].upper = brick.layout[0].upper / 2 + 1;
+                auto& layout                          = ret_bricks[brick_idx].layout;
+                layout.set_array_type_and_offsets(rocfft_array_type_hermitian_interleaved,
+                                                  layout.offsets);
             }
             else if(is_real_domain(fft_type, other_io))
             {
                 ret_bricks[brick_idx].layout[0].upper
                     = 2 * (brick.layout[0].upper - 1) + (other_innermost_length_is_odd ? 1 : 0);
-                ret_bricks[brick_idx].layout.array_type = rocfft_array_type_real;
+                auto& layout = ret_bricks[brick_idx].layout;
+                layout.set_array_type_and_offsets(rocfft_array_type_real, layout.offsets);
             }
             ret_bricks[brick_idx].layout[0].inbuffer_stride = 1;
             for(size_t dim = 1; dim < brick.layout.get_full_rank(); dim++)
