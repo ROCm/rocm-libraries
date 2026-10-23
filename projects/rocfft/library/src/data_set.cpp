@@ -412,6 +412,23 @@ size_t data_set_t::buffer_size_bytes(data_part part) const
     return buffer_element_count(part) * element_byte_size();
 }
 
+size_t data_set_t::max_offset() const
+{
+    if(is_empty())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " is undefined for an empty logical index range.");
+    return *std::max_element(offsets.begin(), offsets.begin() + num_planes())
+           + compute_ptrdiff(lengths_and_batches(), strides_and_distances()) - 1;
+}
+
+size_t data_set_t::max_stride() const
+{
+    size_t ret = 0;
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+        ret = std::max(ret, (*this)[dim].inbuffer_stride);
+    return ret;
+}
+
 data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
 {
     if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)

@@ -346,6 +346,31 @@ struct data_set_t
     size_t buffer_size_bytes(data_part part = data_part::ALL) const;
 
     /**
+     * @return The largest in-buffer position (in elements, relative to the start of the
+     * buffer holding it, offsets included) of an element of the data set, over all its
+     * parts (see `data_part`), i.e., the maximum over all parts of
+     * `get_offset(part) + sum_d (span_d - 1) * stride_d` (equivalently, the maximum over
+     * parts of `buffer_element_count(part) - 1`). Lower bounds do not contribute: as for
+     * `buffer_element_count`, the logical range's first element sits at
+     * `get_offset(part)`. `max_offset() - get_offset(part)` is thus the largest index
+     * reached relative to the start of part `part`, for any part.
+     * @note Computed in `size_t`, so values above 32-bit limits are represented exactly
+     * (wrap-around beyond `size_t` is not detected).
+     * @throw An `std::logic_error` is thrown if the logical index range is empty
+     * (see `is_empty`): no element is reached.
+     */
+    size_t max_offset() const;
+
+    /**
+     * @return The largest in-buffer stride (in elements) over all axes, length and batch
+     * axes alike, including axes of unit or zero logical span (their strides are still
+     * well-defined values a kernel may be given). `0` if the object has no axis.
+     * @note Not bounded by `max_offset`: the stride of a unit-span axis may be arbitrarily
+     * large without contributing to any position.
+     */
+    size_t max_stride() const;
+
+    /**
      * @param[in] new_array_type array type to be given to the returned object.
      * @return A copy of this object relabeled with `new_array_type`. Only relabeling
      * is supported, i.e., the array type must be unchanged or switch between the
