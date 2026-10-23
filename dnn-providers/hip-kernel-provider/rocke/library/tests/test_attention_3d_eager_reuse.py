@@ -403,6 +403,56 @@ def test_maximum_length_within_same_selector_bucket_reuses_pair(eager, runtime):
     assert len(bindings) == 2 and len(launches) == 4
 
 
+@pytest.mark.parametrize("change", ["total_q", "segments"])
+def test_larger_geometry_allocates_larger_scratch_and_retains_prior_pair(
+    eager, runtime, monkeypatch, change
+):
+    from dataclasses import replace
+    from math import prod
+    import sys
+
+    args, bindings, launches, retained = eager
+    monkeypatch.setattr(au, "_num_segments", lambda *a: 128)
+    torch = sys.modules["torch"]
+    empty = torch.empty
+    dtypes = []
+
+    def record_empty(shape, *, dtype, device):
+        dtypes.append(dtype)
+        return empty(shape, dtype=dtype, device=device)
+
+    monkeypatch.setattr(torch, "empty", record_empty)
+    start = len(runtime.allocations)
+    with au.no_fence():
+        au._run_3d_tiled(**args, stream=17)
+        prior = next(iter(retained[17].values()))
+        small = runtime.allocations[start:]
+        assert [t.shape for t in small] == [(1, 4, 128, 64), (1, 4, 128), (1, 4, 128)]
+        assert sum(prod(t.shape) * 4 for t in small) == 135_168
+        if change == "total_q":
+            args["problem"] = replace(args["problem"], total_q=2)
+            expected = [(2, 4, 128, 64), (2, 4, 128), (2, 4, 128)]
+        else:
+            monkeypatch.setattr(au, "_num_segments", lambda *a: 256)
+            expected = [(1, 4, 256, 64), (1, 4, 256), (1, 4, 256)]
+        au._run_3d_tiled(**args, stream=17)
+        large = runtime.allocations[start + 3 :]
+        assert [t.shape for t in large] == expected
+        assert sum(prod(t.shape) * 4 for t in large) == 270_336
+        assert all(a is not b for a, b in zip(small, large))
+        assert bindings[2]["segm_output_ptr"] is large[0]
+        au._run_3d_tiled(**args, stream=17)
+        assert len(runtime.allocations) - start == 6
+        assert len(bindings) == 4 and len(launches) == 6
+        assert len(au._3D_EAGER_WORKSPACES) == len(retained[17]) == 2
+        assert any(entry is prior for entry in retained[17].values())
+        assert all(t is s for t, s in zip(prior[0].__defaults__[0], small))
+    assert dtypes == [torch.float32] * 6
+    assert all(t.stream == 17 for t in small + large)
+    au.wait_stream_and_release(17)
+    assert not retained
+
+
 @pytest.mark.parametrize(
     "change", ["total_q", "num_seqs", "segments", "spec", "strided"]
 )
