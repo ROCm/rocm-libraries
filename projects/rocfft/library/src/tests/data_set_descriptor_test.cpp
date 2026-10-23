@@ -67,6 +67,30 @@ namespace
                                  layout.get_batch_rank(),
                                  offsets);
     }
+
+    // In-buffer offset (sum of stride * coordinate) of every logical index, axis 0 fastest.
+    std::vector<size_t> all_offsets(const data_descriptor_t& d)
+    {
+        std::vector<size_t> ret;
+        if(d.is_empty())
+            return ret;
+        const auto lo     = d.lower();
+        const auto hi     = d.upper();
+        const auto stride = d.strides_and_distances();
+        auto       idx    = lo;
+        while(true)
+        {
+            size_t offset = 0;
+            for(size_t a = 0; a < idx.size(); a++)
+                offset += stride[a] * idx[a];
+            ret.push_back(offset);
+            size_t a = 0;
+            for(; a < idx.size() && ++idx[a] == hi[a]; a++)
+                idx[a] = lo[a];
+            if(a == idx.size())
+                return ret;
+        }
+    }
 }
 
 // Every test restarts its generator from random_seed, so a failing case replays
@@ -1643,4 +1667,188 @@ TEST_F(data_descriptor_test, max_offset_and_stride_beyond_32_bits)
     const auto at_limit = data_descriptor_t::full_layout({2}, {u32_max - 1}, 1, 1);
     EXPECT_EQ(at_limit.max_offset(), u32_max - 1);
     EXPECT_EQ(at_limit.max_stride(), u32_max - 1);
+}
+
+TEST_F(data_descriptor_test, split_length_axis_nominal)
+{
+    // 1D: 12 -> 3 x 4
+    const auto d1 = data_descriptor_t::full_layout({12}, {1}, 3, 12);
+    const auto s1 = d1.split_length_axis(0, 3);
+    EXPECT_EQ(s1.lengths(), (std::vector<size_t>{3, 4}));
+    EXPECT_EQ(s1.strides(), (std::vector<size_t>{1, 3}));
+    EXPECT_EQ(s1.batches(), d1.batches());
+    EXPECT_EQ(s1.distances(), d1.distances());
+    EXPECT_EQ(s1.logical_count(), d1.logical_count());
+    EXPECT_EQ(all_offsets(s1), all_offsets(d1));
+
+    // 2D, splitting the outer (non-unit stride) axis: 8 x 6 -> 8 x 2 x 3
+    const auto d2 = data_descriptor_t::full_layout({8, 6}, {1, 8}, 2, 64);
+    const auto s2 = d2.split_length_axis(1, 2);
+    EXPECT_EQ(s2.lengths(), (std::vector<size_t>{8, 2, 3}));
+    EXPECT_EQ(s2.strides(), (std::vector<size_t>{1, 8, 16}));
+    EXPECT_EQ(s2.distances(), d2.distances());
+    EXPECT_EQ(s2.logical_count(), d2.logical_count());
+    EXPECT_EQ(all_offsets(s2), all_offsets(d2));
+
+    // 3D, splitting the middle axis: later length axes shift by one
+    const auto d3 = data_descriptor_t::default_full_layout({4, 6, 10}, 2);
+    const auto s3 = d3.split_length_axis(1, 3);
+    EXPECT_EQ(s3.lengths(), (std::vector<size_t>{4, 3, 2, 10}));
+    EXPECT_EQ(s3.strides(), (std::vector<size_t>{1, 4, 12, 24}));
+    EXPECT_EQ(s3.batches(), d3.batches());
+    EXPECT_EQ(s3.distances(), d3.distances());
+    EXPECT_EQ(s3.logical_count(), d3.logical_count());
+    EXPECT_EQ(all_offsets(s3), all_offsets(d3));
+    EXPECT_FALSE(s3.is_embedded());
+}
+
+TEST_F(data_descriptor_test, split_length_axis_default_factor)
+{
+    // divisor closest to sqrt(L), ties (if any) to the smaller one
+    const std::map<size_t, std::vector<size_t>> expected = {{64, {8, 8}},
+                                                            {48, {6, 8}},
+                                                            {1024, {32, 32}},
+                                                            {12, {3, 4}},
+                                                            {14, {2, 7}},
+                                                            {4, {2, 2}},
+                                                            {2 * 3 * 5 * 7, {14, 15}}};
+    for(const auto& [L, lengths] : expected)
+    {
+        SCOPED_TRACE("L = " + std::to_string(L));
+        const auto d = data_descriptor_t::default_full_layout({L}, 2);
+        const auto s = d.split_length_axis(0);
+        EXPECT_EQ(s.lengths(), lengths);
+        EXPECT_EQ(s.strides(), (std::vector<size_t>{1, lengths[0]}));
+        EXPECT_EQ(all_offsets(s), all_offsets(d));
+    }
+}
+
+TEST_F(data_descriptor_test, split_length_axis_rejects_bad_input)
+{
+    const auto d = data_descriptor_t::default_full_layout({12, 7, 1}, 2);
+    // not a length axis index (3 is the batch axis)
+    EXPECT_THROW(d.split_length_axis(3, 2), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(100), std::invalid_argument);
+    // non-divisor, trivial factors, factor larger than L
+    EXPECT_THROW(d.split_length_axis(0, 5), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(0, 1), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(0, 12), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(0, 24), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(0, 0), std::invalid_argument);
+    // no non-trivial factor for prime L, L = 1, or an empty range
+    EXPECT_THROW(d.split_length_axis(1), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(2), std::invalid_argument);
+    EXPECT_THROW(d.split_length_axis(2, 1), std::invalid_argument);
+    const data_descriptor_t empty({3, 0}, {3, 2}, {1, 8});
+    EXPECT_THROW(empty.split_length_axis(0), std::invalid_argument);
+    // partial range [2, 14) is not aligned on multiples of 4 (nor of default 3)
+    const data_descriptor_t misaligned({2, 0}, {14, 3}, {1, 16});
+    EXPECT_THROW(misaligned.split_length_axis(0, 4), std::invalid_argument);
+    EXPECT_THROW(misaligned.split_length_axis(0), std::invalid_argument);
+    EXPECT_NO_THROW(misaligned.split_length_axis(0, 2));
+}
+
+TEST_F(data_descriptor_test, split_length_axis_partial_range)
+{
+    // [4, 16) along a stride-1 axis, batch [1, 3): inner [0, 4), outer [1, 4)
+    const data_descriptor_t d({4, 1}, {16, 3}, {1, 32});
+    const auto              s = d.split_length_axis(0, 4);
+    EXPECT_EQ(s.lower(), (std::vector<size_t>{0, 1, 1}));
+    EXPECT_EQ(s.upper(), (std::vector<size_t>{4, 4, 3}));
+    EXPECT_EQ(s.strides_and_distances(), (std::vector<size_t>{1, 4, 32}));
+    EXPECT_EQ(s.logical_count(), d.logical_count());
+    EXPECT_EQ(all_offsets(s), all_offsets(d));
+
+    // offset of the first element within the full layout is unchanged too
+    const auto full = data_descriptor_t::full_layout({16}, {1}, 3, 32);
+    EXPECT_EQ(s.offset_in(full.split_length_axis(0, 4)), d.offset_in(full));
+}
+
+TEST_F(data_descriptor_test, split_length_axis_multi_batch)
+{
+    const auto d = data_descriptor_t::default_full_layout({6, 10}, {3, 2});
+    const auto s = d.split_length_axis(0);
+    EXPECT_EQ(s.lengths(), (std::vector<size_t>{2, 3, 10}));
+    EXPECT_EQ(s.strides(), (std::vector<size_t>{1, 2, 6}));
+    EXPECT_EQ(s.get_batch_rank(), 2u);
+    EXPECT_EQ(s.batches(), d.batches());
+    EXPECT_EQ(s.distances(), d.distances());
+    EXPECT_EQ(all_offsets(s), all_offsets(d));
+}
+
+TEST_F(data_descriptor_test, split_length_axis_keeps_type_precision_and_offsets)
+{
+    const auto base = data_descriptor_t::default_full_layout({6, 10}, 2);
+
+    // planar data with two plane offsets, split along length axis 0
+    const auto planar
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_planar, {5, 1000});
+    const auto sp = planar.split_length_axis(0, 2);
+    EXPECT_EQ(sp.get_array_type(), rocfft_array_type_complex_planar);
+    EXPECT_EQ(sp.get_precision(), rocfft_precision_single);
+    EXPECT_EQ(sp.num_planes(), 2u);
+    EXPECT_EQ(sp.get_offset(0), 5u);
+    EXPECT_EQ(sp.get_offset(1), 1000u);
+    EXPECT_EQ(sp.max_offset(), planar.max_offset());
+    EXPECT_EQ(all_offsets(sp), all_offsets(planar));
+
+    // interleaved data with an offset, split along length axis 1
+    const auto interleaved
+        = with_type(base, rocfft_precision_double, rocfft_array_type_complex_interleaved, {7, 0});
+    const auto si = interleaved.split_length_axis(1);
+    EXPECT_EQ(si.get_array_type(), rocfft_array_type_complex_interleaved);
+    EXPECT_EQ(si.get_precision(), rocfft_precision_double);
+    EXPECT_EQ(si.get_offset(0), 7u);
+
+    // no precision nor array type: still none after the split
+    const auto su = base.split_length_axis(0);
+    EXPECT_EQ(su.get_array_type(), rocfft_array_type_unset);
+    EXPECT_FALSE(su.has_precision());
+}
+
+TEST_F(data_descriptor_test, split_length_axis_embedded)
+{
+    const auto L   = data_descriptor_t::default_full_layout({4, 8, 6}, 3);
+    const auto sub = L.get_layout_for_len_axes({0, 2});
+    ASSERT_TRUE(sub.is_embedded());
+
+    // split the sub-layout's axis 1 (L's axis 2): L's axis 2 is split alike
+    const auto s1 = sub.split_length_axis(1, 2);
+    EXPECT_EQ(s1.lengths(), (std::vector<size_t>{4, 2, 3}));
+    EXPECT_EQ(s1.batches(), sub.batches());
+    EXPECT_TRUE(s1.is_embedded());
+    EXPECT_TRUE(s1.get_embedding_layout() == L.split_length_axis(2, 2));
+    EXPECT_EQ(s1.corresponding_axes_in_embedding(), (std::vector<size_t>{0, 2, 3}));
+    EXPECT_EQ(all_offsets(s1), all_offsets(sub));
+
+    // split the sub-layout's axis 0 (L's axis 0): every later axis shifts by one
+    const auto s0 = sub.split_length_axis(0);
+    EXPECT_EQ(s0.lengths(), (std::vector<size_t>{2, 2, 6}));
+    EXPECT_TRUE(s0.get_embedding_layout() == L.split_length_axis(0));
+    EXPECT_EQ(s0.corresponding_axes_in_embedding(), (std::vector<size_t>{0, 1, 3}));
+    EXPECT_EQ(all_offsets(s0), all_offsets(sub));
+}
+
+TEST_F(data_descriptor_test, split_length_axis_round_trip)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // random layout whose length axis dim spans an aligned partial range of
+        // factor * m elements
+        const auto full   = random_full_layout(2);
+        const auto dim    = uniform(0, full.get_len_rank() - 1);
+        const auto factor = uniform(2, 4);
+        auto       lo     = full.lower();
+        auto       hi     = full.upper();
+        lo[dim]           = factor * uniform(0, 2);
+        hi[dim]           = lo[dim] + factor * uniform(2, 3);
+        const data_descriptor_t d(lo, hi, full.strides_and_distances(), full.get_batch_rank());
+        SCOPED_TRACE("d " + d.str() + ", dim " + std::to_string(dim) + ", factor "
+                     + std::to_string(factor));
+
+        const auto s = d.split_length_axis(dim, factor);
+        EXPECT_EQ(s.get_len_rank(), d.get_len_rank() + 1);
+        EXPECT_EQ(s.logical_count(), d.logical_count());
+        EXPECT_EQ(all_offsets(s), all_offsets(d));
+    }
 }
