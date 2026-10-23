@@ -24,13 +24,6 @@ target_sources(tensilelite-codegen
         "${CMAKE_CURRENT_SOURCE_DIR}/Kernel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMM.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMEpilogue.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMLoop.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMScales.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMSetup.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMSteps.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMTiles.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/SplitKReduce.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target.cpp"
 )
 
