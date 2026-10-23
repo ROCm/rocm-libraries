@@ -40,9 +40,15 @@ endif()
 find_package(GTest 1.11.0 REQUIRED)
 
 # The unit tests compile library translation units directly, so they must see the
-# same rocsparse_int width as librocsparse.
+# same rocsparse_int width and the same configuration macros as librocsparse.
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
+endif()
+if(BUILD_MEMSTAT)
+  add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
+endif()
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
 endif()
 
 # Unit-test sources (the tests themselves + a minimal gtest main).
@@ -81,7 +87,8 @@ add_executable(rocsparse-unit-test
 # ROCSPARSE_EXPORT (and *_NO_EXPORT) to nothing on every platform, which is
 # correct here: these TUs are compiled *into* the test binary, not consumed from
 # the shared library. Test-only; no library change.
-target_compile_definitions(rocsparse-unit-test PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
+target_compile_definitions(rocsparse-unit-test
+  PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
 target_compile_options(rocsparse-unit-test PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -482,7 +489,8 @@ add_executable(rocsparse-unit-test-device
 # (e.g. from library/src/auxiliary/rocsparse_auxiliary.cpp compiled in at the
 # infostructs leaf and beyond). Correct on Linux too (these are definitions
 # built into the executable, not symbols imported from the shared library).
-target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
+target_compile_definitions(rocsparse-unit-test-device
+  PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
