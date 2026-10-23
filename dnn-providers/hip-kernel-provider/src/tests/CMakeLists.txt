@@ -150,6 +150,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # product tree to discovery would widen it for every unit test.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    if(TARGET hkp_packaging_product)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+    endif()
 
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read

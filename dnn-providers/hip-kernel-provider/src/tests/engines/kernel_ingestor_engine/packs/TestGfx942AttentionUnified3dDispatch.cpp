@@ -47,7 +47,8 @@
  *
  * Skipped, with the reason, when there is no device or the device is not gfx942: the
  * shipped code objects are gfx942-only. On a gfx942 device the shipped descriptor set
- * MUST be discoverable (descriptorSearchDirectories()); its absence fails.
+ * MUST load from the product descriptor tree beside this binary
+ * (HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR); its absence fails.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::gfx942_unified_3d
 {
@@ -214,7 +215,7 @@ void runCase(const DispatchCase& c)
     catch(const std::exception& e)
     {
         FAIL() << "gfx942 device but the shipped " << PACK.engineName
-               << " descriptor set is not discoverable: " << e.what();
+               << " descriptor set did not load from the product tree: " << e.what();
     }
     ASSERT_TRUE(kernel.has_value())
         << "kernel '" << c.kernelName << "' is not in the shipped catalog for this graph";
