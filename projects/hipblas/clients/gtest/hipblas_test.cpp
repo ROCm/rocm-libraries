@@ -27,12 +27,14 @@
 #include <csetjmp>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <regex>
 #ifdef WIN32
 #include <windows.h>
 #define strcasecmp(A, B) _stricmp(A, B)
 #else
+#include <execinfo.h>
 #include <pthread.h>
 #include <unistd.h>
 #endif
@@ -61,7 +63,32 @@ static thread_local struct
 
     // The signal which was received
     volatile sig_atomic_t signal;
+
+    const char* volatile current_test_name = nullptr;
 } t_handler;
+
+static const bool continue_on_fatal_signal = [] {
+    const char* env = getenv("HIPBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL");
+    for(const char* truthy : {"1", "true", "yes", "on"})
+        if(env && !strcmp(env, truthy))
+            return true;
+    return false;
+}();
+
+#ifndef WIN32
+static void hipblas_test_dump_backtrace()
+{
+    void*     frames[64];
+    const int n = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
+    backtrace_symbols_fd(frames, n, STDERR_FILENO);
+}
+
+static void async_safe_unwinder_load()
+{
+    void* frames[1];
+    backtrace(frames, 1);
+}
+#endif
 
 // Signal handler (must have external "C" linkage)
 extern "C" void hipblas_test_signal_handler(int sig)
@@ -80,6 +107,28 @@ extern "C" void hipblas_test_signal_handler(int sig)
     }
 
 #ifndef WIN32
+    {
+        static const char prefix[] = "SIGNAL raised in: ";
+        auto              rc       = write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
+        const char*       name     = t_handler.current_test_name;
+        if(name)
+        {
+            rc = write(STDERR_FILENO, name, strlen(name));
+        }
+        else
+        {
+            static const char unknown[] = "(unknown test)";
+            rc                          = write(STDERR_FILENO, unknown, sizeof(unknown) - 1);
+        }
+        rc = write(STDERR_FILENO, "\n", 1);
+        (void)rc;
+    }
+
+    if(!continue_on_fatal_signal)
+    {
+        hipblas_test_dump_backtrace();
+    }
+
     // If this is an alarm timeout, we abort
     if(sig == SIGALRM)
     {
@@ -117,6 +166,8 @@ void hipblas_test_sigaction()
     // Catch SIGALRM and synchronous signals
     for(int sig : {SIGALRM, SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV})
         sigaction(sig, &act, nullptr);
+
+    async_safe_unwinder_load();
 #else
     for(int sig : {SIGABRT, SIGFPE, SIGILL, SIGINT, SIGSEGV, SIGTERM})
         signal(sig, hipblas_test_signal_handler);
@@ -142,10 +193,22 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     if(sigsetjmp(t_handler.sigjmp, true))
     {
 #if(__GLIBC__ < 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 32)
-        FAIL() << "Received " << sys_siglist[t_handler.signal] << " signal";
+        const char* signal_name = sys_siglist[t_handler.signal];
 #else
-        FAIL() << "Received " << sigdescr_np(t_handler.signal) << " signal";
+        const char* signal_name = sigdescr_np(t_handler.signal);
 #endif
+        if(continue_on_fatal_signal)
+        {
+            FAIL() << "Received " << signal_name << " signal";
+        }
+        else
+        {
+            ADD_FAILURE() << "Received " << signal_name
+                          << " signal -- aborting test process (state is unrecoverable)";
+            t_handler.enabled = false;
+            fflush(NULL);
+            abort();
+        }
     }
 #else
     if(setjmp(t_handler.sigjmp))
@@ -160,6 +223,9 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
         if(set_alarm)
             alarm(test_timeout);
 #endif
+        const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        t_handler.current_test_name     = info ? info->name() : nullptr;
+
         // Enable the signal handler
         t_handler.enabled = true;
 

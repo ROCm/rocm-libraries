@@ -25,6 +25,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_gcreate_identity_permutation.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_identity.hpp"
 
 #include "identity_device.h"
@@ -38,16 +39,21 @@ rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle ha
     hipStream_t stream = handle->stream;
 
 #define IDENTITY_DIM 512
-    dim3 identity_blocks((n - 1) / IDENTITY_DIM + 1);
-    dim3 identity_threads(IDENTITY_DIM);
-
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::identity_kernel<IDENTITY_DIM>),
-                                       identity_blocks,
-                                       identity_threads,
-                                       0,
-                                       stream,
-                                       n,
-                                       p);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+        handle,
+        (n - 1) / IDENTITY_DIM + 1,
+        IDENTITY_DIM,
+        [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::identity_kernel<IDENTITY_DIM, decltype(grid_stride)::value>),
+                dim3(grid),
+                dim3(IDENTITY_DIM),
+                0,
+                stream,
+                n,
+                p);
+            return rocsparse_status_success;
+        }));
 #undef IDENTITY_DIM
 
     return rocsparse_status_success;

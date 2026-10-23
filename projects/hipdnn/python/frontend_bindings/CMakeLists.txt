@@ -77,9 +77,11 @@ nanobind_add_module(
     src/tensor_bindings.cpp
     src/attributes_bindings.cpp
     src/types_bindings.cpp
+    src/autotune_bindings.cpp
     src/handle_bindings.cpp
     src/memory_bindings.cpp
     src/hip_bindings.cpp
+    src/dlpack_adapter.cpp
 )
 
 target_link_libraries(

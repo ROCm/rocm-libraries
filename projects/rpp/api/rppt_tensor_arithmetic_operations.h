@@ -46,11 +46,10 @@ extern "C" {
  * \details This function performs the fmadd operation on a batch of 4D tensors.
  *          It multiplies each element of the source tensor by a corresponding element in the
  * 'mulTensor', adds a corresponding element from the 'addTensor', and stores the result in the
- * destination tensor. Support added for f32 -> f32 dataype. \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * Sample Input \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_fused_multiply_add_scalar_150x150x4.gif
- * Sample Output \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * destination tensor. Support added for f32 -> f32 dataype.
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_fused_multiply_add_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] mulTensor mul values for fmadd
@@ -72,11 +71,10 @@ RppStatus rppt_fused_multiply_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr src
 /*! \brief Add scalar augmentation on HIP/HOST backend
  * \details This function performs the addition operation on a batch of 4D tensors.
  *          It adds a corresponding element from the 'addTensor' to source tensor, and stores the
- * result in the destination tensor. Support added for f32 -> f32 dataype. \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * Sample Input \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_add_scalar_150x150x4.gif
- * Sample Output \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * result in the destination tensor. Support added for f32 -> f32 dataype.
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_add_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] addTensor add values for used for
@@ -95,12 +93,10 @@ RppStatus rppt_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr,
 /*! \brief Subtract scalar augmentation on HIP/HOST backend
  * \details This function performs the subtraction operation on a batch of 4D tensors.
  *          It takes a corresponding element from 'subtractTensor' and subtracts it from source
- * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype. \image
- * html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * Sample Input \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_subtract_scalar_150x150x4.gif
- * Sample Output \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype.
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_subtract_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param [in] srcGenericDescPtr source tensor descriptor \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstGenericDescPtr destination tensor descriptor \param[in] subtractTensor subtract values for
@@ -120,12 +116,10 @@ RppStatus rppt_subtract_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
 /*! \brief Multiply scalar augmentation on HIP/HOST backend
  * \details This function performs the multiplication operation on a batch of 4D tensors.
  *          It takes a corresponding element from 'multiplyTensor' and multiplies it with source
- * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype. \image
- * html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenInputs/input150x150x4.gif
- * Sample Input \image html
- * https://raw.githubusercontent.com/ROCm/rpp/develop/docs/data/doxygenOutputs/arithmetic_operations_multiply_scalar_150x150x4.gif
- * Sample Output \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
+ * tensor. Result is stored in the destination tensor. Support added for f32 -> f32 dataype.
+ * \image html input150x150x4.gif "Sample Input"
+ * \image html arithmetic_operations_multiply_scalar_150x150x4.gif "Sample Output"
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory
  * (for HOST backend) \param[in] srcGenericDescPtr source tensor descriptor \param[out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param[in]
  * dstGenericDescPtr destination tensor descriptor \param[in] mulTensor multiplier values for used
@@ -146,11 +140,13 @@ RppStatus rppt_multiply_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
  * \details This function computes magnitude of corresponding pixels for a batch of RGB(3 channel) /
  * greyscale(1 channel) images with an NHWC/NCHW tensor layout.<br> srcPtr depth ranges - Rpp8u (0
  * to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127). dstPtr depth ranges - Will be
- * same depth as srcPtr. <br> \image html img150x150.png Sample Input1 \image html img150x150_2.png
- * Sample Input2 \image html arithmetic_operations_magnitude_img150x150.png Sample Output \param
- * [in] srcPtr1 source1 tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend)
- * \param [in] srcPtr2 source2 tensor in HIP memory (for HIP backend) or HOST memory (for HOST
- * backend) \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4,
+ * same depth as srcPtr. <br>
+ * \image html img150x150.png "Sample Input1"
+ * \image html img150x150_2.png "Sample Input2"
+ * \image html arithmetic_operations_magnitude_img150x150.png "Sample Output"
+ * \param [in] srcPtr1 source1 tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend) \param [in] srcPtr2 source2 tensor in HIP memory (for HIP backend) or HOST memory (for
+ * HOST backend) \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4,
  * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 1/3) \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstDescPtr destination tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,

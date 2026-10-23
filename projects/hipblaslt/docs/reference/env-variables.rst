@@ -26,6 +26,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_LEVEL``
         | Controls the verbosity level of hipBLASLt logging output.
+        | Levels are cumulative: each one also enables the levels below it.
       - | 0: Off (logging disabled, default)
         | 1: Error (only errors are logged)
         | 2: Trace (API calls with kernel launches log parameters)
@@ -35,6 +36,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_MASK``
         | Controls logging output using bit mask flags (can be combined).
+        | Consulted only when ``HIPBLASLT_LOG_LEVEL`` is unset.
       - | 0: Off
         | 1: Error
         | 2: Trace
@@ -47,8 +49,9 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_FILE``
         | Specifies path to logging file. Can contain ``%i`` for process ID replacement.
+        | Has no effect unless a level or mask has enabled logging.
       - | Path to log file (for example, ``logfile_%i.log``)
-        | If not defined: log messages printed to stdout
+        | If not defined: log messages printed to stderr
 
     * - | ``HIPBLASLT_ENABLE_MARKER``
         | Enables marker trace for ROCProfiler profiling.
@@ -84,12 +87,53 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
 
+Runtime tuning cache
+====================
+
+The runtime tuning cache is opt-in and off by default. ``HIPBLASLT_TUNING_MODE`` and
+``HIPBLASLT_TUNING_CACHE_PATH`` are read the first time they are needed in a process, so set them
+before the first hipBLASLt call. A process running in a secure execution context (set-user-ID,
+set-group-ID, or another credential-changing exec such as file capabilities) ignores both, and the
+cache stays off. For more information, see
+:doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+
+``cache`` mode writes two notices without any logging variable: one line naming the mode, the file
+and how many entries loaded, and a closing summary. Replaying the cache adds no output per call.
+Where the notices go depends on logging:
+
+* No level or mask: stderr. ``HIPBLASLT_LOG_FILE`` alone does not open a log file.
+* ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the stream logging already opened,
+  including ``HIPBLASLT_LOG_FILE``.
+* ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``: the same stream,
+  formatted like every other log line, plus a cache hit, miss or invalidation line once per problem.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_TUNING_MODE``
+        | Selects runtime tuning behavior.
+      - | ``off``: Disable runtime tuning (default)
+        | ``cache``: Replay valid entries from the cache file
+
+    * - | ``HIPBLASLT_TUNING_CACHE_PATH``
+        | Specifies the runtime cache file.
+      - | Path to a tuning file
+        | Required for ``cache`` mode
+
 Origami with Stream-K configuration
 ===================================
 
 The Origami with Stream-K configuration environment variables for hipBLASLt are collected in the following table.
 These variables apply to all GEMMs in an application.
 For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-use-streamk>`.
+
+The ``TENSILE_PERSISTENT_*`` launch controls apply to persistent kernels, including Stream-K and persistent DataParallel.
+The legacy aliases listed below remain supported. When both names are set, the preferred name takes precedence,
+even if its value is invalid; it does not fall back to the legacy value.
 
 .. list-table::
     :header-rows: 1
@@ -104,8 +148,9 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | 2: Origami with Stream-K (enables Origami solution selection for consistent performance)
         | This variable has no effect on the AMD Instinct™ MI350 series. Stream-K is always used.
 
-    * - | ``TENSILE_STREAMK_DYNAMIC_GRID``
-        | Controls Stream-K dynamic grid size selection behavior.
+    * - | ``TENSILE_PERSISTENT_DYNAMIC_GRID``
+        | Legacy alias: ``TENSILE_STREAMK_DYNAMIC_GRID``.
+        | Controls persistent grid size selection behavior.
       - | 0: Disable dynamic grid (use all available compute units)
         | 1: Only reduce compute units for small problems to the number of output tiles when ``num_tiles < CU count``
         | 2: Also reduce compute units for large sizes to improve the data-parallel portion and reduce power
@@ -114,16 +159,47 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | 5: The Stream-K algorithm uses the Origami ``select_best_grid_size`` function
         | 6: Default (automatically pick the optimal workgroup count)
 
-    * - | ``TENSILE_STREAMK_FIXED_GRID``
-        | Overrides default grid size with specified number of workgroups for Stream-K kernels.
-      - | Integer value specifying number of workgroups
+    * - | ``TENSILE_GRIDBASED_KDTREE``
+        | Force-enables the k-d tree index on grid-based solution-selection tables, which are otherwise scanned linearly.
+        | Enable-only: it can switch the index on for tables that do not ask for it, but it can never switch it off. A table that declares ``UseKdTree: true`` in its library-logic file already uses the index with this variable unset, and no value of this variable changes that.
+        | Affects which kernel is selected, not the result it computes.
+      - | Unset or 0: Each grid-based table uses the ``UseKdTree`` value declared in its library-logic file. Tables that do not declare it are scanned linearly.
+        | Non-zero: Enable the index for every grid-based table, in addition to those already declaring ``UseKdTree: true``.
+        | To disable the index for a table that declares ``UseKdTree: true``, remove the key (or set it to ``false``) in that table's library-logic file and rebuild the device library. This cannot be done at runtime.
+
+    * - | ``TENSILE_PERSISTENT_FIXED_GRID``
+        | Legacy alias: ``TENSILE_STREAMK_FIXED_GRID``.
+        | Overrides the default persistent grid size, subject to the kernel's launch limits.
+      - | Positive integer specifying the number of workgroups
+        | Default: 0 (no override)
         | Example: 64 (limits GEMM kernels to 64 workgroups)
 
-    * - | ``TENSILE_STREAMK_MAX_CUS``
-        | Sets maximum number of compute units for Stream-K kernels.
-      - | Integer value specifying maximum compute units
-        | Example: 32 (limits GEMM kernels to 32 compute units)
-        | Default: All available compute units
+    * - | ``TENSILE_PERSISTENT_MAX_CUS``
+        | Legacy alias: ``TENSILE_STREAMK_MAX_CUS``.
+        | Sets the compute-unit budget used for persistent grid sizing.
+      - | Positive integer specifying the compute-unit budget
+        | Example: 32
+        | Default: 0 (all available compute units)
+
+    * - | ``TENSILE_PERSISTENT_GRID_MULTIPLIER``
+        | Legacy alias: ``TENSILE_STREAMK_GRID_MULTIPLIER``.
+        | Multiplies the compute-unit count to size the persistent grid when dynamic grid selection and the CU cap are disabled and no fixed grid is set.
+        | The resulting grid remains subject to the kernel's launch limits.
+      - | Integer greater than 1 to enable multiplication
+        | Default: 1
+
+    * - | ``TENSILE_PERSISTENT_DYNAMIC_WGM``
+        | Legacy alias: ``TENSILE_STREAMK_DYNAMIC_WGM``.
+        | Retained for compatibility; currently has no effect on workgroup mapping.
+      - | Default: 0
+
+    * - | ``TENSILE_PERSISTENT_HYBRID_FORCE_MODE``
+        | Legacy alias: ``TENSILE_STREAMK5_FORCE_MODE``.
+        | Debug override for the mode of an already selected Hybrid kernel; does not select the kernel family.
+      - | -1: Respect the normal assignment policy (default)
+        | 0: Force static assignment
+        | 1: Force dynamic work-queue assignment
+        | Malformed or out-of-range values are ignored.
 
 .. _env-type_overrides:
 

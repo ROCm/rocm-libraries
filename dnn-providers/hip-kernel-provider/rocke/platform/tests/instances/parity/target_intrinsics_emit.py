@@ -111,6 +111,19 @@ def build_permlane(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_quad_perm(b: IRBuilder) -> None:
+    b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+    b.ret()
+
+
+def build_warp_shuffle_xor_dpp(b: IRBuilder) -> None:
+    v = b.const_i32(1)
+    for mask in (1, 2, 3, 7, 8, 15):
+        v = b.warp_shuffle_xor_dpp(v, mask)
+    b.warp_shuffle_xor_dpp(b.const_f32(1.0), 7)
+    b.ret()
+
+
 def build_av_b128(b: IRBuilder) -> None:
     p = b.param("p", PtrType(I32, "global"), align=16)
     data = b.av_load_b128(p)
@@ -132,8 +145,10 @@ BUILDERS = [
     build_prefetch_inst,
     build_buffer_load_lds_async,
     build_permlane,
+    build_quad_perm,
     build_av_b128,
     build_scheduler_hints,
+    build_warp_shuffle_xor_dpp,
 ]
 
 
