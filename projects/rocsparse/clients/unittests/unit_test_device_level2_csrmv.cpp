@@ -61,8 +61,8 @@ namespace
         const std::vector<T> y0   = make_vector<T>(ys, 9);
         const std::vector<T> want = csr_gemv(A, c.trans, alpha, x, beta, y0);
 
-        device_csr<T>    dA(A);
-        device_vector<T> dx(x), dy(y0), dalpha(std::vector<T>(1, alpha)),
+        device_csr<T, int32_t, int32_t> dA(A);
+        device_vector<T>                dx(x), dy(y0), dalpha(std::vector<T>(1, alpha)),
             dbeta(std::vector<T>(1, beta));
         ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr && dalpha.ptr && dbeta.ptr);
 

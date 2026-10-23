@@ -348,10 +348,10 @@ namespace
         // time (none, transpose, none again, conjugate transpose): every result must
         // match the host solve of its own operation, whatever analysis the descriptor
         // held before.
-        const spsv_case    base_case;
-        const auto         A = make_spsv_matrix<double>(base_case);
-        const auto         C = to_csc_arrays(A);
-        device_csr<double> dC(C);
+        const spsv_case                      base_case;
+        const auto                           A = make_spsv_matrix<double>(base_case);
+        const auto                           C = to_csc_arrays(A);
+        device_csr<double, int32_t, int32_t> dC(C);
         ASSERT_TRUE(dC.ok());
         const int32_t             m     = A.m;
         const double              alpha = 1.5;
@@ -516,11 +516,11 @@ namespace
     {
         // The argument validation does not depend on the storage format; it is
         // exercised through a CSC descriptor.
-        const spsv_case      c;
-        const auto           A = make_spsv_matrix<float>(c);
-        const auto           C = to_csc_arrays(A);
-        const int32_t        m = A.m;
-        device_csr<float>    dC(C);
+        const spsv_case                     c;
+        const auto                          A = make_spsv_matrix<float>(c);
+        const auto                          C = to_csc_arrays(A);
+        const int32_t                       m = A.m;
+        device_csr<float, int32_t, int32_t> dC(C);
         device_vector<float> dx(make_vector<float>(m, 1)), dy(make_vector<float>(m, 2));
         ASSERT_TRUE(dC.ok() && dx.ptr && dy.ptr);
         spmat_guard mat;

@@ -533,9 +533,9 @@ TEST_F(HostInternalBranches, swdev_csr_descr_argument_checks)
 {
     const debug_state_guard restore;
 
-    rocsparse_int row_ptr = 0;
-    rocsparse_int col_ind = 0;
-    float         value   = 1.0f;
+    int32_t row_ptr = 0;
+    int32_t col_ind = 0;
+    float   value   = 1.0f;
 
     auto create = [&](rocsparse_spmat_descr* d,
                       int64_t                rows,

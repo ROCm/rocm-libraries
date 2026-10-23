@@ -988,10 +988,10 @@ namespace
     {
         const int32_t m = 6;
         itsv_case     c;
-        c.m                     = m;
-        const host_csr<float> A = make_itsv_matrix<float>(c);
-        device_csr<float>     dA(A);
-        device_vector<float>  dx(make_vector<float>(m, 1)), dy(make_vector<float>(m, 2));
+        c.m                                   = m;
+        const host_csr<float>               A = make_itsv_matrix<float>(c);
+        device_csr<float, int32_t, int32_t> dA(A);
+        device_vector<float> dx(make_vector<float>(m, 1)), dy(make_vector<float>(m, 2));
         ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr);
 
         spmat_guard mat;
@@ -1236,8 +1236,8 @@ namespace
         }
         // Types other than the four floating point precisions.
         {
-            spmat_guard       half;
-            device_csr<float> dC(A);
+            spmat_guard                         half;
+            device_csr<float, int32_t, int32_t> dC(A);
             ASSERT_TRUE(dC.ok());
             ASSERT_EQ(rocsparse_create_csr_descr(&half.d,
                                                  m,

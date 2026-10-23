@@ -65,8 +65,8 @@ namespace
         DevBuf<float> dB = up_raw<float>(store_dense<float>(Bl, rocsparse_order_column, ldb));
         DevBuf<float> dC = up_raw<float>(store_dense<float>(C0, rocsparse_order_column, ldc));
         // The arrays are never read, they only have to be valid pointers.
-        DevBuf<rocsparse_int> ind = up_idx<rocsparse_int>(std::vector<int64_t>(4, 0));
-        DevBuf<float>         val = up_raw<float>(std::vector<float>(4, 0.0f));
+        DevBuf<int32_t> ind = up_idx<int32_t>(std::vector<int64_t>(4, 0));
+        DevBuf<float>   val = up_raw<float>(std::vector<float>(4, 0.0f));
         ASSERT_TRUE(dB.ptr && dC.ptr && ind.ptr && val.ptr);
 
         SpmatH sp;
@@ -282,11 +282,11 @@ TEST_F(ExtraBell, dense_to_sparse_blocked_ell_used_by_spmm)
 
 TEST_F(ExtraBell, unsupported_formats_are_rejected)
 {
-    const int64_t         m = 4, n = 3;
-    DevBuf<rocsparse_int> ind = up_idx<rocsparse_int>(std::vector<int64_t>(m * 2, 0));
-    DevBuf<float>         val = up_raw<float>(std::vector<float>(m * 2, 1.0f));
-    DevBuf<float>         dB  = up_raw<float>(std::vector<float>(m * n, 1.0f));
-    DevBuf<float>         dC  = up_raw<float>(std::vector<float>(m * n, 1.0f));
+    const int64_t   m = 4, n = 3;
+    DevBuf<int32_t> ind = up_idx<int32_t>(std::vector<int64_t>(m * 2, 0));
+    DevBuf<float>   val = up_raw<float>(std::vector<float>(m * 2, 1.0f));
+    DevBuf<float>   dB  = up_raw<float>(std::vector<float>(m * n, 1.0f));
+    DevBuf<float>   dC  = up_raw<float>(std::vector<float>(m * n, 1.0f));
     ASSERT_TRUE(ind.ptr && val.ptr && dB.ptr && dC.ptr);
 
     SpmatH sp;

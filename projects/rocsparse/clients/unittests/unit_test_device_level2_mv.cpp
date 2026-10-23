@@ -521,8 +521,8 @@ namespace
             for(int32_t j = 0; j < ys; ++j)
                 want[j] = want[j] + static_cast<CT>(gamma[e]) * z[e][j];
 
-        device_csr<AT>    dA(A);
-        device_vector<CT> dx(x), dy(y0);
+        device_csr<AT, int32_t, int32_t> dA(A);
+        device_vector<CT>                dx(x), dy(y0);
         device_vector<ST> dalpha(std::vector<ST>(1, alpha)), dbeta(std::vector<ST>(1, beta));
         device_vector<ST> dgamma(gamma);
         ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr && dalpha.ptr && dbeta.ptr && dgamma.ptr);
@@ -717,9 +717,9 @@ namespace
 
     TEST_F(L2DeviceV2Spmv, stage_order_and_input_errors)
     {
-        const host_csr<float> A = make_irregular_csr<float>(12, 9, 0, false, false);
-        device_csr<float>     dA(A);
-        device_vector<float>  dx(make_vector<float>(9, 1)), dy(make_vector<float>(12, 2));
+        const host_csr<float>               A = make_irregular_csr<float>(12, 9, 0, false, false);
+        device_csr<float, int32_t, int32_t> dA(A);
+        device_vector<float> dx(make_vector<float>(9, 1)), dy(make_vector<float>(12, 2));
         ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr);
         spmat_guard mat;
         ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
