@@ -1,46 +1,46 @@
 outs:
 - path: tensor0.bin
   remote: golden-data
-  md5: 98181a9137739c747c718b6e950b19f5
+  md5: 816b126d2b84dfc21a4021116d17174a
   size: 32768
   hash: md5
 - path: tensor1.bin
   remote: golden-data
-  md5: c38ecf8e039b034a20fcdedc47f2e18a
+  md5: da51c87ee01e0dc6ef00a59a1ef6ae1c
   size: 32768
   hash: md5
 - path: tensor2.bin
   remote: golden-data
-  md5: 4ee39794ec88885edcf0e2049aa9280d
+  md5: 27539ff24ff585aa774ada0a1a89f8e0
   size: 32768
   hash: md5
 - path: tensor3.bin
   remote: golden-data
-  md5: b618657c43d2fcd3a567addf40837152
+  md5: 80773619bfac2a61bdfd4d217a4dafe5
   size: 32768
   hash: md5
 - path: tensor4.bin
   remote: golden-data
-  md5: 0c4c7f48467189d46075524c71af7cc6
+  md5: a3d2a1732748b54bb4ddae5cce429367
   size: 32768
   hash: md5
 - path: tensor5.bin
   remote: golden-data
-  md5: fe8615687ee344463652cc7f31164fa6
+  md5: b9de65490fc4f5a927e9819ba27ed15d
   size: 32768
   hash: md5
 - path: tensor6.bin
   remote: golden-data
-  md5: cd9b0cac57b2cd9fa37b2fb067ddd77b
+  md5: 98bc270d0af5054daa538ed621b9bf26
   size: 32768
   hash: md5
 - path: tensor7.bin
   remote: golden-data
-  md5: 6beaa113418aff41075072bb0d8a1516
+  md5: 5b86ceea4bbc36ce3b31f2b71fa94764
   size: 32768
   hash: md5
 - path: tensor8.bin
   remote: golden-data
-  md5: e7a143ccfe948b9fb085d29a24d14b43
+  md5: 1d6e7d25a6a7f6f76818101c0a06abfc
   size: 512
   hash: md5
