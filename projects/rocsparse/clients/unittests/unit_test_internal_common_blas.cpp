@@ -36,6 +36,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 namespace
 {
     rocsparse_status gemm_ex_zero_size(rocsparse::blas_handle h)
@@ -122,16 +124,19 @@ TEST(internal_common_blas, rocblas_backend_without_backend_handle)
 {
     for(const auto impl : {rocsparse::blas_impl_default, rocsparse::blas_impl_rocblas})
     {
-        rocsparse::_blas_handle h;
-        h.blas_impl = impl;
+        // blas_destroy_handle deletes the handle only when the backend teardown
+        // succeeds, so the handle is owned here until then.
+        auto h       = std::make_unique<rocsparse::_blas_handle>();
+        h->blas_impl = impl;
 
-        EXPECT_NE(rocsparse::blas_set_stream(&h, nullptr), rocsparse_status_success);
-        EXPECT_NE(rocsparse::blas_set_pointer_mode(&h, rocsparse_pointer_mode_host),
+        EXPECT_NE(rocsparse::blas_set_stream(h.get(), nullptr), rocsparse_status_success);
+        EXPECT_NE(rocsparse::blas_set_pointer_mode(h.get(), rocsparse_pointer_mode_host),
                   rocsparse_status_success);
-        EXPECT_NE(gemm_ex_zero_size(&h), rocsparse_status_success);
-        // The failed backend teardown returns before `delete`, so a stack
-        // handle is safe here.
-        EXPECT_NE(rocsparse::blas_destroy_handle(&h), rocsparse_status_success);
+        EXPECT_NE(gemm_ex_zero_size(h.get()), rocsparse_status_success);
+        const rocsparse_status st = rocsparse::blas_destroy_handle(h.get());
+        EXPECT_NE(st, rocsparse_status_success);
+        if(st == rocsparse_status_success)
+            h.release();
     }
 }
 
