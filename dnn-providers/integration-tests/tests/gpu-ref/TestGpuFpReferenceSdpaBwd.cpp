@@ -583,3 +583,134 @@ INSTANTIATE_TEST_SUITE_P(
                 {12, 5, 7},
                 false}),
     caseName);
+
+// Explicit-mask dropout (cuDNN custom dropout) in backward: GPU vs CPU with GQA, bias + dBias and
+// bottom-right causal; with and without LSE and with and without dropout_scale_inv.
+struct BwdDropoutCase
+{
+    const char* name;
+    bool useLse;
+    bool scaleInv;
+    std::vector<int64_t> maskDims;
+};
+
+class TestGpuSdpaBwdDropoutFp32 : public ::testing::TestWithParam<BwdDropoutCase>
+{
+};
+
+TEST_P(TestGpuSdpaBwdDropoutFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& c = GetParam();
+    const std::vector<int64_t> qDims = {2, 4, 5, 8};
+    const std::vector<int64_t> kDims = {2, 2, 7, 8};
+    Tensor<float> q(qDims);
+    Tensor<float> k(kDims);
+    Tensor<float> v(kDims);
+    Tensor<float> o(qDims);
+    Tensor<float> dO(qDims);
+    Tensor<float> lse({2, 4, 5, 1});
+    Tensor<float> bias({5, 7});
+    Tensor<float> keepMask(c.maskDims);
+    q.fillWithRandomValues(-1.0f, 1.0f, 211);
+    k.fillWithRandomValues(-1.0f, 1.0f, 212);
+    v.fillWithRandomValues(-1.0f, 1.0f, 213);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 214);
+    bias.fillWithRandomValues(-1.0f, 1.0f, 215);
+    for(size_t i = 0; i < keepMask.elementCount(); ++i)
+    {
+        keepMask.memory().hostData()[i] = (i * 5 % 7 < 4) ? 1.0f : 0.0f;
+    }
+    constexpr float KEEP = 0.6f;
+    const float scale = 1.0f / KEEP;
+    const std::optional<float> scaleInv = c.scaleInv ? std::optional<float>(KEEP) : std::nullopt;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                0.4f,
+                                static_cast<const TensorBase<float>*>(&bias),
+                                -1,
+                                0,
+                                false,
+                                &lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &keepMask,
+                                scale);
+
+    Tensor<float> dQCpu(qDims);
+    Tensor<float> dKCpu(kDims);
+    Tensor<float> dVCpu(kDims);
+    Tensor<float> dBiasCpu({5, 7});
+    Tensor<float> dQGpu(qDims);
+    Tensor<float> dKGpu(kDims);
+    Tensor<float> dVGpu(kDims);
+    Tensor<float> dBiasGpu({5, 7});
+    for(auto* t : {&dQGpu, &dKGpu, &dVGpu, &dBiasGpu})
+    {
+        t->fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    }
+    for(auto* t : {&q, &k, &v, &o, &dO, &lse, &bias, &keepMask})
+    {
+        t->memory().hostData();
+    }
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQCpu,
+                                 dKCpu,
+                                 dVCpu,
+                                 0.4f,
+                                 c.useLse ? &lse : nullptr,
+                                 static_cast<const TensorBase<float>*>(&bias),
+                                 -1,
+                                 0,
+                                 false,
+                                 &dBiasCpu,
+                                 nullptr,
+                                 nullptr,
+                                 &keepMask,
+                                 scale,
+                                 scaleInv);
+    GpuFpReferenceSdpa::bprop(q,
+                              k,
+                              v,
+                              o,
+                              dO,
+                              dQGpu,
+                              dKGpu,
+                              dVGpu,
+                              0.4f,
+                              c.useLse ? &lse : nullptr,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              0,
+                              false,
+                              &dBiasGpu,
+                              nullptr,
+                              nullptr,
+                              &keepMask,
+                              scale,
+                              scaleInv);
+    assertAllClose(dQCpu, dQGpu, TOL_FP32);
+    assertAllClose(dKCpu, dKGpu, TOL_FP32);
+    assertAllClose(dVCpu, dVGpu, TOL_FP32);
+    assertAllClose(dBiasCpu, dBiasGpu, TOL_FP32);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestGpuSdpaBwdDropoutFp32,
+    ::testing::Values(BwdDropoutCase{"LseScaleInvBroadcastBatch", true, true, {1, 4, 5, 7}},
+                      BwdDropoutCase{"RecomputeScaleInvFullMask", false, true, {2, 4, 5, 7}},
+                      BwdDropoutCase{"LseNoScaleInv", true, false, {2, 1, 5, 7}}),
+    [](const ::testing::TestParamInfo<BwdDropoutCase>& info) {
+        return std::string(info.param.name);
+    });

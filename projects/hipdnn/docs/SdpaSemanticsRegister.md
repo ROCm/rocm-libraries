@@ -210,7 +210,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-015: Dropout
 
-- **Status:** Aligned for cuDNN's explicit-mask ("custom") dropout (CPU references); Philox dropout declined.
+- **Status:** Aligned for cuDNN's explicit-mask ("custom") dropout (CPU and GPU references); Philox dropout declined.
 - **cuDNN:** forward `O = (P ∘ M · s) V` with mask M `[B|1, H|1, Sq, Skv]` and `dropout_scale` s; Stats are the
   pre-dropout softmax's. Backward (composite lowering, `scaled_dot_product_flash_attention.h`):
   `D = rowsum(dO ∘ O) · dropout_scale_inv` (1 when absent), `dS = s · P ∘ (M ∘ dP − D)`, `dV = (P ∘ M · s)ᵀ dO`,

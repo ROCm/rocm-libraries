@@ -53,6 +53,10 @@ struct GpuSdpaBwdParams
     std::optional<Attrs> dBiasTensor;
     std::optional<Attrs> seqLenQTensor;
     std::optional<Attrs> seqLenKvTensor;
+    // Explicit-mask dropout (cuDNN custom dropout): mask, scale, and optional scale_inv.
+    std::optional<Attrs> dropoutMaskTensor;
+    std::optional<Attrs> dropoutScaleTensor;
+    std::optional<Attrs> dropoutScaleInvTensor;
     int64_t leftBound = -1;
     int64_t rightBound = -1;
     bool topLeftAlignment = true;
@@ -108,6 +112,23 @@ public:
                              _params.seqLenKvTensor->strides);
         }
 
+        std::optional<ShallowGpuTensor<float>> dropoutMask;
+        std::optional<float> dropoutScale;
+        std::optional<float> dropoutScaleInv;
+        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        {
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = resolveScalarOperand(
+                *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
+        }
+        if(_params.dropoutScaleInvTensor.has_value())
+        {
+            dropoutScaleInv = resolveScalarOperand(
+                *_params.dropoutScaleInvTensor, variantPack, "SDPA dropout scale inverse");
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -140,7 +161,10 @@ public:
             _params.topLeftAlignment,
             dBias.has_value() ? &dBias.value() : nullptr,
             seqLenQ.has_value() ? &seqLenQ.value() : nullptr,
-            seqLenKv.has_value() ? &seqLenKv.value() : nullptr);
+            seqLenKv.has_value() ? &seqLenKv.value() : nullptr,
+            dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+            dropoutScale,
+            dropoutScaleInv);
     }
 
 private:
@@ -239,12 +263,21 @@ public:
             }
         }
 
-        if(attrs->dropout_probability().has_value() || attrs->seed_tensor_uid().has_value()
-           || attrs->offset_tensor_uid().has_value() || attrs->dropout_mask_tensor_uid().has_value()
-           || attrs->dropout_scale_tensor_uid().has_value()
-           || attrs->dropout_scale_inv_tensor_uid().has_value())
+        // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv one FLOAT element.
+        if(!isSupportedSdpaDropout(*attrs, tensorMap))
         {
             return false;
+        }
+        if(attrs->dropout_scale_inv_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, attrs->dropout_scale_inv_tensor_uid().value());
+            const auto inv = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(attrs->dropout_scale_inv_tensor_uid().value()));
+            if(elementCount(inv) != 1 || inv.data_type != DataType::FLOAT
+               || !attrs->dropout_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
@@ -296,6 +329,9 @@ public:
         params.dBiasTensor = optional(attrs->dbias_tensor_uid());
         params.seqLenQTensor = optional(attrs->seq_len_q_tensor_uid());
         params.seqLenKvTensor = optional(attrs->seq_len_kv_tensor_uid());
+        params.dropoutMaskTensor = optional(attrs->dropout_mask_tensor_uid());
+        params.dropoutScaleTensor = optional(attrs->dropout_scale_tensor_uid());
+        params.dropoutScaleInvTensor = optional(attrs->dropout_scale_inv_tensor_uid());
 
         std::optional<float> attnScaleValue;
         if(attrs->attn_scale_value().has_value())

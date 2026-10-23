@@ -240,6 +240,14 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
         probability = storeSoftmaxProbability(probability);
+        if(args.dropoutMask != nullptr)
+        {
+            probability
+                *= static_cast<COMPUTE_TYPE>(args.dropoutScale)
+                   * args.dropoutMask[b * args.dropoutMaskStr.s[0] + h * args.dropoutMaskStr.s[1]
+                                      + sq * args.dropoutMaskStr.s[2]
+                                      + skv * args.dropoutMaskStr.s[3]];
+        }
 
         long long vIdx = rowOffset(args.pageTableV,
                                    args.pageTableVStrB,

@@ -156,6 +156,8 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported |
+| Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Not supported |
+| Philox dropout (`dropout_probability`, seed, offset) and RNG_DUMP | Not supported | Not supported |
 | Block-sparse attention | Not supported | Not supported |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
