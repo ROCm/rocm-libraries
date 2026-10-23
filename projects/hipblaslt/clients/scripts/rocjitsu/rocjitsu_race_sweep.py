@@ -24,6 +24,9 @@ from rocjitsu_known_failures import apply_known_failures
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 
+DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
+
+
 def write_text(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(value, encoding="utf-8")
@@ -699,7 +702,7 @@ def run(args):
         manifest, config = prepare(args)
         batch_size = getattr(args, "batch_size", None)
         if batch_size is None:
-            batch_size = 8 if args.backend == "bench" else 1
+            batch_size = DEFAULT_BATCH_SIZES[args.backend]
         if args.backend == "tensile" and batch_size != 1:
             raise ValueError("Tensile backend requires batch size 1")
         batches = make_batches(
@@ -1032,7 +1035,10 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        help="Solution indices per native process (bench: 8; tensile: 1)",
+        help=(
+            "Solution indices per native process "
+            f"(bench: {DEFAULT_BATCH_SIZES['bench']}; tensile: {DEFAULT_BATCH_SIZES['tensile']})"
+        ),
     )
     parser.add_argument(
         "--continue-on-failure",
@@ -1101,7 +1107,7 @@ def main():
             else "known_failures.yaml"
         )
     if args.batch_size is None:
-        args.batch_size = 8 if args.backend == "bench" else 1
+        args.batch_size = DEFAULT_BATCH_SIZES[args.backend]
     if args.batch_size < 1 or (args.backend == "tensile" and args.batch_size != 1):
         parser.error("Batch size must be positive; tensile requires batch size 1")
     if args.policy == REGULAR_POLICY and args.backend != "bench":
