@@ -25,6 +25,7 @@
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/mfma_scale_internal.h"
 
 namespace ckc
 {
@@ -66,6 +67,17 @@ typedef struct rocke_matrix_form
     rocke_matrix_form_kind_t kind;
     rocke_matrix_register_t register_type;
 } rocke_matrix_form_t;
+
+/* The form an f8f6f4 operand of the matrix format with code `format` takes in
+ * `reg` (Python f8f6f4_operand_form): an 8-bit format passes as is or with one
+ * bitcast; a 6-bit or 4-bit format arrives as packed words, zero-padded. */
+constexpr rocke_matrix_form_t rocke_f8f6f4_operand_form(int format, rocke_matrix_register_t reg)
+{
+    return rocke_matrix_form_t{rocke_matrix_format_bits(format) == 8
+                                   ? ROCKE_MATRIX_FORM_AS_IS
+                                   : ROCKE_MATRIX_FORM_ZERO_PADDED,
+                               reg};
+}
 
 /* One call argument: an MMA operand (A, B, C), a literal immediate, or the
  * signedness flag of operand A or B (Python Signedness): an i1 that is 1 when
@@ -143,6 +155,16 @@ typedef struct rocke_lower rocke_lower_t;
  * does not list it" where the catalog does not list it (Python
  * ISABackend._require_catalog_lists, same text). */
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id);
+
+/* MMA operand `kind` (A, B or C) of `op`, whose op_id is `op_id`, rendered
+ * in the register type of `form` (Python AsIs / ZeroPadded /
+ * EvenHalves.operand); returns its LLVM value name. A form that widens or
+ * reinterprets the value emits that one instruction first. */
+const char* rocke_ll_matrix_operand(rocke_lower_t* L,
+                                    const rocke_op_t* op,
+                                    const char* op_id,
+                                    rocke_matrix_arg_kind_t kind,
+                                    const rocke_matrix_form_t* form);
 
 /* Lower MMA op `op` (operands A, B, C) with op_id `op_id` through `call`
  * (Python emit_matrix_call): each operand through its form, the immediates as

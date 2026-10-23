@@ -199,17 +199,6 @@ static constexpr rocke_matrix_call_t k_gfx1250_bf16f32
 static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
 static constexpr rocke_matrix_register_t k_fp8_x8 = {{"i32", 2}, k_i64_from_llvm22, 1};
 
-/* The form an f8f6f4 operand of the matrix format with code `format` takes in
- * `reg` (Python f8f6f4_operand_form): an 8-bit format passes as is or with one
- * bitcast; a 6-bit or 4-bit format arrives as packed words, zero-padded. */
-static constexpr rocke_matrix_form_t f8f6f4_operand_form(int format, rocke_matrix_register_t reg)
-{
-    return rocke_matrix_form_t{rocke_matrix_format_bits(format) == 8
-                                   ? ROCKE_MATRIX_FORM_AS_IS
-                                   : ROCKE_MATRIX_FORM_ZERO_PADDED,
-                               reg};
-}
-
 /* gfx1250 f4 32x16x128 (Python _GFX1250_F4_32X16X128): (A, B, C modifier, C),
  * the C modifier 0. 128 fp4 values of A per lane in sixteen words and 64 of B
  * in eight, each zero-padded from fewer packed words; sixteen fp32 results. */
@@ -517,8 +506,8 @@ consteval rocke_matrix_call_t gfx950_f8f6f4_call(const rocke_matrix_format_pair&
                 : "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
             args,
             9,
-            f8f6f4_operand_form(pair.a, reg("i32", 8)),
-            f8f6f4_operand_form(pair.b, reg("i32", 8)),
+            rocke_f8f6f4_operand_form(pair.a, reg("i32", 8)),
+            rocke_f8f6f4_operand_form(pair.b, reg("i32", 8)),
             as_is(acc),
             as_is(acc),
             m16 ? "mfma.f32.16x16x128.fp8.hero" : "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32"};
@@ -544,8 +533,8 @@ consteval matrix_call_table make_matrix_call_table()
                {"llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
                 k_f8f6f4_args.args[i],
                 6,
-                f8f6f4_operand_form(pair.a, reg("i32", 16)),
-                f8f6f4_operand_form(pair.b, reg("i32", 16)),
+                rocke_f8f6f4_operand_form(pair.a, reg("i32", 16)),
+                rocke_f8f6f4_operand_form(pair.b, reg("i32", 16)),
                 as_is(reg("f32", 8)),
                 as_is(reg("f32", 8)),
                 NULL}};
@@ -555,8 +544,8 @@ consteval matrix_call_table make_matrix_call_table()
            {"llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32",
             k_gfx1250_f4_args,
             (int)(sizeof(k_gfx1250_f4_args) / sizeof(k_gfx1250_f4_args[0])),
-            f8f6f4_operand_form(k_fp4_format, reg("i32", 16)),
-            f8f6f4_operand_form(k_fp4_format, reg("i32", 8)),
+            rocke_f8f6f4_operand_form(k_fp4_format, reg("i32", 16)),
+            rocke_f8f6f4_operand_form(k_fp4_format, reg("i32", 8)),
             as_is(reg("f32", 16)),
             as_is(reg("f32", 16)),
             NULL}};

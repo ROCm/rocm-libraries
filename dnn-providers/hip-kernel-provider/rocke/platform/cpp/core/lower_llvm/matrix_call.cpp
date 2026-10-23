@@ -233,6 +233,25 @@ static void even_halves_result(rocke_lower_t* L,
                        rocke_ll_llvm_type(L, result->type));
 }
 
+const char* rocke_ll_matrix_operand(rocke_lower_t* L,
+                                    const rocke_op_t* op,
+                                    const char* op_id,
+                                    rocke_matrix_arg_kind_t kind,
+                                    const rocke_matrix_form_t* form)
+{
+    const rocke_type_t* register_type = rocke_matrix_form_type_at(&L->arena, form, L->flavor);
+    switch(form->kind)
+    {
+    case ROCKE_MATRIX_FORM_ZERO_PADDED:
+        return zero_padded_operand(L, op, op_id, kind, register_type);
+    case ROCKE_MATRIX_FORM_EVEN_HALVES:
+        return even_halves_operand(L, op, op_id, kind, register_type);
+    case ROCKE_MATRIX_FORM_AS_IS:
+    default:
+        return as_is_operand(L, op, op_id, kind, register_type);
+    }
+}
+
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id)
 {
     const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
@@ -332,19 +351,7 @@ void rocke_ll_emit_matrix_call(rocke_lower_t* L,
         }
         const rocke_matrix_form_t& form = form_of(call, arg.kind);
         const rocke_type_t* register_type = rocke_matrix_form_type_at(&L->arena, &form, L->flavor);
-        const char* value = NULL;
-        switch(form.kind)
-        {
-        case ROCKE_MATRIX_FORM_AS_IS:
-            value = as_is_operand(L, op, op_id, arg.kind, register_type);
-            break;
-        case ROCKE_MATRIX_FORM_ZERO_PADDED:
-            value = zero_padded_operand(L, op, op_id, arg.kind, register_type);
-            break;
-        case ROCKE_MATRIX_FORM_EVEN_HALVES:
-            value = even_halves_operand(L, op, op_id, arg.kind, register_type);
-            break;
-        }
+        const char* value = rocke_ll_matrix_operand(L, op, op_id, arg.kind, &form);
         arguments += std::string(rocke_ll_llvm_type(L, register_type)) + " " + value;
     }
 

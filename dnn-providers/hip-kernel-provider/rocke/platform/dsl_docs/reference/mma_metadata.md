@@ -108,6 +108,20 @@ assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
 
+The instruction takes A and B as sixteen 32-bit words per lane. Each operand may
+arrive in any shape its own matrix format allows:
+
+| Operand holds | Shape | Reaches the register by |
+|---|---|---|
+| the sixteen register words | `vec<i32x16>` | nothing (passed unchanged) |
+| 64 fp8 or bf8 values | `vec<fp8e4m3x64>`, `vec<bf8e5m2x64>` | one bitcast |
+| the packed words of 64 fp6 or bf6 values | `vec<i32x12>` | four zero words appended |
+| the packed words of 64 fp4 values | `vec<i32x8>` | eight zero words appended |
+
+A mixed op such as fp8 x fp4 takes `vec<fp8e4m3x64>` for A and `vec<i32x8>` for
+B. Any other shape is refused with an error naming the operand and the register
+type. These operations lower with LLVM 23 only.
+
 For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
 example selects FP8 A and FP4 B, with independent E8M0 scales over K32:
 
