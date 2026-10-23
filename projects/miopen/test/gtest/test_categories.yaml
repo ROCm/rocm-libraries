@@ -657,6 +657,11 @@ exclude_gpu:
       # Flaky on Windows gfx1151 (ALMIOPEN-1926), same signature as gfx110X: intermittent CPU/GPU mismatch at
       # rnn_seq_api.hpp:272, bias-enabled cases only (18 of 2,316 executions failed in PR #13107 run 39358709264).
       - "Full/GPU_LstmMSRnn_FP32*"
+      # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
+      # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
+      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
+      # CS-RORDMZ hosts). Remove once the test skips missing dbs or #13680 lands.
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
     labels:
       - "quick"
       - "standard"
@@ -671,12 +676,11 @@ exclude_gpu:
       # runner target's db files. Passes on Windows gfx1151. Remove when ALMIOPEN-2966 makes the test skip archs without models.
       - "GPU_ConvAIModelLoad_FP32*"
       # OOM-killed on the 7.5 GB Linux gfx1151 runners strixhalo-12 and strixhalo-10 (ALMIOPEN-2964): SIGKILL / exit 137 in
-      # PR #13107 runs 39358709264, 39480689944 and 39529845480; the same cases pass on the 31-125 GB gfx1151 hosts.
+      # PR #13107 runs 39358709264 and 39529845480; both pass on the 31-125 GB gfx1151 hosts. Only standard-tier cases are
+      # excluded (the tier TheRock release tests run on these hosts); comprehensive/full OOM kills are not chased per case.
       # Remove when ALMIOPEN-2964 closes.
       - "CPU_PerfDb_NONE.*"
-      - "Full/GPU_na_*nchw_8_480_128_256_*" # largest BN+activation shape (126M elements, ~500 MB per FP32 tensor)
-      - "GPU_BN_Spatial_FP32.MIOpen3900Regression"           # 1x2048x512x512 FP32, ~2.1 GB per tensor
-      - "Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h256w512" # 201M elements, ~800 MB per FP32 tensor
+      - "GPU_BN_Spatial_FP32.MIOpen3900Regression" # 1x2048x512x512 FP32, ~2.1 GB per tensor
     labels:
       - "quick"
       - "standard"
@@ -686,10 +690,6 @@ exclude_gpu:
 
   exclude_gpu_gfx115X_windows:
     test_patterns:
-      # Fails on every Windows gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist
-      # ...\bin\gfx115128.HIP.fdb.txt" (also gfx115120). 5 of 5 executions failed on 5 hosts in PR #13107 runs
-      # 39358709264 / 39480689944 and develop nightly 38527180317. Remove once the test skips missing dbs or #13680 lands.
-      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
       # Flaky on Windows gfx1151 (same bias-only RNN CPU/GPU mismatch as ALMIOPEN-1926): Backward Data / Forward Train /
       # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
       # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
