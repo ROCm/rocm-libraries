@@ -77,16 +77,16 @@ namespace TensileLite
             bool        m_deterministicMode;
             bool        m_cEqualsD;
             int         m_uniformSummationOrder;
-            int         m_useBias;
-            int         m_biasSrc;
+            int         m_useBias = 0;
+            int         m_biasSrc = static_cast<int>(ContractionProblemGemm::TENSOR::D);
             std::string m_useScaleAB;
-            bool        m_useScaleCD;
-            int         m_useScaleAlphaVec;
-            bool        m_useSynchronizer;
-            bool        m_useE;
-            bool        m_useGradient     = false;
-            bool        m_useGateResidual = false;
-            bool        m_outputAmaxD;
+            bool        m_useScaleCD       = false;
+            int         m_useScaleAlphaVec = 0;
+            bool        m_useSynchronizer  = false;
+            bool        m_useE             = false;
+            bool        m_useGradient      = false;
+            bool        m_useGateResidual  = false;
+            bool        m_outputAmaxD      = false;
 
             int                              m_sparse;
             KernelLanguage                   m_kernelLanguage;
