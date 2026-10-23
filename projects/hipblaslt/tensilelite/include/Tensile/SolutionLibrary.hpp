@@ -50,8 +50,44 @@ namespace TensileLite
         DEFAULT        = 1,
         GEMM_TYPE_ONLY = 2,
         HARDWARE_ONLY  = 3,
-        COUNT          = 4
+        // Same filtering as GEMM_TYPE_ONLY, but ExactLogicLibrary::findAllSolutions
+        // additionally skips the ranking (GridBasedMatching / PredictionMatching)
+        // rows on a standard-CU device. The heuristic fallback uses it because it
+        // has already collected those candidates and does not want to re-rank them.
+        // Everywhere else this must behave exactly like GEMM_TYPE_ONLY, which is
+        // what isGemmTypeOnlySearch() below is for.
+        GEMM_TYPE_ONLY_NO_RANKING = 4,
+        COUNT                     = 5
     };
+
+    /**
+ * True for every search type whose software filter is "same GEMM type", i.e.
+ * GEMM_TYPE_ONLY and its no-ranking variant. Use this instead of comparing
+ * against GEMM_TYPE_ONLY directly.
+ */
+    inline bool isGemmTypeOnlySearch(SolutionLibrarySearchType searchType)
+    {
+        return searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY
+               || searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING;
+    }
+
+    /**
+ * True when the caller asked ExactLogicLibrary to skip the ranking matching
+ * libraries (GridBasedMatching / PredictionMatching).
+ */
+    inline bool skipsRankingLibraries(SolutionLibrarySearchType searchType)
+    {
+        return searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING;
+    }
+
+    /**
+ * The matching-library predicate types that rank solutions for a specific
+ * problem size. skipsRankingLibraries() excludes exactly these rows.
+ */
+    inline bool isRankingMatchingLibrary(std::string const& predicateType)
+    {
+        return predicateType == "GridBasedMatching" || predicateType == "PredictionMatching";
+    }
 
     template <typename MySolution, typename MyProblem>
     inline bool isGemmTypeSame(const MySolution& solutions, const MyProblem& problem)
@@ -96,6 +132,7 @@ namespace TensileLite
                    && solutions.uniformSummationOrderSupported(problem, hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
+        case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
             return isGemmTypeSame(solutions, problem);
             break;
         case SolutionLibrarySearchType::HARDWARE_ONLY:
