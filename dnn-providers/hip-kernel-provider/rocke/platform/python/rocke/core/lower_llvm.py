@@ -62,6 +62,7 @@ from .ir import (
     Value,
     VectorType,
     _is_unsigned,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     check_cluster_dims,
@@ -2038,6 +2039,23 @@ class _Lowerer:
             )
         return v
 
+    def _require_fp8_scale_conversion(
+        self, op: Op, instruction: str, fallback: str
+    ) -> None:
+        """Reject a fused scale-and-convert op on a target without the instruction.
+
+        LLVM does not always refuse the intrinsic on such a target: it can
+        select it and write an encoding the GPU does not have. So the check is
+        made here, from the backend's capability, before anything is emitted.
+        """
+        gfx = self._backend.arch.gfx
+        if not self._backend.has_fp8_scale_conversion:
+            raise ValueError(
+                f"{op.name} needs {instruction}, which {gfx} does not have "
+                f"(gfx950 does); convert with {fallback} and multiply by the "
+                "scale instead"
+            )
+
     def _require_llvm23_target_fact(self, op: str, fact: _OpTargetFact) -> None:
         """Reject an LLVM-23-only operation unless the target records ``fact``.
 
@@ -2839,6 +2857,7 @@ class _Lowerer:
         )
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = uitofp {_llvm_type(v.type)} {self._operand(v)} to float"
@@ -2952,6 +2971,9 @@ class _Lowerer:
         showed FP8 long-prefill inner loop drop ``v_pk_mul`` count
         from 64 → 16.
         """
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_fp8", "cvt_pk_f32_fp8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.fp8")
         packed_i32 = f"{op.result.name}p"
@@ -2975,6 +2997,9 @@ class _Lowerer:
 
     def _op_arith_cvt_scalef32_pk_f32_bf8(self, op: Op) -> None:
         """e5m2 sibling of :meth:`_op_arith_cvt_scalef32_pk_f32_fp8`."""
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_bf8", "cvt_pk_f32_bf8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.bf8")
         packed_i32 = f"{op.result.name}p"

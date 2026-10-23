@@ -52,6 +52,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     nontemporal.touch()
     unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
     unsigned_int_ops.touch()
+    target_identity = tmp_path / "Debug" / "rocke_arch_target_identity"
+    target_identity.touch()
     shared = tmp_path / "librocke.so"
     replay = tmp_path / "tests" / "rocke_portable_ir_replay_cli"
     replay.parent.mkdir(exist_ok=True)
@@ -75,6 +77,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
                 {
                     "name": "rocke_unsigned_int_ops",
                     "command": [str(unsigned_int_ops)],
+                },
+                {
+                    "name": "rocke_arch_target_identity",
+                    "command": [str(target_identity)],
                 },
             ]
         }
@@ -110,6 +116,9 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert all(
         env["ROCKE_UNSIGNED_INT_OPS_CLI"] == str(unsigned_int_ops)
         for _, env in children
+    )
+    assert all(
+        env["ROCKE_ARCH_TARGET_TEST_EXE"] == str(target_identity) for _, env in children
     )
     assert all(env["ROCKE_ONLINE_LIB"] == str(shared) for _, env in children)
     assert all(env["ROCKE_REPLAY_CLI"] == str(replay) for _, env in children)
@@ -376,7 +385,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
         "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
-        "             rocke_unsigned_int_ops rocke_dtypes)\n"
+        "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -404,6 +413,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
     assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
+    assert Path(env["ROCKE_ARCH_TARGET_TEST_EXE"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")
