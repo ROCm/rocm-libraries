@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -308,6 +308,218 @@ namespace rocalution
         }
 
         row_nnz[ai] = row_offset[ai + 1] - row_offset[ai];
+    }
+
+    // Marks the entries of the prolongation that survive truncation and rescales them.
+    //
+    // Two independent filters run per row. The first drops everything small relative to the row's
+    // largest entry, the second keeps at most max_elmts of what is left. Both rescale the survivors
+    // so that the row sum is preserved.
+    template <typename ValueType, typename I, typename J>
+    __global__ void kernel_csr_rs_truncation_mark(I     nrow,
+                                                  float trunc_factor,
+                                                  int   max_elmts,
+                                                  const J* __restrict__ row_offset,
+                                                  const int* __restrict__ col,
+                                                  ValueType* __restrict__ val,
+                                                  bool* __restrict__ keep,
+                                                  int* __restrict__ row_nnz)
+    {
+        typedef numeric_traits_t<ValueType> RealType;
+
+        const ValueType zero  = static_cast<ValueType>(0);
+        const RealType  rzero = static_cast<RealType>(0);
+
+        int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
+
+        for(int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; row < nrow;
+            row += stride)
+        {
+            J row_begin = row_offset[row];
+            J row_end   = row_offset[row + 1];
+
+            for(J j = row_begin; j < row_end; ++j)
+            {
+                keep[j] = true;
+            }
+
+            if(trunc_factor > 0.0f)
+            {
+                RealType row_nrm = rzero;
+
+                for(J j = row_begin; j < row_end; ++j)
+                {
+                    RealType mag = hip_abs(val[j]);
+                    row_nrm      = (row_nrm < mag) ? mag : row_nrm;
+                }
+
+                RealType drop_coeff = static_cast<RealType>(trunc_factor) * row_nrm;
+
+                ValueType row_sum = zero;
+                ValueType scale   = zero;
+
+                for(J j = row_begin; j < row_end; ++j)
+                {
+                    row_sum = row_sum + val[j];
+
+                    if(hip_abs(val[j]) < drop_coeff)
+                    {
+                        keep[j] = false;
+                    }
+                    else
+                    {
+                        scale = scale + val[j];
+                    }
+                }
+
+                if(scale != zero && scale != row_sum)
+                {
+                    ValueType factor = row_sum / scale;
+
+                    for(J j = row_begin; j < row_end; ++j)
+                    {
+                        if(keep[j])
+                        {
+                            val[j] = val[j] * factor;
+                        }
+                    }
+                }
+            }
+
+            if(max_elmts > 0)
+            {
+                int remaining = 0;
+
+                for(J j = row_begin; j < row_end; ++j)
+                {
+                    remaining += keep[j] ? 1 : 0;
+                }
+
+                if(remaining > max_elmts)
+                {
+                    // The row sum is taken in storage order, the sum of the survivors in magnitude
+                    // order
+                    ValueType row_sum = zero;
+
+                    for(J j = row_begin; j < row_end; ++j)
+                    {
+                        if(keep[j])
+                        {
+                            row_sum = row_sum + val[j];
+                        }
+                    }
+
+                    ValueType scale    = zero;
+                    RealType  prev_mag = rzero;
+                    int       prev_col = 0;
+                    bool      first    = true;
+
+                    for(int k = 0; k < max_elmts; ++k)
+                    {
+                        RealType best_mag = rzero;
+                        int      best_col = 0;
+                        J        best_j   = -1;
+
+                        for(J j = row_begin; j < row_end; ++j)
+                        {
+                            if(keep[j] == false)
+                            {
+                                continue;
+                            }
+
+                            RealType mag = hip_abs(val[j]);
+                            int      c   = col[j];
+
+                            // Strictly below the previous pick in the row's total order
+                            if(first == false
+                               && (mag > prev_mag || (mag == prev_mag && c <= prev_col)))
+                            {
+                                continue;
+                            }
+
+                            if(best_j < 0 || mag > best_mag || (mag == best_mag && c < best_col))
+                            {
+                                best_mag = mag;
+                                best_col = c;
+                                best_j   = j;
+                            }
+                        }
+
+                        // remaining > max_elmts, so a pick always exists
+                        scale    = scale + val[best_j];
+                        prev_mag = best_mag;
+                        prev_col = best_col;
+                        first    = false;
+                    }
+
+                    bool      rescale = (scale != zero && scale != row_sum);
+                    ValueType factor  = rescale ? row_sum / scale : zero;
+
+                    for(J j = row_begin; j < row_end; ++j)
+                    {
+                        if(keep[j] == false)
+                        {
+                            continue;
+                        }
+
+                        RealType mag = hip_abs(val[j]);
+                        int      c   = col[j];
+
+                        if(mag > prev_mag || (mag == prev_mag && c <= prev_col))
+                        {
+                            if(rescale)
+                            {
+                                val[j] = val[j] * factor;
+                            }
+                        }
+                        else
+                        {
+                            keep[j] = false;
+                        }
+                    }
+                }
+            }
+
+            int count = 0;
+
+            for(J j = row_begin; j < row_end; ++j)
+            {
+                count += keep[j] ? 1 : 0;
+            }
+
+            row_nnz[row] = count;
+        }
+    }
+
+    // Gathers the surviving entries of each row into the truncated matrix. Rows keep their column
+    // order because entries are only removed.
+    template <typename ValueType, typename I, typename J>
+    __global__ void kernel_csr_rs_truncation_compact(I nrow,
+                                                     const J* __restrict__ src_row_offset,
+                                                     const int* __restrict__ src_col,
+                                                     const ValueType* __restrict__ src_val,
+                                                     const bool* __restrict__ keep,
+                                                     const J* __restrict__ dst_row_offset,
+                                                     int* __restrict__ dst_col,
+                                                     ValueType* __restrict__ dst_val)
+    {
+        int64_t stride = static_cast<int64_t>(gridDim.x) * blockDim.x;
+
+        for(int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; row < nrow;
+            row += stride)
+        {
+            J k = dst_row_offset[row];
+
+            for(J j = src_row_offset[row]; j < src_row_offset[row + 1]; ++j)
+            {
+                if(keep[j])
+                {
+                    dst_col[k] = src_col[j];
+                    dst_val[k] = src_val[j];
+                    ++k;
+                }
+            }
+        }
     }
 
     // Performs a permutation on the vector of non-zero elements per row

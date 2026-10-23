@@ -58,12 +58,11 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
-    if(!(name == "gfx803" || name == "gfx900" || name == "gfx906" || name == "gfx908"))
+    if(!(name == "gfx900" || name == "gfx906" || name == "gfx908"))
         return false;
 
     // Check if kernel is suitable for the problem description
     // and able to correctly run with given parameters.
-    const auto device_is_gfx8         = StartsWith(name, "gfx8");
     const auto grid_workgroup_count_x = ctx.GetStream().GetMaxComputeUnits();
 
     if(problem.HasNonPackedTensors())
@@ -102,7 +101,7 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
         && (problem.GetInChannels() * problem.GetWeightsWidth() * problem.GetWeightsHeight()) <= std::pow(2, 28)
         && (problem.GetOutChannels() * problem.GetWeightsWidth() * problem.GetWeightsHeight()) <= std::pow(2, 28)
         && problem.GetInChannels() % 2 == 0
-        && problem.GetInChannels() >= (device_is_gfx8 ? 16 : 18)
+        && problem.GetInChannels() >= 18
         && problem.IsFp32()
         && problem.GetGroupCount() == 1
         && problem.GetIn().IsPossibleLayout4D5D("NCHW", strict);
@@ -138,9 +137,7 @@ ConvSolution ConvBinWinograd3x3U::GetSolution(const ExecutionContext& ctx,
     };
     kernel.comp_options = options.GenerateFor(kbp::GcnAsm{});
 
-    if(StartsWith(name, "gfx8"))
-        kernel.kernel_file = "conv_3x3_wheel_alpha_v3_0b.s";
-    else if(StartsWith(name, "gfx9"))
+    if(StartsWith(name, "gfx9"))
         kernel.kernel_file = "conv_3x3_wheel_alpha_v7_0_3b.s";
     else
         MIOPEN_THROW("Unsupported device.");

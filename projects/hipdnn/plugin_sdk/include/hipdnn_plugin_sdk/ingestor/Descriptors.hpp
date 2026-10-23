@@ -6,12 +6,18 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -102,7 +108,8 @@ static_assert(
         std::vector<int64_t>>,
     "MetadataType::INT_LIST no longer indexes MetadataValue's vector<int64_t> alternative.");
 
-/// A kernel's complete metadata tuple; must be unique per kernel within an engine.
+/// A kernel's complete metadata tuple. Kernels of one engine sharing a tuple must not compete at
+/// the same arch tier on any device; a better tier shadows a worse one.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
 /// One field a kernel may vary along, as declared by an engine's KMD.
@@ -121,13 +128,46 @@ struct MetadataSchema
     DescriptorId id;
     std::string name;
     std::vector<MetadataField> fields;
+    /// Authored semantics; independent of the JSON file-format version.
+    hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
-/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload`.
-enum class HeuristicKind
+/// How a UHD ranks a catalog. RFC 0019 §4.2: one discriminant, which also selects the
+/// adapter-scoped body's key.
+enum class UhdAdapter
 {
-    NATIVE, ///< NativeRegistry score symbol. Only kind with an adapter today.
-    MODEL, ///< Trained model artifact plus feature signature. No adapter yet.
+    STATIC_ORDER, ///< No model. `priority`, then descriptor id.
+    NATIVE, ///< A scorer compiled into the engine, resolved by symbol.
+    TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
+    TABLE, ///< Bucketed lookup table shipped as a data artifact.
+    CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
+};
+
+/// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
+/// §4.4, §11.3).
+struct UhdScore
+{
+    /// A registered ranking metric (RankingMetrics.hpp), which fixes the units and the
+    /// direction; empty for a ranker that orders its catalog without predicting a comparable
+    /// number (a `native` comparator, a `static_order`).
+    std::string metric;
+    bool calibrated = false; ///< True iff comparable across engines.
+    std::string transform; ///< Applied to raw model output: "identity", "log1p".
+};
+
+/// A semantic dependency, independent of the descriptor file-format version.
+struct DescriptorDependency
+{
+    DescriptorId id;
+    hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
+};
+
+/// The resolved descriptor definitions used to collect a model's training corpus.
+struct HeuristicProvenance
+{
+    DescriptorDependency ued;
+    DescriptorDependency kmd;
+    std::vector<DescriptorDependency> umd;
 };
 
 /// UHD: the kernel-selection model for one engine.
@@ -135,8 +175,59 @@ struct HeuristicDescriptor
 {
     DescriptorId id;
     std::string name;
-    HeuristicKind kind = HeuristicKind::NATIVE;
-    std::string payload;
+    UhdAdapter adapter = UhdAdapter::STATIC_ORDER;
+
+    /// Ordered bare references or inline expression objects over published symbols,
+    /// `$device.*` and `$kernel.*`. Order is the model's input order.
+    std::vector<nlohmann::json> featuresSignature;
+    /// Guards @ref featuresSignature against the model that was trained on it. The
+    /// extractor recomputes it and refuses to load on a mismatch (RFC 0019 §6.3).
+    std::string featuresHash;
+
+    /// RFC 0019 §6.5 string-to-code map, folded into @ref featuresHash. Keyed by the whole
+    /// `$`-reference, not the field name: `$kernel.dtype` ("BF16") and
+    /// `$q.attention_dense.dtype` ("bf16") are separate vocabularies. Empty when the signature
+    /// reads no string field.
+    std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
+
+    /// "max" or "min". A model trained on a cost rather than a rate ranks ascending, and
+    /// getting this wrong silently inverts every ranking it produces.
+    std::string objective = "max";
+    UhdScore score;
+
+    /// NATIVE: the symbol the engine registered its scorer under.
+    std::string nativeSymbol;
+    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path, relative to @ref baseDir.
+    std::string modelArtifactPath;
+    /// SHA-256 of the artifact (lowercase hex): the declared digest, else that of the bytes
+    /// present at parse. Verifies the artifact at load; empty when no artifact exists yet.
+    std::string modelHash;
+    /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
+    std::string customLibrarySymbol;
+
+    /// Directory of the `.uhd.json` that declared this; @ref modelArtifactPath resolves
+    /// against it. Empty for descriptors built in memory.
+    std::filesystem::path baseDir;
+    /// The tree root the loader walked: the containment boundary for the author-controlled
+    /// artifact path (RFC 0019 §16), which may leave @ref baseDir but never the tree. Filled
+    /// by the loader; empty for descriptors built in memory.
+    std::filesystem::path treeRoot;
+
+    /// Required for feature-consuming models. Semantic revisions are checked against
+    /// the engine, metadata schema and matcher identities before a model is used.
+    std::optional<HeuristicProvenance> trainedAgainst;
+    /// RFC 0019 §4.1 `trained_against.selector_revision`: the provider build this model was
+    /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
+    /// warned about, because a stale L1 estimate changes which engine is selected.
+    std::string trainedAgainstSelectorRevision;
+    /// The role-map entry that resolved this model: backfilled by
+    /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
+    /// (RFC 0019 §3.1). Empty for a model no role map has resolved yet.
+    std::string engineName;
+    std::string role;
+    std::string arch;
+    /// The authored `trained_against` object, kept verbatim for UhdConfig.
+    nlohmann::json trainedAgainstJson;
 };
 
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
@@ -145,9 +236,18 @@ struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
+    /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
-    /// descriptor-declared order. Must equal `DescriptorSet::heuristic`'s id when set.
+    /// descriptor-declared order. Filled by resolveDescriptorSets(), not at parse, because the
+    /// default depends on the metric each loaded UHD declares.
     std::optional<DescriptorId> heuristicId;
+
+    /// RFC 0019 §3.1 role-scoped UHDs, each optional, keyed by `gcnArchName` with an optional
+    /// `default`. The scoring roles list UHDs per arch; the loader indexes them by each UHD's
+    /// own `score.metric` rather than restating the metric here.
+    std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
+    std::map<std::string, std::vector<DescriptorId>> predictEngine;
+    std::map<std::string, DescriptorId> predictApplicableKernels;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
@@ -155,6 +255,14 @@ struct EngineDescriptor
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+    /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
+    /// yet, so nothing consumes the strings.
+    std::vector<std::string> numericalNotes;
+    /// Resolved through GraphMatchRegistry; empty means this engine declares no
+    /// graph-topology match.
+    std::string graphMatchNativeSymbol;
+    /// Authored knob and binding semantics, not the JSON file-format version.
+    hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
 /// Which inputs a matcher reads, and so what its failure prunes.
@@ -171,6 +279,7 @@ struct MatchDescriptor
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
     std::string matchSymbol; ///< Resolved through NativeRegistry.
+    hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.
@@ -185,18 +294,139 @@ struct DispatchDescriptor
 enum class KernelSourceKind
 {
     EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
-    KPACK_SYMBOL, ///< Prebuilt kpack library plus symbol. No adapter yet.
+    KPACK, ///< Prebuilt kpack archive plus toc key and symbol.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
-/// UKD's source. Only `EMBEDDED_SOURCE` is implemented.
+/// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
+/// metadata note declares it -- read out of the object by the packager, never authored.
+///
+/// Compiler-appended hidden arguments are excluded: the host does not marshal them, so
+/// keeping them would make this list incomparable with the one a pack passes to `launch`.
+struct KernelArgument
+{
+    /// `.value_kind` verbatim: `global_buffer`, `by_value`, and so on. Kept as the string
+    /// the toolchain emits rather than mapped to an enum, so a kind this build has never
+    /// heard of still parses, still compares, and still prints in a diagnostic.
+    std::string kind;
+    uint32_t size = 0; ///< Bytes it occupies in the kernarg segment.
+    uint32_t offset = 0; ///< Where it starts within that segment.
+    /// `.name`, empty when the producer emitted none -- clang omits names for HIP
+    /// `extern "C" __global__` kernels. Empty means "this producer records no names",
+    /// never "named the empty string".
+    std::string name;
+};
+
+/// One argument list rendered for a diagnostic, as `kind:size@offset` per argument with the
+/// name appended when there is one.
+inline std::string describeKernelSignature(const std::vector<KernelArgument>& signature)
+{
+    if(signature.empty())
+    {
+        return "(no arguments)";
+    }
+    std::string text;
+    for(const auto& argument : signature)
+    {
+        if(!text.empty())
+        {
+            text += ", ";
+        }
+        text += argument.kind + ":" + std::to_string(argument.size) + "@"
+                + std::to_string(argument.offset);
+        if(!argument.name.empty())
+        {
+            text += " '" + argument.name + "'";
+        }
+    }
+    return text;
+}
+
+/// UKD's source. `EMBEDDED_SOURCE` and `KPACK` are implemented; a kind fills only its own
+/// fields and leaves the rest empty.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
-    std::string sourceFile;
-    std::string entryPoint;
+    std::string sourceFile; ///< EMBEDDED_SOURCE.
+    std::string entryPoint; ///< EMBEDDED_SOURCE.
+    /// KPACK: archive path, relative to the directory of the descriptor that declared it.
+    /// Relative because the installed tree is relocatable and an absolute build-machine
+    /// path would not survive packaging.
+    std::string library;
+    /// KPACK: the archive's own key for this code object. Opaque -- the hip packager
+    /// content-addresses it on (source, build) and the rocKE producer uses a different
+    /// scheme entirely, so nothing here may parse it. An authored hsaco's key hashes the
+    /// normalized root-relative file path, so one file serving several symbols is one entry.
+    /// Not unique per kernel: two kernels differing only by entry point share one key, one
+    /// blob, and one loaded module.
+    std::string tocKey;
+    /// KPACK: the undecorated extern "C" name to resolve inside the loaded module. The
+    /// only field that separates two kernels sharing a tocKey.
+    std::string symbol;
+    /// KPACK: digest of the raw decompressed code object, as the packager recorded it.
+    ///
+    /// Checked before the code object reaches the driver: a TOC entry pointing at the
+    /// wrong offset decompresses cleanly and yields another entry's blob, which only this
+    /// field can catch. An integrity check, not a security control -- a descriptor travels
+    /// with the archive it names, so whoever can rewrite one can rewrite the other.
+    std::string sha256;
+    /// KPACK: the argument list `symbol` declares, read out of the code object at pack
+    /// time. Not a description of the call -- the list a pack marshals is fixed in its
+    /// C++; this is the copy that comparison checks it against, in requireSignatureMatch.
+    ///
+    /// Empty is a kernel that takes no arguments, which is why the parser rejects the key
+    /// being absent rather than reading absence as empty.
+    std::vector<KernelArgument> signature;
 };
+
+namespace detail
+{
+
+/// True iff `T{Args...}` is a valid brace initialization. `std::is_constructible` cannot
+/// answer this under C++17: it probes parenthesized direct-initialization, which does not
+/// perform aggregate initialization until C++20.
+template <typename T, typename = void, typename... Args>
+struct IsBraceInitializable : std::false_type
+{
+};
+
+template <typename T, typename... Args>
+struct IsBraceInitializable<T, std::void_t<decltype(T{std::declval<Args>()...})>, Args...>
+    : std::true_type
+{
+};
+
+template <typename T, typename... Args>
+inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, Args...>::value;
+
+} // namespace detail
+
+// KernelSource's field count is pinned here: accepting exactly eight initializers and no
+// more makes an inserted field ill-formed at this assertion, rather than silently
+// rebinding every value after it at a positional initialization site. Only the count --
+// two same-typed members swapped past each other still brace-initialize.
+static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                               KernelSourceKind,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::vector<KernelArgument>>
+                  && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                                       KernelSourceKind,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::vector<KernelArgument>,
+                                                       std::string>,
+              "KernelSource gained or lost a field; append only, then extend this "
+              "assertion.");
 
 /// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.
 struct KernelDescriptor
@@ -204,9 +434,47 @@ struct KernelDescriptor
     DescriptorId id;
     std::string name;
     KernelSource source;
+    /// RFC 0017 §15.1: the launches of a multi-launch kernel, keyed by launch name, in place
+    /// of @c source. Empty for every kernel that ships one launch, which keeps `source`;
+    /// non-empty always holds at least two entries and leaves `source` default. The
+    /// descriptor only lists the entries: launch order, workspace and the hand-off between
+    /// stages belong to the native dispatch handler of the pack, which also declares the
+    /// names it launches.
+    std::map<std::string, KernelSource> sources;
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
+    /// GFX base targets this kernel runs on; empty inherits the pack's list. A kernel may
+    /// narrow to part of what its pack claims, never reach outside it, and the resolved
+    /// list reaches dispatch as KernelDefinition::arch. Authored on either form: inline in
+    /// a KDP, or in a standalone `.ukd.json`.
+    ///
+    /// For a standalone kernel it is also half the catalog key. A per-arch shard ships the
+    /// same kernel id in every shard, differing only in which code object it names, so the
+    /// id alone cannot say which copy a pack means. An inline kernel is not keyed at all --
+    /// it lives inside a pack document that the pack's own (id, arch) key already separates
+    /// per shard -- so there the field is applicability only.
+    std::vector<std::string> arch;
+    /// Directory of the descriptor file that defined this kernel. Any path a descriptor
+    /// names is resolved against it, so a relocated, DESTDIR-staged or drop-in install
+    /// resolves from where the file actually is rather than from a loader root. Empty for a
+    /// kernel built in memory, which names no file. Filled by the loader, never authored.
+    std::filesystem::path originDirectory;
+    /// The descriptor tree @c originDirectory was found under -- the root the loader was
+    /// pointed at, not the file's own folder.
+    ///
+    /// Carried because resolution and CONTAINMENT are different questions. A path is
+    /// resolved against originDirectory (above), but the boundary it may not cross is the
+    /// tree, not the individual descriptor's folder: one archive is shipped per arch shard
+    /// at the shard root, so a descriptor nested inside that shard legitimately climbs out
+    /// of its own directory to reach it. Anchoring containment on originDirectory rejected
+    /// every nested descriptor and made production-packaged kernels unloadable.
+    ///
+    /// The tree root rather than the arch shard root: it is what the loader actually
+    /// walked, so it needs no probing and no assumption about how deep a shard sits, and
+    /// it stays correct for a flat tree where the two coincide. Empty for a kernel built
+    /// in memory. Filled by the loader, never authored.
+    std::filesystem::path treeRoot;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
@@ -218,10 +486,22 @@ struct KernelDescriptorPack
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
-    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent.
-    /// Matches the base target id exactly, so `gfx942` never accepts `gfx950`.
+    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent. A concrete
+    /// entry is matched exactly against the device's base target id; a generic entry
+    /// matches by membership in the generic target table. Part of the pack's catalog identity
+    /// -- packs are keyed by (id, arch), so per-arch shards may ship one pack id many
+    /// times -- as well as a match-time filter. The filter itself is enforced at catalog
+    /// build, not load time, so an excluded pack still builds and simply declines per
+    /// call -- an expected decline like a matcher returning false, not a malformed load,
+    /// so it must not be reported as one.
     std::vector<std::string> arch;
+    /// Every kernel this pack binds, whether authored inline or referenced by id.
     std::vector<KernelDescriptor> kernels;
+    /// Kernels named by id rather than spelled inline; each is a standalone `.ukd.json`.
+    /// resolveDescriptorSets() looks them up and appends them to `kernels`, which is the
+    /// resolved truth every consumer reads -- this stays as the authored record. Packs
+    /// built in memory leave it empty and fill `kernels` directly.
+    std::vector<DescriptorId> kernelIds;
 };
 
 /// One engine and every descriptor it references by id; self-contained.
@@ -229,12 +509,27 @@ struct DescriptorSet
 {
     EngineDescriptor engine;
     MetadataSchema schema;
-    /// nullopt when this engine ships no ranking model; the generic engine then ranks
+    /// The default ranker for the `default` architecture key (RFC 0019 §3.1): the
+    /// metric-less `sort_kernel_catalog` UHD if there is one, else the one for
+    /// `DEFAULT_RANKING_METRIC`. nullopt when neither exists; the generic engine then ranks
     /// on `priority` then descriptor id. See makeKernelHeuristic().
     std::optional<HeuristicDescriptor> heuristic;
+
+    /// RFC 0019 §3.1 catalog-ranking UHDs by declared metric (`""` for the metric-less
+    /// ranker), then by arch key as the UED wrote it. Arch resolution (exact, then `default`,
+    /// within one metric) happens at first rank(): discovery runs before any device exists.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> heuristicsByMetric;
+    /// Resolved cheap graph/device models by metric, then architecture; never consumed by
+    /// catalog ranking. Every `predict_engine` UHD declares a metric, so there is no `""`.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> enginePredictionsByMetric;
     std::vector<MatchDescriptor> matchers;
     std::vector<DispatchDescriptor> dispatches;
     std::vector<KernelDescriptorPack> packs;
+    /// Explicitly named models that could not be used, by metric (`""` for the metric-less
+    /// ranker) and architecture key. An exact-arch failure must not silently select another
+    /// architecture's model for the same metric.
+    std::map<std::string, std::set<std::string>> unavailableHeuristicArches;
+    std::map<std::string, std::set<std::string>> unavailableEnginePredictionArches;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

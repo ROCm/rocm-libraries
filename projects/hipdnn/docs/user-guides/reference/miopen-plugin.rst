@@ -81,10 +81,14 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``FP32``
      - NCHW, NHWC
      - Single-node graph
+   * - Pointwise Binary Elementwise (standalone)
+     - ``FP16``, ``FP32``
+     - NCHW, NCDHW
+     - Single-node graph⁷
 
 .. note::
 
-  - For annotations ¹ through ⁴ and ⁶, see :ref:`operations`.
+  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -141,6 +145,7 @@ Operation notes
 
 - **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+- ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs
@@ -194,6 +199,8 @@ The MIOpen Provider plugin uses the ``global.benchmarking`` knob to control whet
 
 - ``0`` (Benchmarking disabled (default)): MIOpen uses heuristics to select a kernel. The first execution is relatively fast, but it may not use the optimal kernel for your specific configuration.
 - ``1`` (Benchmarking enabled): MIOpen benchmarks multiple solver candidates. The first execution is slower, but subsequent executions use the cached optimal solver which provides the best performance for production workloads. It has minimal overhead and typically results in a 10-50% performance improvement over the default heuristic selection.
+
+The ``HIPDNN_FORCE_BENCHMARKING`` environment variable overrides this knob for the whole process. See :ref:`engine-selection-variables`.
 
 Caching
 ~~~~~~~

@@ -100,6 +100,9 @@ class TensorField:
     required: bool = True
     frontend_getter: str = ""
     expected_data_type: str = ""
+    # The tensor's contents, not its shape, decide how much work the node does
+    # (ragged offsets, valid lengths, page tables, block masks, routing offsets).
+    work_data_dependent: bool = False
 
     @property
     def camel_name(self) -> str:
@@ -138,6 +141,19 @@ class TensorField:
     def frontend_setter(self) -> str:
         """Derive setter method name for unpacker."""
         return f"set_{self.name}"
+
+    @property
+    def fbs_declaration(self) -> str:
+        """The FBS table field declaration with its annotations."""
+        default = "" if self.required else " = null"
+        return f"{self.fbs_field}: long{default} ({_fbs_uid_attributes(self)})"
+
+
+def _fbs_uid_attributes(tensor_field) -> str:
+    """FBS attribute list of a tensor-reference field."""
+    if tensor_field.work_data_dependent:
+        return "cache_uid, work_data_dependent"
+    return "cache_uid"
 
 
 def _to_camel_case(snake: str) -> str:
@@ -236,6 +252,12 @@ class DataField:
     #   "none"     — finalize sentinel check is NEVER emitted; enum has no sentinel by design
     #   None       — unset; resolved by `effective_mode_sentinel` via auto-detection
     mode_sentinel: Optional[str] = None
+
+    # Overrides whether the frontend->backend mode converter returns
+    # ``std::optional<T>``. Unset means "derive from ``mode_sentinel``". Set it
+    # for sentinel-less enums that must still reject an unmapped value instead
+    # of silently coercing it to the first enumerator.
+    mode_converter_optional: Optional[bool] = None
 
     # True when a frontend-only sentinel is intentionally absent from the
     # backend C API and FlatBuffers enum. The packer rejects it before the
@@ -452,14 +474,19 @@ class DataField:
     def mode_converter_returns_optional(self) -> bool:
         """Whether the frontend→backend mode converter returns ``std::optional<T>``.
 
-        Mode converters return ``std::optional<T>`` when the enum has a
-        sentinel value (so the converter can signal "unsupported/unset" by
-        returning ``std::nullopt``). When ``mode_sentinel`` is explicitly
-        ``"none"`` the enum has no sentinel by design and the converter
-        returns plain ``T`` — so the packer must NOT emit the
-        ``.has_value()`` / ``*deref`` plumbing around the converter result.
+        Defaults to whether the enum carries a sentinel: with one the converter
+        signals "unsupported/unset" by returning ``std::nullopt``; with
+        ``mode_sentinel: "none"`` it returns plain ``T`` and the packer must not
+        emit ``.has_value()`` / ``*deref`` plumbing.
+
+        ``mode_converter_optional`` overrides that default, for enums that have
+        no sentinel by design but must still reject a value they do not map.
         """
-        return self.is_mode and self.effective_mode_sentinel != "none"
+        if not self.is_mode:
+            return False
+        if self.mode_converter_optional is not None:
+            return self.mode_converter_optional
+        return self.effective_mode_sentinel != "none"
 
 
 @dataclass
@@ -487,6 +514,8 @@ class TensorArrayField:
     required: bool = False
     test_uids: list[int] = field(default_factory=list)
     test_label: str = ""
+    # See TensorField.work_data_dependent.
+    work_data_dependent: bool = False
 
     @property
     def member_name(self) -> str:
@@ -506,6 +535,11 @@ class TensorArrayField:
         "set_peer_stats". Otherwise uses "set_{name}".
         """
         return _derive_frontend_setter_name(self.frontend_getter, self.name)
+
+    @property
+    def fbs_declaration(self) -> str:
+        """The FBS table field declaration with its annotations."""
+        return f"{self.fbs_field}: [long] ({_fbs_uid_attributes(self)})"
 
 
 @dataclass
@@ -948,6 +982,41 @@ class OperationConfig:
     @property
     def node_attributes_union_member(self) -> str:
         return self.fbs_table
+
+    @property
+    def fbs_schema_filename(self) -> str:
+        """The schema file flatc compiles into ``fbs_generated_header``."""
+        return self.fbs_generated_header.removesuffix("_generated.h") + ".fbs"
+
+    @property
+    def fbs_tensor_declarations(self) -> list[str]:
+        """Annotated FBS declarations of every tensor-reference field."""
+        return [f.fbs_declaration for f in self.tensor_fields] + [
+            f.fbs_declaration for f in self.tensor_array_fields
+        ]
+
+    @property
+    def work_data_dependent_fields(self) -> list[str]:
+        """FBS names of the tensor fields whose contents decide the node's work."""
+        return [
+            f.fbs_field
+            for f in [*self.tensor_fields, *self.tensor_array_fields]
+            if f.work_data_dependent
+        ]
+
+    @property
+    def work_model_test_tensors(self) -> list[tuple[TensorField, Optional[list[int]]]]:
+        """Required tensor fields of the work-model test graph with their test dims.
+
+        ``single()`` in TestEngineFeatures.cpp numbers tensors 1, 2, ... in this order.
+        Dims are None when ``test_data.tensor_configs`` gives none for the field.
+        """
+        dims = {
+            name: config.dims
+            for name, config in self.test_data.tensor_configs.items()
+            if config.dims
+        }
+        return [(f, dims.get(f.name)) for f in self.tensor_fields if f.required]
 
     @property
     def header_filename(self) -> str:

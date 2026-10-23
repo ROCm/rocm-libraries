@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
+  "name": "Shared static-order heuristic",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.shared.score"
+  }
+}

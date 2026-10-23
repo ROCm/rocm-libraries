@@ -374,7 +374,8 @@ __global__ void convert_ycbcr_pln3_to_rgb_pkd3(
 RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                              RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                              RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int batchSize = dstDescPtr->n;
 
@@ -441,6 +442,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                 dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
                 srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride), yBuf,
                 cbBuf, crBuf, make_uint2(srcDescPtr->w, srcDescPtr->h), roiTensorPtrSrc, batchSize);
+            HIP_CHECK_LAUNCH_RETURN();
 
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 d_hist, 0, batchSize * HISTOGRAM_BINS * sizeof(unsigned int), handle.GetStream()));
@@ -456,9 +458,11 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                handle.GetStream(), yBuf, roiTensorPtrSrc,
                                make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize,
                                /*applyRoiOffset=*/false);
+            HIP_CHECK_LAUNCH_RETURN();
 
             hipLaunchKernelGGL(build_lut_from_hist_kernel, dim3(batchSize), dim3(HISTOGRAM_BINS), 0,
                                handle.GetStream(), d_hist, d_lut, roiTensorPtrSrc, batchSize);
+            HIP_CHECK_LAUNCH_RETURN();
 
             globalThreads_x = dstDescPtr->w;
             globalThreads_y = dstDescPtr->h;
@@ -472,6 +476,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                handle.GetStream(), yBuf, make_ulong2(yuvNStride, yuvHStride), yBuf,
                                make_ulong2(yuvNStride, yuvHStride), d_lut, roiTensorPtrSrc,
                                batchSize, /*applyRoiOffset=*/false);
+            HIP_CHECK_LAUNCH_RETURN();
 
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
@@ -487,6 +492,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                     yBuf, cbBuf, crBuf, make_uint2(srcDescPtr->w, srcDescPtr->h), dstPtr,
                     make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     roiTensorPtrSrc, batchSize);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (dstDescPtr->layout == RpptLayout::NCHW) {
                 hipLaunchKernelGGL(
                     convert_ycbcr_pln3_to_rgb_pln3,
@@ -498,6 +504,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     roiTensorPtrSrc, batchSize);
+                HIP_CHECK_LAUNCH_RETURN();
             }
         } else if (srcDescPtr->layout == RpptLayout::NCHW) {
             int globalThreads_x = (srcDescPtr->w + 7) >> 3;
@@ -519,6 +526,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                           srcDescPtr->strides.hStride),
                                yBuf, cbBuf, crBuf, make_ulong2(yuvNStride, yuvHStride),
                                roiTensorPtrSrc, batchSize);
+            HIP_CHECK_LAUNCH_RETURN();
 
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 d_hist, 0, batchSize * HISTOGRAM_BINS * sizeof(unsigned int), handle.GetStream()));
@@ -534,9 +542,11 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                handle.GetStream(), yBuf, roiTensorPtrSrc,
                                make_ulong2(yuvNStride, yuvHStride), d_hist, batchSize,
                                /*applyRoiOffset=*/false);
+            HIP_CHECK_LAUNCH_RETURN();
 
             hipLaunchKernelGGL(build_lut_from_hist_kernel, dim3(batchSize), dim3(HISTOGRAM_BINS), 0,
                                handle.GetStream(), d_hist, d_lut, roiTensorPtrSrc, batchSize);
+            HIP_CHECK_LAUNCH_RETURN();
 
             globalThreads_x = dstDescPtr->w;
             globalThreads_y = dstDescPtr->h;
@@ -550,6 +560,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                                handle.GetStream(), yBuf, make_ulong2(yuvNStride, yuvHStride), yBuf,
                                make_ulong2(yuvNStride, yuvHStride), d_lut, roiTensorPtrSrc,
                                batchSize, /*applyRoiOffset=*/false);
+            HIP_CHECK_LAUNCH_RETURN();
 
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
@@ -565,6 +576,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                     yBuf, cbBuf, crBuf, make_uint2(srcDescPtr->w, srcDescPtr->h), dstPtr,
                     make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     roiTensorPtrSrc, batchSize);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (dstDescPtr->layout == RpptLayout::NCHW) {
                 hipLaunchKernelGGL(
                     convert_ycbcr_pln3_to_rgb_pln3,
@@ -576,6 +588,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     roiTensorPtrSrc, batchSize);
+                HIP_CHECK_LAUNCH_RETURN();
             }
         }
 
@@ -598,9 +611,11 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                        handle.GetStream(), srcPtr, roiTensorPtrSrc,
                        make_ulong2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                        d_hist, batchSize);
+    HIP_CHECK_LAUNCH_RETURN();
 
     hipLaunchKernelGGL(build_lut_from_hist_kernel, dim3(batchSize), dim3(HISTOGRAM_BINS), 0,
                        handle.GetStream(), d_hist, d_lut, roiTensorPtrSrc, batchSize);
+    HIP_CHECK_LAUNCH_RETURN();
 
     globalThreads_x = dstDescPtr->w;
     globalThreads_y = dstDescPtr->h;
@@ -615,6 +630,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
         make_ulong2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride), dstPtr,
         make_ulong2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride), d_lut,
         roiTensorPtrSrc, batchSize);
+    HIP_CHECK_LAUNCH_RETURN();
 
     return RPP_SUCCESS;
 }

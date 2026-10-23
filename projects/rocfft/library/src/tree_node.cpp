@@ -19,7 +19,9 @@
 // THE SOFTWARE.
 
 #include "tree_node.h"
+#include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "logging.h"
@@ -28,6 +30,8 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -60,6 +64,16 @@ TreeNode::~TreeNode()
     {
         Repo::ReleaseTwiddle1D(twiddles_large);
         twiddles_large = nullptr;
+    }
+    if(twiddles_off_dim)
+    {
+        Repo::ReleaseTwiddle1D(twiddles_off_dim);
+        twiddles_off_dim = nullptr;
+    }
+    if(twiddles_pp)
+    {
+        Repo::ReleaseTwiddlePP(twiddles_pp);
+        twiddles_pp = nullptr;
     }
     if(chirp)
     {
@@ -128,26 +142,38 @@ void LeafNode::GetKernelPartialPassFactors()
     }
     case 1: // work along y will be split between x and z
     {
+        std::stringstream msg;
+        std::stringstream factors_msg;
+
+        msg << "work in the off-dimension = ";
+
+        factors_msg << "radix-(";
+        for(const auto factor : kernelFactorsPP)
+            factors_msg << factor << ",";
+        factors_msg.seekp(-1, std::ios_base::end);
+        factors_msg << ") pass(es)";
+
+        auto root_transform_type = GetRootPlanTransformType();
+
         if(scheme == CS_KERNEL_STOCKHAM_PP)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-            comments.push_back(msg.str());
+
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << "local data transposition + " << factors_msg.str() << ".";
+            else
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
         }
         if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     local data transposition + radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es). \n";
-            comments.push_back(msg.str());
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
+            else
+                msg << "local data transposition + " << factors_msg.str() << ".";
         }
+
+        msg << "\n";
+
+        comments.push_back(msg.str());
 
         break;
     }
@@ -261,8 +287,7 @@ void LeafNode::Print(rocfft_ostream& os, int indent) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    devKernArg = kargs_create(length, inStride, outStride, iDist, oDist);
-    return (devKernArg != nullptr);
+    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
 }
 
 bool LeafNode::CreateDeviceResources()
@@ -287,6 +312,25 @@ bool LeafNode::CreateDeviceResources()
     }
 
     return CreateLargeTwdTable();
+}
+
+bool LeafNode::CreatePartialPassDeviceResources(size_t off_dim_length)
+{
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(off_dim_length, precision, deviceProp);
+
+    return LeafNode::CreateDeviceResources();
 }
 
 void LeafNode::SetupGridParam(GridParam& gp)
@@ -591,8 +635,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -710,8 +753,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     const auto devices = rccl.get_devices();
 
@@ -722,9 +764,9 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                  + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    // collect per-rank send/recv pointers and streams.  the wrapper
-    // requires each vector to be sized num_ranks() and indexed by
-    // RCCL rank; agents[] is already in that order (see constructor).
+    // collect per-rank send/recv pointers. The wrapper requires each
+    // vector to be sized num_ranks() and indexed by RCCL rank; agents[]
+    // is already in that order (see constructor).
     //
     // Buffer layout (disjoint send/recv):
     //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
@@ -733,27 +775,23 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     //                (populated by the collective; read by unpack step)
     std::vector<const void*> send_ptrs(agents.size(), nullptr);
     std::vector<void*>       recv_ptrs(agents.size(), nullptr);
-    std::vector<hipStream_t> streams(agents.size(), nullptr);
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
         send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
         recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
-        streams[r]   = agents[r].stream;
     }
 
-    // wrapper owns the ncclGroupStart/End scope and per-call
-    // hipSetDevice, so a single call fires the whole collective.
-    rccl.alltoall(send_ptrs, recv_ptrs, streams, count_per_rank, precision, arrayType);
+    // one call fires the whole collective on the comm-owned streams.
+    rccl.alltoall(send_ptrs, recv_ptrs, count_per_rank, precision, arrayType);
 
-    // collective work is now enqueued on each agent's stream.
-    // record a completion event per agent so Wait() can synchronize
-    // on events (matching every other MultiPlanItem) rather than on
-    // streams directly.
+    // record a completion event per agent on the same comm stream the
+    // collective was enqueued on, so Wait() can sync on events.
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        if(agents[r].event && hipEventRecord(agents[r].event, agents[r].stream) != hipSuccess)
+        if(agents[r].event
+           && hipEventRecord(agents[r].event, rccl.get_stream(devices[r])) != hipSuccess)
             throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
                                      + std::to_string(devices[r]));
     }
@@ -798,8 +836,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                    void*                                 in_buffer[],
                                    void*                                 out_buffer[],
                                    const rocfft_execution_info_internal& info,
-                                   size_t                                multiPlanIdx,
-                                   const std::map<int, device_callback_t>&)
+                                   size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -842,7 +879,6 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                           t.count,
                           t.peer_location.device,
                           t.local_location.device,
-                          t.stream,
                           precision,
                           arrayType);
                 break;
@@ -851,7 +887,6 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                           t.count,
                           t.peer_location.device,
                           t.local_location.device,
-                          t.stream,
                           precision,
                           arrayType);
                 break;
@@ -862,15 +897,14 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
     // close the group explicitly so a launch failure throws before events record
     group.end();
 
-    // record a completion event per local transfer so Wait() can
-    // synchronize on events (matching every other MultiPlanItem)
-    // rather than on streams directly.
+    // record a completion event per local transfer on the comm-owned
+    // stream it was enqueued on, so Wait() can sync on events.
     for(auto& t : transfers)
     {
         if(t.event)
         {
             rocfft_scoped_device dev(t.local_location.device);
-            if(hipEventRecord(t.event, t.stream) != hipSuccess)
+            if(hipEventRecord(t.event, rccl.get_stream(t.local_location.device)) != hipSuccess)
                 throw std::runtime_error("hipEventRecord failed for RCCL Grouped on device "
                                          + std::to_string(t.local_location.device));
         }
@@ -917,8 +951,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
                                void*                                 in_buffer[],
                                void*                                 out_buffer[],
                                const rocfft_execution_info_internal& info,
-                               size_t                                multiPlanIdx,
-                               const std::map<int, device_callback_t>&)
+                               size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -1049,8 +1082,7 @@ void CommGather::ExecuteAsync(const rocfft_plan                     plan,
                               void*                                 in_buffer[],
                               void*                                 out_buffer[],
                               const rocfft_execution_info_internal& info,
-                              size_t                                multiPlanIdx,
-                              const std::map<int, device_callback_t>&)
+                              size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -1184,8 +1216,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                 void*                                 in_buffer[],
                                 void*                                 out_buffer[],
                                 const rocfft_execution_info_internal& info,
-                                size_t                                multiPlanIdx,
-                                const std::map<int, device_callback_t>&)
+                                size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {

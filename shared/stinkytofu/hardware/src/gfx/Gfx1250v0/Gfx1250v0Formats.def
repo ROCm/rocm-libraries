@@ -545,6 +545,13 @@ DEF_FORMAT(MXWMMA,
 DEF_FORMAT(MXWMMA_SCALE,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX2,
+    // The encoding is a back-to-back VOP3P pair: the WMMA plus an LD_SCALE that hardware
+    // always runs in the last cycle of the window. Nothing of any pipe can be issued
+    // there, which the VALU-only co-issue window cannot express. The mask is anchored at
+    // the window END (bit 0 = last cycle), so it stays correct across the per-format cost
+    // overrides below without needing an override of its own.
+    // (Keep literal field names out of .def comments: the parser substring-matches them.)
+    .blockedScale = 0x0001,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
@@ -561,6 +568,13 @@ DEF_FORMAT(MXWMMA_SCALE,
 DEF_FORMAT(MXWMMA_SCALE16,
     .parent = MXWMMA,
     .microcode = MC_VOP3PX3,
+    // The encoding is a back-to-back VOP3P pair: the WMMA plus an LD_SCALE that hardware
+    // always runs in the last cycle of the window. Nothing of any pipe can be issued
+    // there, which the VALU-only co-issue window cannot express. The mask is anchored at
+    // the window END (bit 0 = last cycle), so it stays correct across the per-format cost
+    // overrides below without needing an override of its own.
+    // (Keep literal field names out of .def comments: the parser substring-matches them.)
+    .blockedScale = 0x0001,
     .maxOperands = 6,
     .encoding = {128},
     .fields = {
