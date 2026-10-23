@@ -1181,6 +1181,50 @@ def resolve_gemm_vector_sizes(
     return eff, None
 
 
+# Pipelines whose A/B global loads always use the universal policy's
+# MakeA/BDramTileDistribution. comp_async switches to an XOR-swizzled
+# distribution when neither operand is transpose-loaded, and TDM moves A/B with
+# the Tensor Data Mover, so neither is checked here.
+_UNIVERSAL_DRAM_TILE_PIPELINES = ("mem", "compv3", "compv4", "compv5")
+
+
+def gemm_native_dram_tile_reject_reason(
+    *,
+    dtype_a: str,
+    dtype_b: str,
+    dtype_c: str,
+    layout: str,
+    tile: Sequence[int],
+    waves: Sequence[int],
+    warp_tile: Sequence[int],
+    gfx_arch: str,
+    pipeline: str,
+    epilogue: str = "cshuffle",
+) -> Optional[str]:
+    """Why a kernel's native A or B global-load tile cannot be distributed, or None.
+
+    The pipelines in ``_UNIVERSAL_DRAM_TILE_PIPELINES`` load A and B through
+    ``tile_distribution_encoding_pattern_2d`` (``MakeA/BDramTileDistribution``),
+    whose static_asserts need the threads along the contiguous dimension to
+    divide the wavefront and to cover it whole. ``resolve_gemm_vector_sizes``
+    checks that for fixed widths only; at the native widths a tile such as 96,
+    160 or 192 on an M- or N-contiguous operand (column-major A, row-major B)
+    fails to compile instead. Other pipelines are not checked.
+    """
+    if pipeline not in _UNIVERSAL_DRAM_TILE_PIPELINES:
+        return None
+    native, a_yx, b_yx, _, block_size, warp_size, _ = _vector_geometry(
+        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
+    )
+    for name, width, (y, x) in (("A", native[0], a_yx), ("B", native[1], b_yx)):
+        if not _pattern_2d_y2(y, x, width, block_size, warp_size):
+            return (
+                f"{name} tile {y}x{x} cannot be distributed over {block_size} threads "
+                f"with its native vector width {width}"
+            )
+    return None
+
+
 # ============================================================================
 # Arch-derived warp tile K
 # ============================================================================
