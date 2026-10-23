@@ -50,13 +50,20 @@ inline std::vector<int64_t> squeezeToRank(const std::vector<int64_t>& strides, s
     return {strides.begin(), strides.begin() + static_cast<std::ptrdiff_t>(rank)};
 }
 
+// The graph plans use fp32 softmax probabilities, like the CPU reference and cuDNN's reference,
+// so the GPU reference is an independent oracle for every dtype (SdpaSemanticsRegister.md SEM-012).
+inline constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode REFERENCE_SDPA_PROBABILITY_MODE
+    = hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::FLOAT;
+
+// Opt-in emulation of a provider kernel's P storage, for callers that want to model it
+// explicitly (GpuFpReferenceSdpa::fprop's probabilityMode). Not used by the graph plans.
+// The P->bf16 cast is a property of the P@V matmul inputs, not the output: the AITER BF16
+// forward kernel materializes the softmax probabilities in bf16 before P@V whenever Q/K/V are
+// bf16, regardless of the (fp32 or bf16) output dtype.
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
-constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode sdpaProbabilityMode()
+constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode providerSdpaProbabilityMode()
 {
     using hipdnn_data_sdk::types::bfloat16;
-    // The P->bf16 cast is a property of the P@V matmul inputs, not the output: the
-    // AITER BF16 forward kernel materializes the softmax probabilities in bf16 before
-    // P@V whenever Q/K/V are bf16, regardless of the (fp32 or bf16) output dtype.
     if constexpr(std::is_same_v<QDataType, bfloat16> && std::is_same_v<KDataType, bfloat16>
                  && std::is_same_v<VDataType, bfloat16>)
     {
@@ -260,7 +267,7 @@ public:
                 _params.rightBound,
                 _params.topLeftAlignment,
                 lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                REFERENCE_SDPA_PROBABILITY_MODE,
                 seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
                 seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr,
                 pageTableK.has_value() ? &pageTableK.value() : nullptr,

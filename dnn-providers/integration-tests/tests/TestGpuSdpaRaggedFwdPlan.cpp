@@ -421,7 +421,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 }
 
 // The plan must run the same kernel as a direct fpropRagged call, including the LSE. Equal
-// lengths leave no padding, so whole tensors are compared. ExecuteUsesBfloat16ProbabilityMode
+// lengths leave no padding, so whole tensors are compared. ExecuteUsesFloatProbabilityNotProviderRounding
 // checks the probability mode, which this tolerance cannot tell apart.
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
 {
@@ -501,7 +501,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         /*topLeftAlignment=*/true,
         &lseDirect,
         /*raggedOffsetLse=*/nullptr,
-        sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>());
+        REFERENCE_SDPA_PROBABILITY_MODE);
 
     const float tolerance = 1e-2f;
     const CpuFpReferenceValidation<bfloat16> oValidation(tolerance, tolerance);
@@ -512,10 +512,10 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         << "Plan LSE differs from direct fpropRagged LSE";
 }
 
-// All-bf16 graphs round P to bf16 (RTNE) before P@V, as AITER does. Large V values make that
-// rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the plan must match RTNE
-// exactly. One query token against four keys, H = D = 1, and the default scale of 1.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
+// The plan computes P in fp32 (an independent oracle, SEM-012), not with AITER's bf16 P rounding.
+// Large V values make the rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the
+// plan must match FLOAT.
+TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -590,7 +590,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
     const float oFloat = direct(SdpaSoftmaxProbabilityMode::FLOAT);
 
     ASSERT_NE(oRtne, oFloat);
-    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oRtne);
+    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oFloat);
 }
 
 // fp8: the plan must pass the Q/K/V descales from the variant pack through to fpropRagged.
