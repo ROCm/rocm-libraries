@@ -258,6 +258,18 @@ If performance is still poor after default swizzle, consider:
 2. Adjust tile_k to avoid power-of-2 strides
 3. Check if pipeline type affects LDS layout (try `compv4` vs `basic_v1`)
 
+### Variant: XOR on the DMA source (gfx9 async copies)
+
+On gfx942/gfx950 an async `buffer_load ... lds` writes lane `n` of the wave to LDS
+slot `n`, so the destination address cannot be swizzled (gfx1250's
+`global_load_async_to_lds` takes a per-lane LDS address and can). Swizzle the *source*
+instead: the lane that writes LDS chunk `c` of row `r` fetches global chunk
+`c ^ (r % chunks_per_row)` (XOR is its own inverse), and every LDS read applies the
+same permutation to its column. The copies stay contiguous and the tile needs no
+padding. The attention 3D decode kernels use this (`use_kv_lds_swizzle`); see runbook
+[§6.4a](../../optimization_runbook.md#64a-lds-swizzle-strategy-selection-xor-vs-padding)
+and [§12.1.K2](../../optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
+
 ---
 
 ## Optimization Method 3: Reduce Pipeline Stages
