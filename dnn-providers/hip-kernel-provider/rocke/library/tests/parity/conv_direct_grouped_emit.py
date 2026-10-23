@@ -11,14 +11,14 @@
 # from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
 # output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
 # non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
-# must reject, from index 71 the runtime-channel DirectConvWgradSpec and from
+# must reject, from index 71 the runtime-channel DirectConvWgradSpec, from
 # index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
 # baked and runtime-channel, from index 95 the split-C non-grouped
 # DirectNongroupedConvSpec and its DirectSplitReduceSpec second pass, from
 # index 103 its grouped / group-merge mode, and from index 114 the direct
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
-# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec),
-# builds the kernel
+# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
+# and from index 163 the bf16 DirectConv4cSpec), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -146,6 +146,31 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 # negative block budget. Follows the 11 grouped non-grouped configs.
 # ---------------------------------------------------------------------------
 _WGRAD_DIRECT_CFG_BASE = 114
+
+# bf16 4c (mfma_f32_4x4x4_bf16) configs, indices 163..165, after the direct
+# wgrad ones.
+_FOURC_BF16_CFG_BASE = 163
+
+
+def _fourc_bf16_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FOURC_BF16_CFG_BASE + idx``, or
+    None. 0: odd H/W (right-edge column mask, H-edge rows); 1: gfx942 (the
+    ``_1k`` atom is CDNA2+, so the kernel stays arch-neutral); 2: two waves per
+    block and four q-tiles per wave."""
+    # (N, H, W, groups, block_q, block_groups, arch)
+    table = {
+        0: (2, 13, 13, 32, 4, 16, "gfx950"),
+        1: (1, 8, 8, 16, 8, 16, "gfx942"),
+        2: (2, 15, 15, 32, 16, 32, "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    N, H, W, groups, bq, bg, arch = sel
+    p = DirectConvProblem(
+        N=N, H=H, W=W, groups=groups, cpg=4, kpg=4, KH=3, KW=3, PAD=1, dtype="bf16"
+    )
+    return ("4c", DirectConv4cSpec(problem=p, block_q=bq, block_groups=bg), arch)
 
 
 def _wp(**over):
@@ -1744,6 +1769,11 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _FOURC_BF16_CFG_BASE:
+        sel = _fourc_bf16_spec(idx - _FOURC_BF16_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_DIRECT_CFG_BASE:
         sel = _wgrad_direct_spec(idx - _WGRAD_DIRECT_CFG_BASE)
         if sel is not None:

@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-# Importing GlobalParameters pulls in the Tensile toolchain (rocisa bindings,
+# Importing GlobalParameters pulls in the TensileLite toolchain (rocisa bindings,
 # etc.). If that chain is unavailable in the current environment, skip rather
 # than error at collection time.
 try:
