@@ -60,126 +60,6 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         !Base::template is_a_load_tr<Problem> && !Base::template is_b_load_tr<Problem> &&
         IsSupportedXorSwizzleDataType<Problem> && IsSupportedXorSwizzleAsyncWidth<Problem>;
 
-    // Base::GetGlobalVectorLoadSize can pick widths the gfx950 async copy cannot issue (8 bytes,
-    // or under 4 bytes for packed types such as FP4); fall back to 4 bytes per lane in that case.
-    // gfx1250 has a 64-bit async load, so other targets keep the Base width. Keyed on the
-    // whole-TU CK_GFX950_SUPPORT rather than __gfx950__ so the host pass picks the same width.
-#if defined(CK_GFX950_SUPPORT)
-    static constexpr bool UseAsyncVectorWidthFallback = true;
-#else
-    static constexpr bool UseAsyncVectorWidthFallback = false;
-#endif
-
-    template <typename Problem,
-              typename DataType,
-              index_t MNPerBlock,
-              index_t XPerTile,
-              bool IsWave32Host>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetAsyncGlobalVectorLoadSize()
-    {
-        constexpr index_t VecSize = Base::template GetGlobalVectorLoadSize<Problem,
-                                                                           DataType,
-                                                                           MNPerBlock,
-                                                                           XPerTile,
-                                                                           IsWave32Host>();
-        if constexpr(IsSupportedAsyncVectorWidth<DataType, VecSize>)
-        {
-            return VecSize;
-        }
-        else
-        {
-            constexpr index_t BlockSize =
-                IsWave32Host ? Problem::kBlockSize / 2 : Problem::kBlockSize;
-            constexpr index_t ElementsPerThread =
-                MNPerBlock * Problem::BlockGemmShape::kK / BlockSize;
-            constexpr index_t DwordVecSize =
-                4 * numeric_traits<remove_cvref_t<DataType>>::PackedSize / sizeof(DataType);
-
-            if constexpr(DwordVecSize > 0 && XPerTile % DwordVecSize == 0 &&
-                         ElementsPerThread % DwordVecSize == 0)
-                return DwordVecSize;
-            else
-                return VecSize;
-        }
-    }
-
-    template <typename Problem, bool IsWave32Host = false>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeA()
-    {
-        using ALayout =
-            remove_cvref_t<std::tuple_element_t<number<0>{}, problem_as_layout_t<Problem>>>;
-        using ADataType =
-            remove_cvref_t<std::tuple_element_t<number<0>{}, problem_as_data_type_t<Problem>>>;
-        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
-        if constexpr(!UseAsyncVectorWidthFallback || problem_fixed_vector_size_v<Problem> ||
-                     UseXorSwizzle<Problem>)
-            return Base::template GetVectorSizeA<Problem, IsWave32Host>();
-        else if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
-            return GetAsyncGlobalVectorLoadSize<Problem,
-                                                ADataType,
-                                                MPerBlock,
-                                                KPerBlock,
-                                                IsWave32Host>();
-        else
-            return GetAsyncGlobalVectorLoadSize<Problem,
-                                                ADataType,
-                                                MPerBlock,
-                                                MPerBlock,
-                                                IsWave32Host>();
-    }
-
-    template <typename Problem, bool IsWave32Host = false>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeB()
-    {
-        using BLayout =
-            remove_cvref_t<std::tuple_element_t<number<0>{}, problem_bs_layout_t<Problem>>>;
-        using BDataType = std::conditional_t<Base::template IsBCastPolicyBeforeLDSWrite_v<Problem>,
-                                             typename Problem::ADataType,
-                                             typename Problem::BDataType>;
-        constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
-        if constexpr(!UseAsyncVectorWidthFallback || Problem::FixedVectorSize ||
-                     UseXorSwizzle<Problem>)
-            return Base::template GetVectorSizeB<Problem, IsWave32Host>();
-        else if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
-            return GetAsyncGlobalVectorLoadSize<Problem,
-                                                BDataType,
-                                                NPerBlock,
-                                                NPerBlock,
-                                                IsWave32Host>();
-        else
-            return GetAsyncGlobalVectorLoadSize<Problem,
-                                                BDataType,
-                                                NPerBlock,
-                                                KPerBlock,
-                                                IsWave32Host>();
-    }
-
-    // Tile is MNPerBlock x KPerBlock when K is contiguous, otherwise KPerBlock x MNPerBlock
-    template <typename Problem,
-              index_t MNPerBlock,
-              bool KContiguous,
-              index_t VecLoadSize,
-              tile_distribution_pattern AccessPattern>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAsyncABDramTileDistribution()
-    {
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t YPerTile  = KContiguous ? MNPerBlock : KPerBlock;
-        constexpr index_t XPerTile  = KContiguous ? KPerBlock : MNPerBlock;
-
-        using TileEncodingPattern = tile_distribution_encoding_pattern_2d<BlockSize,
-                                                                          YPerTile,
-                                                                          XPerTile,
-                                                                          VecLoadSize,
-                                                                          AccessPattern,
-                                                                          Problem::NumWaveGroups>;
-        return TileEncodingPattern::make_2d_static_tile_distribution();
-    }
-
     // Compute the number of LDS read accesses for A or B
     // IsLoadTr=true if ds_read_tr is used
     template <bool IsLoadTr, typename DataType, index_t ThreadElements, bool IsScale>
@@ -299,14 +179,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
-            using ALayout = remove_cvref_t<
-                std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::AsLayoutTuple>>>;
-            return MakeAsyncABDramTileDistribution<
-                Problem,
-                Problem::BlockGemmShape::kM,
-                std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
-                GetVectorSizeA<Problem>(),
-                Base::getATileAccessPattern()>();
+            return Base::template MakeADramTileDistribution<Problem>();
         }
     }
 
@@ -321,17 +194,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
-            using BLayout = remove_cvref_t<
-                std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
-            constexpr index_t VecLoadSize = Base::template IsBCastPolicyBeforeLDSWrite_v<Problem>
-                                                ? GetVectorSizeA<Problem>()
-                                                : GetVectorSizeB<Problem>();
-            return MakeAsyncABDramTileDistribution<
-                Problem,
-                Problem::BlockGemmShape::kN,
-                !std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>,
-                VecLoadSize,
-                Base::getBTileAccessPattern()>();
+            return Base::template MakeBDramTileDistribution<Problem>();
         }
     }
 
