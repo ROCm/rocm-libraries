@@ -3610,6 +3610,23 @@ struct TensileDataGemm
     // by the same builder the C API uses, so both APIs look up the same key.
     // Only set while a tuning file is in play.
     TensileLite::ProblemOverride tuningKey;
+
+    // The rocblaslt-level problem this object was created from. The object API
+    // otherwise drops it at create time and keeps only the Tensile problem, but the
+    // whole rocRoller path needs it: useRocRoller() reads scaleAType/scaleBType
+    // together with the operand types, and getRocRollerBestSolutions and
+    // runRocRollerContractionProblem take the rocblaslt problem itself rather than
+    // the Tensile one. Keeping it lets the object API make, and then act on, the
+    // same routing decision as the C API. gemmCreate refreshes it on every
+    // setProblem, so it stays exactly as current as `inputs`.
+    std::optional<RocblasltContractionProblem> rocProblem;
+
+    // Set by makeArgument when the chosen algo is a rocRoller solution. Those carry
+    // a negative packed index, are not Tensile solutions, and produce no
+    // KernelInvocation, so they must be launched through
+    // runRocRollerContractionProblem rather than adapter->launchKernels.
+    bool                  runViaRocRoller = false;
+    rocblaslt_matmul_algo rocRollerAlgo{};
 };
 
 struct TensileDataGroupedGemm
@@ -5484,6 +5501,15 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
     return found->size();
 }
 
+// Same routing decision as useRocRoller(), for the object API's gemmData entry
+// points. False when the originating problem was not recorded, which keeps any
+// path that does not go through gemmCreate on its existing behaviour.
+static bool gemmDataUsesRocRoller(rocblaslt_handle                        handle,
+                                  const std::shared_ptr<TensileDataGemm>& data)
+{
+    return data && data->rocProblem && useRocRoller(handle, *data->rocProblem);
+}
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // Amax uses Synchronizer for its counter, so retain its GSU region.
@@ -6212,8 +6238,10 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
             updateTensileProblem(problem, data->problem);
-            data->inputs         = GetTensileInputs(problem);
-            data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data->inputs          = GetTensileInputs(problem);
+            data->enableEpilogue  = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data->rocProblem      = problem;
+            data->runViaRocRoller = false;
             if(cacheTuningKey)
                 data->tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
         }
@@ -6223,6 +6251,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             data.problem        = ConstructTensileProblem(problem);
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data.rocProblem     = problem;
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -6375,8 +6404,29 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
-            data->algoIndex = *solutionIndex;
-            auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            data->algoIndex       = *solutionIndex;
+            data->runViaRocRoller = false;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+            // A rocRoller JIT solution carries a negative packed index: it is not in
+            // the Tensile library, so getSolutionByIndex cannot find it, and it
+            // produces no KernelInvocation for launchKernels to run. Record it and
+            // let runKernelFromInvocation dispatch to the rocRoller launcher.
+            if(*solutionIndex < 0 && gemmDataUsesRocRoller(handle, data))
+            {
+                data->runViaRocRoller = true;
+                data->rocRollerAlgo   = algo;
+                data->kernels.clear();
+                data->inputs.ws                 = workspace;
+                data->inputs.workspaceSize      = workspaceSizeInBytes;
+                data->rocProblem->workspace     = workspace;
+                data->rocProblem->workspaceSize = workspaceSizeInBytes;
+                data->rocProblem->stream        = stream;
+                return rocblaslt_status_success;
+            }
+#endif
+
+            auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
             if(!solution)
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
@@ -6641,6 +6691,24 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+            // rocRoller kernels are not TensileLite::KernelInvocations; launchKernels
+            // cannot run them. The stream is only known here, so stamp it on the
+            // problem copy before handing it to the rocRoller launcher.
+            if(data->runViaRocRoller)
+            {
+                RocblasltContractionProblem prob = *data->rocProblem;
+                prob.stream                      = stream;
+                if(start)
+                    static_cast<void>(hipEventRecord(start, stream));
+                status = runRocRollerContractionProblem(handle, &data->rocRollerAlgo, prob);
+                if(stop)
+                    static_cast<void>(hipEventRecord(stop, stream));
+                return status;
+            }
+#endif
+
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
                || rocblaslt::Debug::Instance().printLogAsMarker()
                || rocblaslt::Debug::Instance().benchPrintCommand())
@@ -7318,6 +7386,45 @@ static rocblaslt_status
     return rocblaslt_status_success;
 }
 
+// Vector-returning form of the rocRoller heuristic, for the object API. ON picks
+// JIT kernels (negative packed indices); OFF picks checked-in RR_GEMM_* Tensile
+// solutions (ordinary positive indices), which is why only ON needs the extra
+// launch plumbing in makeArgument/runKernelFromInvocation.
+static rocblaslt_status
+    rocRollerBestSolutionsVector(rocblaslt_handle                                handle,
+                                 const RocblasltContractionProblem&              prob,
+                                 int                                             requestedAlgoCount,
+                                 size_t                                          maxWorkSpaceBytes,
+                                 std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+{
+    heuristicResults.clear();
+    if(requestedAlgoCount <= 0)
+        return rocblaslt_status_success;
+
+    std::vector<rocblaslt_matmul_heuristic_result> tmp(requestedAlgoCount);
+    int                                            returnAlgoCount = 0;
+
+    // `prob` keeps its create-time workspace size on purpose. The object API has no
+    // stream, and so no Stream-K flag region, until makeArgument; widening the budget
+    // here ranks Stream-K tiles first and they are then rejected for want of that
+    // region, leaving no solution at all. Ranking them out yields a usable non-
+    // Stream-K tile instead, which is why these two sizes can differ from the C API.
+#ifdef HIPBLASLT_USE_ROCROLLER
+    rocblaslt_status status = getRocRollerBestSolutions(
+        handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
+#else
+    rocblaslt_status status = getRocRollerSelectedSolutions(
+        handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
+#endif
+    if(status != rocblaslt_status_success)
+        return status;
+
+    returnAlgoCount = std::max(0, std::min(returnAlgoCount, requestedAlgoCount));
+    tmp.resize(returnAlgoCount);
+    heuristicResults = std::move(tmp);
+    return rocblaslt_status_success;
+}
+
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
@@ -7574,7 +7681,15 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        // Defer to the rocblaslt-problem overload, which already carries both the
+        // ON and OFF rocRoller legs, so the object API enumerates the same set.
+        // Same empty-result fallback as getBestSolutions.
+        status = rocblaslt_status_success;
+        if(gemmDataUsesRocRoller(handle, data))
+            status
+                = getAllSolutions(*data->rocProblem, handle, heuristicResults, maxWorkSpaceBytes);
+        if(status == rocblaslt_status_success && heuristicResults.empty())
+            status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -8036,6 +8151,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
         if(!data)
             return rocblaslt_status_invalid_pointer;
 
+#ifdef HIPBLASLT_USE_ROCROLLER
+        // Mirrors the C API: a JIT solution is not in the Tensile library, so the
+        // Tensile predicate check below cannot validate it. OFF needs no branch --
+        // its rocRoller selections are ordinary Tensile solutions.
+        if(gemmDataUsesRocRoller(handle, data))
+            return isRocRollerSolutionSupported(
+                handle, *data->rocProblem, &algo, &workspaceSizeInBytes);
+#endif
+
         auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
             using T = std::remove_pointer_t<decltype(tag)>;
 
@@ -8123,6 +8247,24 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+        // Route block-scaled problems exactly as the C API does. Without this the
+        // object API falls through to the Tensile heuristic, which only ever sees
+        // the checked-in RR_GEMM_* solutions behind their CustomKernelSizePredicate
+        // boxes and never the rocRoller tile ladder.
+        if(gemmDataUsesRocRoller(handle, data))
+        {
+            const rocblaslt_status rrStatus = rocRollerBestSolutionsVector(
+                handle, *data->rocProblem, requestedAlgoCount, workspaceBytes, heuristicResults);
+            // Only commit to rocRoller when it actually produced something. The
+            // rocRoller-off matcher keeps a name-matched kernel only when that
+            // kernel's own hardware and problem predicates accept the problem, so it
+            // legitimately declines sizes outside them; without this the object API
+            // would go from a working Tensile solution to none at all for those.
+            if(rrStatus != rocblaslt_status_success || !heuristicResults.empty())
+                return rrStatus;
+        }
+
         data->problem.setWorkspaceSize(workspaceBytes);
         auto solutions = getSolutions(data->inputs,
                                       library,
@@ -8224,9 +8366,14 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        kernels                               = data->kernels;
-        gsu                                   = data->problem.getParams().gsu();
-        wgm                                   = data->problem.getParams().wgm();
+#ifdef HIPBLASLT_USE_ROCROLLER
+        // A rocRoller run leaves `kernels` empty; report the rr_ label instead of "".
+        if(data->runViaRocRoller)
+            return rocRollerShortKernelNameFromEncodedSolutionIndex(data->algoIndex);
+#endif
+        kernels = data->kernels;
+        gsu     = data->problem.getParams().gsu();
+        wgm     = data->problem.getParams().wgm();
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {

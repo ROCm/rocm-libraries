@@ -43,4 +43,33 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# Selection on the object (hipblaslt_ext) API sees only a Tensile problem, which does
+# not record the block-scale format, so block-scaled GEMMs used to bypass rocRoller
+# routing there and silently fall through to the Tensile heuristic. No other use_ext
+# case in the suite carries block scales, which is why that went unnoticed. Covers
+# both the create-time and setProblem forms of the object API.
+#
+# Asserts that such a problem resolves to a solution, runs it, and gets the right
+# answer. Which kernel it resolves to differs by build -- rocRoller JIT when
+# HIPBLASLT_ENABLE_ROCROLLER is on, a checked-in RR_GEMM_* otherwise -- so this pins
+# the routing rather than any one kernel.
+- name: rocroller_ext_block_scaled
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [256]
+  N: [256]
+  K: [256]
+  transA: T
+  transB: N
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 ...
