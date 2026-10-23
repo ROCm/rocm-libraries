@@ -1,0 +1,95 @@
+<svg viewBox="0 0 900 520" width="900" height="520" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowSP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="32" text-anchor="middle" font-weight="600">What a failing matcher prunes: scope "graph" versus scope "kernel"</text>
+  <text x="450" y="52" text-anchor="middle" font-size="11" fill="#666">the same pack, four candidate kernels, one failing matcher</text>
+
+  <!-- LEFT COLUMN: scope graph -->
+  <rect x="20" y="70" width="410" height="404" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="225" y="96" text-anchor="middle" font-weight="600" font-family="Consolas, monospace" font-size="12">scope: "graph"</text>
+
+  <rect x="38" y="110" width="374" height="90" rx="6" fill="#ffffff" stroke="#c99a2e" stroke-width="1.2"/>
+  <text x="52" y="132" font-family="Consolas, monospace" font-size="10">reads: bound graph fields only</text>
+  <text x="52" y="150" font-family="Consolas, monospace" font-size="10">  $q.dtype  $q.stride_order  $device.lds_size</text>
+  <text x="52" y="172" font-size="10" fill="#666">evaluated once per (graph, device)</text>
+  <text x="52" y="190" font-size="10" fill="#666">reading any $kernel.* here is refused at load</text>
+
+  <line x1="225" y1="202" x2="225" y2="230" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSP)"/>
+  <text x="235" y="221" font-size="10" fill="#b4553f">fails</text>
+
+  <text x="225" y="252" text-anchor="middle" font-size="11" fill="#666">the pack, after the verdict</text>
+
+  <rect x="38" y="264" width="374" height="150" rx="6" fill="#f7f5f0" stroke="#c99a2e" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="52" y="286" font-family="Consolas, monospace" font-size="10" fill="#666">pack: 4 candidate kernels</text>
+
+  <rect x="52" y="298" width="76" height="46" rx="6" fill="#f0eeea" stroke="#b0a894" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="90" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8a8272">k0</text>
+  <text x="90" y="336" text-anchor="middle" font-size="9" fill="#8a8272">pruned</text>
+
+  <rect x="140" y="298" width="76" height="46" rx="6" fill="#f0eeea" stroke="#b0a894" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="178" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8a8272">k1</text>
+  <text x="178" y="336" text-anchor="middle" font-size="9" fill="#8a8272">pruned</text>
+
+  <rect x="228" y="298" width="76" height="46" rx="6" fill="#f0eeea" stroke="#b0a894" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="266" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8a8272">k2</text>
+  <text x="266" y="336" text-anchor="middle" font-size="9" fill="#8a8272">pruned</text>
+
+  <rect x="316" y="298" width="76" height="46" rx="6" fill="#f0eeea" stroke="#b0a894" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="354" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8a8272">k3</text>
+  <text x="354" y="336" text-anchor="middle" font-size="9" fill="#8a8272">pruned</text>
+
+  <text x="225" y="370" text-anchor="middle" font-weight="600" font-size="11" fill="#b4553f">one failure prunes EVERY kernel in the pack</text>
+  <text x="225" y="394" text-anchor="middle" font-size="10" fill="#666">the most-shared checks go first, so the candidate set</text>
+  <text x="225" y="408" text-anchor="middle" font-size="10" fill="#666">shrinks fast</text>
+
+  <text x="225" y="444" text-anchor="middle" font-size="10" fill="#666">memoization key: (graph, device)</text>
+  <text x="225" y="462" text-anchor="middle" font-size="10" fill="#666">one evaluation serves the whole pack</text>
+
+  <!-- RIGHT COLUMN: scope kernel -->
+  <rect x="470" y="70" width="410" height="404" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="675" y="96" text-anchor="middle" font-weight="600" font-family="Consolas, monospace" font-size="12">scope: "kernel"</text>
+
+  <rect x="488" y="110" width="374" height="90" rx="6" fill="#ffffff" stroke="#4a72c4" stroke-width="1.2"/>
+  <text x="502" y="132" font-family="Consolas, monospace" font-size="10">reads: bound graph fields AND $kernel.*</text>
+  <text x="502" y="150" font-family="Consolas, monospace" font-size="10">  $q.dims[3] == $kernel.head_size</text>
+  <text x="502" y="172" font-size="10" fill="#666">re-evaluated once per distinct value of the</text>
+  <text x="502" y="190" font-size="10" fill="#666">$kernel.* fields it reads</text>
+
+  <line x1="675" y1="202" x2="675" y2="230" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSP)"/>
+  <text x="685" y="221" font-size="10" fill="#b4553f">fails for k1</text>
+
+  <text x="675" y="252" text-anchor="middle" font-size="11" fill="#666">the pack, after the verdict</text>
+
+  <rect x="488" y="264" width="374" height="150" rx="6" fill="#ffffff" stroke="#4a72c4" stroke-width="1.2"/>
+  <text x="502" y="286" font-family="Consolas, monospace" font-size="10" fill="#666">pack: 4 candidate kernels</text>
+
+  <rect x="502" y="298" width="76" height="46" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="540" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10">k0</text>
+  <text x="540" y="336" text-anchor="middle" font-size="9" fill="#3f9159">survives</text>
+
+  <rect x="590" y="298" width="76" height="46" rx="6" fill="#f0eeea" stroke="#b0a894" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="628" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#8a8272">k1</text>
+  <text x="628" y="336" text-anchor="middle" font-size="9" fill="#8a8272">pruned</text>
+
+  <rect x="678" y="298" width="76" height="46" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="716" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10">k2</text>
+  <text x="716" y="336" text-anchor="middle" font-size="9" fill="#3f9159">survives</text>
+
+  <rect x="766" y="298" width="76" height="46" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="804" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="10">k3</text>
+  <text x="804" y="336" text-anchor="middle" font-size="9" fill="#3f9159">survives</text>
+
+  <text x="675" y="370" text-anchor="middle" font-weight="600" font-size="11" fill="#b4553f">a failure prunes ONLY that candidate</text>
+  <text x="675" y="394" text-anchor="middle" font-size="10" fill="#666">k0, k2, and k3 stay in the catalog and go on to the</text>
+  <text x="675" y="408" text-anchor="middle" font-size="10" fill="#666">rest of the pack's matchers</text>
+
+  <text x="675" y="444" text-anchor="middle" font-size="10" fill="#666">memoization key: the projection ($kernel.head_size)</text>
+  <text x="675" y="462" text-anchor="middle" font-size="10" fill="#666">not the full metadata tuple, which is unique per kernel</text>
+
+  <text x="450" y="500" text-anchor="middle" font-style="italic" fill="#444">scope is declared, not inferred, so the pruning level is a stated contract (RFC 0018 §8, Appendix A.1).</text>
+</svg>

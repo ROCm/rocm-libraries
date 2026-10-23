@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 
-#include <sstream>
+#include <limits>
 
 #include "internal/generic/rocsparse_spsv.h"
 #include "rocsparse_control.hpp"
@@ -33,6 +33,9 @@
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv.hpp"
 #include "rocsparse_determine_indextype.hpp"
+#include "rocsparse_ellsv.hpp"
+#include "rocsparse_ellsv_info.hpp"
+#include "rocsparse_mat_info.hpp"
 
 // LCOV_EXCL_START
 template <>
@@ -113,21 +116,14 @@ namespace rocsparse
         {
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
-            // CSC triangular solve is dispatched through the cscsv_* wrappers,
-            // which internally express it as a transposed CSR solve (no descriptor
-            // is allocated). This mirrors the CSR path below one-to-one.
             switch(stage)
             {
             case rocsparse_spsv_stage_buffer_size:
             {
-                size_t buffer_size_analysis;
+                size_t buffer_size_analysis = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
-                size_t buffer_size_solve;
+                size_t buffer_size_solve = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve_buffer_size(
                     handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
@@ -179,7 +175,6 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
             // LCOV_EXCL_STOP
             break;
-#endif
         }
         case rocsparse_format_csr:
         {
@@ -187,10 +182,10 @@ namespace rocsparse
             {
             case rocsparse_spsv_stage_buffer_size:
             {
-                size_t buffer_size_analysis;
+                size_t buffer_size_analysis = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
-                size_t buffer_size_solve;
+                size_t buffer_size_solve = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
                     handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
@@ -222,7 +217,7 @@ namespace rocsparse
                                                                  trans,
                                                                  datatype,
                                                                  alpha,
-                                                                 0,
+                                                                 static_cast<int64_t>(0),
                                                                  mat,
                                                                  x,
                                                                  y,
@@ -245,10 +240,10 @@ namespace rocsparse
             {
             case rocsparse_spsv_stage_buffer_size:
             {
-                size_t buffer_size_analysis;
+                size_t buffer_size_analysis = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_analysis_buffer_size(
                     handle, trans, mat, &buffer_size_analysis));
-                size_t buffer_size_solve;
+                size_t buffer_size_solve = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve_buffer_size(
                     handle, trans, mat, x, y, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
@@ -279,7 +274,7 @@ namespace rocsparse
                                                                  trans,
                                                                  datatype,
                                                                  alpha,
-                                                                 static_cast<int64_t>(0),
+                                                                 0,
                                                                  mat,
                                                                  x,
                                                                  y,
@@ -295,8 +290,65 @@ namespace rocsparse
             // LCOV_EXCL_STOP
             break;
         }
-        case rocsparse_format_bsr:
         case rocsparse_format_ell:
+        {
+#ifndef ROCSPARSE_WITH_ELL_TRSV
+            // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            switch(stage)
+            {
+            case rocsparse_spsv_stage_buffer_size:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::ellsv_buffer_size(handle, trans, mat, x, y, buffer_size));
+                return rocsparse_status_success;
+            }
+            case rocsparse_spsv_stage_preprocess:
+            {
+                rocsparse_ellsv_info ellsv_info = mat->info->get_ellsv_info();
+                if(ellsv_info->get(trans, mat->descr->fill_mode) == nullptr)
+                {
+                    // rocsparse_spsv does not carry the caller's buffer size past the
+                    // buffer_size stage, so there is no size left to validate against.
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::ellsv_analysis(handle,
+                                                  trans,
+                                                  mat,
+                                                  rocsparse_analysis_policy_reuse,
+                                                  &ellsv_info,
+                                                  std::numeric_limits<size_t>::max(),
+                                                  temp_buffer));
+                }
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_spsv_stage_compute:
+            {
+                const rocsparse_datatype datatype = mat->data_type;
+
+                // The caller's buffer size is no longer available here either.
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve(handle,
+                                                                 trans,
+                                                                 datatype,
+                                                                 alpha,
+                                                                 0,
+                                                                 mat,
+                                                                 x,
+                                                                 y,
+                                                                 mat->info->get_ellsv_info(),
+                                                                 std::numeric_limits<size_t>::max(),
+                                                                 temp_buffer));
+                return rocsparse_status_success;
+            }
+            }
+
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            // LCOV_EXCL_STOP
+#endif
+        }
+        case rocsparse_format_bsr:
         case rocsparse_format_bell:
         case rocsparse_format_sell:
         case rocsparse_format_coo_aos:

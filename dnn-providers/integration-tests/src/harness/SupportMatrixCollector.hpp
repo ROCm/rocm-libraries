@@ -64,7 +64,15 @@ public:
         return _outputPath;
     }
 
+    void setEngineNames(std::map<int64_t, std::string> engineNames)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _engineNames = std::move(engineNames);
+    }
+
     // Record support information for a graph.
+    // Engine ids not covered by setEngineNames() fall back to the compile-time
+    // registry, then to zero-padded hexadecimal.
     // Thread-safe: protected by mutex for parallel GTest execution.
     void recordGraphSupport(const std::string& graphName,
                             const std::string& graphDescription,
@@ -78,20 +86,17 @@ public:
             return;
         }
 
+        const std::lock_guard<std::mutex> lock(_mutex);
+
         std::set<std::string> engineNames;
         for(auto id : supportingEngineIds)
         {
-            try
-            {
-                engineNames.emplace(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
-            }
-            catch(const std::out_of_range&)
-            {
-                engineNames.emplace("Unknown(" + std::to_string(id) + ")");
-            }
+            auto it = _engineNames.find(id);
+            engineNames.emplace(it != _engineNames.end()
+                                    ? it->second
+                                    : hipdnn_data_sdk::utilities::engineNameOrHex(id));
         }
 
-        const std::lock_guard<std::mutex> lock(_mutex);
         _records.push_back(
             {graphName, graphDescription, testName, std::move(engineNames), note, layout});
     }
@@ -108,6 +113,7 @@ public:
     void reset()
     {
         _records.clear();
+        _engineNames.clear();
         _enabled = false;
         _outputPath = "support_matrix.md";
     }
@@ -270,6 +276,7 @@ private:
 
     mutable std::mutex _mutex;
     std::vector<GraphSupportRecord> _records;
+    std::map<int64_t, std::string> _engineNames;
     bool _enabled = false;
     std::string _outputPath = "support_matrix.md";
 };

@@ -1,5 +1,5 @@
 
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -66,9 +66,12 @@ class Repo
     // key structure for 2D twiddles
     struct repo_twd_key_2D_t
     {
-        size_t              length0   = 0;
-        size_t              length1   = 0;
-        rocfft_precision    precision = rocfft_precision_single;
+        size_t           length0   = 0;
+        size_t           length1   = 0;
+        rocfft_precision precision = rocfft_precision_single;
+        // attach_halfN1 changes the table twiddles_create_2D generates, so it
+        // belongs in the key
+        bool                attach_halfN1 = false;
         std::vector<size_t> radices1;
         std::vector<size_t> radices2;
         // buffers are in device memory, so we need per-device
@@ -83,6 +86,8 @@ class Repo
                 return length1 < other.length1;
             if(precision != other.precision)
                 return precision < other.precision;
+            if(attach_halfN1 != other.attach_halfN1)
+                return attach_halfN1 < other.attach_halfN1;
             if(radices1 != other.radices1)
                 return radices1 < other.radices1;
             if(radices2 != other.radices2)
@@ -201,7 +206,6 @@ public:
                                                   rocfft_precision           precision,
                                                   const hipDeviceProp_t&     deviceProp,
                                                   bool                       attach_halfN1,
-                                                  bool                       attach_halfN2,
                                                   const std::vector<size_t>& radices1,
                                                   const std::vector<size_t>& radices2);
     static std::pair<void*, size_t>

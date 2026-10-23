@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "BatchnormFunctions.hpp"
-#include "FloatTypes.h"
 #include "ReductionFunctions.hpp"
 #include "StaticUnroll.hpp"
 #include "VectorTypes.hpp"

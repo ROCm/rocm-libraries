@@ -121,16 +121,19 @@ TEST(CommutativeTest, VectorBitwiseCommutative) {
     {
         auto* and_op = VAndB32(dst, src0, src1);
         EXPECT_TRUE(and_op->isCommutative()) << "VAndB32 should be commutative";
+        and_op->safeErase();
     }
 
     {
         auto* or_op = VOrB32(dst, src0, src1);
         EXPECT_TRUE(or_op->isCommutative()) << "VOrB32 should be commutative";
+        or_op->safeErase();
     }
 
     {
         auto* xor_op = VXorB32(dst, src0, src1);
         EXPECT_TRUE(xor_op->isCommutative()) << "VXorB32 should be commutative";
+        xor_op->safeErase();
     }
 }
 
@@ -146,44 +149,52 @@ TEST(CommutativeTest, ScalarCommutative) {
     {
         auto* add = SAddU32(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "SAddU32 should be commutative";
+        add->safeErase();
     }
 
     {
         auto* add = SAddI32(dst, src0, src1);
         EXPECT_TRUE(add->isCommutative()) << "SAddI32 should be commutative";
+        add->safeErase();
     }
 
     // Test scalar mul operations (should be commutative)
     {
         auto* mul = SMulI32(dst, src0, src1);
         EXPECT_TRUE(mul->isCommutative()) << "SMulI32 should be commutative";
+        mul->safeErase();
     }
 
     // Test scalar min/max operations (should be commutative)
     {
         auto* min = SMinU32(dst, src0, src1);
         EXPECT_TRUE(min->isCommutative()) << "SMinU32 should be commutative";
+        min->safeErase();
     }
 
     {
         auto* max = SMaxU32(dst, src0, src1);
         EXPECT_TRUE(max->isCommutative()) << "SMaxU32 should be commutative";
+        max->safeErase();
     }
 
     // Test scalar bitwise operations (should be commutative)
     {
         auto* and_op = SAndB32(dst, src0, src1);
         EXPECT_TRUE(and_op->isCommutative()) << "SAndB32 should be commutative";
+        and_op->safeErase();
     }
 
     {
         auto* or_op = SOrB32(dst, src0, src1);
         EXPECT_TRUE(or_op->isCommutative()) << "SOrB32 should be commutative";
+        or_op->safeErase();
     }
 
     {
         auto* xor_op = SXorB32(dst, src0, src1);
         EXPECT_TRUE(xor_op->isCommutative()) << "SXorB32 should be commutative";
+        xor_op->safeErase();
     }
 }
 
@@ -199,22 +210,26 @@ TEST(CommutativeTest, NonCommutativeOperations) {
     {
         auto* sub = VSubF32(dst, src0, src1);
         EXPECT_FALSE(sub->isCommutative()) << "VSubF32 should NOT be commutative";
+        sub->safeErase();
     }
 
     {
         auto* sub = VSubI32(dst, src0, src1);
         EXPECT_FALSE(sub->isCommutative()) << "VSubI32 should NOT be commutative";
+        sub->safeErase();
     }
 
     // Test shift operations (NOT commutative)
     {
         auto* lsl = VLShiftLeftB32(dst, src0, src1);
         EXPECT_FALSE(lsl->isCommutative()) << "VLShiftLeftB32 should NOT be commutative";
+        lsl->safeErase();
     }
 
     {
         auto* lsr = VLShiftRightB32(dst, src0, src1);
         EXPECT_FALSE(lsr->isCommutative()) << "VLShiftRightB32 should NOT be commutative";
+        lsr->safeErase();
     }
 
     // Test move operation (NOT commutative, only has 1 operand)
