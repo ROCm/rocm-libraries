@@ -83,7 +83,14 @@ boundary. `lower_bound` controls the fused KDA sigmoid gate.
 The remaining spec fields carry head geometry, `dtype`, `state_dtype`,
 `use_qk_l2norm`, the two fusion flags `fuse_conv` and `fuse_out_norm`, and
 three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects the one-thread-per-state-row reference body.
+`simple=True` selects the one-thread-per-state-row reference body. Ten
+performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
+`xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
+`out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
+state hints and `waves_per_eu` also apply to the reference body); each
+defaults to the code emitted before it existed, and dispatch does not set them
+yet. Their rules live in
+[`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
 construction and is the final authority for dispatch. It also rejects a flag
@@ -110,7 +117,9 @@ dispatched spec sets them. Specs that use them are built directly.
 
 `kernel_name()` encodes every field that changes emitted code. Default GDN
 fields add no suffix, so its existing names remain stable while KDA gets a
-distinct compile/launcher cache key.
+distinct compile/launcher cache key. A knob adds its suffix only on a tile
+where it changes code (its `*_applies` predicate), so an inert knob keeps the
+knob-off name of the identical kernel.
 
 ## Thread mapping
 
@@ -119,13 +128,19 @@ One workgroup per `(sequence, value head, v-sub-block)`; the grid is
 
 Within a workgroup, each warp's lanes are split `warp_threads_k` ways across the
 key dimension and `wave_size / warp_threads_k` ways across value rows. A lane
-holds a contiguous run of K elements, so the dot products against `k_hat` and
-`q_hat` become lane-local products followed by a cross-lane sum.
+holds a contiguous run of K elements (with `interleave_cols` and an `f32`
+state, two 16 B runs per K chunk, interleaved across the group), so the dot
+products against `k_hat` and `q_hat` become lane-local products followed by a
+cross-lane sum.
 
 That sum is an xor butterfly. Offsets inside a four-lane quad use `quad_perm` on
 the VALU, avoiding the LDS crossbar and its wait; wider offsets fall back to
-`ds_swizzle`. Every lane ends holding the total, so no broadcast is needed, and
-only the first lane of each group stores the output scalar.
+`ds_swizzle`, except that with `dpp_reduce` offsets 4 and 8 use `tile.dpp_xor`
+(masks 7 and 15: the DPP, data-parallel primitives, `row_half_mirror` /
+`row_mirror` modifiers on gfx9 CDNA) instead. Every lane ends holding the total,
+so no broadcast is needed, and only the first lane of each group stores the
+output scalar (with `out_lds`, the first few lanes each store a packed group of
+consecutive rows instead; ALGORITHM.md §4.10).
 
 ## Registry and tile selection
 
@@ -174,6 +189,7 @@ PYTHONPATH=library:platform/python python3 -m pytest \
   library/tests/test_gdn_decode_ir_cpp_parity.py \
   library/tests/test_gdn_decode_prepare.py \
   library/tests/test_gdn_decode_fused.py \
+  library/tests/test_gdn_decode_knobs.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py
 ```
@@ -181,7 +197,8 @@ PYTHONPATH=library:platform/python python3 -m pytest \
 The on-device output and recurrent-state checks are in
 `library/tests/test_gdn_decode_gfx950_numeric.py` and
 `library/tests/test_kda_decode_gfx950_numeric.py`; the fused modes' in
-`library/tests/test_gdn_decode_fused_gfx950_numeric.py`.
+`library/tests/test_gdn_decode_fused_gfx950_numeric.py`; the performance
+knobs' in `library/tests/test_gdn_decode_knobs_gfx950_numeric.py`.
 
 - **Spec rejected at dispatch.** The message names the failing rule; most often
   a head dim or `blocks_per_v_dim` that does not divide.

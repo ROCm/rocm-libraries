@@ -83,7 +83,7 @@ typedef struct rocke_isa_backend
 {
     rocke_isa_kind_t kind;
     const char* gfx; /* "gfx942", "gfx1151", ...             */
-    int vmcnt_bits; /* arch.vmcnt_bits fact (4 or 6)        */
+    int vmcnt_bits; /* arch.vmcnt_bits (VMCNT field width)  */
     uint32_t buffer_rsrc_word3;
     rocke_waitcnt_layout_t waitcnt_layout;
     int wave_size; /* 64 (CDNA) / 32 (RDNA)                */
@@ -230,7 +230,9 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
                              const char* b_cast_name);
 
 /* Emit the byte-identical text of an integer WMMA (iu8/iu4) call. Mirrors
- * Gfx11Backend._emit_wmma_int: signedA=1, signedB=1, clamp=0, no bitcast.
+ * Gfx11Backend._emit_wmma_int: signedA=1, signedB=1, clamp=0. `a_name` and
+ * `b_name` must already name <op_vec x i32> values; reinterpreting an operand
+ * of another shape is the lowerer's job (mma_operand in lower_llvm/mma.cpp).
  *   %<result_name> = call <acc_vec x i32> @<intrinsic>(
  *     i1 1, <op_vec x i32> a, i1 1, <op_vec x i32> b,
  *     <acc_vec x i32> c, i1 0)

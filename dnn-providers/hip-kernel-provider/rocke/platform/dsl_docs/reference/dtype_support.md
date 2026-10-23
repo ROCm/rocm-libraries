@@ -125,8 +125,41 @@ from logical TF32, including gfx950's BF16x3-emulated atoms, which split each
 operand's payload into three BF16 products rather than rounding it to BF16; no
 production selector maps TF32 requests to BF16 compute.
 
+**Integer types.** The 8- and 4-bit integer dtypes are `i8` and `i4`. RDNA integer
+WMMA instructions say `iu8` / `iu4` in their names, but those are not dtypes:
+signedness is an operand of those instructions, not a property of the data, so
+their operands are `i8` / `i4`. `i4` is packed-only: its
+values only ever live packed in 32-bit words, so it has no scalar or vector form
+and no LLVM or HIP rendering. The IR builder of both engines refuses any op
+result, kernel parameter or LDS tile of `i4` elements (`<op>: i4 values travel
+packed in 32-bit words and have no scalar or vector form -- keep them in i32
+storage and unpack explicitly`); a kernel keeps the words in `i32` storage and
+unpacks them explicitly. Both lowerings still refuse an `i4` value that reaches
+them (`no LLVM mapping for type i4`, `no HIP mapping for type i4`).
+
+**Unsigned integers.** `u8` and `u4` name unsigned data, so integer matrix
+instructions with a per-operand signedness flag can be selected for it. `u8`
+renders as LLVM `i8` (LLVM integers carry no sign) and HIP `uint8_t`, and takes
+one byte in LDS, like `i8`. `u8` is an arithmetic type: every op whose result
+depends on signedness emits its unsigned form for it -- `udiv` / `urem` for
+`div` / `mod`, `icmp ult` / `ule` / `ugt` / `uge` for the ordered compares, and
+no `nsw` flag on `add` / `sub` / `mul`, since unsigned values wrap. `zext` and
+`lshr` widen and shift it; `umax` / `umin` (`llvm.umax` / `llvm.umin`),
+`uitofp_f32` and the saturating `cvt_f32_to_u8_sat` (round to nearest even,
+then clamp to [0, 255] in f32 before `fptoui`; a NaN gives 0) are its own ops.
+The ops that are signed by definition -- `smax`, `smin`, `sext` and their
+vector forms -- refuse a `u8` operand (`smax treats its operands as signed, but
+u8 is unsigned -- use umax`). Native `u16`/`u32` types remain absent.
+A single `u8` can be loaded from and stored to global memory and stored to
+LDS. The vector memory builders refuse `u8`: the global pair, and the LDS pair
+`smem_load_vN` / `smem_store_vN`, which admit one shared element list (so an
+LDS load of `u8`, which `smem_load_vN` also serves for one element, is refused
+too). `u4`, like `i4`, is packed-only: the IR builder of both engines refuses
+its values with the same text, and both lowerings refuse a `u4` value that
+reaches them.
+
 **Types that are entirely absent from the vocabulary:** unsigned
-`u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
+`u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
 TF32 source anchors: [Python type and builders](../../python/rocke/core/ir.py),
@@ -222,7 +255,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `bf8e5m2` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
 | `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
-| `i4` (packed) | 0 | 1 | 1 | 2 | 2 | 2 | **44%** | [C][P] |
+| `i4` (packed) | 1 | 1 | 1 | 2 | 2 | 2 | **50%** | [C][P] |
 | `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
 | `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
@@ -233,7 +266,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `i8` | 3 | 2 | 2 | 2 | 1 | 2 | **67%** | [P] |
 | `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
 | `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
-| `u8` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
+| `u8` | 1 | 0 | 0 | 0 | 0 | -- | **7%** | [M] |
 | `u16/u32/u64` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
 | **Compute mode (not a storage type)** | | | | | | | | |
 | `bf16-mode` (reduced-precision compute over `f32`) | 0 | 3 | 2 | 3 | 0 | 1 | **50%** | [P][M] |
@@ -293,42 +326,42 @@ mode. The missing selector and precision contract are described in §2.5.
   rather than 3 because the scale semantics are not part of the contract — the
   helpers take a scale operand but neither document nor enforce per-tensor vs
   per-channel, so two callers can disagree about what a scale means.
-- **`i4` C1=0 / C3=1** — packed i4 is not a scalar IR `Type`.
+- **`i4` C1=1 / C3=1** -- `I4` is a logical IR `Type` with no LLVM rendering; its values travel packed.
   [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides conversions
   from packed i4 to i32, f32, f16, fp8, and bf8, but no reverse f32→packed-i4
   conversion. The quantization helpers accept only i8, fp8, and bf8
   (`quant.py:58-70`). This is one-direction support under C3's round-trip
-  criterion. C2=1 reflects `iu4` WMMA on gfx1151/gfx11-generic; the MFMA targets
+  criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
   matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
   `mfma_f32_16x16x96_fp6`) and the hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
-- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:251`) decodes a
+- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
   packed byte to two f32 via a hand-written 16-entry codebook
-  (`_FP4_CODEBOOK`, `:214-232`) that matches OCP E2M1
+  (`_FP4_CODEBOOK`, `:216-233`) that matches OCP E2M1
   (`±{0, 0.5, 1, 1.5, 2, 3, 4, 6}`). Partial rather than Full because there is no
   scalar `cvt` primitive and no f32→fp4 direction.
 - **`fp6` (E2M3) C3=0 — there is no E2M3 decoder at all.** Despite the name,
-  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:308`) does not implement E2M3;
+  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:315`) does not implement E2M3;
   see the next entry.
 - **`bf6` (E3M2) C3=0 — a decoder exists but is defective and must not be used.**
-  `_FP6_CODEBOOK` (`i4_dequant.py:276-287`) is built as
+  `_FP6_CODEBOOK` (`i4_dequant.py:276-294`) is built as
   `2^(e-3) × (1 + m/4)` over a 3-bit exponent (bias 3) and a 2-bit mantissa, which
   is **E3M2 — i.e. `bf6`, not `fp6`** (CK-Tile is explicit about the split:
   `pk_fp6_t = pk_float6_e2m3_t` and `pk_bf6_t = pk_float6_e3m2_t`,
-  `include/ck_tile/core/numeric/pk_f6.hpp:294-295,300-323`). It carries three
-  independent defects and is scored 0 for that reason:
+  `include/ck_tile/core/numeric/pk_f6.hpp:294-295,300-323`). Its table matches the
+  spec for every code (+0 / -0 at codes 0 / 32, subnormals `2^(1-3) * (m/4)` at
+  exponent field 0), but the entry point carries two independent defects and is
+  scored 0 for that reason:
   1. **Width.** The entry point takes two `i8` operands = 16 bits, but four
      6-bit values need 24. `v2` is silently truncated (its top two bits read as
      zero) and `v3` is always code 0.
-  2. **Zero and subnormal encoding.** Codes 0 and 32 map to `+1.0` and `-1.0`
-     instead of signed zero. Nonzero subnormal codes collapse to signed zero.
-  3. **Naming.** The public symbol says `fp6` while the layout is `bf6`, so a
+  2. **Naming.** The public symbol says `fp6` while the layout is `bf6`, so a
      caller following OCP naming gets the other format with no error.
-  Fixing this needs a signature change (three `i8`, or one `i32`), a corrected
-  codebook, a rename to `unpack_bf6_*`, and a genuine `unpack_fp6_*` for E2M3.
+  Fixing this needs a signature change (three `i8`, or one `i32`), a rename to
+  `unpack_bf6_*`, and a genuine `unpack_fp6_*` for E2M3.
   Tracked outside this document; until then neither format has a usable decode.
 - **`e8m0` C1=0 / C6=2** — a scale operand rather than a type, and
   `cvt_scalef32_pk_*` restricts scales to powers of two; arbitrary scaling needs
@@ -337,9 +370,11 @@ mode. The missing selector and precision contract are described in §2.5.
   (guarded), so vector-width predicate init must be open-coded.
 - **`i64` C4=1** — 8-byte LDS works and addressing is fine, but there is no
   `global_store_vN` and no zero-vec. It is an addressing type with no matrix atom.
-- **`u8` — 0 at every layer.** `UINT8` appears in the hipDNN enum
+- **`u8` C1=1, 0 elsewhere.** The row records the snapshot before `u8` gained its
+  unsigned arithmetic, compares and conversions, described in section 1; it still has no
+  vector memory helpers. `UINT8` appears in the hipDNN enum
   (`GpuReferenceValidationFactory.cpp:31`), but only in a reference-validation
-  switch; no rocKE surface accepts it. Note that the silicon is not the
+  switch. Note that the silicon is not the
   constraint: the RDNA/GFX12 WMMA integer atom is `IU8`, whose per-operand
   signedness selects make it an *unsigned* int8 matmul as well as a signed one
   (§4A).
@@ -351,14 +386,18 @@ mode. The missing selector and precision contract are described in §2.5.
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
 - **`f64` — IR, memory, and elementwise/reduce2d only.** The IR type,
-  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fmax`/`fmin`/`fcmp`/
-  `select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to
-  2-element vectors, and HIP lowering are present. Elementwise
+  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
+  `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
+  memory up to 2-element vectors, and HIP lowering are present. Elementwise
   (non-transcendental ops) and reduce2d accept f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
-  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`,
-  `fma`, `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings; there
-  are no conversions to or from f64, MMA atoms, or atomics. f64 is in the
+  `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3`, and
+  `vector_fma` reject f64 in both lowerings. `exp2_fast` rejects f64 in the
+  LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only
+  f32: the builder rejects any other operand type. `cvt_f32_to_f64` (exact)
+  and `cvt_f64_to_f32` (round to nearest even) are the only conversions;
+  `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
+  conversions, MMA atoms, or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
   `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950 but undeclared (§4C.6).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
@@ -368,7 +407,7 @@ mode. The missing selector and precision contract are described in §2.5.
 
 Every score above is traceable to: compiler `ir.py:43-52`,
 `lower_llvm.py:1093-1129`,
-FP-op guards `lower_llvm.py:2068-2150` (FMA/FABS/FMAX3 accept only f32/f16/bf16;
+FP-op guards `lower_llvm.py:2068-2150` (FMA/FMAX3 accept only f32/f16/bf16, FABS also f64;
 the dtype rejection is at `:2122`);
 helpers `ir.py:838-1170` (casts), `helpers/io.py:48-211,260-315`,
 `helpers/quant.py:58-357`, `helpers/i4_dequant.py`, `helpers/mx_scale.py`;
@@ -407,8 +446,8 @@ bucket the ticket calls out):
 | `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:251`) decodes E2M1 from a 16-entry codebook (`:214-232`) without MFMA, and is correct. | [P] |
-| scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width, codebook, and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
+| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:252`) decodes E2M1 from a 16-entry codebook (`:216-233`) without MFMA, and is correct. | [P] |
+| scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
@@ -467,10 +506,10 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
 | `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
-| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **iu8, iu4** |
+| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
-| `gfx11-generic` | same as `gfx1151` | f16, bf16, iu8, iu4 |
+| `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
@@ -536,7 +575,10 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 **Consequence for rocKE.** The gfx942 catalog declares
 `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
 FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
-other targets. gfx950/gfx1250 have no native XF32 instruction; gfx950's catalog
+other targets, deciding from the target's MMA catalog: a target whose catalog
+does not list the atom raises "no MMA instruction found for
+'<op_id>' on '<target>'", so a target that gains the atom in its catalog needs no
+code change. gfx950/gfx1250 have no native XF32 instruction; gfx950's catalog
 carries two emulated atoms, `mfma_f32_16x16x32_xf32` and
 `mfma_f32_32x32x16_xf32`, which take the same logical TF32 operands and expand into
 three BF16 MFMAs. This atom support does not add production GEMM/convolution

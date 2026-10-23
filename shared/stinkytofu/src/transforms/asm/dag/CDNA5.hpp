@@ -476,11 +476,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(0,
                         getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
     }
-    // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
-    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
-    // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
-    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
-    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
     // A barrier is preceded by a tail of kBarrierTailWmmas WMMAs issued back to back: the wave
     // waits for the stage's last ds_loads while the tail runs, so the tail hides that much of the
     // drain. 4 is the best batch size measured on gfx1250 (never above 8, the useful queue depth).
@@ -495,6 +490,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
                                                       : f.wmmaBarrierCoverCycles;
         return std::min(want, fullQueue);
     }
+    // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
+    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
+    // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
+    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
+    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
     bool wmmaRefillActive(int wmmaLatency) {
         if (wmmaQueueCover() <= 0) return false;
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
@@ -594,7 +594,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // than the quota when a hazard or dependency forces it, e.g. an
     // s_cmp/s_cmov SCC chain.
     //
-    // Invariant: ds_load selection is untouched. fillsThisWindow_ is separate
+    // Invariant: the quota does not touch ds_load selection (the ds pacer gates that).
+    // fillsThisWindow_ is separate
     // from nonWmmaFillsSinceActiveWmma_, which counts VALU only and pads the
     // WMMA->WMMA / WMMA->VALU coexec hazards; those pads keep their full 7+1
     // length. 0 = feature off.
@@ -734,6 +735,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool dsOverflow_ = false;
     // decidePromote() held a ready barrier back: the queued WMMA cover is below the barrier cover.
     bool barrierWaitsForCover_ = false;
+    // WMMA count at which a ready barrier was first held for its tail (the hold lasts
+    // kBarrierTailWmmas).
+    std::unordered_map<const DAGNode*, int> barrierCoverHoldStart_;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -821,10 +825,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::unordered_map<const StinkyInstruction*, StinkyInstruction*> prefetchStageBarrier_;
     std::unordered_set<const StinkyInstruction*> prefetchIssued_;
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
-    static constexpr int kSingleStageLeadBelow = 8;
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
-        return lead > 0 && lead < kSingleStageLeadBelow;
+        return lead > 0 && lead < StageWmmaCounter::kSingleStageLeadBelow;
     }
     bool prefetchHeldForLead(const DAGNode* node) const {
         auto it = prefetchEarliestWmma_.find(node->inst);
@@ -860,7 +863,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // Multi-stage loops: any vm_vsrc wait drains older LDS reads, so it is strict at any
         // count. Single-stage loops run ds_loads up to the barrier and keep the count rule.
         const int lead = blockPrefetchLead_;
-        const bool vsrcAlways = lead >= kSingleStageLeadBelow;
+        const bool vsrcAlways = lead >= StageWmmaCounter::kSingleStageLeadBelow;
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
@@ -1785,7 +1788,12 @@ void CDNA5ReadyQueue::decidePromote() {
                 // The WMMAs queued behind the barrier hide its stall: refill first.
                 if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
                     const int latency = wmmaQueue.top()->inst->latencyCycles;
-                    if (queuedCoverCycles() < wmmaBarrierCover(latency)) {
+                    const int heldSince =
+                        barrierCoverHoldStart_.emplace(node, wmmaIssuedCountThisRegion_)
+                            .first->second;
+                    if (!isBarrierWait(*node->inst) &&
+                        wmmaIssuedCountThisRegion_ - heldSince < kBarrierTailWmmas &&
+                        queuedCoverCycles() < wmmaBarrierCover(latency)) {
                         barrierWaitsForCover_ = true;
                         continue;
                     }
@@ -2487,6 +2495,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         if (barrier) {
             updateWMMAStatus(barrier);
+            // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
+            // lets the queued WMMAs finish: take the WMMA queue as empty.
+            if (isBarrierWait(*barrier->inst)) resetActiveWindow();
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -2729,6 +2740,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     barrierWaitsForCover_ = false;
+    barrierCoverHoldStart_.clear();
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
@@ -3389,6 +3401,36 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // A barrier more than kStageHops dependency hops away (through non-WMMA, non-ds nodes) is
         // not a stage edge of the load.
         constexpr int kStageHops = 3;
+        // Where each node can first issue, in WMMA counts: after a WMMA it must wait for (write
+        // after read) at its position + 1 + the queue depth, after any other node at that node's
+        // position; a barrier not before its window. The graph fixes it, the pacer cannot move it.
+        std::vector<int> wmmaPos(deps.dag.nodes.size(), -1);
+        {
+            int pos = 0;
+            for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
+                if (isMatrixInstruction(*deps.dag.nodes[n].inst)) wmmaPos[n] = pos++;
+        }
+        // Keep the WMMAs in program order. The plan above counts positions in that order, and the
+        // ready queue is first come first serve, so in a rare case it could issue them in
+        // another one. A DAG-only edge between consecutive WMMAs, the way the ds read order is
+        // locked, makes what is scheduled equal what was planned.
+        {
+            StinkyInstruction* prevWmma = nullptr;
+            for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+                if (wmmaPos[n] < 0) continue;
+                auto* wmma = const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst);
+                if (prevWmma != nullptr) deps.requestedConstraints.emplace_back(prevWmma, wmma);
+                prevWmma = wmma;
+            }
+        }
+        const int queueDelay = wmmaQueueDepth() > 1 ? wmmaQueueDepth() : 0;
+        std::vector<int> earliestAt(deps.dag.nodes.size(), 0);
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+            int e = std::max(0, cutWindow(n));
+            for (unsigned pr : predsRef[n])
+                e = std::max(e, wmmaPos[pr] >= 0 ? wmmaPos[pr] + 1 + queueDelay : earliestAt[pr]);
+            earliestAt[n] = e;
+        }
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id : dsOrder) {
             int start = 0;
@@ -3415,17 +3457,25 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     frontier = std::move(next);
                 }
             }
-            loads.push_back({id, start, end});
+            loads.push_back({id, start, end, earliestAt[id]});
         }
-        // WMMAs kept free in front of a stage end for the last ds_load to return: the LDS return
-        // time plus the WMMA queue depth (the wave runs up to a full queue ahead of the matrix
-        // pipe, so the WMMAs behind the last load cover its return only after the queue). 17
-        // WMMAs for 8-cycle WMMAs, the old scheduler's value on f8; a reserve of 9 (return time
-        // only) measured no better on medium, MAF or MAB.
+        // WMMAs kept free in front of a stage end for the last ds_load to return. Typical case:
+        // ceil(creditLifetime / window) (9 for 8-cycle WMMAs). The worst case (4 waves loading
+        // together, sched_test) needs about 17. kDrainSlackWmmas is an UNVERIFIED magic number
+        // chosen so the sum is the old scheduler's 17 on f8; a reserve of 9 measured no better
+        // on medium, MAF or MAB.
+        static constexpr int kDrainSlackWmmas = 8;
         const int drainWindows =
-            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + wmmaQueueDepth();
+            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + kDrainSlackWmmas;
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows);
+        // The most loads the LDS takes in one batch: its credits (readQueueDepth, each held
+        // readCreditLifetime cycles) over the batch's cycles.
+        const int maxPerBatch = static_cast<int>(
+            (static_cast<long long>(batch) * windowCycles * std::max(1, dsReadQueueDepth()) +
+             dsReadCreditLifetime() - 1) /
+            std::max(1, dsReadCreditLifetime()));
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
+                       maxPerBatch);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
