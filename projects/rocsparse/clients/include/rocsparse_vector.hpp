@@ -28,7 +28,6 @@
 
 #include "rocsparse_allocator.hpp"
 #include "rocsparse_clients_float16.hpp"
-#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_init.hpp"
 
