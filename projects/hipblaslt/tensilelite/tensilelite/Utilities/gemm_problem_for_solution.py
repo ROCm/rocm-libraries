@@ -4,7 +4,7 @@
 
 A solution describes a GPU kernel and the matrix layouts it expects. This module
 uses that description to choose one full output tile and a specified number of
-reduction blocks per workgroup, without importing the kernel generator or using
+reduction blocks, without importing the kernel generator or using
 an installed GPU. Execution and native solution support checks happen later.
 """
 
@@ -51,6 +51,8 @@ class GemmProblem:
 
     Scalars are alpha=1 and beta=0, batch count is one, and optional epilogue
     features are disabled. Native execution still checks solution support.
+    MX block sizes of zero mean unscaled operands. MX scale format is 0 for
+    ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
     """
 
     solution_index: int
@@ -73,6 +75,11 @@ class GemmProblem:
     math_op: str
     conjugate_a: bool = False
     conjugate_b: bool = False
+    mx_block_a: int = 0
+    mx_block_b: int = 0
+    mx_type_a: str = "E8"
+    mx_type_b: str = "E8"
+    mx_scale_format: int = 0
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -120,6 +127,8 @@ class LibraryMetadata:
         M and N are the dimensions of the output tile computed by one workgroup.
         K is ``reduction_blocks * DepthU * fixed_split``: each split workgroup
         processes ``reduction_blocks`` full blocks of DepthU reduction elements.
+        Persistent scheduling (Stream-K or DataParallel) uses no fixed split
+        multiplier; the runtime distributes those blocks among workgroups.
         Blocks include prefetch and final stages; loop backedges can differ.
 
         Raise UnsupportedSolution for explicitly unimplemented features. Invalid
@@ -151,13 +160,11 @@ class LibraryMetadata:
             ]
         except ValueError as error:
             raise ValueError(f"Solution {solution_index}: {error}") from error
-        # Persistent scheduling disables fixed split-K with zero. Its workload
-        # is deferred, while zero remains invalid for an ordinary solution.
+        # Persistent scheduling disables fixed split-K with zero, which remains
+        # invalid for an ordinary solution.
         if type(split) is not int or split < -1 or (split == 0 and strategy == "None"):
             raise ValueError(f"Solution {solution_index}: invalid globalSplitU {split!r}")
         reasons = []
-        if strategy != "None":
-            reasons.append(f"tileProcessingStrategy={strategy}")
         if split == -1 or mapping.get("adaptiveGemmGSUA", 0):
             reasons.append("automatic split-K")
         unsupported = (
@@ -174,8 +181,6 @@ class LibraryMetadata:
             "swizzleTensorB",
             "mirrorDimsA",
             "mirrorDimsB",
-            "mxBlockA",
-            "mxBlockB",
         )
         reasons.extend(key for key in unsupported if p.get(key))
         if not p.get("stridedBatched", True):
@@ -185,10 +190,20 @@ class LibraryMetadata:
             reasons.append(f"fixed activation {activation}")
         if reasons:
             raise UnsupportedSolution(solution_index, reasons)
+        mx_blocks = tuple(p.get(f"mxBlock{operand}", 0) for operand in "AB")
+        if any(type(block) is not int or block < 0 for block in mx_blocks):
+            raise ValueError(
+                f"Solution {solution_index}: MX block sizes must be nonnegative integers"
+            )
+        mx_types = tuple(p.get(f"mxType{operand}", "E8") for operand in "AB")
+        mx_format = p.get("mxScaleFormat", 0)
+        if type(mx_format) is not int or mx_format not in (0, 1, 2):
+            raise ValueError(f"Solution {solution_index}: invalid mxScaleFormat {mx_format!r}")
         types = {key: p[f"{key}Type"] for key in "abcd"}
         compute_a = p.get("computeInputTypeA", p.get("computeInputType", types["a"]))
         compute_b = p.get("computeInputTypeB", p.get("computeInputType", types["b"]))
-        for dtype in (*types.values(), compute_a, compute_b, p["computeType"]):
+        scaled_types = [dtype for block, dtype in zip(mx_blocks, mx_types) if block]
+        for dtype in (*types.values(), compute_a, compute_b, p["computeType"], *scaled_types):
             if dtype not in TYPE_PROPERTIES:
                 raise ValueError(f"Solution {solution_index}: unknown metadata datatype {dtype!r}")
         compute_a = _INPUT_TYPE_PAIRS.get(compute_a, (compute_a, compute_a))[0]
@@ -212,7 +227,7 @@ class LibraryMetadata:
             self.target,
             m,
             n,
-            reduction_blocks * depth * split,
+            reduction_blocks * depth * (split if strategy == "None" else 1),
             types["a"],
             types["b"],
             types["c"],
@@ -225,6 +240,11 @@ class LibraryMetadata:
             p.get("f32XdlMathOp", "Float"),
             conjugate_a,
             conjugate_b,
+            mx_block_a=mx_blocks[0],
+            mx_block_b=mx_blocks[1],
+            mx_type_a=mx_types[0],
+            mx_type_b=mx_types[1],
+            mx_scale_format=mx_format,
         )
 
 

@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Generate a small gfx942 library and execute one regular GEMM per solution."""
+"""Generate small libraries and execute one GEMM per solution through bench."""
 
 import argparse
 import csv
@@ -22,18 +22,18 @@ from tensilelite.Tests.gpu_detection import get_available_archs
 from tensilelite.Utilities.gemm_problem_bench import bench_yaml
 from tensilelite.Utilities.gemm_problem_for_solution import load_library_metadata
 
-pytestmark = [pytest.mark.gfx94x, pytest.mark.emu_fast, pytest.mark.gpu, pytest.mark.gemm]
+pytestmark = [pytest.mark.emu_fast, pytest.mark.gpu, pytest.mark.gemm]
 
 
-def _logic(dtype, split):
+def _logic(dtype, split, target="gfx942", strategy="None", mx_output=None):
     # One wave / 16x16 output tile keeps eight reduction blocks cheap to emulate.
     mi_k = 4 if dtype in {"S", "D"} else 16
     compute_type = "D" if dtype == "D" else "S"
     logic = {
         "MinimumRequiredVersion": "5.0.0",
-        "ScheduleName": "gfx942",
-        "ArchitectureName": "gfx942",
-        "DeviceNames": ["Device 74a0"],
+        "ScheduleName": target,
+        "ArchitectureName": target,
+        "DeviceNames": ["Device 74a0" if target == "gfx942" else "Device 75a0"],
         "LibraryType": "Prediction",
         "ProblemType": {
             "OperationType": "GEMM",
@@ -60,7 +60,7 @@ def _logic(dtype, split):
                 "MIInputPerThreadA": mi_k // 4,
                 "MIInputPerThreadB": mi_k // 4,
                 "DepthU": 32,
-                "TileProcessingStrategy": "None",
+                "TileProcessingStrategy": strategy,
                 "MFMA_BF16_1K": False,
                 "GlobalSplitU": split,
                 "GlobalSplitUAlgorithm": "MultipleBuffer",
@@ -72,6 +72,35 @@ def _logic(dtype, split):
             }
         ],
     }
+    if mx_output:
+        logic["ProblemType"].update(
+            DestDataType=mx_output,
+            HighPrecisionAccumulate=True,
+            TransposeA=True,
+            MXBlockA=32,
+            MXBlockB=32,
+        )
+        # A 64x64 tile uses the gfx950 subtile layout for both MXFP4 and MXFP8.
+        logic["Solutions"][0].update(
+            MatrixInstruction=[16, 16, 128, 1],
+            MIBlock=[16, 16, 128, 1, 1, 1],
+            MIWaveGroup=[2, 2],
+            MIWaveTile=[2, 2],
+            WorkGroup=[32, 8, 1],
+            MIInputPerThread=32,
+            MIInputPerThreadA=32,
+            MIInputPerThreadB=32,
+            MIInputPerThreadMXSA=1,
+            MIInputPerThreadMXSB=1,
+            DepthU=256,
+            UseSubtileImpl=True,
+            MXScaleFormat="HostPreSwizzle",
+            SourceSwap=True,
+            TransposeLDS=1,
+            LocalReadVectorWidth=32 if dtype == "F4" else 16,
+            GlobalReadVectorWidthA=16,
+            GlobalReadVectorWidthB=16,
+        )
     logic["ProblemType"] = state(ProblemType(logic["ProblemType"], False).state)
     return logic
 
@@ -86,15 +115,69 @@ def _logic(dtype, split):
     ],
 )
 @pytest.mark.parametrize("split", [1, 4])
+@pytest.mark.gfx94x
 def test_gemm_problem_for_solution(
     dtype, split, tmp_path, pytestconfig, tensile_args, worker_lock_instance
+):
+    _run_problem(dtype, split, tmp_path, pytestconfig, tensile_args, worker_lock_instance)
+
+
+@pytest.mark.gfx950
+@pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
+def test_persistent_gemm_problem_for_solution(
+    strategy, tmp_path, pytestconfig, tensile_args, worker_lock_instance
+):
+    _run_problem(
+        "S",
+        0,
+        tmp_path,
+        pytestconfig,
+        tensile_args,
+        worker_lock_instance,
+        target="gfx950",
+        strategy=strategy,
+    )
+
+
+@pytest.mark.gfx950
+@pytest.mark.parametrize(
+    "dtype",
+    [pytest.param("F4", marks=pytest.mark.Float4), pytest.param("F8", marks=pytest.mark.Float8)],
+)
+@pytest.mark.parametrize("output", ["H", "B", "S"])
+def test_mx_gemm_problem_for_solution(
+    dtype, output, tmp_path, pytestconfig, tensile_args, worker_lock_instance
+):
+    _run_problem(
+        dtype,
+        0,
+        tmp_path,
+        pytestconfig,
+        tensile_args,
+        worker_lock_instance,
+        target="gfx950",
+        strategy="StreamK",
+        mx_output=output,
+    )
+
+
+def _run_problem(
+    dtype,
+    split,
+    tmp_path,
+    pytestconfig,
+    tensile_args,
+    worker_lock_instance,
+    target="gfx942",
+    strategy="None",
+    mx_output=None,
 ):
     build_only = pytestconfig.getoption("--build-only")
     use_cache = pytestconfig.getoption("--use-cache")
     targets = pytestconfig.getoption("--gpu-targets")
     archs = targets.split(";") if build_only else get_available_archs()
-    if "gfx942" not in archs:
-        pytest.skip("requires gfx942 hardware or emulator")
+    if target not in archs:
+        pytest.skip(f"requires {target} hardware or emulator")
     bench = pytestconfig.getoption("--hipblaslt-bench") or shutil.which("hipblaslt-bench")
     if not build_only and not bench:
         pytest.skip("requires hipblaslt-bench on PATH or --hipblaslt-bench")
@@ -103,7 +186,7 @@ def test_gemm_problem_for_solution(
     Tensile.addCommonArguments(parser)
     parser.add_argument("--gpu-targets")
     options = parser.parse_args(tensile_args)
-    artifact_name = f"gemm_problem_{dtype}_gsu{split}_gfx942"
+    artifact_name = f"gemm_problem_{dtype}_{mx_output}_gsu{split}_{strategy}_{target}"
     output = tmp_path / artifact_name
     artifact_dir = pytestconfig.getoption("--artifact-dir")
     if use_cache:
@@ -111,7 +194,9 @@ def test_gemm_problem_for_solution(
     else:
         logic_dir = tmp_path / "logic"
         logic_dir.mkdir()
-        (logic_dir / "gfx942.yaml").write_text(yaml.safe_dump(_logic(dtype, split)))
+        (logic_dir / f"{target}.yaml").write_text(
+            yaml.safe_dump(_logic(dtype, split, target, strategy, mx_output))
+        )
         command = [
             sys.executable,
             str(Path(Tensile.__file__).parent / "bin/TensileCreateLibrary"),
@@ -119,7 +204,7 @@ def test_gemm_problem_for_solution(
             str(output),
             "HIP",
             "--architecture",
-            "gfx942",
+            target,
             "--library-format",
             "msgpack",
             "--jobs",
@@ -139,10 +224,11 @@ def test_gemm_problem_for_solution(
             compress_output(str(output), dest_dir=artifact_dir, name=artifact_name)
             return
 
-    library = load_library_metadata(output / "library", target="gfx942")
+    library = load_library_metadata(output / "library", target=target)
     assert len(library.indices) == 1
     problem = library.choose_single_problem(library.indices[0])
-    assert (problem.m, problem.n, problem.k) == (16, 16, 8 * 32 * split)
+    expected = (64, 64, 2048) if mx_output else (16, 16, 256 * (split if strategy == "None" else 1))
+    assert (problem.m, problem.n, problem.k) == expected
     config = tmp_path / "regular.yaml"
     config.write_text(bench_yaml([problem]))
     # Bench's --yaml converter has its own build-selected interpreter, which

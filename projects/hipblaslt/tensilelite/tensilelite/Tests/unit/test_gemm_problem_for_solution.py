@@ -70,6 +70,7 @@ def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split)
     assert (row["cold_iters"], row["iters"], row["adaptive"]) == (0, 0, False)
     assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
     assert row["activation_type"] == "none" and row["bias_vector"] is False
+    assert (row["scaleA"], row["scaleB"], row["initialization"]) == ("none", "none", "rand_int")
     # Generation reuses the loaded records, independent of the files afterward.
     for path in tmp_path.iterdir():
         path.unlink()
@@ -108,8 +109,6 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("tileProcessingStrategy", "StreamK"),
-        ("tileProcessingStrategy", "DataParallel"),
         ("globalSplitU", -1),
         ("adaptiveGemmGSUA", 1),
         ("globalSplitU", 0),
@@ -131,15 +130,26 @@ def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key,
             load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
-@pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
-def test_zero_split_for_deferred_scheduling_is_unsupported(tmp_path, strategy):
-    # Packaged persistent solutions use zero to disable fixed split-K.
-    record = solution(split=0)
-    record["sizeMapping"]["tileProcessingStrategy"] = strategy
+@pytest.mark.parametrize("split", [0, 1, 4])
+@pytest.mark.parametrize("blocks", [1, 8, 17])
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"tileProcessingStrategy": "StreamK", "workAssignment": assignment}
+        for assignment in ("StaticGrid", "DynamicWorkQueue", "Hybrid")
+    ]
+    + [{"tileProcessingStrategy": "DataParallel"}],
+)
+def test_persistent_scheduling_uses_no_fixed_split(tmp_path, split, blocks, policy):
+    record = solution(split=split)
+    record["sizeMapping"].update(policy)
     write_shard(tmp_path, [record])
-    with pytest.raises(UnsupportedSolution) as caught:
-        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
-    assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=blocks
+    )
+    assert (problem.m, problem.n, problem.k) == (128, 96, blocks * 32)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert (row["solution_index"], row["K"]) == (17, blocks * 32)
 
 
 @pytest.mark.parametrize(
@@ -165,19 +175,25 @@ def test_invalid_execution_policy_is_an_error(tmp_path, mapping):
     "mode,force,strategy",
     [(3, 0, "StreamK"), (4, 0, "StreamK"), (5, 0, "StreamK"), (3, 1, "DataParallel")],
 )
-def test_legacy_persistent_scheduling_is_unsupported(tmp_path, mode, force, strategy):
+def test_legacy_persistent_scheduling_matches_canonical(tmp_path, mode, force, strategy):
     record = solution(split=0)
     record["sizeMapping"].update(streamK=mode, streamKForceDPOnly=force)
     write_shard(tmp_path, [record])
-    with pytest.raises(UnsupportedSolution) as caught:
-        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
-    assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
+    legacy = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    record["sizeMapping"].pop("streamK")
+    record["sizeMapping"].pop("streamKForceDPOnly")
+    record["sizeMapping"].update(
+        tileProcessingStrategy=strategy,
+        workAssignment={3: "StaticGrid", 4: "DynamicWorkQueue", 5: "Hybrid"}[mode],
+    )
+    write_shard(tmp_path, [record])
+    assert legacy == load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    assert legacy.k == 256
 
 
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("mxBlockA", 32),
         ("groupedGemm", True),
         ("sparse", 1),
         ("useE", True),
@@ -193,6 +209,110 @@ def test_rejects_unsupported_problem_features(tmp_path, key, value):
         load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert caught.value.solution_index == 17
     assert caught.value.reasons
+
+
+@pytest.mark.parametrize("dtype", ["Float4", "Float8"])
+@pytest.mark.parametrize("output", ["Half", "BFloat16", "Float"])
+@pytest.mark.parametrize("depth", [256, 512])
+def test_gfx950_mx_streamk_preserves_scales_and_original_index(tmp_path, dtype, output, depth):
+    record = solution(trans_a=True, split=0)
+    record["sizeMapping"].update(depthU=depth, tileProcessingStrategy="StreamK")
+    record["problemType"].update(
+        aType=dtype,
+        bType=dtype,
+        cType=output,
+        dType=output,
+        mxBlockA=32,
+        mxBlockB=32,
+        mxTypeA="E8",
+        mxTypeB="E8",
+        mxScaleFormat=1,
+    )
+    write_shard(tmp_path, [record], "TensileLibrary_mx_gfx950.dat")
+    problem = load_library_metadata(tmp_path, target="gfx950").choose_single_problem(17)
+    assert (
+        problem.mx_block_a,
+        problem.mx_block_b,
+        problem.mx_type_a,
+        problem.mx_type_b,
+        problem.mx_scale_format,
+    ) == (32, 32, "E8", "E8", 1)
+    assert (problem.m, problem.n, problem.k) == (128, 96, 8 * depth)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert (row["scaleA"], row["scaleB"], row["initialization"]) == (1001, 1001, "hpl")
+    assert (row["transA"], row["transB"], row["lda"], row["ldb"]) == (
+        "T",
+        "N",
+        8 * depth,
+        8 * depth,
+    )
+    assert row["a_type"] == row["b_type"] == ("f4_r" if dtype == "Float4" else "f8_r")
+    assert row["solution_index"] == 17 and row["norm_check_assert"] and row["allclose_check"]
+
+
+@pytest.mark.parametrize("operand", ["A", "B"])
+@pytest.mark.parametrize("layout,target", [(0, "gfx950"), (2, "gfx1250")])
+@pytest.mark.parametrize(
+    "block,dtype,mode",
+    [
+        (32, "E8", 3),
+        (16, "E8", 4),
+        (32, "Float8", 5),
+        (16, "Float8", 6),
+        (32, "E5M3", 7),
+        (16, "E5M3", 8),
+    ],
+)
+def test_per_operand_mx_scale_modes(tmp_path, operand, layout, target, block, dtype, mode):
+    record = solution()
+    record["problemType"].update(
+        {
+            f"mxBlock{operand}": block,
+            f"mxType{operand}": dtype,
+            "mxScaleFormat": layout,
+        }
+    )
+    write_shard(tmp_path, [record], f"TensileLibrary_mx_{target}.dat")
+    problem = load_library_metadata(tmp_path, target=target).choose_single_problem(17)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row[f"scale{operand}"] == mode
+    assert row["scaleB" if operand == "A" else "scaleA"] == "none"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("mxBlockA", -1),
+        ("mxBlockB", True),
+        ("mxScaleFormat", 3),
+        ("mxScaleFormat", True),
+        ("mxTypeA", "unknown"),
+    ],
+)
+def test_invalid_mx_metadata_is_an_error(tmp_path, field, value):
+    record = solution()
+    record["problemType"].update(mxBlockA=32)
+    record["problemType"][field] = value
+    write_shard(tmp_path, [record])
+    with pytest.raises(ValueError, match="Solution 17"):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"mx_block_a": 64},
+        {"mx_type_a": "Half"},
+        {"mx_scale_format": 1},
+        {"mx_scale_format": 2},
+    ],
+)
+def test_unexpressible_mx_scale_is_an_adapter_error(tmp_path, changes):
+    write_shard(tmp_path, [solution()])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    problem = replace(problem, **{"mx_block_a": 32, **changes})
+    with pytest.raises(UnsupportedBenchProblem, match="MX A"):
+        bench_yaml([problem])
 
 
 def test_compressed_precedence_missing_and_duplicate_indices(tmp_path):
@@ -315,7 +435,7 @@ def test_complex_conjugate_transpose(tmp_path):
 
 def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
     unsupported = solution(9)
-    unsupported["problemType"].update(mxBlockA=32, useE=True)
+    unsupported["problemType"].update(groupedGemm=True, useE=True)
     write_shard(tmp_path, [unsupported, solution(17)])
     library = load_library_metadata(tmp_path, target="gfx942")
     executed, gaps = [], {}
@@ -325,7 +445,7 @@ def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
         except UnsupportedSolution as error:
             gaps[error.solution_index] = error.reasons
     assert [p.solution_index for p in executed] == [17]
-    assert set(gaps[9]) == {"mxBlockA", "useE"}
+    assert set(gaps[9]) == {"groupedGemm", "useE"}
     # A broken record must escape the sweep's UnsupportedSolution handler.
     broken = solution(0)
     del broken["sizeMapping"]["depthU"]
