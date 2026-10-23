@@ -24,6 +24,7 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
@@ -52,9 +53,9 @@ void addVgprMsbDrainSite(BasicBlock* bb, int destReg) {
     createVAddInBlock(bb, kArch, destReg + 1, 1, 2);
 }
 
-/// Run the pass over the whole kernel with profiling on and return its report.
+/// Run the whole-kernel profile ModulePass and return its report.
 std::string runPassAndCaptureReport(StinkyAsmModule& module) {
-    auto pass = createGfx1250HazardPass(module.getFunctions(), /*enableXcntDrainProfile=*/true);
+    auto pass = createGfx1250HazardModulePass(/*enableXcntDrainProfile=*/true);
 
     GemmTileConfig config;
     config.arch = kArchTriple;
@@ -62,15 +63,16 @@ std::string runPassAndCaptureReport(StinkyAsmModule& module) {
     // The pass's only gate; TensileLite forwards rocisa's archCaps here.
     AsmCapsConfig caps;
     caps.requiresXCntForVolatileVMEM = true;
+    caps.enableXnackReplay = true;
 
     PassContext ctx;
     ctx.setGemmTileConfig(config);
     ctx.setAsmCapsConfig(caps);
-    AnalysisManager am;
+    ModuleAnalysisManager mam;
 
     std::ostringstream report;
     std::streambuf* saved = std::cerr.rdbuf(report.rdbuf());
-    pass->run(module.getFunction(), ctx, am);
+    pass->run(module, ctx, mam);
     std::cerr.rdbuf(saved);
     return report.str();
 }

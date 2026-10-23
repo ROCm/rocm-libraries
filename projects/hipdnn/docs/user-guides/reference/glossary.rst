@@ -11,6 +11,8 @@ hipDNN glossary
 - **DAG (Directed Acyclic Graph)**: A graph structure representing tensor operations where edges indicate data flow and no cycles exist.
 - **Engine**: A component capable of executing one or more types of operation graphs.
 - **Engine Config**: Configuration parameters that specify how an engine should execute a particular graph.
+- **Engine ID**: The 64-bit integer that identifies an engine throughout hipDNN.
+- **Engine Name**: The human-readable name for an engine. Unique across loaded engines. See :ref:`engine-names`.
 - **Execution Context**: Runtime state and resources needed to execute a specific plan.
 - **Execution Plan**: A compiled, ready-to-execute representation of an operation graph for a specific engine.
 - **Plan Builder**: A component responsible for determining if an engine can handle a graph and constructing execution plans.

@@ -22,6 +22,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs that leverages a flex
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ---
 
@@ -39,6 +41,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and extending the framework
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status
+- **[cuDNN Compatibility Shim](./docs/cudnn-shim.md)** - Compile cuDNN frontend v9 source against hipDNN
 - **[Samples](./samples/README.md)** - Frontend usage examples
 - **[API Reference](#api-documentation)** - Doxygen-generated API documentation
 
@@ -47,12 +50,14 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[Extending hipDNN](./docs/HowTo.md#extending-hipdnn)** - How to extend hipDNN functionality
 - **[Plugin Development](./docs/PluginDevelopment.md)** - Creating and using custom plugins for hipDNN
 - **[Roadmap](./docs/Roadmap.md)** - Feature priorities and development plans
+- **[RFCs](./docs/rfcs/README.md)** - Design documents and their implementation status
 
 ### Testing
-- **[Testing](./docs/Testing.md)** - Synopsis of testing information
-- **[Testing Strategy](./docs/testing/TestingStrategy.md)** - Specific testing approach
-- **[Test Plan](./docs/testing/TestPlan.md)** - Detailed test planning
-- **[Test Run Template](./docs/testing/TestRunTemplate.md)** - Guidelines for test execution
+- **[Testing](./docs/TESTING.md)** - Build and run tests, CI gates, pre-push checklist
+- **[Testing Strategy](./docs/testing/TESTING_STRATEGY.md)** - Methodology, integration strategy, and testing policies
+- **[Known Testing Gaps](./docs/testing/KNOWN_TESTING_GAPS.md)** - What a green run does not prove
+- **[Release Testing](./docs/testing/RELEASE_TESTING.md)** - Release verification procedure
+- **[Release Run Template](./docs/testing/RELEASE_RUN_TEMPLATE.md)** - Record for a release verification run
 
 ---
 
@@ -67,12 +72,14 @@ hipDNN is organized into several key components. For detailed architecture descr
 | **[Flatbuffers SDK](./flatbuffers_sdk/)** | Header-only library with FlatBuffers schemas, generated headers, graph wrappers, and optional JSON helpers |
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
 | **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
+| **[Test SDK](./test_sdk/)** | Test utilities, including the CPU reference graph executor |
+| **[Python](./python/)** | Python bindings for the frontend |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
-| **[Tools](./tools/)** | Experimental utilities (e.g., benchmarking, engine listing) — subject to change |
+| **[Tools](./tools/)** | Experimental utilities (e.g., descriptor and ingestor code generators, shape conversion, engine listing, PyTorch integration) — subject to change |
 
 > [!NOTE]
-> Official hipDNN plugins can be found in the [dnn-providers](../../../dnn-providers/) folder (e.g., [MIOpen Plugin](../../../dnn-providers/miopen-provider/)).
+> Official hipDNN plugins can be found in the [dnn-providers](../../dnn-providers/) folder (e.g., [MIOpen Plugin](../../dnn-providers/miopen-provider/), [hipBLASLt Plugin](../../dnn-providers/hipblaslt-provider/), [HIP Kernel Provider](../../dnn-providers/hip-kernel-provider/)).
 
 ### Docker Support
 See [Docker README](./dockerfiles/README.md) for containerized development environments.
@@ -118,3 +125,15 @@ The documentation covers the frontend API including:
 ## Contributing
 
 For information about contributing to the hipDNN project, please see the [Contributing Guide](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+Please follow [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
+---
+
+## License
+
+This project is licensed under the terms described in [LICENSE](./LICENSE).

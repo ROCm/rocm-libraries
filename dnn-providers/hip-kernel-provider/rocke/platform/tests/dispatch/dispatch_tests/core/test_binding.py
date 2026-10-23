@@ -192,14 +192,12 @@ class TestBindingRatchet(unittest.TestCase):
     _EXEMPT = {
         # No args signature declared yet (`signature=lambda _spec: ()`), so
         # there is nothing to pack. Backfilling the signature comes first.
-        "conv_implicit_gemm": "no args signature",
         "norm2d": "no args signature",
         # Also has no grid: it is computed at runtime from num_m_blocks.
         "moe_fused_mega": "no args signature, runtime grid",
     }
 
     def _registries(self):
-        from rocke.dispatch.families.conv import CONV_REGISTRY
         from rocke.dispatch.families.moe import MOE_REGISTRY
         from rocke.dispatch.families.norm import NORM_REGISTRY
         from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
@@ -208,7 +206,6 @@ class TestBindingRatchet(unittest.TestCase):
         return (
             GEMM_FP16_REGISTRY,
             GEMM_BF16_REGISTRY,
-            CONV_REGISTRY,
             MOE_REGISTRY,
             NORM_REGISTRY,
         )

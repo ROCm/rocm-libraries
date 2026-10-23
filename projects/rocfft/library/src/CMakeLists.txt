@@ -34,11 +34,21 @@ function( prepend_path prefix source_list_of_files return_list_of_files )
   set( ${return_list_of_files} ${new_list} PARENT_SCOPE )
 endfunction( )
 
+# Add a definition for internal library targets so code can be
+# conditional on being in-library or not
+function( rocfft_add_internal_build_flag target )
+  get_target_property( target_is_imported ${target} IMPORTED )
+  if( NOT target_is_imported )
+    target_compile_definitions( ${target} PRIVATE ROCFFT_BUILD_INTERNAL )
+  endif()
+endfunction()
+
 # Link to an internal object library.  Setting LINK_LIBRARIES
 # directly prevents the object libraries from being exported by
 # rocm_export_targets in a static build, since they're not supposed
 # to be visible by users of rocFFT.
 function( rocfft_link_internal_lib target lib )
+  rocfft_add_internal_build_flag( ${lib} )
   set_property( TARGET ${target} APPEND PROPERTY
     LINK_LIBRARIES ${lib}
   )
@@ -144,6 +154,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
      ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
+     ${CMAKE_SOURCE_DIR}/library/src/include/rtc_generator.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -260,7 +271,6 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
-  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -305,6 +315,7 @@ add_library( rocfft-rtc-gen OBJECT
   rtc_chirp_gen.cpp
   rtc_test_harness.cpp
   load_store_ops_gen.cpp
+  ${CMAKE_SOURCE_DIR}/shared/sha256.c
 )
 # caching of generation/compilation
 add_library( rocfft-rtc-cache OBJECT
@@ -412,6 +423,7 @@ add_library( rocfft
   ${relative_rocfft_headers_public}
   )
 rocfft_add_coverage_flags( rocfft )
+rocfft_add_internal_build_flag( rocfft )
 
 if( WIN32 )
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)

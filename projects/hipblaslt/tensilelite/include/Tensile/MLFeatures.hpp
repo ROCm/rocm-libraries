@@ -59,11 +59,13 @@ namespace TensileLite
             float                     waveScale;
         };
 
-        float tilesPerCU(ContractionProblemGemm const&    problem,
-                         CUGranularityScaleFactors const& cuFactors);
+        TENSILELITEHOST_EXPORT float tilesPerCU(ContractionProblemGemm const&    problem,
+                                                CUGranularityScaleFactors const& cuFactors);
 
-        std::ostream& operator<<(std::ostream& stream, CUGranularityScaleFactors const& cugsf);
-        std::ostream& operator<<(std::ostream& stream, WaveGranularityScaleFactors const& wgsf);
+        TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                    stream,
+                                                        CUGranularityScaleFactors const& cugsf);
+        TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                      stream,
+                                                        WaveGranularityScaleFactors const& wgsf);
 
         /**
          * @brief A Property whose value is of type `float`.
@@ -257,4 +259,3 @@ namespace TensileLite
          */
     } // namespace MLFeatures
 } // namespace TensileLite
-

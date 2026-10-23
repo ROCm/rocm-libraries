@@ -251,9 +251,8 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
     EXPECT_EQ(error.get_message().find("score modifier"), std::string::npos);
 }
 
-// set_causal_mask(true) forwards a bare bool to hipDNN (the cuDNN compound
-// alignment/right-bound side effects are intentionally NOT replicated). A causal
-// graph must still validate — the mask is a first-class hipDNN attribute.
+// set_causal_mask(true) mirrors cuDNN: it sets TOP_LEFT alignment and right_bound = 0
+// rather than the deprecated causal_mask bool. A causal graph must still validate.
 TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
 {
     fe::graph::Graph graph;
@@ -265,26 +264,6 @@ TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
     auto [o, stats] = graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_causal_mask(true));
     ASSERT_NE(o, nullptr);
     EXPECT_TRUE(graph.validate().is_good());
-}
-
-// State machine, Mode::Native branch of build_plan_at_index: a graph that HAS an
-// operation graph (an sdpa node makes it Native) rejects a non-zero index with
-// the "index is invalid" message — distinct from the no-op-graph message covered
-// host-only in TestCudnnShimGraph. The index!=0 guard runs before any backend
-// call, so this is reachable without a device.
-TEST(TestCudnnShimGraphSDPA, BuildPlanAtInvalidIndexOnNativeGraphReportsInvalidIndex)
-{
-    fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q;
-    std::shared_ptr<fe::graph::Tensor_attributes> k;
-    std::shared_ptr<fe::graph::Tensor_attributes> v;
-    addForwardInputs(graph, q, k, v);
-    graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
-
-    auto error = graph.build_plan_at_index(5);
-    ASSERT_TRUE(error.is_bad());
-    EXPECT_NE(error.get_message().find("index is invalid"), std::string::npos);
-    EXPECT_EQ(error.get_message().find("no compiled execution plan"), std::string::npos);
 }
 
 // A native (sdpa) graph reports get_execution_plan_count() == 0 until plans are

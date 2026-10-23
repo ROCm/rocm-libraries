@@ -33,6 +33,7 @@ include: blas2/trsv_gtest.yaml
 include: blas3/dgmm_gtest.yaml
 include: blas3/geam_gtest.yaml
 include: blas3/gemm_gtest.yaml
+include: blas3/gemm_grouped_batched_gtest.yaml
 include: blas3/hemm_gtest.yaml
 include: blas3/her2k_gtest.yaml
 include: blas3/herk_gtest.yaml
@@ -50,6 +51,7 @@ include: blas_ex/nrm2_ex_gtest.yaml
 include: blas_ex/rot_ex_gtest.yaml
 include: blas_ex/scal_ex_gtest.yaml
 include: blas_ex/gemm_ex_gtest.yaml
+include: blas_ex/gemm_grouped_batched_ex_gtest.yaml
 include: blas_ex/syrk_ex_gtest.yaml
 include: blas_ex/herk_ex_gtest.yaml
 include: blas_ex/trsm_ex_gtest.yaml

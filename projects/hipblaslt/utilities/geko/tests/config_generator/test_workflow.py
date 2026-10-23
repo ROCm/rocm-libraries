@@ -94,7 +94,7 @@ class TestConfigGeneratorIntegration:
             pytest.skip(f"hipBLASLt path not found: {hipblaslt_path}")
 
         script = repo_root / "scripts" / "config_generator.py"
-        hip = str(Path(hipblaslt_path).resolve())  # resolve before cwd changes
+        hip = str(Path(hipblaslt_path).resolve())
         for overrides in _VARIANT_OVERRIDES:
             variant = _write_variant(base, overrides, tmp_path)
             out_dir = tmp_path / f"cli_out_{variant.stem}"

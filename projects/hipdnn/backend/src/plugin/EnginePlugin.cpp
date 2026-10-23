@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "EnginePlugin.hpp"
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 namespace hipdnn_backend
 {
@@ -100,6 +101,14 @@ void EnginePlugin::resolveSymbols()
                                 "(hipdnnEnginePluginExecuteOpGraphWithOverrides not exported)");
     }
 
+    if(!tryAssignSymbol(_funcGetEngineName, "hipdnnEnginePluginGetEngineName"))
+    {
+        HIPDNN_BACKEND_LOG_INFO("Plugin does not supply engine names "
+                                "(hipdnnEnginePluginGetEngineName not exported)");
+    }
+    tryAssignSymbol(_funcEnumerateCandidates, "hipdnnEnginePluginEnumerateCandidates");
+    tryAssignSymbol(_funcGetPrediction, "hipdnnEnginePluginGetPrediction");
+
 #ifndef NDEBUG
     _initialized = true;
 #endif
@@ -138,6 +147,54 @@ std::vector<int64_t> EnginePlugin::getAllEngineIds() const
     _allEngineIds = engineIds;
 
     return engineIds;
+}
+
+bool EnginePlugin::hasEngineName() const
+{
+    assert(_initialized);
+    return _funcGetEngineName != nullptr;
+}
+
+std::optional<std::string> EnginePlugin::getEngineName(int64_t engineId) const
+{
+    assert(_initialized);
+
+    if(_funcGetEngineName == nullptr)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' was asked to name engine {} but does not export "
+                                "hipdnnEnginePluginGetEngineName; the engine keeps its ID.",
+                                cachedName(),
+                                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
+        return std::nullopt;
+    }
+
+    const char* name = nullptr;
+    const auto status = _funcGetEngineName(engineId, &name);
+
+    // The SDK emits this entry point even when the container defines no
+    // getEngineName, so NOT_APPLICABLE is how a plugin declines.
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return std::nullopt;
+    }
+
+    // Any other status is a defect, not a way to decline.
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Failed to get engine name. Status: ") + toString(status)
+                                  + "(" + std::to_string(status)
+                                  + "), Error: " + std::string(getLastErrorString()));
+    }
+
+    // A name the host cannot use is the same as no name, and an empty one would
+    // hash to a value the engine's ID cannot match anyway.
+    if(name == nullptr || *name == '\0')
+    {
+        return std::nullopt;
+    }
+
+    return std::string(name);
 }
 
 hipdnnEnginePluginHandle_t EnginePlugin::createHandle() const
@@ -221,6 +278,61 @@ void EnginePlugin::getEngineDetails(hipdnnEnginePluginHandle_t handle,
     assert(_initialized);
     invokePluginFunction(
         "get engine details", _funcGetEngineDetails, handle, engineId, opGraph, engineDetails);
+}
+
+void EnginePlugin::enumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                       const hipdnnPluginConstData_t* engineConfig,
+                                       const hipdnnPluginConstData_t* opGraph,
+                                       uint64_t offset,
+                                       uint64_t limit,
+                                       hipdnnPluginConstData_t* engineDetails) const
+{
+    if(_funcEnumerateCandidates == nullptr)
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Plugin does not export matched-catalog enumeration");
+    }
+    const auto status
+        = _funcEnumerateCandidates(handle, engineConfig, opGraph, offset, limit, engineDetails);
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Engine does not support matched-catalog enumeration");
+    }
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Candidate enumeration failed: ")
+                                  + std::string(getLastErrorString()));
+    }
+}
+
+bool EnginePlugin::getPrediction(hipdnnEnginePluginHandle_t handle,
+                                 const hipdnnPluginConstData_t* engineConfig,
+                                 const hipdnnPluginConstData_t* opGraph,
+                                 hipdnnEnginePredictionKind_t kind,
+                                 bool evaluate,
+                                 hipdnnPluginConstData_t* prediction) const
+{
+    assert(_initialized);
+    *prediction = {nullptr, 0};
+    if(_funcGetPrediction == nullptr)
+    {
+        return false;
+    }
+    const auto status
+        = _funcGetPrediction(handle, engineConfig, opGraph, kind, evaluate ? 1 : 0, prediction);
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return false;
+    }
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Engine prediction failed: ")
+                                  + std::string(getLastErrorString()));
+    }
+    return true;
 }
 
 void EnginePlugin::destroyEngineDetails(hipdnnEnginePluginHandle_t handle,

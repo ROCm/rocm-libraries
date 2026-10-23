@@ -27,7 +27,7 @@ import os
 from Tensile.CustomKernels import getCustomKernelConfig, getCustomKernelContents
 from Tensile.BenchmarkProblems import getCustomKernelSolutionObj
 from Tensile.Common import assignGlobalParameters
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 from Tensile.Utilities.Toolchain import validateToolchain, ToolchainDefaults
 
 import yaml
@@ -59,7 +59,7 @@ WorkGroup: [  8, 16,  1 ]
 DepthU: 8
 VectorWidth: 4
 AssertSizeEqual: {3: 512}
-AssertSizeMultiple: {0: 128, 1: 128}""", yamlLoader
+AssertSizeMultiple: {0: 128, 1: 128}""", SafeLoader
 )
 
 # TODO when more custom kernels have been added - expand these lists
@@ -80,14 +80,12 @@ def test_CreateSolutionFromCustomKernel(objs):
         cCompiler,
         assembler,
         offloadBundler,
-        hipconfig,
         # deviceEnumerator
     ) = validateToolchain(
         ToolchainDefaults.CXX_COMPILER,
         ToolchainDefaults.C_COMPILER,
         ToolchainDefaults.ASSEMBLER,
         ToolchainDefaults.OFFLOAD_BUNDLER,
-        ToolchainDefaults.HIP_CONFIG,
         # ToolchainDefaults.DEVICE_ENUMERATOR
     )
     params = {
@@ -95,7 +93,6 @@ def test_CreateSolutionFromCustomKernel(objs):
         "CCompiler": cCompiler,
         "Assembler": assembler,
         "OffloadBundler": offloadBundler,
-        "HipConfig": hipconfig,
         # "ROCmAgentEnumeratorPath": deviceEnumerator,
     }
     params["ROCmAgentEnumeratorPath"] = None

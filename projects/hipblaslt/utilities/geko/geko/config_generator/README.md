@@ -83,16 +83,24 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 
 | Key | Role |
 |-----|------|
-| `StreamK` | `True` = StreamK, `False` = DataParallel |
-| `GA` | `True` = Ductile/GA tuning; `False` = exhaustive |
-| `MACROTILE_OPT` | Origami macro-tile tuning (**GA only**) |
+| `StreamK` | `True` adds persistent kernels (`TileProcessingStrategy` StreamK, plus DataParallel in the gfx1250 generic space). `False` keeps ordinary one-workgroup-per-tile kernels (`TileProcessingStrategy: None`) |
+| `backend` | `"ductile"` or `"tensile"` (default: `"ductile"`; CLI `--backend` overrides). |
+| `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). Subtile uses UseSubtileImpl=1 variants with MI16x16-base only, persistent StreamK, CMS off (gfx950 only). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
+| `MACROTILE_OPT` | Origami macro-tile tuning. Works with the Ductile backend, or with `backend: tensile` when `SIZE_OPTION: 0` (explicit `Sizes:` list); the tensile path emits `Backend: Tensile` and Tensile enumerates the pinned fork space exhaustively. |
 | `MT_DU` | Fixed `[MT0, MT1, DU]` when `MACROTILE_OPT` |
-| `USE_HEURISTICS` | Refined heuristic param lists per size |
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |
 | `EPILOGUES` | Include epilogues |
+| `MX` | `True` = MX block scaling on the arch's default block (32) with E8 scales. `F4` is always MX; only `F4` and `F8` take MX |
+| `MX_BLOCK` | MX block size, 16 or 32; setting it turns MX on. `0` forces plain non-MX, which `F4` and `MX: True` reject. MXFP8 is `F8` with 32, NVFP4 is `F4` with 16 |
+| `MX_SCALE_TYPE` | MX scale dtype: `E8` (E8M0, default), `F8` (E4M3, for NVFP4) or `E5M3` |
+| `LIBRARY_TYPE` | gfx1250 only. `"OOB"` (default), with StreamK, hands WGM / StaggerU to origami; `"Equality"` searches them. For MX, OOB keeps `UseScaleAlphaVec` and Equality drops it, as the hipBLASLt MX libraries of each kind do |
 | `CLUSTER` | `0` = all-in-one, `1` = cluster by top MI |
+
+With `SIZE_OPTION: 2`, each log row's `scaleA` / `scaleB` gives its MX format. The MX keys apply to the log's `F4` / `F8` rows that carry none, and must agree with the rows that do. Output files of an MX format the data type does not imply are tagged with it, e.g. `F8BS_MXE8B32_TN_0.yaml` (MXFP8) or `F4BS_MXF8B16_TN_0.yaml` (NVFP4).
+
+With `--tune` (the `geko` CLI), this file supplies the GEMM problems, each with its MX format (`MX`, `MX_BLOCK`, `MX_SCALE_TYPE`), and the keys in `LIST_FORWARDED_KEYS` in [`constants.py`](constants.py) (`StreamK`, `LIBRARY_TYPE`, `MACROTILE_OPT`, `MT_DU`, `ONE_SIZE_PER_CONFIG`, `MI_FILTER`, `EPILOGUES`, `CLUSTER`, `DUCTILE_VALIDATION_PROFILE`); architecture, backend and search space come from the command line, and other keys are ignored. `scripts/config_generator.py --config` applies every key.
 
 ### Environment variable override
 
@@ -104,7 +112,7 @@ Current keys (from `ENV_UPDATABLE_KEYS`):
 
 - `StreamK`
 - `MI_FILTER`
-- `GA_VALIDATION_PROFILE`
+- `DUCTILE_VALIDATION_PROFILE`
 
 Example (force `MI_FILTER` to `0` for one run):
 
@@ -114,9 +122,9 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 
 ### Other behavior
 
-- **`MAX_NUM_KERNELS_PER_CONFIG`:** In non-GA mode, caps merged kernels per file (default in `constants.py`; overridable in YAML). In GA mode it is set to effectively unlimited (`sys.maxsize`).
-- **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): `MACROTILE_OPT` requires `GA`; if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`.
-- **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and `GA` raises `NotImplementedError`.
+- **`MAX_NUM_KERNELS_PER_CONFIG`:** With heuristic search space, caps merged kernels per file (default in `constants.py`; overridable in YAML). With generic search space it is set to effectively unlimited (`sys.maxsize`).
+- **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`. `MACROTILE_OPT` with a non-Ductile backend is supported for `SIZE_OPTION: 0` only (explicit `Sizes:` list); attempting it with `SIZE_OPTION: 1` raises `NotImplementedError`. The post-processor's `_apply_mt_du` runs regardless of backend.
+- **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and the Ductile backend raises `NotImplementedError`.
 - **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
 
 ---
@@ -129,7 +137,7 @@ Order matches [`config_generator.run`](config_generator.py):
 2. **`get_sizes`** — resolve `[M, N, B, K]` list (deduplicated).
 3. **`MIDesign`**, **`get_optimization_params`**, **`get_post_processor`** — per-run instances from config.
 4. **Per size:** **`generate_fork_params`** — MI groups from `MIDesign`, non-MI params/groups from optimization profile, optional post-processing, then `Groups` assembled ([`fork_param_generator.py`](fork_param_generator.py)); build **`ConfigEntry`**.
-5. **`do_cluster`** / **`do_merge`** — group sizes and merge fork params; respect kernel cap when not GA.
+5. **`do_cluster`** / **`do_merge`** — group sizes and merge fork params; respect kernel cap for heuristic search space.
 6. **`geko.utils.build_tensilelite_client`** — when shell scripts are enabled, ensure prebuilt Tensile client path for generated `.sh` files.
 7. **`ConfigSectionGenerator.build_config`** + **`EntityOutputWriter.write_entity_files_only`** / **`append_aggregate_metadata`** — one output bundle per merged entry.
 
@@ -153,7 +161,7 @@ flowchart LR
 | [`load_input_config.py`](load_input_config.py) | Single place for loaded + normalized config dict |
 | [`sizes.py`](sizes.py) | Size list vs grid sources |
 | [`mi_designer.py`](mi_designer.py) | MI / macro-tile exploration for each size |
-| [`fork_params/`](fork_params/) | Per-`ARCH` (and GA vs heuristic) parameter and post-process implementations |
+| [`fork_params/`](fork_params/) | Per-`ARCH` (and generic vs heuristic) parameter and post-process implementations |
 | [`fork_param_generator.py`](fork_param_generator.py) | Combines MI design, optimization params, post-processor |
 | [`cluster_sizes.py`](cluster_sizes.py), [`config_merger.py`](config_merger.py) | Clustering and merging fork params under kernel limits |
 | [`config_sections_generator.py`](config_sections_generator.py), [`output_writer.py`](output_writer.py) | Final YAML / scripts / logs |
@@ -166,4 +174,4 @@ flowchart LR
 
 ### Registries
 
-[`fork_params/__init__.py`](fork_params/__init__.py) picks heuristic vs GA classes from `config['ARCH']` and `config['GA']`. There is no generic fallback: an unregistered `ARCH` fails at optimization-param lookup (post-processor registry can return `None` only when the key is missing—generation still requires a registered optimization profile).
+[`fork_params/__init__.py`](fork_params/__init__.py) picks heuristic vs generic classes from `config['ARCH']` and `config['search_space']`. There is no generic fallback: an unregistered `ARCH` fails at optimization-param lookup (post-processor registry can return `None` only when the key is missing—generation still requires a registered optimization profile).

@@ -21,6 +21,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
+    test_sddmm_batched_csr.cpp
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
     test_sparse_to_dense_csr.cpp
@@ -67,6 +68,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/13/test_sddmm_coo_aos.yaml
     cuda/13/test_sddmm_csc.yaml
     cuda/13/test_sddmm_csr.yaml
+    cuda/13/test_sddmm_batched_csr.yaml
     cuda/13/test_sparse_to_dense_coo.yaml
     cuda/13/test_sparse_to_dense_csc.yaml
     cuda/13/test_sparse_to_dense_csr.yaml

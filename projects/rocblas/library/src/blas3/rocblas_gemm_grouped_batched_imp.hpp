@@ -201,22 +201,22 @@ namespace
         }
 
         rocblas_status status
-            = rocblas_internal_gemm_grouped_batched_template<API_INT, T>(handle,
-                                                                         transa_array,
-                                                                         transb_array,
-                                                                         m_array,
-                                                                         n_array,
-                                                                         k_array,
-                                                                         alpha_host,
-                                                                         Aarray,
-                                                                         lda_array,
-                                                                         Barray,
-                                                                         ldb_array,
-                                                                         beta_host,
-                                                                         Carray,
-                                                                         ldc_array,
-                                                                         group_count,
-                                                                         group_size);
+            = ROCBLAS_API(rocblas_internal_gemm_grouped_batched_template)(handle,
+                                                                          transa_array,
+                                                                          transb_array,
+                                                                          m_array,
+                                                                          n_array,
+                                                                          k_array,
+                                                                          alpha_host,
+                                                                          Aarray,
+                                                                          lda_array,
+                                                                          Barray,
+                                                                          ldb_array,
+                                                                          beta_host,
+                                                                          Carray,
+                                                                          ldc_array,
+                                                                          group_count,
+                                                                          group_size);
 
         if(status != rocblas_status_success)
             return status;

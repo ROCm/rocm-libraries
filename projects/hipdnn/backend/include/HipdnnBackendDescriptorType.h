@@ -35,6 +35,9 @@ typedef enum
      * Represents a specific execution engine that can run an operation graph.
      * Engines are discovered through heuristics and provide different
      * performance/precision trade-offs.
+     * Finalization validates applicability without fetching plugin EngineDetails.
+     * Name, knob-info, and behavior-note queries load and validate that metadata
+     * lazily, so their first read can fail after successful finalization.
      */
     HIPDNN_BACKEND_ENGINE_DESCRIPTOR = 1,
 
@@ -338,5 +341,15 @@ typedef enum
      * tokens, with mode-dependent routing tensors.
      */
     HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR = 37,
+
+    /**
+     * @brief MoE grouped matmul backward operation descriptor
+     *
+     * Represents the weight-gradient pass of grouped matrix multiplication over
+     * routed mixture-of-experts tokens, taking the output gradient (DOUTPUT),
+     * token, and first token offset tensors and producing the weight gradient
+     * (DWEIGHT) tensor.
+     */
+    HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR = 38,
 
 } hipdnnBackendDescriptorType_t;

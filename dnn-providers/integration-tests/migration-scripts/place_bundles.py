@@ -41,22 +41,25 @@ from bundle_utils import (
     NODE_STRUCTURAL,
     TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
-    TIER_MAP,
     TOP_LEVEL_IF_VARIES,
     ambiguous_attr_keys,
     assign_case_ids,
     canon,
     canonical_uid_map_by_name,
+    capture_reference_source,
+    capture_suite_case,
     derive_operation,
     expand,
     infer_layout,
     node_attr_items,
     raw_node_attrs,
+    read_capture_sidecar,
     remap_graph,
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
+    tier_for_suite,
 )
 
 
@@ -90,6 +93,8 @@ class Stats:
     sweeps_written: int = 0
     sweep_cases: int = 0
     standalone_written: int = 0
+    manual_kept: int = 0
+    held_back: int = 0
     verify_pass: int = 0
     verify_fail: int = 0
     errors: list = field(default_factory=list)
@@ -116,16 +121,10 @@ def discover_captures(capture_dir: Path) -> list[CapturedCase]:
         return cases
 
     for graph_path in sorted(capture_dir.rglob("*.json")):
-        if graph_path.name.endswith(".meta.json"):
+        found = capture_suite_case(graph_path, capture_dir)
+        if found is None:
             continue
-
-        case_dir = graph_path.parent
-        case_name = case_dir.name
-        if graph_path.stem != case_name:
-            continue
-
-        suite_rel = case_dir.parent.relative_to(capture_dir)
-        suite_name = str(suite_rel)
+        suite_name, case_name = found
 
         try:
             with open(graph_path) as f:
@@ -134,16 +133,13 @@ def discover_captures(capture_dir: Path) -> list[CapturedCase]:
             print(f"  WARN: bad graph {graph_path}: {e}", file=sys.stderr)
             continue
 
-        meta_path = case_dir / f"{case_name}.meta.json"
-        meta = {"format_version": 1}
-        if meta_path.exists():
-            try:
-                with open(meta_path) as f:
-                    meta = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"  WARN: bad meta {meta_path}: {e}", file=sys.stderr)
+        meta_path, meta, err = read_capture_sidecar(graph_path)
+        if err is not None:
+            print(f"  WARN: bad meta {meta_path}: {err}", file=sys.stderr)
+        if meta is None:
+            meta = {"format_version": 1}
 
-        tier = TIER_MAP.get(suite_rel.parts[0], "quick") if suite_rel.parts else "quick"
+        tier = tier_for_suite(suite_name)
 
         cases.append(
             CapturedCase(
@@ -242,7 +238,7 @@ def detect_and_build(bucket: Bucket):
 
         meta = dict(c.meta)
         meta.setdefault("format_version", 1)
-        meta["reference_source"] = f"c++ integration suite: {c.suite}.{c.case_name}"
+        meta["reference_source"] = capture_reference_source(c.suite, c.case_name)
 
         sweep_cases.append(
             {"id": None, "values": values, "metadata": meta, "_origin": c}
@@ -285,13 +281,49 @@ def verify_case(template: dict, entry: dict) -> bool:
     return canon(expanded) == canon(original)
 
 
+def manual_cases_to_keep(sweep_path: Path, template: dict, captured_ids: set):
+    """Return (cases, error) for the hand-written cases of an existing sweep.json.
+
+    A case with ``metadata.generator == "manual"`` has no C++ test behind it, so
+    no capture reproduces it. Regenerating a sweep keeps such cases. A manual
+    case that no longer fits the regenerated template (a different tensor set,
+    an unresolved placeholder, or an id a captured case now uses) is an error:
+    it has to be fixed by hand, and dropping it would lose the test silently.
+    """
+    if not sweep_path.is_file():
+        return [], None
+    with open(sweep_path) as f:
+        existing = json.load(f).get("cases", [])
+    manual = [c for c in existing if c.get("metadata", {}).get("generator") == "manual"]
+    template_uids = set(tensors_by_uid(template))
+    for c in manual:
+        cid = c.get("id")
+        if cid in captured_ids:
+            return [], f"manual case {cid!r} has the id of a captured case"
+        values = c.get("values", {})
+        case_uids = {t.get("uid") for t in values.get("tensors", [])}
+        patch_uids = {p.get("uid") for p in c.get("tensor_patches", [])}
+        if (
+            case_uids != template_uids
+            or not patch_uids <= template_uids
+            or "${UNRESOLVED:" in canon(expand(template, values))
+        ):
+            return [], f"manual case {cid!r} does not fit the regenerated template"
+    return manual, None
+
+
 # --------------------------------------------------------------------------
 # 4. Writers
 # --------------------------------------------------------------------------
 
 
 def write_sweep(
-    target: Path, bucket: Bucket, template: dict, sweep_cases: list, dry_run: bool
+    target: Path,
+    bucket: Bucket,
+    template: dict,
+    sweep_cases: list,
+    manual_cases: list,
+    dry_run: bool,
 ):
     out_dir = target / bucket.tier / bucket.operation / bucket.topology_name
     cases_out = []
@@ -299,7 +331,7 @@ def write_sweep(
         cases_out.append(
             {"id": e["id"], "values": e["values"], "metadata": e["metadata"]}
         )
-    sweep = {"version": 1, "cases": cases_out}
+    sweep = {"version": 1, "cases": cases_out + manual_cases}
     if not dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(out_dir / "graph.template.json", "w") as f:
@@ -328,9 +360,7 @@ def write_standalone(target: Path, case: CapturedCase, reason: str, dry_run: boo
             f.write("\n")
         meta = dict(case.meta)
         meta.setdefault("format_version", 1)
-        meta["reference_source"] = (
-            f"c++ integration suite: {case.suite}.{case.case_name}"
-        )
+        meta["reference_source"] = capture_reference_source(case.suite, case.case_name)
         meta["standalone_reason"] = reason
         with open(out_dir / f"{bundle_name}.meta.json", "w") as f:
             json.dump(meta, f, indent=2)
@@ -462,9 +492,32 @@ def main() -> int:
                 continue
             stats.verify_pass += len(sweep_cases)
 
-        out = write_sweep(args.output_dir, bucket, template, sweep_cases, args.dry_run)
+        sweep_path = (
+            args.output_dir
+            / bucket.tier
+            / bucket.operation
+            / bucket.topology_name
+            / "sweep.json"
+        )
+        manual, err = manual_cases_to_keep(
+            sweep_path, template, {e["id"] for e in sweep_cases}
+        )
+        if err is not None:
+            stats.errors.append(f"{sweep_path}: {err}")
+            stats.held_back += len(sweep_cases)
+            print(
+                f"  ERROR {bucket.tier}/{bucket.operation}/{bucket.topology_name}: "
+                f"{err}; sweep left unchanged",
+                file=sys.stderr,
+            )
+            continue
+
+        out = write_sweep(
+            args.output_dir, bucket, template, sweep_cases, manual, args.dry_run
+        )
         stats.sweeps_written += 1
         stats.sweep_cases += len(sweep_cases)
+        stats.manual_kept += len(manual)
         topology_map.append(
             {
                 "skeleton_hash": bucket.skeleton_hash,
@@ -477,7 +530,8 @@ def main() -> int:
         )
         print(
             f"  sweep: {bucket.tier}/{bucket.operation}/{bucket.topology_name}  "
-            f"({len(sweep_cases)} graphs -> 1 sweep)",
+            f"({len(sweep_cases)} graphs -> 1 sweep"
+            + (f", kept {len(manual)} manual case(s))" if manual else ")"),
             file=sys.stderr,
         )
 
@@ -499,11 +553,21 @@ def main() -> int:
         file=sys.stderr,
     )
     print(f"  standalone:        {stats.standalone_written}", file=sys.stderr)
+    print(f"  manual kept:       {stats.manual_kept}", file=sys.stderr)
     if not args.no_verify:
         print(f"  verify pass:       {stats.verify_pass}", file=sys.stderr)
         print(f"  verify fail:       {stats.verify_fail}", file=sys.stderr)
-    total_out = stats.sweep_cases + stats.standalone_written
+    total_out = stats.sweep_cases + stats.standalone_written + stats.held_back
     print(f"  accounted graphs:  {total_out} / {stats.cases_found}", file=sys.stderr)
+    if stats.errors:
+        print(
+            f"  not written:       {stats.held_back} graphs in "
+            f"{len(stats.errors)} sweep(s) whose manual cases need fixing by hand",
+            file=sys.stderr,
+        )
+        for e in stats.errors:
+            print(f"  ERROR: {e}", file=sys.stderr)
+        return 1
 
     if total_out != stats.cases_found:
         print(

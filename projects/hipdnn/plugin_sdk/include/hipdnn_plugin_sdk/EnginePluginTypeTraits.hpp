@@ -59,6 +59,24 @@ struct HasCopyEngineIds<
 };
 
 /**
+ * @brief Check for static getEngineName method.
+ *
+ * Optional; see hipdnnEnginePluginGetEngineName.
+ */
+template <typename T, typename = void>
+struct HasGetEngineName : std::false_type
+{
+};
+
+template <typename T>
+struct HasGetEngineName<
+    T,
+    std::void_t<decltype(T::getEngineName(std::declval<int64_t>(), std::declval<const char**>()))>>
+    : std::true_type
+{
+};
+
+/**
  * @brief Validates that a container type meets all requirements.
  *
  * This function uses static_assert to provide clear error messages if
@@ -67,6 +85,9 @@ struct HasCopyEngineIds<
  * Required methods:
  * - EngineManager& getEngineManager()
  * - static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
+ *
+ * Optional methods:
+ * - static hipdnnPluginStatus_t getEngineName(int64_t, const char**)
  */
 template <typename ContainerType>
 constexpr void validateContainerType()
@@ -111,6 +132,22 @@ template <typename T>
 struct HasSetStream<
     T,
     std::void_t<decltype(std::declval<T&>().setStream(std::declval<hipStream_t>()))>>
+    : std::true_type
+{
+};
+
+/**
+ * @brief Check for getStream() method returning hipStream_t.
+ */
+template <typename T, typename = void>
+struct HasGetStream : std::false_type
+{
+};
+
+template <typename T>
+struct HasGetStream<
+    T,
+    std::void_t<decltype(static_cast<hipStream_t>(std::declval<const T&>().getStream()))>>
     : std::true_type
 {
 };

@@ -79,7 +79,7 @@ typedef struct rocke_unified_attn_problem
     bool use_alibi; /* default false */
     bool use_qq_bias; /* default false */
     bool use_fp8; /* default false */
-    int num_sms; /* default 120 */
+    int num_cus; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
 } rocke_unified_attn_problem_t;

@@ -33,10 +33,19 @@ SOFTWARE.
 
 #if _WIN32
 #include <intrin.h>
-#else
+#elif defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #include <smmintrin.h>
 #include <x86intrin.h>
+#else
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#include <simde/x86/f16c.h>
+#include <simde/x86/fma.h>
+// SIMDE bug: native alias block omits _MM_FROUND_NO_EXC
+#ifndef _MM_FROUND_NO_EXC
+#define _MM_FROUND_NO_EXC 0x08
+#endif
 #endif
 
 #define M256I(m256i_register) (*((_m256i_union*)&m256i_register))
@@ -225,17 +234,27 @@ union RppSIMD256 {
 };
 
 inline void rpp_storeu_si32(void* __p, __m128i __b) {
+#if defined(__x86_64__) || defined(_M_X64)
     struct __storeu_si32 {
         int __v;
     } __attribute__((__packed__, __may_alias__));
     ((struct __storeu_si32*)__p)->__v = ((__v4si)__b)[0];
+#else
+    int __v = _mm_cvtsi128_si32(__b);
+    memcpy(__p, &__v, sizeof(__v));
+#endif
 }
 
 inline void rpp_storeu_si64(void* __p, __m128i __b) {
+#if defined(__x86_64__) || defined(_M_X64)
     struct __storeu_si64 {
         long long __v;
     } __attribute__((__packed__, __may_alias__));
     ((struct __storeu_si64*)__p)->__v = ((__v2di)__b)[0];
+#else
+    long long __v = _mm_cvtsi128_si64(__b);
+    memcpy(__p, &__v, sizeof(__v));
+#endif
 }
 
 inline void rpp_pixel_check_0to1(__m256* p, Rpp32s numVectors) {
@@ -436,9 +455,9 @@ inline void rpp_store48_f32pln3_to_u8pkd3(Rpp8u* dstPtr, __m128* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Store only 12 bytes for the last register to write exactly 48 bytes total
+    _mm_storel_epi64((__m128i*)(dstPtr + 36), px[3]);       /* store first 8 bytes */
+    rpp_storeu_si32(dstPtr + 44, _mm_srli_si128(px[3], 8)); /* store last 4 bytes */
 }
 
 inline void rpp_load48_u8pkd3_to_u8pln3(Rpp8u* srcPtr, __m128i* px) {
@@ -744,7 +763,9 @@ inline void rpp_store12_f32pln3_to_f32pkd3(Rpp32f* dstPtr, __m128* p) {
     _mm_storeu_ps(dstPtr, p[0]);
     _mm_storeu_ps(dstPtr + 3, p[1]);
     _mm_storeu_ps(dstPtr + 6, p[2]);
-    _mm_storeu_ps(dstPtr + 9, p[3]);
+    // Store only 3 floats (12 bytes) to avoid writing beyond 48-byte boundary
+    rpp_storeu_si64(dstPtr + 9, _mm_castps_si128(p[3]));  /* store first 2 floats (8 bytes) */
+    _mm_store_ss(dstPtr + 11, _mm_movehl_ps(p[3], p[3])); /* store 3rd float (4 bytes) */
 }
 
 inline void rpp_load8_f32_to_f32(Rpp32f* srcPtr, __m128* p) {
@@ -946,9 +967,9 @@ inline void rpp_store48_f32pln3_to_i8pkd3(Rpp8s* dstPtr, __m128* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Store only 12 bytes for the last register to write exactly 48 bytes total
+    _mm_storel_epi64((__m128i*)(dstPtr + 36), px[3]);       /* store first 8 bytes */
+    rpp_storeu_si32(dstPtr + 44, _mm_srli_si128(px[3], 8)); /* store last 4 bytes */
 }
 
 inline void rpp_load48_i8pln3_to_i32pln3_avx(Rpp8s* srcPtrR, Rpp8s* srcPtrG, Rpp8s* srcPtrB,
@@ -1886,10 +1907,16 @@ inline void rpp_store48_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)dstPtr, px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 3), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 6), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 9), px128[3]);
+    __m128i packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    __m128i packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 0, packed01);
+    rpp_storeu_si32(dstPtr + 4, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 6, packed23);
+    rpp_storeu_si32(dstPtr + 10, _mm_srli_si128(packed23, 8));
 
     p128[0] = _mm256_extractf128_ps(p[0], 1);
     p128[1] = _mm256_extractf128_ps(p[2], 1);
@@ -1899,10 +1926,16 @@ inline void rpp_store48_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtr + 12), px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 15), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 18), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 21), px128[3]);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 12, packed01);
+    rpp_storeu_si32(dstPtr + 16, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 18, packed23);
+    rpp_storeu_si32(dstPtr + 22, _mm_srli_si128(packed23, 8));
 
     p128[0] = _mm256_extractf128_ps(p[1], 0);
     p128[1] = _mm256_extractf128_ps(p[3], 0);
@@ -1912,10 +1945,16 @@ inline void rpp_store48_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtr + 24), px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 27), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 30), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 33), px128[3]);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 24, packed01);
+    rpp_storeu_si32(dstPtr + 28, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 30, packed23);
+    rpp_storeu_si32(dstPtr + 34, _mm_srli_si128(packed23, 8));
 
     p128[0] = _mm256_extractf128_ps(p[1], 1);
     p128[1] = _mm256_extractf128_ps(p[3], 1);
@@ -1925,10 +1964,16 @@ inline void rpp_store48_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtr + 36), px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 39), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 42), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 45), px128[3]);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 36, packed01);
+    rpp_storeu_si32(dstPtr + 40, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 42, packed23);
+    rpp_storeu_si32(dstPtr + 46, _mm_srli_si128(packed23, 8));
 }
 
 inline void rpp_load48_u8pln3_to_f32pln3_avx(Rpp8u* srcPtrR, Rpp8u* srcPtrG, Rpp8u* srcPtrB,
@@ -2088,9 +2133,11 @@ inline void rpp_store48_f32pln3_to_u8pkd3_avx(Rpp8u* dstPtr, __m256* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Fixed: Only store 12 bytes (not 16) to avoid writing beyond 48-byte boundary
+    _mm_storel_epi64((__m128i*)(dstPtr + 36),
+                     px[3]); /* store first 8 bytes [R13|G13|B13|R14|G14|B14|R15|G15] */
+    rpp_storeu_si32(dstPtr + 44,
+                    _mm_srli_si128(px[3], 8)); /* store last 4 bytes [B15|R16|G16|B16] */
 }
 
 inline void rpp_load24_u8pln3_to_f64pln3_avx(Rpp8u* srcPtrR, Rpp8u* srcPtrG, Rpp8u* srcPtrB,
@@ -2592,7 +2639,9 @@ inline void rpp_store24_f32pln3_to_f32pkd3_avx(Rpp32f* dstPtr, __m256* p) {
     _mm_storeu_ps(dstPtr, p128[0]);
     _mm_storeu_ps(dstPtr + 3, p128[1]);
     _mm_storeu_ps(dstPtr + 6, p128[2]);
-    _mm_storeu_ps(dstPtr + 9, p128[3]);
+    // Store only 3 floats (12 bytes) to avoid writing beyond 48-byte boundary
+    rpp_storeu_si64(dstPtr + 9, _mm_castps_si128(p128[3]));     /* store first 2 floats (8 bytes) */
+    _mm_store_ss(dstPtr + 11, _mm_movehl_ps(p128[3], p128[3])); /* store 3rd float (4 bytes) */
 
     p128[0] = _mm256_extractf128_ps(pRow[0], 1); /* get R05|G05|B05|00 */
     p128[1] = _mm256_extractf128_ps(pRow[1], 1); /* get R06|G06|B06|00 */
@@ -2601,7 +2650,9 @@ inline void rpp_store24_f32pln3_to_f32pkd3_avx(Rpp32f* dstPtr, __m256* p) {
     _mm_storeu_ps(dstPtr + 12, p128[0]);
     _mm_storeu_ps(dstPtr + 15, p128[1]);
     _mm_storeu_ps(dstPtr + 18, p128[2]);
-    _mm_storeu_ps(dstPtr + 21, p128[3]);
+    // Fixed: Only store 3 floats (not 4) to avoid writing beyond 24-float (96-byte) boundary
+    rpp_storeu_si64(dstPtr + 21, _mm_castps_si128(p128[3]));    /* store first 2 floats [R08|G08] */
+    _mm_store_ss(dstPtr + 23, _mm_movehl_ps(p128[3], p128[3])); /* store 3rd float [B08] */
 }
 
 inline void extract_and_convert_to_f64_pln3_to_pln3(__m256* px, __m256d* p) {
@@ -3058,9 +3109,11 @@ inline void rpp_store48_f32pln3_to_i8pkd3_avx(Rpp8s* dstPtr, __m256* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Fixed: Only store 12 bytes (not 16) to avoid writing beyond 48-byte boundary
+    _mm_storel_epi64((__m128i*)(dstPtr + 36),
+                     px[3]); /* store first 8 bytes [R13|G13|B13|R14|G14|B14|R15|G15] */
+    rpp_storeu_si32(dstPtr + 44,
+                    _mm_srli_si128(px[3], 8)); /* store last 4 bytes [B15|R16|G16|B16] */
 }
 
 inline void rpp_load24_i8pln3_to_f64pln3_avx(Rpp8s* srcPtrR, Rpp8s* srcPtrG, Rpp8s* srcPtrB,
@@ -4771,10 +4824,18 @@ inline void rpp_store24_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)dstPtr, px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 3), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 6), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 9), px128[3]);
+    // Each px128[i] contains [Ri, Gi, Bi, unused] - pack pairs without unused elements
+    // Shuffle to pack: px128[0]+px128[1] -> [R0,G0,B0,R1,G1,B1,X,X]
+    __m128i packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    __m128i packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 0, packed01);                      // Store R0,G0,B0,R1
+    rpp_storeu_si32(dstPtr + 4, _mm_srli_si128(packed01, 8));   // Store G1,B1
+    rpp_storeu_si64(dstPtr + 6, packed23);                      // Store R2,G2,B2,R3
+    rpp_storeu_si32(dstPtr + 10, _mm_srli_si128(packed23, 8));  // Store G3,B3
 
     p128[0] = _mm256_extractf128_ps(p[0], 1);
     p128[1] = _mm256_extractf128_ps(p[1], 1);
@@ -4785,10 +4846,16 @@ inline void rpp_store24_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
     px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtr + 12), px128[0]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 15), px128[1]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 18), px128[2]);
-    _mm_storeu_si128((__m128i*)(dstPtr + 21), px128[3]);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 12, packed01);                     // Store R4,G4,B4,R5
+    rpp_storeu_si32(dstPtr + 16, _mm_srli_si128(packed01, 8));  // Store G5,B5
+    rpp_storeu_si64(dstPtr + 18, packed23);                     // Store R6,G6,B6,R7
+    rpp_storeu_si32(dstPtr + 22, _mm_srli_si128(packed23, 8));  // Store G7,B7
 }
 
 inline void rpp_store8_f32pln1_to_f16pln1_avx(Rpp16f* dstPtr, __m256 p) {
@@ -5644,9 +5711,9 @@ inline void rpp_store12_float_pkd_pln(Rpp16f** dstPtrTempChannels, __m128* pDst)
     pxDst[0] = _mm_cvtps_ph(pDst[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     pxDst[1] = _mm_cvtps_ph(pDst[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
     pxDst[2] = _mm_cvtps_ph(pDst[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[0]), pxDst[0]);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[1]), pxDst[1]);
-    _mm_storeu_si128((__m128i*)(dstPtrTempChannels[2]), pxDst[2]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[0]), pxDst[0]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[1]), pxDst[1]);
+    _mm_storeu_si64((__m128i*)(dstPtrTempChannels[2]), pxDst[2]);
 }
 
 inline void rpp_store12_float_pkd_pln(Rpp8u** dstPtrTempChannels, __m128* pDst) {

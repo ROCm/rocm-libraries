@@ -196,8 +196,15 @@ namespace rocsparse
             local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
         }
         else if(force_conj)
         {
@@ -221,7 +228,7 @@ namespace rocsparse
 
             if(blockdim == 64)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<64, true>),
@@ -274,7 +281,7 @@ namespace rocsparse
             }
             else if(blockdim == 128)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<128, true>),
@@ -327,7 +334,7 @@ namespace rocsparse
             }
             else if(blockdim == 256)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<256, true>),
@@ -380,7 +387,7 @@ namespace rocsparse
             }
             else if(blockdim == 512)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<512, true>),
@@ -433,7 +440,7 @@ namespace rocsparse
             }
             else if(blockdim == 1024)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::csrsm<1024, true>),
@@ -561,7 +568,6 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
             const int64_t inc_y           = static_cast<int64_t>(1);
 
             _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                       false,
                                        batch_count,
                                        m,
                                        m,
@@ -583,7 +589,13 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                        info);
 
             _rocsparse_dnvec_descr dnx(
-                batch_count, m, rocsparse::get_datatype<T>(), B, nullptr, b_inc, batch_dist_zero);
+                batch_count, m, rocsparse::get_datatype<T>(), B, B, b_inc, batch_dist_zero);
+
+            if(trans_B == rocsparse_operation_conjugate_transpose)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_conjugate(handle, &dnx, nullptr));
+            }
+
             _rocsparse_dnvec_descr dny(
                 batch_count, m, rocsparse::get_datatype<T>(), y, y, inc_y, batch_dist_zero);
 
