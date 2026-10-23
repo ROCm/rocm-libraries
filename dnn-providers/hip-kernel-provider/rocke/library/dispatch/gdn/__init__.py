@@ -10,7 +10,7 @@ registry is unreachable no matter how complete its kernel is.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, Sequence, Tuple
 
 from rocke.dispatch.core import (
@@ -22,7 +22,9 @@ from rocke.dispatch.core import (
     Ranker,
     make_dispatch_result,
     make_kernel_id,
+    opt_in_probe,
     pin_to_spec,
+    selector_matches,
     stable_json_hash,
 )
 
@@ -91,10 +93,37 @@ def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ..
     """Each legal registered tile's base configuration (no knobs: what ``auto``
     runs on that tile), one result per tile in registry priority order. What a
     caller that compares tiles wants, rather than every configuration
-    :func:`dispatch_gdn_decode_all` lists."""
-    return tuple(
-        result for result in dispatch_gdn_decode_all(req) if not result.spec.knobs
-    )
+    :func:`dispatch_gdn_decode_all` lists.
+
+    The same walk as the registry's ``iter_combos`` (arch, selector pins, an
+    opt-in probe pinned to each candidate, which ``route_auto`` would
+    otherwise turn away), but it selects only each candidate's base
+    configuration instead of expanding its knob space, so the cost is one spec
+    per tile, not one per configuration."""
+    if request_errors(req):
+        return ()
+    out = []
+    for candidate in GDN_REGISTRY.candidates():
+        capability = candidate.capability
+        if capability is not None and req.arch not in capability.arches:
+            continue
+        if not selector_matches(req, candidate)[0]:
+            continue
+        probe = replace(opt_in_probe(req, candidate), tuning_id="auto", tuning_knobs=())
+        if not candidate.admits(probe)[0]:
+            continue
+        spec = candidate.select_spec(probe)
+        pinned = pin_to_spec(req, candidate, spec)
+        out.append(
+            make_dispatch_result(
+                pinned,
+                candidate,
+                spec,
+                kernel_id=_kernel_id(pinned, candidate, spec),
+                headline=f"sweep {candidate.name} ({candidate.algorithm}) on {req.arch}",
+            )
+        )
+    return tuple(out)
 
 
 def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:

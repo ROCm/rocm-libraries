@@ -417,6 +417,40 @@ def test_pinned_xcd_remap_keeps_the_launch_grid():
         assert on.grid == base.grid and on.block == base.block, req
 
 
+@pytest.mark.parametrize(
+    "req",
+    (
+        _req(gate_kind="gdn"),
+        _req(gate_kind="gdn", head_k_dim=64, head_v_dim=64),
+        _req(gate_kind="kda", state_dtype="f32", heads=16, **_FUSED),
+        _req(gate_kind="gdn", heads=16, fuse_out_norm=True),
+        _req(gate_kind="gdn", spec_id="nw4_wtk16_bpv8"),
+    ),
+    ids=("gdn", "gdn_d64", "kda_f32_fused", "gdn_norm_only", "gdn_pinned"),
+)
+def test_bases_equal_the_knob_free_rows_of_all(req):
+    """dispatch_gdn_decode_bases builds only each tile's base configuration
+    (an opt-in probe per candidate, as iter_combos walks), yet returns
+    exactly the knob-free rows dispatch_gdn_decode_all lists: same
+    candidates, order, specs, ids, grid, block and pinned request."""
+    from dispatch.gdn import dispatch_gdn_decode_bases
+
+    def key(row):
+        return (
+            row.candidate.name,
+            row.spec,
+            row.kernel_id,
+            row.grid,
+            row.block,
+            row.request,
+        )
+
+    expected = [key(r) for r in dispatch_gdn_decode_all(req) if not r.spec.knobs]
+    got = [key(r) for r in dispatch_gdn_decode_bases(req)]
+    assert got == expected
+    assert len(got) > 1 or req.spec_id != "auto"  # route_auto must not prune
+
+
 def test_kda_admits_exactly_its_d128_tiles():
     """KDA accepts only DK = DV = 128, so 54 of its 180 registered tiles are
     admissible and the rest are unselectable until that limit is lifted."""
