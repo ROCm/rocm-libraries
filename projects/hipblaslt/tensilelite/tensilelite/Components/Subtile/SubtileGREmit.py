@@ -26,11 +26,11 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SAndB64, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SSubU32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
-    VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
+    VAddU32, VAndB32, VCmpLtI32, VCmpLtU32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -879,18 +879,15 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
   # between would mangle an out-of-range value back into a valid address.
   padFreeElems = _tluPadFreeExtent(kernel, tileInfo)
   laneSGPRCount = writer.states.laneSGPRCount
+  SAndX = SAndB64 if laneSGPRCount == 2 else SAndB32
   with contextlib.ExitStack() as padStack:
-    padMaskSgpr = None
-    oobVgpr = None
+    keepMaskSgpr = None
     if padFreeElems is not None:
       padChunks = -(-padFreeElems // elemsPerChunk)
-      oobVgpr = writer.vgprPool.checkOut(1, tag="_graColScatter_oob")
-      module.add(VMovB32(dst=vgpr(oobVgpr), src="BufferOOB",
-                 comment="%s: offset that the buffer bound rejects" % tc))
-      padMaskSgpr = padStack.enter_context(
+      keepMaskSgpr = padStack.enter_context(
           writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount,
                               tag="_graColScatter_padMask")).idx
-      module.add(VCmpLtI32(dst=sgpr(padMaskSgpr, laneSGPRCount), src0=vgpr(mc),
+      module.add(VCmpLtI32(dst=sgpr(keepMaskSgpr, laneSGPRCount), src0=vgpr(mc),
                  src1=padChunks,
                  comment="%s: m_chunk < %u, i.e. lane inside the real %u elements?"
                          % (tc, padChunks, padFreeElems)))
@@ -898,6 +895,25 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
     # m_chunk * elemsPerChunk (free-dim element start, load-independent).
     module.add(VLShiftLeftB32(dst=vgpr(mc), shiftHex=hex(elemsPerChunk.bit_length() - 1),
                src=vgpr(mc), comment="%s: m_chunk * %u (free-dim start)" % (tc, elemsPerChunk)))
+
+    # mc is now the lane's free-dim element start, which is what the M/N edge
+    # compare needs.  A pad lane is out of range for a compile-time reason and an
+    # edge lane for a runtime one, so both masks select the same BufferOOB value.
+    edgeMaskSgpr = padStack.enter_context(
+        writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount,
+                            tag="_graColScatter_edgeMask")).idx
+    _tluFreeEdgeKeepMask(writer, kernel, module, tileInfo, mc, edgeMaskSgpr)
+    if keepMaskSgpr is None:
+      keepMaskSgpr = edgeMaskSgpr
+    else:
+      module.add(SAndX(dst=sgpr(keepMaskSgpr, laneSGPRCount),
+                 src0=sgpr(keepMaskSgpr, laneSGPRCount),
+                 src1=sgpr(edgeMaskSgpr, laneSGPRCount),
+                 comment="%s: keep lanes that are neither pad nor past M/N" % tc))
+
+    oobVgpr = writer.vgprPool.checkOut(1, tag="_graColScatter_oob")
+    module.add(VMovB32(dst=vgpr(oobVgpr), src="BufferOOB",
+               comment="%s: offset that the buffer bound rejects" % tc))
 
     waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
     colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
@@ -920,13 +936,11 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
       if waveAxisOffVgpr is not None:
         module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
                    comment="%s: + per-wave free-dim (M/N) global offset" % tc))
-      if padMaskSgpr is not None:
-        module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(oobVgpr), src1=vgpr(out),
-                   src2=sgpr(padMaskSgpr, laneSGPRCount),
-                   comment="%s: pad lane -> BufferOOB, dropping its global read" % tc))
+      module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(oobVgpr), src1=vgpr(out),
+                 src2=sgpr(keepMaskSgpr, laneSGPRCount),
+                 comment="%s: pad or past-M/N lane -> BufferOOB, dropping its global read" % tc))
 
-    if oobVgpr is not None:
-      writer.vgprPool.checkIn(oobVgpr)
+    writer.vgprPool.checkIn(oobVgpr)
 
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
@@ -1243,6 +1257,84 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
           comment="%s: + K-slice offset" % tc))
     writer.vgprPool.checkIn(kOff)
   return dst
+
+
+def _tluWaveFreeElemOffset(writer, kernel, module, tileInfo):
+  """VGPR holding this wave's free-dim (M/N) element offset, or None when it is 0.
+
+  _tluWaveAxisGlobalOffset returns a byte offset with the K-slice step already
+  folded in, which cannot be separated again.  The edge mask needs the free-dim
+  term on its own, so recompute just that one here.
+  """
+  tc = tileInfo.tc
+  subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
+  axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
+  # Bail before the id helpers, which emit a mov even when they report no split.
+  if int(tileInfo.grWavesPerStrip) <= 1 and axisWaves <= 1:
+    return None
+  dst = writer.vgprPool.checkOut(1, tag="_tluWaveFreeElemOffset_%s" % tc)
+  if int(tileInfo.grWavesPerStrip) > 1:
+    # Waves sharing a strip step along the free dim by whole strips.
+    idOk = _tluStripIdx(writer, kernel, module, tc, tileInfo, dst)
+    elemsPerId = subtileM
+  else:
+    idOk = _tluWaveAxisId(writer, kernel, module, tc, dst)
+    elemsPerId = int(tileInfo.localSubtileGrid[0]) * subtileM
+  if not idOk:
+    writer.vgprPool.checkIn(dst)
+    return None
+  comment = "%s: wave free-dim element offset = id*%u" % (tc, elemsPerId)
+  if elemsPerId > 1 and (elemsPerId & (elemsPerId - 1)) == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(dst), shiftHex=hex(int(log2(elemsPerId))),
+               src=vgpr(dst), comment=comment))
+  elif elemsPerId > 1:
+    tmpS = writer.sgprPool.checkOut(1, tag="_tluWaveFreeElemOffset_s_%s" % tc,
+                                    preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(elemsPerId),
+               comment="%s: free-dim elements per id" % tc))
+    module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst), comment=comment))
+    writer.sgprPool.checkIn(tmpS)
+  return dst
+
+
+def _tluFreeEdgeKeepMask(writer, kernel, module, tileInfo, laneFreeElemVgpr, maskSgpr):
+  """Set maskSgpr to the lanes whose free-dim (M/N) element is inside the operand.
+
+  On TLU=1 the free dim is contiguous, so a lane past the real M/N does not run
+  off the tensor: it wraps into the next K row.  The SRD limit is one linear
+  bound over the K window and so keeps that address, and the load costs full
+  bandwidth for data no MFMA result survives to use.  Comparing against the size
+  lets the caller point those lanes at BufferOOB instead, dropping the read.
+
+  The workgroup's tile start is already folded into the SRD base, so the compare
+  is tile-relative: waveFree + laneFree < size - WG*MT.
+  """
+  tc = tileInfo.tc
+  isA = (tc == 'A')
+  mt = int(kernel["MacroTile0" if isA else "MacroTile1"])
+  sizeIdx = kernel["ProblemType"]["Index0" if isA else "Index1"]
+  laneSGPRCount = writer.states.laneSGPRCount
+
+  module.addComment0("%s: drop GR lanes past the real M/N" % tc)
+  waveFree = _tluWaveFreeElemOffset(writer, kernel, module, tileInfo)
+  if waveFree is None:
+    posVgpr, ownPos = laneFreeElemVgpr, False
+  else:
+    module.add(VAddU32(dst=vgpr(waveFree), src0=vgpr(waveFree), src1=vgpr(laneFreeElemVgpr),
+               comment="%s: lane free-dim element within the tile" % tc))
+    posVgpr, ownPos = waveFree, True
+
+  with writer.allocTmpSgpr(1, tag="_tluFreeEdge_rem_%s" % tc) as remSgprInfo:
+    rem = remSgprInfo.idx
+    module.add(SMulI32(dst=sgpr(rem), src0=sgpr("WorkGroup0" if isA else "WorkGroup1"),
+               src1=mt, comment="%s: tile start = WG*%u" % (tc, mt)))
+    module.add(SSubU32(dst=sgpr(rem), src0=writer.sizeRef(sizeIdx), src1=sgpr(rem),
+               comment="%s: free-dim elements left in the operand" % tc))
+    module.add(VCmpLtU32(dst=sgpr(maskSgpr, laneSGPRCount), src0=vgpr(posVgpr),
+               src1=sgpr(rem), comment="%s: lane inside the real M/N?" % tc))
+
+  if ownPos:
+    writer.vgprPool.checkIn(posVgpr)
 
 
 def _tluKWaveSlots(tileInfo):

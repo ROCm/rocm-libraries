@@ -86,6 +86,11 @@ class _Writer:
         from rocisa.container import sgpr
         return sgpr("Stride%s%s" % (tc, idx))
 
+    def sizeRef(self, idx):
+        from rocisa.container import sgpr
+        from tensilelite.Common import INDEX_CHARS
+        return sgpr("Size%s" % INDEX_CHARS[idx])
+
     def isConstUnitStride(self, ref):
         return False
 
@@ -115,7 +120,7 @@ def _kernel(miWaveGroup=(1, 1)):
         "MacroTile0": 256, "MacroTile1": 256,
         "_DepthUA": 256, "_DepthUB": 256,
         "MIWaveGroup": list(miWaveGroup), "WavefrontSize": 64,
-        "ProblemType": {"IndexUnroll": 2},
+        "ProblemType": {"Index0": 0, "Index1": 1, "IndexUnroll": 2},
         "NonTemporalA": 0, "NonTemporalB": 0,
         "BufferLoad": True, "DirectToLds": False,
     }
@@ -186,6 +191,42 @@ def test_gr_addressing_is_emitted_for_either_operand(tc):
     """NN and TT pair a TLU=1 operand with a row-major one, on either side."""
     _, _, module, _ = _emitGR(_COL_SCATTER_STACK, tc=tc)
     assert module.items()
+
+
+# --- M/N edge mask ----------------------------------------------------------
+#
+# The free dim is contiguous on TLU=1, so a lane past the real M/N wraps into the
+# next K row instead of off the tensor.  The SRD limit keeps that address, so the
+# read costs full bandwidth unless the lane is sent to BufferOOB explicitly.
+
+def test_gr_sends_lanes_past_the_free_dim_size_to_buffer_oob():
+    _, _, module, _ = _emitGR(_COL_SCATTER_STACK)
+    text = str(module)
+    assert "v_cmp_lt_u32" in text, "no runtime compare against the free-dim size"
+    assert "BufferOOB" in text, "out-of-range lanes are not pointed at the buffer bound"
+    assert "v_cndmask_b32" in text, "the compare never selects the OOB offset"
+
+
+@pytest.mark.parametrize("tc,sizeSgpr", [("A", "SizeI"), ("B", "SizeJ")])
+def test_gr_edge_mask_compares_against_that_operands_size(tc, sizeSgpr):
+    """A is bounded by M and B by N; swapping them would corrupt the other edge."""
+    _, _, module, _ = _emitGR(_COL_SCATTER_STACK, tc=tc)
+    assert sizeSgpr in str(module)
+
+
+@pytest.mark.parametrize("tc,wgSgpr", [("A", "WorkGroup0"), ("B", "WorkGroup1")])
+def test_gr_edge_mask_is_tile_relative(tc, wgSgpr):
+    """The tile start is already in the SRD base, so the bound is size - WG*MT."""
+    text = str(_emitGR(_COL_SCATTER_STACK, tc=tc)[2])
+    assert wgSgpr in text, "the bound does not account for this workgroup's tile"
+    assert "s_sub_u32" in text, "the size is never reduced to the tile-relative bound"
+
+
+def test_gr_edge_mask_does_not_leak_registers():
+    """The mask needs scratch on top of the pad path's; all of it must come back."""
+    writer, _, _, (vbefore, sbefore) = _emitGR(_COL_SCATTER_STACK)
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
 
 
 # --- local read -------------------------------------------------------------
