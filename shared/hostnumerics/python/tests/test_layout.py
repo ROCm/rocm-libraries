@@ -18,7 +18,7 @@ SIZE_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 class LayoutTests(unittest.TestCase):
     def test_scalar_and_owned_metadata(self):
         scalar = hn.Layout()
-        self.assertEqual(scalar, hn.Layout(hn.Shape(), []))
+        self.assertEqual(scalar, hn.Layout(hn.Shape(), [], 0))
         self.assertEqual(scalar.shape, hn.Shape())
         self.assertEqual(scalar.strides, [])
         self.assertEqual(scalar.element_offset([]), 0)
@@ -159,8 +159,8 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "stride count 1 does not match shape rank 2"
         ):
-            hn.Layout(hn.Shape([2, 3]), [1])
-        layout = hn.Layout(hn.Shape([2, 3]), [3, 1])
+            hn.Layout(hn.Shape([2, 3]), [1], 0)
+        layout = hn.Layout(hn.Shape([2, 3]), [3, 1], 0)
         for point in ([], [0], [0, 0, 0]):
             with self.assertRaisesRegex(
                 RuntimeError,
@@ -178,7 +178,7 @@ class LayoutTests(unittest.TestCase):
         ):
             layout.stride(2)
         for dimensions in ([0], [2, 0, 3]):
-            empty = hn.Layout(hn.Shape(dimensions), [1] * len(dimensions))
+            empty = hn.Layout(hn.Shape(dimensions), [1] * len(dimensions), 0)
             with self.assertRaises(RuntimeError):
                 empty.element_offset([0] * len(dimensions))
 
@@ -193,7 +193,7 @@ class LayoutTests(unittest.TestCase):
             ):
                 layout.element_offset(point)
         for dimensions in ([SIZE_MAX, 2, 0], [3, 0]):
-            layout = hn.Layout(hn.Shape(dimensions), [PTRDIFF_MAX] * len(dimensions))
+            layout = hn.Layout(hn.Shape(dimensions), [PTRDIFF_MAX] * len(dimensions), 0)
             point = [d - 1 if d else 0 for d in dimensions]
             axis = dimensions.index(0)
             with self.assertRaisesRegex(
@@ -268,14 +268,14 @@ class LayoutTests(unittest.TestCase):
     def test_invalid_python_inputs(self):
         for strides in ([PTRDIFF_MIN - 1], [PTRDIFF_MAX + 1], [1.5]):
             with self.assertRaises(TypeError):
-                hn.Layout(hn.Shape([2]), strides)
+                hn.Layout(hn.Shape([2]), strides, 0)
         for offset in (PTRDIFF_MIN - 1, PTRDIFF_MAX + 1, 1.5):
             with self.assertRaises(TypeError):
                 hn.Layout(hn.Shape([2]), [1], offset)
-        layout = hn.Layout(hn.Shape([2]), [1])
+        layout = hn.Layout(hn.Shape([2]), [1], 0)
         for axis in (-1, -(1 << 63), SIZE_MAX + 1, 1.5, slice(None)):
             with self.assertRaises(TypeError):
                 layout.stride(axis)
         for point in ([-1], [SIZE_MAX + 1], [1.5], 3):
             with self.assertRaises(TypeError):
-                hn.Layout(hn.Shape([2]), [1]).element_offset(point)
+                hn.Layout(hn.Shape([2]), [1], 0).element_offset(point)

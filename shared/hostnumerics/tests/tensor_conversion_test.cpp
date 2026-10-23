@@ -18,7 +18,7 @@ void testTensorConversions() {
     const std::array<float, 6> matrixConversionSource{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     const Tensor matrixSource =
         Tensor::copyNativeValues<float>(Shape{2, 3}, matrixConversionSource);
-    const Layout columnMajorLayout(Shape{2, 3}, {1, 2});
+    const Layout columnMajorLayout(Shape{2, 3}, {1, 2}, 0);
     const Tensor columnMajorFloat16 =
         matrixSource.copyConvertedTo(ScalarType::Float16, columnMajorLayout);
     require(columnMajorFloat16.layout() == columnMajorLayout,
@@ -37,7 +37,7 @@ void testTensorConversions() {
                         "Tensor conversion changed a value in the reverse relayout direction.");
     requireError(
         [&] {
-            (void)matrixSource.copyConvertedTo(ScalarType::Float16, Layout(Shape{2, 3}, {0, 1}));
+            (void)matrixSource.copyConvertedTo(ScalarType::Float16, Layout(Shape{2, 3}, {0, 1}, 0));
         },
         "Tensor conversion accepted overlapping destination elements.");
 
@@ -49,7 +49,7 @@ void testTensorConversions() {
     std::copy(sourceEncodings.begin(), sourceEncodings.end(),
               rawBFloat16.rawEncodedBackingStorage().begin());
     const Tensor relaidBFloat16 =
-        rawBFloat16.copyConvertedTo(ScalarType::BFloat16, Layout(Shape{2, 2}, {1, 2}));
+        rawBFloat16.copyConvertedTo(ScalarType::BFloat16, Layout(Shape{2, 2}, {1, 2}, 0));
     const std::array<std::byte, 8> expectedRelaidEncodings{
         std::byte{0xa1}, std::byte{0x7f}, std::byte{0x00}, std::byte{0x80},
         std::byte{0xa2}, std::byte{0xff}, std::byte{0x80}, std::byte{0x3f},

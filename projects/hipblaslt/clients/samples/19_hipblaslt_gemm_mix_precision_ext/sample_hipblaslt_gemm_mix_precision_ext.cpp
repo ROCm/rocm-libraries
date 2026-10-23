@@ -72,20 +72,24 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
             = copyTensorFromEncodedStorage(reference.data() + batchStrideD * b,
                                            batchStrideD,
                                            Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                                  {1, static_cast<ptrdiff_t>(runner.m)}));
+                                                  {1, static_cast<ptrdiff_t>(runner.m)},
+                                                  0));
         Tensor a = copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
                                                 batchStrideA,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.k)},
-                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+                                                       {1, static_cast<ptrdiff_t>(runner.m)},
+                                                       0));
         Tensor bTensor
             = copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
                                            batchStrideB,
                                            Layout(Shape{size_t(runner.k), size_t(runner.n)},
-                                                  {1, static_cast<ptrdiff_t>(runner.k)}));
+                                                  {1, static_cast<ptrdiff_t>(runner.k)},
+                                                  0));
         Tensor       c        = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
                                                 batchStrideC,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+                                                       {1, static_cast<ptrdiff_t>(runner.m)},
+                                                       0));
         const Tensor product  = matmul(a, bTensor, ScalarType::Float32);
         const Tensor combined = product * (runner.alpha * scaleA)
                                 + c.copyConvertedTo(ScalarType::Float32) * runner.beta;

@@ -35,7 +35,7 @@ void testReferenceOperationAliasing() {
 
     const Tensor distinctLinearCombinationInput =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    Tensor selfCollidingLinearCombinationOutput(ScalarType::Float32, Layout(Shape{2}, {0}));
+    Tensor selfCollidingLinearCombinationOutput(ScalarType::Float32, Layout(Shape{2}, {0}, 0));
     selfCollidingLinearCombinationOutput.storeFrom({0}, 17.0f);
     const std::vector<std::byte> selfCollidingLinearCombinationOutputBefore =
         copyRawEncodedBackingStorage(selfCollidingLinearCombinationOutput);

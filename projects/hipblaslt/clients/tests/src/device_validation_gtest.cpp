@@ -52,7 +52,7 @@ namespace
         {
             SCOPED_TRACE(int(apiType));
             const auto type = hipblaslt::hostnumerics::scalarType(apiType);
-            hn::Tensor stored(type, hn::Layout(hn::Shape{batches, m, n}, {stride, 1, ld}));
+            hn::Tensor stored(type, hn::Layout(hn::Shape{batches, m, n}, {stride, 1, ld}, 0));
             std::vector<hn::FreivaldsPlan> plans;
             hn::ScalarConversionOptions    conversion;
             conversion.integerOverflow = hn::IntegerOverflow::Saturate;

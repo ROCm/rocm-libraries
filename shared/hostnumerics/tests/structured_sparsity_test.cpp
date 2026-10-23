@@ -21,7 +21,7 @@ void testStructuredSparsity() {
     std::array<float, 20> inputStorage;
     inputStorage.fill(-99);
     Tensor input =
-        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
+        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}, 0),
                                           std::as_writable_bytes(std::span<float>(inputStorage)));
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 8; ++column)
@@ -30,7 +30,7 @@ void testStructuredSparsity() {
     std::array<float, 20> prunedStorage;
     prunedStorage.fill(-7);
     Tensor pruned =
-        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
+        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}, 0),
                                           std::as_writable_bytes(std::span<float>(prunedStorage)));
     std::array<float, 8> compressedStorage{};
     Tensor compressed = Tensor::copyNativeStorage<float>(
@@ -155,7 +155,7 @@ void testStructuredSparsity() {
     for (const Shape shape : {Shape{std::numeric_limits<size_t>::max(), 2, 0},
                               Shape{0, std::numeric_limits<size_t>::max(), 2}}) {
         const size_t axis = shape[0] == 0 ? 0 : 2;
-        const Layout layout(shape, {0, 0, 0});
+        const Layout layout(shape, {0, 0, 0}, 0);
         const Tensor emptyInput(ScalarType::Float32, layout);
         const StructuredSparseTensor outputs{
             .pruned = Tensor(ScalarType::Float32, layout),
@@ -203,8 +203,8 @@ void testStructuredSparsity() {
     require(wide.compressed.shape() == Shape{1} && !wide.retainedIndices,
             "Structured sparsity imposed the UInt8 index limit without an index output.");
 
-    Tensor overlappingPrunedA(ScalarType::Float32, Layout(Shape{2, 8}, {1, 1}));
-    Tensor overlappingPrunedB(ScalarType::Float32, Layout(Shape{2, 8}, {1, 1}));
+    Tensor overlappingPrunedA(ScalarType::Float32, Layout(Shape{2, 8}, {1, 1}, 0));
+    Tensor overlappingPrunedB(ScalarType::Float32, Layout(Shape{2, 8}, {1, 1}, 0));
     Tensor independentCompressedA(ScalarType::Float32, Shape{2, 4});
     Tensor independentCompressedB(ScalarType::Float32, Shape{2, 4});
     StructuredSparsityPattern overlappingPattern;

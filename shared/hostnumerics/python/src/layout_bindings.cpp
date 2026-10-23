@@ -30,7 +30,7 @@ compare and hash by their shape, strides, and offset.
 )doc")
         .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
-             "offset"_a = 0)
+             "offset"_a)
         .def_static(
             "contiguous", [](const Shape& shape) { return Layout::contiguous(shape); }, "shape"_a,
             "Contiguous C order, with the last dimension fastest.")

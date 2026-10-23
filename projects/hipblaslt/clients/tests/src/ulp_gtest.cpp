@@ -61,7 +61,8 @@ namespace
 
         const Layout layout(
             Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
-            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)});
+            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)},
+            0);
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
         options.allClose                     = false;
@@ -97,7 +98,8 @@ namespace
         const ScalarType scalar = hipblaslt::hostnumerics::scalarType(type);
         const Layout     layout(
             Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
-            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)});
+            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)},
+            0);
         ComparisonOptions options;
         options.allClose                     = false;
         options.computeElementwiseStatistics = false;

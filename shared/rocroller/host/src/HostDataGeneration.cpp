@@ -489,11 +489,13 @@ namespace rocRoller::hostnumerics
         {
             return Layout(
                 Shape{freeExtent, blockCount},
-                {checkedPtrdiff(blockCount, "rocRoller block-scale stride exceeds ptrdiff_t."), 1});
+                {checkedPtrdiff(blockCount, "rocRoller block-scale stride exceeds ptrdiff_t."), 1},
+                0);
         }
         return Layout(
             Shape{freeExtent, blockCount},
-            {1, checkedPtrdiff(freeExtent, "rocRoller block-scale stride exceeds ptrdiff_t.")});
+            {1, checkedPtrdiff(freeExtent, "rocRoller block-scale stride exceeds ptrdiff_t.")},
+            0);
     }
 
     GeneratedTensor generateHostTensor(TensorDescriptor const&             descriptor,

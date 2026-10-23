@@ -106,7 +106,7 @@ namespace
             hn::Shape{batches * batchStride},
             hn::GenerationRecipe::realOnly(hn::GenerationRecipe::constant({.value = 40})));
         return storage.shareStorageWithLayout(hn::Layout(
-            hn::Shape{batches, rows, cols}, {ptrdiff_t(batchStride), rowStride, columnStride}));
+            hn::Shape{batches, rows, cols}, {ptrdiff_t(batchStride), rowStride, columnStride}, 0));
     }
 
     hn::PeriodicMatmulPlan requirePlan(hn::PeriodicMatmulPreparation preparation)
@@ -463,9 +463,10 @@ namespace
                         for(size_t col = 0; col < n; col += 61)
                         {
                             const size_t width = std::min(size_t(61), n - col);
-                            hn::Tensor   observed(hn::ScalarType::Float32,
-                                                hn::Layout(hn::Shape{m, width}, {1, ptrdiff_t(m)}));
-                            auto         readbackBegin = Clock::now();
+                            hn::Tensor   observed(
+                                hn::ScalarType::Float32,
+                                hn::Layout(hn::Shape{m, width}, {1, ptrdiff_t(m)}, 0));
+                            auto readbackBegin = Clock::now();
                             requireHip(hipMemcpy2D(observed.rawEncodedBackingStorage().data(),
                                                    m * sizeof(float),
                                                    static_cast<float*>(dd.data) + batch * strideD
