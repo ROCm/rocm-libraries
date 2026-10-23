@@ -49,6 +49,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <hipblaslt/client/FreivaldsCheck.hpp>
 #include <hipblaslt/client/MatmulPreparation.hpp>
 #include <hipblaslt/client/MatmulProblem.hpp>
 #include <hipblaslt/hipblaslt-ext-op.h>
@@ -4091,6 +4092,8 @@ void testing_matmul_with_bias(const Arguments&                                  
         };
         std::vector<std::vector<roc::hostnumerics::FreivaldsPlan>> freivaldsPlansE(
             freivaldsCheckE ? problem_count : 0);
+        std::vector<roc::hostnumerics::FreivaldsCheckOptions> freivaldsOptions(problem_count);
+        std::vector<roc::hostnumerics::FreivaldsCheckOptions> freivaldsOptionsE(problem_count);
         // Only prepare numerical plans here; no dense reference output is allocated.
         // Certification and numerical failure reasons come from HostNumerics.
         if(arg.freivalds)
@@ -4136,6 +4139,21 @@ void testing_matmul_with_bias(const Arguments&                                  
                         if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&result))
                             throw std::invalid_argument("Freivalds: " + failure->reason);
                         plans.push_back(std::get<FreivaldsPlan>(std::move(result)));
+                        // Activation and amax reconstruction still require exact stored integers.
+                        if(!checkActivation && !arg.amaxD)
+                        {
+                            auto& options = auxiliary ? freivaldsOptionsE[i] : freivaldsOptions[i];
+                            const auto batchOptions = hipblaslt::client::freivaldsCheckOptions(
+                                hipblaslt_get_arch_major(),
+                                plans.back(),
+                                problem.k,
+                                hipblaslt::hostnumerics::scalarType(TiA),
+                                hipblaslt::hostnumerics::scalarType(TiB),
+                                operation.accumulatorType);
+                            options.maximumAbsoluteComputationError
+                                = std::max(options.maximumAbsoluteComputationError,
+                                           batchOptions.maximumAbsoluteComputationError);
+                        }
                     }
                 };
                 prepare(false);
@@ -4403,10 +4421,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                    stream);
 
                     // With an activation D is not linear in the inputs; it is checked through E.
-                    ValidationResult res
-                        = arg.freivalds && !checkActivation ? verify_freivalds_device(
-                              d_dev, freivaldsPlans[i], stream, exceptionBudget(i))
-                                                            : ValidationResult{};
+                    ValidationResult res = arg.freivalds && !checkActivation
+                                               ? verify_freivalds_device(d_dev,
+                                                                         freivaldsPlans[i],
+                                                                         stream,
+                                                                         exceptionBudget(i),
+                                                                         freivaldsOptions[i])
+                                               : ValidationResult{};
                     freivaldsStatistics.checked_elements += res.statistics.checked_elements;
                     freivaldsStatistics.recomputed_elements += res.statistics.recomputed_elements;
                     freivaldsStatistics.readback_bytes += res.statistics.readback_bytes;
@@ -4426,8 +4447,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                                 stream);
                         ValidationResult resE;
                         if(arg.freivalds)
-                            resE = verify_freivalds_device(
-                                e_dev, freivaldsPlansE[i], stream, exceptionBudget(i));
+                            resE = verify_freivalds_device(e_dev,
+                                                           freivaldsPlansE[i],
+                                                           stream,
+                                                           exceptionBudget(i),
+                                                           freivaldsOptionsE[i]);
                         freivaldsStatistics.checked_elements += resE.statistics.checked_elements;
                         freivaldsStatistics.recomputed_elements
                             += resE.statistics.recomputed_elements;

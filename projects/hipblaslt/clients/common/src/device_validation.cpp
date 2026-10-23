@@ -503,7 +503,8 @@ namespace
 ValidationResult verify_freivalds_device(const DeviceMatrix&                output,
                                          std::span<const hn::FreivaldsPlan> plans,
                                          hipStream_t                        stream,
-                                         size_t                             maximumExceptions)
+                                         size_t                             maximumExceptions,
+                                         const hn::FreivaldsCheckOptions&   options)
 {
     if(plans.empty() || output.rows == 0 || output.cols == 0)
         return {};
@@ -530,7 +531,7 @@ ValidationResult verify_freivalds_device(const DeviceMatrix&                outp
             const auto begin = std::chrono::steady_clock::now();
             const auto check = std::visit(
                 [&](const auto& output) {
-                    return plan.check(output, report.remaining_exceptions());
+                    return plan.check(output, report.remaining_exceptions(), options);
                 },
                 observed.output);
             report.compare(plan, batch, check, [&](size_t i, size_t j) {

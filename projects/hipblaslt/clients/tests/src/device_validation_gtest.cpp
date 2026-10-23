@@ -7,6 +7,7 @@
 #include "hipBuffer.hpp"
 #include "hip_placement.hpp"
 #include <gtest/gtest.h>
+#include <hipblaslt/client/FreivaldsCheck.hpp>
 #include <hipblaslt/client/FreivaldsDevice.hpp>
 #include <hipblaslt/hostnumerics/Types.hpp>
 
@@ -103,6 +104,82 @@ namespace
                       hipSuccess);
             EXPECT_FALSE(verify_freivalds_device(matrix, plans, stream.value).passed);
         }
+    }
+
+    TEST(FreivaldsDevice_pre_checkin, Gfx11AccumulationBound_smoke)
+    {
+        const Stream stream;
+        for(auto inputType : {hn::ScalarType::Float16, hn::ScalarType::BFloat16})
+            for(auto apiType : {HIP_R_32F, HIP_R_16F, HIP_R_16BF})
+            {
+                SCOPED_TRACE(int(inputType));
+                SCOPED_TRACE(int(apiType));
+                hn::Tensor a(inputType, hn::Shape{1, 4}), b(inputType, hn::Shape{4, 1});
+                a.storeFrom({0, 0}, -2);
+                a.storeFrom({0, 2}, 1);
+                a.storeFrom({0, 3}, 1);
+                for(size_t k = 0; k < 4; ++k)
+                    b.storeFrom({k, 0}, 1);
+                auto prepared = hn::prepareFreivalds(a,
+                                                     b,
+                                                     hn::MatmulOptions{},
+                                                     hn::EpilogueOptions{},
+                                                     hipblaslt::hostnumerics::scalarType(apiType));
+                ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
+                const std::vector plans{std::get<hn::FreivaldsPlan>(std::move(prepared))};
+                auto              policy = [&](int            architecture,
+                                  hn::ScalarType input,
+                                  hn::ScalarType compute,
+                                  size_t         k = 4) {
+                    return hipblaslt::client::freivaldsCheckOptions(
+                        architecture, plans.front(), k, input, input, compute);
+                };
+                // Force the gfx11 policy so this regression also executes on other GPUs.
+                const auto options = policy(11, inputType, hn::ScalarType::Float32);
+                EXPECT_GT(options.maximumAbsoluteComputationError, 0x1p-23);
+                EXPECT_LT(options.maximumAbsoluteComputationError, 0.5);
+                EXPECT_EQ(
+                    policy(12, inputType, hn::ScalarType::Float32).maximumAbsoluteComputationError,
+                    0);
+                EXPECT_EQ(policy(11, hn::ScalarType::Float32, hn::ScalarType::Float32)
+                              .maximumAbsoluteComputationError,
+                          0);
+                EXPECT_EQ(
+                    policy(11, inputType, hn::ScalarType::Float64).maximumAbsoluteComputationError,
+                    0);
+                EXPECT_EQ(policy(11, inputType, hn::ScalarType::Float32, 0)
+                              .maximumAbsoluteComputationError,
+                          0);
+                hn::Tensor stored(hipblaslt::hostnumerics::scalarType(apiType), hn::Shape{1, 1});
+                // This encoded residual is produced by -2 + 1*1 + 1*1 on gfx11 DOT2.
+                stored.storeFrom({0, 0}, 0x1p-23);
+                const auto      bytes = stored.rawEncodedBackingStorage();
+                HipDeviceBuffer device(apiType, 1);
+                ASSERT_EQ(hipMemcpyAsync(device.buf(),
+                                         bytes.data(),
+                                         bytes.size(),
+                                         hipMemcpyHostToDevice,
+                                         stream.value),
+                          hipSuccess);
+                const DeviceMatrix matrix{device.buf(), apiType, 1, 1, 1, 1};
+                EXPECT_FALSE(verify_freivalds_device(matrix, plans, stream.value).passed);
+                const auto checked
+                    = verify_freivalds_device(matrix, plans, stream.value, 1, options);
+                EXPECT_TRUE(checked.passed) << checked.message;
+                EXPECT_EQ(checked.statistics.recomputed_elements, 1);
+                EXPECT_FALSE(checked.statistics.used_host_fallback);
+                EXPECT_FALSE(
+                    verify_freivalds_device(matrix, plans, stream.value, 0, options).passed);
+                ASSERT_EQ(corrupt_element_device(matrix, 0, 0, 0, stream.value), hipSuccess);
+                // The helper replaces a nonzero residual with zero, then zero with one.
+                ASSERT_EQ(corrupt_element_device(matrix, 0, 0, 0, stream.value), hipSuccess);
+                EXPECT_FALSE(
+                    verify_freivalds_device(matrix, plans, stream.value, 1, options).passed);
+                const auto unsafe = policy(11, inputType, hn::ScalarType::Float32, 1u << 24);
+                EXPECT_GE(unsafe.maximumAbsoluteComputationError, 0.5);
+                EXPECT_FALSE(
+                    verify_freivalds_device(matrix, plans, stream.value, 1, unsafe).passed);
+            }
     }
 
     TEST(FreivaldsDevice_pre_checkin, Encoded16BitValues_smoke)
