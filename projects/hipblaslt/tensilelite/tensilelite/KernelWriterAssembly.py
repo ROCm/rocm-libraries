@@ -89,7 +89,8 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
-from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered
+from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered, \
+  dot2DtvASlotPipelined
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -10023,13 +10024,50 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MAC Iteration
   ##############################################################################
+  def dot2DtvAPairsPerSlot(self, kernel):
+    """v_dot2 iterations (dword pairs) covered by one A load."""
+    return kernel["GlobalReadVectorWidthA"] // kernel["NumDotElements"]
+
+  def dot2DtvALoadIdx(self, kernel, block, slot):
+    """Global-read index of the A load for tile row `block` and K slot `slot`."""
+    return slot + kernel["NumLoadsCoalescedA"] * block
+
   def dot2DirectToVgprAReg(self, kernel, block, u):
     """G2LA register holding the A pair of tile row `block` for loop iteration `u`
-    under DirectToVgprDot2A: one global load per row, its K block in order."""
-    dwordsPerLoad = kernel["GlobalReadVectorWidthA"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() // self.states.bpr
+    under DirectToVgprDot2A: each load holds its K block in order."""
+    pairs = self.dot2DtvAPairsPerSlot(kernel)
+    load = self.dot2DtvALoadIdx(kernel, block, u // pairs)
     # With two sets, the v_dot2 read the set the current global read does not target.
     useSecond = dot2DtvADoubleBuffered(kernel) and self.states.dot2DtvASet == 0
-    return "G2LA%s+%u" % ("2" if useSecond else "", block * dwordsPerLoad + u)
+    return "G2LA%s+%u" % ("2" if useSecond else "", load * pairs + u % pairs)
+
+  def dot2DirectToVgprBReg(self, kernel, block, u):
+    """G2LB register holding the B pair of tile column `block` for loop iteration
+    `u` under DirectToVgprDot2B; B loads are shaped like A's."""
+    pairs = self.dot2DtvAPairsPerSlot(kernel)
+    load = u // pairs + kernel["NumLoadsCoalescedB"] * block
+    return "G2LB+%u" % (load * pairs + u % pairs)
+
+  def dot2DtvADequantSlot(self, kernel, tPA, u):
+    """Slot-pipelined DirectToVgprDot2A: before the first v_dot2 of a K slot,
+    wait for that slot's A loads and dequantize them in place.
+
+    Loop-body issue order is B, scales (and zero-points), then A by load index,
+    so the loads still in flight after slot s are exactly the later A loads."""
+    module = Module("dot2DtvADequantSlot")
+    pairs = self.dot2DtvAPairsPerSlot(kernel)
+    if u % pairs:
+      return module
+    slot = u // pairs
+    numLoads = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
+    loads = [self.dot2DtvALoadIdx(kernel, row, slot) for row in range(kernel["NumLoadsPerpendicularA"])]
+    module.add(SWaitCnt(vlcnt=numLoads - 1 - max(loads), comment="A slot %u loaded" % slot))
+    if kernel["ProblemType"]["DataTypeA"].isInt4():
+      srcDwords = int(kernel["GlobalReadVectorWidthA"] * tPA["bpeGR"]) // self.states.bpr
+      for load in loads:
+        g2lIdx = load * pairs
+        module.add(self.blockScaleADequant(kernel, tPA, "G2LA", g2lIdx, g2lIdx, load, srcDwords))
+    return module
 
   def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False, unrollIdx=None):
     imod = Module("macIter_X%u_I%u"%(bufferIdx, iuiCount))
@@ -13078,11 +13116,17 @@ class KernelWriterAssembly(KernelWriter):
       self.globalread_gpr_record.b.addrVgpr = []
       self.globalread_gpr_record.b.offset = []
 
+    # Slot-pipelined DirectToVgprDot2A issues the scales first, so that waiting
+    # for an A slot does not wait for later A loads too.
+    scalesFirst = tP["isA"] and dot2DtvASlotPipelined(kernel)
+    if scalesFirst and kernel["ProblemType"]["UseScaleAB"] == "Block":
+      imod.middle.add(self.blockScaleAGlobalRead(kernel, tP))
+
     globalReadBody(tP)
 
     # w4a16: issue the block scales alongside A so they land in the same
     # outstanding-load batch the localWrite already waits on.
-    if tP["isA"] and kernel["ProblemType"]["UseScaleAB"] == "Block":
+    if tP["isA"] and kernel["ProblemType"]["UseScaleAB"] == "Block" and not scalesFirst:
       imod.middle.add(self.blockScaleAGlobalRead(kernel, tP))
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -14415,7 +14459,8 @@ class KernelWriterAssembly(KernelWriter):
     if (not kernel["DirectToLds%s"%tc]) or \
        ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
       # Skip local write if DTVA or DTVB
-      if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
+      if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]) \
+         and not (tP["isB"] and kernel["DirectToVgprDot2B"]):
         localWriteBody(tP)
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and \
       (not kernel["DirectToLdsMetadata"] or (kernel["NonDTLTailLoopMetadata"] and self.states.inTailLoop)):
@@ -14786,7 +14831,10 @@ class KernelWriterAssembly(KernelWriter):
         else:
           # dot2
           if kernel["DirectToVgprDot2A"]:
-            offsetInc = self.states.lrvwUnrollA
+            slotStride = kernel["NumWaveSplitK"] * kernel["GlobalReadVectorWidthA"]
+            within = tP["localReadOffset"] % slotStride + self.states.lrvwUnrollA
+            offsetInc = self.states.lrvwUnrollA if within < kernel["GlobalReadVectorWidthA"] \
+              else slotStride - tP["localReadOffset"] % slotStride
           elif kernel["UseDotInstruction"]:
             offsetInc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"]
           else:
@@ -14826,8 +14874,8 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def localReadDo(self, kernel, bufferIdx, iui, epsi, tP):
 
-    if tP["isA"] and kernel["DirectToVgprDot2A"]:
-      return Module("LocalReadDoA_I%s (DirectToVgprDot2A)" % iui), Module(), Module()
+    if (tP["isA"] and kernel["DirectToVgprDot2A"]) or (tP["isB"] and kernel["DirectToVgprDot2B"]):
+      return Module("LocalReadDo%s_I%s (DirectToVgprDot2)" % (tP["tensorChar"], iui)), Module(), Module()
 
     if not self.do["LocalRead%s" % tP["tensorChar"]]:
       imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"], iui))
@@ -20102,7 +20150,10 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def isSwapGlobalReadOrderForDtvOrDtl(self, kernel, prefetch1=False):
     # check the conditions to swap global read order (from A, B to B, A)
-    if kernel["DirectToVgprA"] and kernel["DirectToVgprB"]:
+    if dot2DtvASlotPipelined(kernel):
+      # A slots are consumed in issue order behind partial vmcnt waits.
+      return True
+    elif kernel["DirectToVgprA"] and kernel["DirectToVgprB"]:
       # DTVA+DTVB case, no swap
       return False
     elif kernel["DirectToVgprA"]:

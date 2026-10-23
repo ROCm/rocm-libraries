@@ -260,11 +260,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
-    # DirectToVgprDot2A=False is the default; naming it would rename every kernel.
-    if state.get("DirectToVgprDot2A", False):
-      requiredParametersTemp.add("DirectToVgprDot2A")
-    else:
-      requiredParametersTemp.discard("DirectToVgprDot2A")
+    # DirectToVgprDot2A/B=False is the default; naming it would rename every kernel.
+    for key in ("DirectToVgprDot2A", "DirectToVgprDot2B"):
+      if state.get(key, False):
+        requiredParametersTemp.add(key)
+      else:
+        requiredParametersTemp.discard(key)
 
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:

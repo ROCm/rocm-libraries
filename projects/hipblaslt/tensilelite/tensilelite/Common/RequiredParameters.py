@@ -49,6 +49,7 @@ def getRequiredParametersMin() -> set:
         'DirectToVgprA',
         'DirectToVgprB',
         'DirectToVgprDot2A',
+        'DirectToVgprDot2B',
         'DirectToVgprSparseMetadata',
         'DirectToLdsA',
         'DirectToLdsB',
