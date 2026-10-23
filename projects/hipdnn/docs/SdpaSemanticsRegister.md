@@ -100,7 +100,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-009: Paged KV cache
 
-- **Status:** Aligned (CPU reference); GPU reference not yet.
+- **Status:** Aligned (CPU and dense GPU forward references).
 - **cuDNN:** K/V are containers `[num_blocks, H, block_size, D]` with arbitrary strides; page tables are INT32
   `[B, 1, table_size, 1]`; logical key `j` of batch `b` is `container[page_table[b, 0, j / block_size, 0], h,
   j % block_size, :]`. Paging requires padding (both seq_len tensors). `max_seq_len_kv` gives the logical key
