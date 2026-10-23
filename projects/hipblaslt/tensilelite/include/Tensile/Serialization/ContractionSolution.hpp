@@ -140,6 +140,13 @@ namespace TensileLite
                 iot::mapOptional(io, "packSummationDims", s.packSummationDims);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
+                if(!iot::outputting(io))
+                {
+                    // Accept the obsolete artifact field without using it to
+                    // select an ABI. The argument-layout version is authoritative.
+                    bool obsoleteClusterMulticast = false;
+                    iot::mapOptional(io, "streamKClusterMulticast", obsoleteClusterMulticast);
+                }
                 bool hasStrategy = !iot::outputting(io) && iot::hasKey(io, "tileProcessingStrategy");
                 bool hasAssignment = !iot::outputting(io) && iot::hasKey(io, "workAssignment");
                 std::string strategy = iot::outputting(io) ? toString(s.tileProcessingStrategy) : "None";
@@ -256,6 +263,7 @@ namespace TensileLite
                 // Optional so older logic files that omit the field deserialize
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
+                iot::mapOptional(io, "streamKClusterParallel", s.streamKClusterParallel);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }

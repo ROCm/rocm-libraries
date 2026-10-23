@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
 
 import collections
 import copy
@@ -311,19 +311,27 @@ def _validateStreamKClusterShape(cs, ck):
 
 
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
-  """Validate the gfx1250 persistent DataParallel multicast path.
+  """Validate persistent spatial TDM multicast on gfx1250.
 
-  The cluster co-locates ClusterDim = [Cs, Ck] workgroups: the Cs
-  M-adjacent peers share the same B over full K and the Ck N-adjacent peers
-  share the same A, so each operand is TDM-multicast across the peers that reuse
-  it. Each cluster walks whole Cs x Ck tile blocks, so sizes that are not a
-  cluster multiple need no build-time check: a peer past the tile edge aliases
-  the edge tile, keeps issuing its multicast loads, and skips the store.
-
-  DataParallel with a non-unit ClusterDim selects this path. The legacy
-  StreamK=3 + StreamKForceDPOnly=1 spelling normalizes to the same policy.
-  These checks leave StreamK's existing clustered reduction path unchanged.
+  M-adjacent peers share B and N-adjacent peers share A over the same K
+  interval. DataParallel assigns complete blocks; StreamK splits
+  block K ranges between logical cluster workers. Boundary peers retain their
+  phantom identity, participate in loads, and suppress every completion path.
   """
+  if isStreamKSpatialCluster(state):
+    constraints = (
+        (not state.get("PrefetchAcrossPersistent", 0), "PrefetchAcrossPersistent=0"),
+        (state.get("PrefetchGlobalRead", 1) in (1, 2) or state.get("UseSubtileImpl", False),
+         "PrefetchGlobalRead in (1,2) without UseSubtileImpl"),
+        (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),
+        (not (state.get("ProblemType", {}).get("Gradient", False)
+              and state.get("ProblemType", {}).get("UseBias", False)), "no bias-gradient reduction"),
+        (not state.get("DebugStreamK", 0), "DebugStreamK=0"),
+    )
+    for supported, requirement in constraints:
+      if not supported:
+        reject(state, printRejectionReason, "StreamK spatial clustering requires " + requirement)
+        return False
   if not streamKCluster(state):
     return True
 
@@ -1352,13 +1360,17 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason,
               "Currently ClusterDim = 16x1 and 1x16 are not supported")
 
-    # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
-    # each WG's tile per iteration, so the broadcast would target the wrong partner.
-    # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
-    # -- except on the DataParallel cluster, whose peers walk whole Cs x Ck tile blocks
-    # together, so they stay the spatial tile neighbours ClusterLoad broadcasts between.
+    # Persistent spatial clusters keep their peers on neighbouring Cs x Ck tiles.
+    # DataParallel processes whole blocks and StreamK shares a K interval within
+    # each block, so both preserve the physical peers used by multicast masks.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
                                   and (not isPersistent(state) or streamKCluster(state)))
+    # One-axis StreamK clusters share only B. Independent TDM loads avoid
+    # multicast synchronization that outweighs the saved loads on gfx1250.
+    # Keep spatial scheduling and ABI2; two-axis clusters share both operands
+    # and retain multicast, as does the DataParallel path.
+    if isStreamKSpatialCluster(state) and state["ClusterDim"][1] == 1:
+      clusterPeersShareTiles = False
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles
@@ -2319,7 +2331,17 @@ class Solution(collections.abc.Mapping):
     # runtime selector". It is fully derived here, overriding whatever the
     # solution YAML said, because only the generator knows what it just emitted.
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
-        _supportStreamKPerTileExtraIters(state)
+        (_supportStreamKPerTileExtraIters(state)
+         and (not isStreamKSpatialCluster(state)
+              or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
+                  and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
+    # Sparse, subtile and gradient variants retain in-kernel fixup.
+    state["InternalSupportParams"]["SupportStreamKClusterParallel"] = (
+        isStreamKSpatialCluster(state)
+        and not state["ProblemType"]["Sparse"]
+        and not state["ProblemType"]["Gradient"]
+        and not state.get("UseSubtileImpl", False)
+    )
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -2340,13 +2362,13 @@ class Solution(collections.abc.Mapping):
         # A Y-extent > 1 means the Ck peers share A on N-adjacent tiles, which only
         # works when the launch spans the real M x N tile space and the Y rank is
         # folded back into a unique tile index (StreamK.preLoop). That is the
-        # ForceDPOnly cluster multicast; anywhere else a Y-extent > 1 would collide
+        # persistent spatial cluster multicast; anywhere else a Y-extent > 1 would collide
         # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
         # no B-sharing X peers at all and is not a multicast shape.
         if state["ClusterDim"][1] != 1 and not (streamK2DCluster(state)
-                                                and isPersistentDataParallel(state)):
+                                                and streamKCluster(state)):
           reject(state, printRejectionReason,
-                 "Persistent ClusterDim Y-extent > 1 requires DataParallel "
+                 "Persistent ClusterDim Y-extent > 1 requires DataParallel or StreamK/StaticGrid "
                  "and a cluster [Cs, Ck] with both axes > 1; got %s"
                  % state["ClusterDim"])
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
