@@ -286,6 +286,10 @@ class WmmaFmhaFwdV2Spec:
         """1: live query rows come from ``seqused_q``."""
         return int(self.seqused_q)
 
+    def catalog_sinks(self) -> int:
+        """1: the softmax takes one per-query-head sink logit (``sink_ptr``)."""
+        return int(self.use_sinks)
+
 
 def is_gfx12_family(arch: str) -> bool:
     """Whether ``arch`` uses the gfx12 WMMA operand layout."""

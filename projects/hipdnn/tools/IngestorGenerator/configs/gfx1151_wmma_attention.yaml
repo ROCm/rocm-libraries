@@ -20,9 +20,10 @@
 # launch, one object per dtype x bucket (64, 96, 128, 256) x page size (16, 32,
 # 64) x query form: a batch-strided Q (dense_q; with seqused_q when the graph
 # carries seq_len_q) or a ragged Q packed through its ragged offsets
-# (seqused_q). The causal class again serves every mask; no bias. Paged graphs
-# are this engine's whatever their query length: the decode engine's objects
-# are dense.
+# (seqused_q). The causal class again serves every mask; no bias. Each paged
+# object also ships with attention sinks (sinks 1: one per-query-head sink
+# logit in the Q dtype, sink_ptr). Paged graphs are this engine's whatever
+# their query length: the decode engine's objects are dense.
 #
 # The native matcher (Gfx1151WmmaAttentionNative.cpp) declines the dense
 # problems the rocKE dispatcher's rule sends to decode (the decode engine takes
@@ -74,6 +75,10 @@ kmd_fields:
 - name: seqused_q
   type: int
   default_value: 0
+# 1: the object takes attention sinks (paged prefill only).
+- name: sinks
+  type: int
+  default_value: 0
 
 specialization:
   metadata_fields:
@@ -90,6 +95,7 @@ specialization:
   - page_block_size
   - dense_q
   - seqused_q
+  - sinks
   vocabulary:
     dtype: {bf16: BF16, fp16: FP16}
   bindings:
@@ -106,6 +112,7 @@ specialization:
     page_block_size: {method: catalog_page_block_size}
     dense_q: {method: catalog_dense_q}
     seqused_q: {method: catalog_seqused_q}
+    sinks: {method: catalog_sinks}
 
 kernel_source_kind: rocke
 packs:
@@ -119,7 +126,7 @@ packs:
   variants:
   # Prefill, one head-width geometry on both families.
   - name: wmma_prefill.{dtype}_d{head_dim}v{head_dim_v}_m{md_block_m}_{tag}
-    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_dim, head_dim_v, mask, bias]
@@ -133,14 +140,14 @@ packs:
       - {bias: f32, tag: bias_f32}
       - {bias: q, tag: bias_q}
     shapes:
-    - {head_dim: 64, head_dim_v: 64, knobs: bias, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 96, head_dim_v: 96, knobs: bias, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 128, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 256, head_dim_v: 256, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
+    - {head_dim: 64, head_dim_v: 64, knobs: bias, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 96, head_dim_v: 96, knobs: bias, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 128, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 256, head_dim_v: 256, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
   # Prefill, wide Q with V <= 128 on gfx11: the head splits across a wave pair.
   - name: wmma_prefill.{dtype}_d{head_dim}v{head_dim_v}_m{md_block_m}_{tag}
     arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153]
-    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_dim, head_dim_v, mask, bias]
@@ -154,12 +161,12 @@ packs:
       - {bias: f32, tag: bias_f32}
       - {bias: q, tag: bias_q}
     shapes:
-    - {head_dim: 192, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 192, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 256, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
+    - {head_dim: 192, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 192, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 256, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 64, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
   # Prefill, wide Q with V <= 128 on gfx12: one wave holds the whole Q row.
   - name: wmma_prefill.{dtype}_d{head_dim}v{head_dim_v}_m{md_block_m}_{tag}
     arch: [gfx1200, gfx1201]
-    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_dim, head_dim_v, mask, bias, wave_pair]
@@ -174,13 +181,13 @@ packs:
       - {bias: f32, tag: bias_f32}
       - {bias: q, tag: bias_q}
     shapes:
-    - {head_dim: 192, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 192, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 256, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0}}
+    - {head_dim: 192, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 192, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 256, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
   # Paged prefill on both families: page size x query form. A batch-strided Q
   # (dense_q, with seqused_q for a graph carrying seq_len_q) or a ragged Q
   # (cu_seqlens_q from the ragged offsets, seqused_q from seq_len_q).
   - name: wmma_prefill_paged.{dtype}_d{head_dim}v{head_dim_v}_p{page_block_size}_m{md_block_m}_{tag}
-    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_dim, head_dim_v, mask, layout, page_block_size, dense_q, seqused_q]
@@ -196,7 +203,32 @@ packs:
       - {dense_q: true, seqused_q: true, tag: denseq_used}
       - {seqused_q: true, tag: raggedq}
     shapes:
-    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0}}
-    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, seqused_q: 0}}
+    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
+  # Paged prefill with attention sinks (gpt-oss): the same objects taking one
+  # per-query-head sink logit [Hq] in the Q dtype (sink_ptr, after the stride
+  # arguments and before the query-form and page arguments).
+  - name: wmma_prefill_paged.{dtype}_d{head_dim}v{head_dim_v}_p{page_block_size}_m{md_block_m}_{tag}
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [dtype, head_dim, head_dim_v, mask, use_sinks, layout, page_block_size, dense_q, seqused_q]
+    spec_defaults:
+      mask: causal
+      use_sinks: true
+      layout: paged
+    shape_axes:
+      dtype: [fp16, bf16]
+      page_block_size: [16, 32, 64]
+    knob_sets:
+      query:
+      - {dense_q: true, tag: denseq_sinks}
+      - {dense_q: true, seqused_q: true, tag: denseq_used_sinks}
+      - {seqused_q: true, tag: raggedq_sinks}
+    shapes:
+    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
+    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
+    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
+    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}

@@ -33,10 +33,11 @@
  * @file TestGfx1151WmmaAttentionPaged.cpp
  * @brief hipkernel:Gfx1151WmmaAttention on the cuDNN paged-K/V SDPA graph: which graphs
  *        the native matcher binds (dense or ragged Q, page tables, sequence lengths,
- *        arbitrary container strides incl. vLLM's interleaved K|V cache), what it binds,
- *        which catalog object serves each, and the kernel ABI prepare() marshals. Paged
- *        graphs are the prefill engine's alone: hipkernel:Gfx1151WmmaAttentionDecode,
- *        whose objects are dense, declines every one of them.
+ *        arbitrary container strides incl. vLLM's interleaved K|V cache, attention sinks),
+ *        what it binds, which catalog object serves each, and the kernel ABI prepare()
+ *        marshals. Paged graphs are the prefill engine's alone:
+ *        hipkernel:Gfx1151WmmaAttentionDecode, whose objects are dense, declines every
+ *        one of them.
  *
  * No device: the GPU half (numerics against a gather-then-dense reference, HIP-graph
  * capture and replay) is IntegrationGpuGfx1151WmmaAttentionPaged.cpp.
@@ -74,6 +75,7 @@ constexpr std::string_view SEQ_LEN_KV_UID_TOKEN = "gfx1151_wmma_attention.seq_le
 constexpr std::string_view SEQ_LEN_Q_UID_TOKEN = "gfx1151_wmma_attention.seq_len_q.uid";
 constexpr std::string_view Q_OFFSET_UID_TOKEN = "gfx1151_wmma_attention.q_offset.uid";
 constexpr std::string_view MAX_SEQ_LEN_KV_TOKEN = "gfx1151_wmma_attention.max_seq_len_kv";
+constexpr std::string_view SINK_UID_TOKEN = "gfx1151_wmma_attention.sink.uid";
 
 // GraphLayout in the pack.
 constexpr int64_t LAYOUT_PAGED_DENSE_Q = 1;
@@ -115,13 +117,18 @@ struct PagedSpec
     bool seqLenQ = false;
     bool seqLenKv = true;
     bool returnLse = false;
+    // Attention sinks: sink_token [1, sinkHeads, 1, 1] (Hq when absent) in sinkDtype (Q's
+    // when absent) with head stride sinkHeadStride.
+    bool sinks = false;
+    std::optional<data_objects::DataType> sinkDtype;
+    std::optional<int64_t> sinkHeads;
+    int64_t sinkHeadStride = 1;
     // Defects, each of which the engine must decline.
     bool separateVTable = false;
     int64_t tableEntryStride = 1;
     data_objects::DataType tableDtype = data_objects::DataType::INT32;
     std::optional<int64_t> qMultiplier; // the token stride when absent
     bool oOwnOffsets = false;
-    bool sinks = false;
     bool alibi = false;
     bool bias = false;
     int64_t leftBound = -1;
@@ -161,7 +168,9 @@ flatbuffers::FlatBufferBuilder buildPagedGraph(const PagedSpec& spec)
     const std::vector<int64_t> offsetDims{b + 1, 1, 1, 1};
     const std::vector<int64_t> lseDims{b, spec.queryHeads, spec.queryLength, 1};
     const auto lseStrides = packedStrides(lseDims);
-    const std::vector<int64_t> headDims{1, spec.queryHeads, 1, 1};
+    const std::vector<int64_t> sinkDims{1, spec.sinkHeads.value_or(spec.queryHeads), 1, 1};
+    const std::vector<int64_t> sinkStrides{
+        sinkDims[1] * spec.sinkHeadStride, spec.sinkHeadStride, 1, 1};
     const std::vector<int64_t> biasDims{b, spec.queryHeads, spec.queryLength, 128};
     const auto biasStrides = packedStrides(biasDims);
 
@@ -204,7 +213,7 @@ flatbuffers::FlatBufferBuilder buildPagedGraph(const PagedSpec& spec)
         tensor(Q_OFFSET_UID, data_objects::DataType::INT32, vectorStrides, offsetDims),
         tensor(O_OFFSET_UID, data_objects::DataType::INT32, vectorStrides, offsetDims),
         tensor(PAGE_TABLE_V_UID, spec.tableDtype, tableStrides, tableDims),
-        tensor(SINK_UID, spec.dtype, packedStrides(headDims), headDims),
+        tensor(SINK_UID, spec.sinkDtype.value_or(spec.dtype), sinkStrides, sinkDims),
         tensor(BIAS_UID, data_objects::DataType::FLOAT, biasStrides, biasDims),
     };
     if(spec.returnLse)
@@ -330,6 +339,7 @@ struct ObjectSpec
     int64_t pageBlockSize = 16;
     int64_t denseQ = 1;
     int64_t seqUsedQ = 0;
+    int64_t sinks = 0;
 };
 
 ObjectSpec pagedObject(int64_t headSize, int64_t page, int64_t denseQ, int64_t seqUsedQ)
@@ -372,7 +382,8 @@ KernelDefinition makeKernel(const ObjectSpec& spec)
                        {"layout", spec.layout},
                        {"page_block_size", spec.pageBlockSize},
                        {"dense_q", spec.denseQ},
-                       {"seqused_q", spec.seqUsedQ}};
+                       {"seqused_q", spec.seqUsedQ},
+                       {"sinks", spec.sinks}};
     return kernel;
 }
 
@@ -523,7 +534,6 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesMalformedPagedGraphs)
     add("a strided page-table row", [](PagedSpec& s) { s.tableEntryStride = 2; });
     add("an INT64 page table", [](PagedSpec& s) { s.tableDtype = data_objects::DataType::INT64; });
     add("an additive bias", [](PagedSpec& s) { s.bias = true; });
-    add("attention sinks", [](PagedSpec& s) { s.sinks = true; });
     add("ALiBi", [](PagedSpec& s) { s.alibi = true; });
     add("a head dim off the 8-element grid", [](PagedSpec& s) { s.headSize = 76; });
     add("a ragged Q without seq_len_q", [](PagedSpec& s) { s.seqLenQ = false; }, raggedGraph());
@@ -574,6 +584,102 @@ TEST(TestGfx1151WmmaAttentionPaged, OnlyTheObjectOfThePageSizeAndQueryFormServes
     EXPECT_TRUE(serves(dense, pagedObject(256, 16, 1, 0)));
 }
 
+// -----------------------------------------------------------------------------
+// Attention sinks: sink_token [1, Hq, 1, 1] in the Q data type selects the paged sinks
+// objects, which take sink_ptr before the query form's operands.
+// -----------------------------------------------------------------------------
+
+PagedSpec withSinks(PagedSpec spec)
+{
+    spec.sinks = true;
+    return spec;
+}
+
+ObjectSpec sinksObject(ObjectSpec spec)
+{
+    spec.sinks = 1;
+    return spec;
+}
+
+PagedSpec denseUsedGraph()
+{
+    PagedSpec spec;
+    spec.seqLenQ = true;
+    return spec;
+}
+
+TEST(TestGfx1151WmmaAttentionPaged, BindsAttentionSinksInEveryQueryForm)
+{
+    PagedSpec half;
+    half.dtype = data_objects::DataType::HALF;
+    half.interleavedCache = false;
+    for(const auto& graph : {PagedSpec{}, denseUsedGraph(), raggedGraph(), half})
+    {
+        const auto plain = Fixture(graph).bound();
+        ASSERT_TRUE(plain.has_value());
+        EXPECT_FALSE(tryGetBoundInt(*plain, SINK_UID_TOKEN).has_value());
+        const auto bound = Fixture(withSinks(graph)).bound();
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(boundInt(*bound, SINK_UID_TOKEN), SINK_UID);
+        EXPECT_EQ(boundInt(*bound, LAYOUT_TOKEN), boundInt(*plain, LAYOUT_TOKEN));
+    }
+}
+
+TEST(TestGfx1151WmmaAttentionPaged, DeclinesSinksTheKernelsCannotRead)
+{
+    struct Case
+    {
+        const char* what;
+        PagedSpec spec;
+    };
+    std::vector<Case> cases;
+    const auto add = [&cases](const char* what, auto&& edit) {
+        PagedSpec spec = withSinks(PagedSpec{});
+        edit(spec);
+        cases.push_back({what, spec});
+    };
+    // The kernels load the sink in the I/O data type.
+    add("a FLOAT sink", [](PagedSpec& s) { s.sinkDtype = data_objects::DataType::FLOAT; });
+    add("a HALF sink for a BFLOAT16 query",
+        [](PagedSpec& s) { s.sinkDtype = data_objects::DataType::HALF; });
+    add("one sink per K/V head", [](PagedSpec& s) { s.sinkHeads = s.kvHeads; });
+    add("a strided head axis", [](PagedSpec& s) { s.sinkHeadStride = 2; });
+    ASSERT_TRUE(matches(withSinks(PagedSpec{})));
+    for(const auto& c : cases)
+    {
+        EXPECT_FALSE(matches(c.spec)) << c.what;
+    }
+}
+
+TEST(TestGfx1151WmmaAttentionPaged, OnlyTheSinksObjectServesASinksGraph)
+{
+    struct Case
+    {
+        PagedSpec graph;
+        int64_t denseQ;
+        int64_t seqUsedQ;
+    };
+    for(const auto& c :
+        {Case{PagedSpec{}, 1, 0}, Case{denseUsedGraph(), 1, 1}, Case{raggedGraph(), 0, 1}})
+    {
+        const auto plain = pagedObject(128, 16, c.denseQ, c.seqUsedQ);
+        EXPECT_TRUE(serves(withSinks(c.graph), sinksObject(plain)));
+        EXPECT_FALSE(serves(withSinks(c.graph), plain));
+        EXPECT_FALSE(serves(c.graph, sinksObject(plain)));
+        EXPECT_TRUE(serves(c.graph, plain));
+        // The page size and query form still decide among the sinks objects.
+        EXPECT_FALSE(
+            serves(withSinks(c.graph), sinksObject(pagedObject(128, 32, c.denseQ, c.seqUsedQ))));
+        EXPECT_FALSE(serves(withSinks(c.graph),
+                            sinksObject(pagedObject(128, 16, 1 - c.denseQ, c.seqUsedQ))));
+    }
+    // sinks is 0 or 1.
+    auto malformed = pagedObject(128, 16, 1, 0);
+    malformed.sinks = 2;
+    EXPECT_FALSE(serves(withSinks(PagedSpec{}), malformed));
+    EXPECT_FALSE(serves(PagedSpec{}, malformed));
+}
+
 // A paged graph is the prefill engine's whatever its query length, even a decode-shaped
 // one (one query row, a small batch, long sequences): the dense decode rule, which reads
 // a dense key length, never declines it, and the decode objects are dense.
@@ -600,9 +706,14 @@ TEST(TestGfx1151WmmaAttentionPaged, TheDecodeEngineDeclinesEveryPagedGraph)
     decodeShaped.maxBlocksPerSeq = 512;
     decodeShaped.numBlocks = 512;
     decodeShaped.maxSeqLenKv = 8192;
-    PagedSpec denseUsed;
-    denseUsed.seqLenQ = true;
-    for(const auto& graph : {PagedSpec{}, decodeShaped, denseUsed, raggedGraph()})
+    // Sinks objects are paged prefill objects, so graphs with sinks are declined too.
+    for(const auto& graph : {PagedSpec{},
+                             decodeShaped,
+                             denseUsedGraph(),
+                             raggedGraph(),
+                             withSinks(PagedSpec{}),
+                             withSinks(denseUsedGraph()),
+                             withSinks(raggedGraph())})
     {
         const Fixture fixture(graph);
         ASSERT_TRUE(fixture.bound().has_value());
@@ -612,6 +723,7 @@ TEST(TestGfx1151WmmaAttentionPaged, TheDecodeEngineDeclinesEveryPagedGraph)
         EXPECT_FALSE(decodeEngineServes(graph, decodeObject(128)));
         EXPECT_FALSE(decodeEngineServes(graph, pagedObject(128, 16, 1, 0)));
         EXPECT_FALSE(decodeEngineServes(graph, pagedObject(128, 16, 0, 1)));
+        EXPECT_FALSE(decodeEngineServes(graph, sinksObject(pagedObject(128, 16, 1, 0))));
     }
 }
 
@@ -667,7 +779,7 @@ KernelArgument scalarArgument(const std::string& name)
 }
 
 /// wmma_fmha_fwd_v2._declare_params of a shipped paged object.
-std::vector<KernelArgument> rockePagedAbi(int64_t denseQ, int64_t seqUsedQ)
+std::vector<KernelArgument> rockePagedAbi(int64_t denseQ, int64_t seqUsedQ, bool sinks = false)
 {
     std::vector<KernelArgument> abi;
     for(const char* name : {"Q", "K", "V", "O", "LSE"})
@@ -696,6 +808,10 @@ std::vector<KernelArgument> rockePagedAbi(int64_t denseQ, int64_t seqUsedQ)
         {
             abi.push_back(scalarArgument(std::string("stride_") + tensor + "_" + axis));
         }
+    }
+    if(sinks)
+    {
+        abi.push_back(pointerArgument("sink_ptr"));
     }
     if(denseQ == 0)
     {
@@ -775,6 +891,48 @@ TEST(TestGfx1151WmmaAttentionPaged, PrepareMarshalsThePagedRockeAbi)
         auto dense = rockePagedAbi(1, 0);
         dense.resize(dense.size() - 5);
         EXPECT_NE(prepareFailure(c.graph, object, dense).find("is packaged with arguments"),
+                  std::string::npos)
+            << c.what;
+    }
+}
+
+TEST(TestGfx1151WmmaAttentionPaged, PrepareMarshalsTheSinkBeforeTheQueryForm)
+{
+    struct Case
+    {
+        const char* what;
+        PagedSpec graph;
+        int64_t denseQ;
+        int64_t seqUsedQ;
+    };
+    for(const auto& c : {Case{"dense Q", PagedSpec{}, 1, 0},
+                         Case{"dense Q with seq_len_q", denseUsedGraph(), 1, 1},
+                         Case{"ragged Q", raggedGraph(), 0, 1}})
+    {
+        const auto object = sinksObject(pagedObject(128, 16, c.denseQ, c.seqUsedQ));
+        const auto graph = withSinks(c.graph);
+        const auto failure
+            = prepareFailure(graph, object, rockePagedAbi(c.denseQ, c.seqUsedQ, true));
+        ASSERT_FALSE(failure.empty()) << c.what;
+        EXPECT_EQ(failure.find("is packaged with arguments"), std::string::npos)
+            << c.what << ": " << failure;
+        EXPECT_NE(failure.find(", symbol 'wmma_fmha_fwd_v2':"), std::string::npos)
+            << c.what << ": " << failure;
+
+        // A descriptor without sink_ptr, or with it after the page lookup, is refused.
+        EXPECT_NE(prepareFailure(graph, object, rockePagedAbi(c.denseQ, c.seqUsedQ))
+                      .find("is packaged with arguments"),
+                  std::string::npos)
+            << c.what;
+        auto late = rockePagedAbi(c.denseQ, c.seqUsedQ);
+        late.push_back(pointerArgument("sink_ptr"));
+        EXPECT_NE(prepareFailure(graph, object, late).find("is packaged with arguments"),
+                  std::string::npos)
+            << c.what;
+
+        // A sinks object prepared for a graph without sinks is refused before any load.
+        EXPECT_NE(prepareFailure(c.graph, object, rockePagedAbi(c.denseQ, c.seqUsedQ, true))
+                      .find("sink use"),
                   std::string::npos)
             << c.what;
     }

@@ -471,7 +471,10 @@ synchronization and graph-destruction boundary.
 The shipped catalog packages the same two kernels per RDNA family (generic
 targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
 in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
-64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, plus
+paged prefill objects for the cuDNN paged-K/V graph (buckets 64/96/128/256 x
+page size 16/32/64 x query form), each with and without attention sinks
+(`use_sinks`, catalog field `sinks`), and
 `hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
 64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
 kernel of the same code object (RFC 0017 §15.1 `sources`). Both native

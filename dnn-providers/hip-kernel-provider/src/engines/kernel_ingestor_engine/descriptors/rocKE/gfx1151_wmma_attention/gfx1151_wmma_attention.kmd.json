@@ -58,6 +58,11 @@
       "name": "seqused_q",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "sinks",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }
