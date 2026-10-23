@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
@@ -659,6 +661,196 @@ hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, i
     return dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>&>(*inputs.at(uid));
 }
 
+// ── SDPA backward at attention shapes ───────────────────────────────────────
+// Q, O, dO, dQ [1, 2, 4, 8]; K, V, dK, dV [1, 2, 6, 8]. uids: q=1, k=2, v=3, o=4,
+// do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11.
+
+constexpr int64_t kSdpaHeads = 2;
+constexpr int64_t kSdpaSeqQ = 4;
+constexpr int64_t kSdpaSeqKv = 6;
+constexpr int64_t kSdpaHeadDim = 8;
+
+struct SdpaBwdOptions
+{
+    DataType ioType = DataType::FLOAT;
+    bool rank3Stats = false;
+    std::optional<float> attnScale;
+    bool runtimeScale = false;
+    bool causal = false;
+    bool attnMask = false;
+    bool dropout = false;
+};
+
+GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    GraphResult r;
+    auto& b = r.builder;
+
+    const std::vector<int64_t> qDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaHeadDim};
+    const std::vector<int64_t> kvDims = {1, kSdpaHeads, kSdpaSeqKv, kSdpaHeadDim};
+    const auto statsDims = opts.rank3Stats ? std::vector<int64_t>{1, kSdpaHeads, kSdpaSeqQ}
+                                           : std::vector<int64_t>{1, kSdpaHeads, kSdpaSeqQ, 1};
+    const std::vector<int64_t> scalarDims = {1};
+    const std::vector<int64_t> maskDims = {1, 1, kSdpaSeqQ, kSdpaSeqKv};
+    const auto qStrides = generateStrides(qDims);
+    const auto kvStrides = generateStrides(kvDims);
+    const auto statsStrides = generateStrides(statsDims);
+    const auto maskStrides = generateStrides(maskDims);
+    const auto io = opts.ioType;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "q", io, &qStrides, &qDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 2, "k", io, &kvStrides, &kvDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "v", io, &kvStrides, &kvDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 4, "o", io, &qStrides, &qDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 5, "do", io, &qStrides, &qDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 6, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 7, "dq", io, &qStrides, &qDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 8, "dk", io, &kvStrides, &kvDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 9, "dv", io, &kvStrides, &kvDims));
+    if(opts.runtimeScale)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(b,
+                                                       10,
+                                                       "scale",
+                                                       DataType::FLOAT,
+                                                       &scalarDims,
+                                                       &scalarDims,
+                                                       /*virtual_=*/false,
+                                                       TensorValue::NONE,
+                                                       /*value=*/0,
+                                                       /*is_runtime_pass_by_value=*/true));
+    }
+    if(opts.attnMask)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
+    }
+
+    SdpaBackwardAttributesBuilder attrs(b);
+    attrs.add_q_tensor_uid(1);
+    attrs.add_k_tensor_uid(2);
+    attrs.add_v_tensor_uid(3);
+    attrs.add_o_tensor_uid(4);
+    attrs.add_do_tensor_uid(5);
+    attrs.add_stats_tensor_uid(6);
+    attrs.add_dq_tensor_uid(7);
+    attrs.add_dk_tensor_uid(8);
+    attrs.add_dv_tensor_uid(9);
+    if(opts.runtimeScale)
+    {
+        attrs.add_scale_tensor_uid(10);
+    }
+    if(opts.attnScale.has_value())
+    {
+        attrs.add_attn_scale_value(*opts.attnScale);
+    }
+    if(opts.causal)
+    {
+        attrs.add_right_bound(0);
+    }
+    if(opts.attnMask)
+    {
+        attrs.add_attn_mask_tensor_uid(11);
+    }
+    if(opts.dropout)
+    {
+        attrs.add_dropout_probability(0.1f);
+    }
+    auto bwd = attrs.Finish();
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(
+        CreateNodeDirect(b, "sdpa_bwd", io, NodeAttributes::SdpaBackwardAttributes, bwd.Union()));
+
+    auto graph
+        = CreateGraphDirect(b, "test", io, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+// Fills the graph with O and stats forced to 0.5, which no forward of these
+// shapes produces everywhere, so a derived value is told apart from a filled one.
+InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRecipes recipes = {})
+{
+    recipes.set(4, FillRecipe::fixed(0.5f));
+    recipes.set(6, FillRecipe::fixed(0.5f));
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return inputs;
+}
+
+// Recomputes the forward from the filled Q, K and V: every row of
+// exp(Q K^T * scale - lse) sums to 1 over its unmasked keys, and O is that row's
+// weighted sum of V. A causal graph masks keys after the query (top-left aligned).
+template <class T>
+void expectOAndStatsAreForwardOfQkv(InputTensorMap& inputs,
+                                    float scale,
+                                    bool causal,
+                                    float oTolerance)
+{
+    const auto& q = typedTensor<T>(inputs, 1);
+    const auto& k = typedTensor<T>(inputs, 2);
+    const auto& v = typedTensor<T>(inputs, 3);
+    const auto& o = typedTensor<T>(inputs, 4);
+    // [1, H, Sq, 1], packed.
+    const auto* lse = static_cast<const float*>(inputs.at(6)->rawHostData());
+
+    for(int64_t h = 0; h < kSdpaHeads; ++h)
+    {
+        for(int64_t sq = 0; sq < kSdpaSeqQ; ++sq)
+        {
+            const float rowLse = lse[(h * kSdpaSeqQ) + sq];
+            float rowSum = 0.0f;
+            std::vector<float> expectedO(kSdpaHeadDim, 0.0f);
+            for(int64_t skv = 0; skv < kSdpaSeqKv; ++skv)
+            {
+                if(causal && skv > sq)
+                {
+                    continue;
+                }
+                float score = 0.0f;
+                for(int64_t d = 0; d < kSdpaHeadDim; ++d)
+                {
+                    score += static_cast<float>(q.getHostValue(0, h, sq, d))
+                             * static_cast<float>(k.getHostValue(0, h, skv, d));
+                }
+                const float p = std::exp((score * scale) - rowLse);
+                rowSum += p;
+                for(int64_t d = 0; d < kSdpaHeadDim; ++d)
+                {
+                    expectedO[static_cast<size_t>(d)]
+                        += p * static_cast<float>(v.getHostValue(0, h, skv, d));
+                }
+            }
+            EXPECT_NEAR(rowSum, 1.0f, 1e-4f) << "h=" << h << " sq=" << sq;
+            for(int64_t d = 0; d < kSdpaHeadDim; ++d)
+            {
+                EXPECT_NEAR(static_cast<float>(o.getHostValue(0, h, sq, d)),
+                            expectedO[static_cast<size_t>(d)],
+                            oTolerance)
+                    << "h=" << h << " sq=" << sq << " d=" << d;
+            }
+        }
+    }
+}
+
+void expectAllEqual(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
+{
+    const auto* data = static_cast<const float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementCount(); ++i)
+    {
+        ASSERT_EQ(data[i], value) << "element " << i;
+    }
+}
+
 } // namespace
 
 // ── Test cases ──────────────────────────────────────────────────────────────
@@ -742,6 +934,73 @@ TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
     const auto result = runFill(gr, {7, 8, 9});
 
     EXPECT_TRUE(result.filled) << result.reason;
+}
+
+// O and stats are replaced by the forward of Q, K and V even over an explicit
+// override, which is what a bundle's metadata "inputs" entry for them becomes.
+// bf16 with [B, H, Sq, 1] stats, as the SdpaBackward sweeps declare them.
+TEST(TestFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkv)
+{
+    SdpaBwdOptions opts;
+    opts.ioType = DataType::BFLOAT16;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    // O is stored as bf16: 8 significant bits on values below 1.
+    expectOAndStatsAreForwardOfQkv<hipdnn_data_sdk::types::bfloat16>(
+        inputs, 0.35f, /*causal=*/true, /*oTolerance=*/1e-2f);
+}
+
+// A runtime scale is read from its filled value, not taken as 1.
+TEST(TestFillInputs, SdpaBwdDerivationUsesFilledRuntimeScale)
+{
+    SdpaBwdOptions opts;
+    opts.runtimeScale = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(10, FillRecipe::fixed(0.25f));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 0.25f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// Graphs whose forward adds a mask or applies dropout are left to the fill, so
+// O and stats keep their filled values.
+TEST(TestFillInputs, SdpaBwdWithAttnMaskKeepsFilledOAndStats)
+{
+    SdpaBwdOptions opts;
+    opts.attnMask = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectAllEqual(*inputs.at(4), 0.5f);
+    expectAllEqual(*inputs.at(6), 0.5f);
+}
+
+TEST(TestFillInputs, SdpaBwdWithDropoutKeepsFilledOAndStats)
+{
+    SdpaBwdOptions opts;
+    opts.dropout = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectAllEqual(*inputs.at(4), 0.5f);
+    expectAllEqual(*inputs.at(6), 0.5f);
+}
+
+// The CPU reference takes the LSE only as [B, H, Sq, 1], so rank-3 stats are left
+// as filled and the backward reference rejects the graph when it runs.
+TEST(TestFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStats)
+{
+    SdpaBwdOptions opts;
+    opts.rank3Stats = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectAllEqual(*inputs.at(4), 0.5f);
+    expectAllEqual(*inputs.at(6), 0.5f);
 }
 
 // An op missing from applyDefaultFills() makes fillInputs() refuse the whole
