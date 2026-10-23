@@ -77,6 +77,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-superbuild-test` | Running tests against an existing hipDNN superbuild. |
 | `hipdnn-tidy` | Running clang-tidy on hipDNN, scoped to the files you changed. |
 | `hipdnn-ingestor-engine` | Creating or extending a generic-kernel-ingestor integration. |
+| `hipdnn-deep-review` | Reviewing a hipDNN or provider change in depth with parallel agents until its findings close, or checking whether a kernel ingestor change breaks kernel ABI or dispatch at run time (its `IMPACT` lane and `impact.py`). |
 | `hipdnn-codegen` (at [`projects/hipdnn/tools/DescriptorGenerator/.claude/skills/`](projects/hipdnn/tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md)) | Generating operation boilerplate from a YAML config. |
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
