@@ -9,6 +9,7 @@ GPU is touched.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 from dataclasses import replace
@@ -147,18 +148,56 @@ def test_identities_are_unique(jobs):
     assert len(hashes) == len(set(hashes))
 
 
+class _InMemoryEntriesCache(KernelCache):
+    """A cache whose entries are held in memory, all linked to one placeholder
+    binary on disk.
+
+    Each entry's metadata is what :meth:`KernelCache.link` would write. One
+    metadata file per job is over ten thousand small files, and writing then
+    parsing them outlasts the per-test timeout on slow filesystems (Windows
+    CI). The tests that build their own cache cover the on-disk layout.
+    """
+
+    def __init__(self, root, arch, identities):
+        super().__init__(root, arch)
+        key = hashlib.sha256(b"placeholder").hexdigest()
+        # The binary's symbol is the first identity's, as when each is put.
+        self._blob = self.put_blob(key, b"placeholder", identities[0].label())
+        self._metas = {
+            ident: {
+                "identity": ident.to_dict(),
+                "blob": key,
+                "hsaco_bytes": self._blob.stat().st_size,
+                "kernel_name": self.blob_kernel_name(key),
+            }
+            for ident in identities
+        }
+
+    def meta(self, identity):
+        return self._metas.get(identity)
+
+    def _load(self, subdir):
+        # In metadata file-name order, as the on-disk walk yields them.
+        return sorted(
+            (
+                (ident, self._blob, meta)
+                for ident, meta in self._metas.items()
+                if self._dir_for(ident).name == subdir
+            ),
+            key=lambda entry: entry[0].stable_hash(),
+        )
+
+
 @pytest.fixture(scope="module")
 def cache(tmp_path_factory, jobs):
     """A cache holding every job with a placeholder binary.
 
-    Filling it is the slow part of this file, and the tests that take it only
-    read it (the ones that add or discard entries build their own), so the
-    module shares one.
+    The tests that take it only read it (the ones that add or discard entries
+    build their own), so the module shares one.
     """
-    c = KernelCache(tmp_path_factory.mktemp("direct_cache"), _ARCH)
-    for job in jobs:
-        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
-    return c
+    return _InMemoryEntriesCache(
+        tmp_path_factory.mktemp("direct_cache"), _ARCH, [j.identity for j in jobs]
+    )
 
 
 def _variants(plans):
