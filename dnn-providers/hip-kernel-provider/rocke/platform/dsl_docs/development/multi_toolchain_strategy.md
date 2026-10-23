@@ -343,7 +343,11 @@ it. — SHIPPED** as `tools/gen_arch_domain.py`, gated by
 Uses the link probe (declare + call + `store volatile`, compile **and link**;
 prototype validated, §2.4), at **`-O0`** — at `-O3` the optimiser can delete the
 call being asked about and the probe reports `ok` for a target that cannot run
-it. Every decl key × every wired arch — the committed columns are the count of
+it. A probe that links is then compiled to assembly and assembled for its target
+with the same install's `llvm-mc`: the backend can select an intrinsic for a
+target that lacks the instruction and write it into the object, and only the
+text assembler checks each instruction against the target (`arch_absent`
+otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
 golden — a generator tool, a committed artifact, a test asserting regeneration is
 a no-op. Depends only on `clang`, never on install layout (§2.4).
