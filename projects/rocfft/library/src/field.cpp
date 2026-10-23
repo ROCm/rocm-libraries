@@ -258,3 +258,53 @@ void rocfft_field_t::reinterpret_as(rocfft_array_type new_array_type)
         relabeled_bricks.emplace_back(brick.layout.reinterpret_as(new_array_type), brick.location);
     std::swap(bricks, relabeled_bricks);
 }
+
+rocfft_field_t rocfft_field_t::get_field_for_lengths(const std::set<size_t>& len_dims) const
+{
+    std::vector<rocfft_brick_t> embedded_bricks;
+    embedded_bricks.reserve(bricks.size());
+    for(const auto& brick : bricks)
+        embedded_bricks.emplace_back(brick.layout.get_layout_for_len_axes(len_dims),
+                                     brick.location);
+    rocfft_field_t embedded_field(std::move(embedded_bricks));
+    // Complex-conjugate symmetry relationships no longer hold for sub-transforms that
+    // exclude the innermost (halved) axis
+    if(embedded_field.get_array_type() == rocfft_array_type_hermitian_interleaved
+       && !len_dims.contains(0) && len_dims.size() < global_data_range.get_len_rank())
+    {
+        embedded_field.reinterpret_as(rocfft_array_type_complex_interleaved);
+    }
+    return embedded_field;
+}
+
+rocfft_field_t rocfft_field_t::get_embedding_field() const
+{
+    if(std::none_of(bricks.begin(), bricks.end(), [](const rocfft_brick_t& brick) {
+           return brick.layout.is_embedded();
+       }))
+    {
+        return *this;
+    }
+    std::vector<rocfft_brick_t> embedding_bricks;
+    embedding_bricks.reserve(bricks.size());
+    for(const auto& brick : bricks)
+        embedding_bricks.emplace_back(brick.layout.get_embedding_layout(), brick.location);
+    rocfft_field_t embedding_field(std::move(embedding_bricks));
+    // Complex-conjugate symmetry relationships no longer hold upon re-interpretation into
+    // a higher-dimensional data set
+    if(embedding_field.get_array_type() == rocfft_array_type_hermitian_interleaved)
+        embedding_field.reinterpret_as(rocfft_array_type_complex_interleaved);
+    return embedding_field;
+}
+
+bool rocfft_field_t::is_same_up_to_hermitian_relabel(const rocfft_field_t& other) const
+{
+    const auto relabeled = [](rocfft_field_t field) {
+        if(field.get_array_type() == rocfft_array_type_hermitian_interleaved)
+            field.reinterpret_as(rocfft_array_type_complex_interleaved);
+        else if(field.get_array_type() == rocfft_array_type_hermitian_planar)
+            field.reinterpret_as(rocfft_array_type_complex_planar);
+        return field;
+    };
+    return relabeled(*this) == relabeled(other);
+}

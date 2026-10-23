@@ -165,6 +165,43 @@ struct rocfft_field_t
     void reinterpret_as(rocfft_array_type new_array_type);
 
     /**
+     * @brief Extracts the field describing the same data as a set of lower-dimensional
+     * transforms over the selected length axes, all other length axes becoming batch
+     * axes (see `data_descriptor_t::get_layout_for_len_axes`). Bricks keep their
+     * locations, array type and precision, after which the returned field is explicitly
+     * reinterpreted as `rocfft_array_type_complex_interleaved` iff it is
+     * `rocfft_array_type_hermitian_interleaved`, @p len_dims does not contain length
+     * axis 0, and @p len_dims selects fewer axes than this field has.
+     *
+     * @note Hermitian data is kept as such when axis 0 is selected: the sub-transform
+     * then still includes the innermost (halved) axis, i.e., it is still a real transform
+     * and complex-conjugate symmetry still holds for the selected axes. Without axis 0,
+     * the selected axes see plain complex data.
+     *
+     * @param[in] len_dims indices of the length axes to be kept as length axes.
+     *
+     * @throw std::invalid_argument if @p len_dims is empty or has out-of-bounds indices.
+     */
+    rocfft_field_t get_field_for_lengths(const std::set<size_t>& len_dims) const;
+
+    /**
+     * @return This field if none of its bricks is embedded (see
+     * `data_descriptor_t::is_embedded`). Otherwise, the field made of the bricks'
+     * embedding layouts (same locations), explicitly reinterpreted as
+     * `rocfft_array_type_complex_interleaved` if it is
+     * `rocfft_array_type_hermitian_interleaved` (complex-conjugate symmetry relationships
+     * no longer hold upon re-interpretation into a higher-dimensional data set).
+     */
+    rocfft_field_t get_embedding_field() const;
+
+    /**
+     * @return `true` iff both fields have identical bricks once hermitian bricks are
+     * relabeled as complex bricks of the same format (interleaved or planar), i.e., this
+     * tolerates hermitian/complex relabelings of the same data.
+     */
+    bool is_same_up_to_hermitian_relabel(const rocfft_field_t& other) const;
+
+    /**
      * @brief Verifies whether this field is consistent as input (resp. output)
      * for embarrassingly-parallel computations of specific types of Fourier
      * Transforms and, if so, returns the corresponding output (resp. input)
@@ -821,8 +858,6 @@ private:
     {
         field_view_t(const rocfft_field_t&         field_,
                      const std::vector<BufferPtr>& buffers_,
-                     rocfft_array_type             array_type_,
-                     rocfft_precision              precision_,
                      const std::string&            group_name_ = "");
 
         field_view_t get_view_for_lengths(const std::set<size_t>& len_dims) const;
@@ -831,12 +866,10 @@ private:
         inline bool operator==(const field_view_t& other) const
         {
             // group_name is irrelevant for logical comparisons of field views
-            // Do not use a strict equality of `array_type` as that would prevent simple
-            // re-interpretation of `rocfft_array_type_hermitian_interleaved` into
+            // Do not use a strict equality of the fields' array types as that would prevent
+            // simple re-interpretation of `rocfft_array_type_hermitian_interleaved` into
             // `rocfft_array_type_complex_interleaved` and vice-versa.
-            return field == other.field && precision == other.precision
-                   && array_type_is_complex(array_type) == array_type_is_complex(other.array_type)
-                   && buffers == other.buffers;
+            return field.is_same_up_to_hermitian_relabel(other.field) && buffers == other.buffers;
         }
         inline bool operator!=(const field_view_t& other) const
         {
@@ -845,8 +878,6 @@ private:
 
         const rocfft_field_t         field;
         const std::vector<BufferPtr> buffers;
-        const rocfft_array_type      array_type;
-        const rocfft_precision       precision;
         const std::string            group_name;
     };
 

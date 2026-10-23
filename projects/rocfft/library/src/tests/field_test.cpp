@@ -21,6 +21,7 @@
 #include "data_descriptor_test_access.h"
 #include "plan.h"
 #include <gtest/gtest.h>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -55,6 +56,51 @@ namespace
             EXPECT_NE(std::string(e.what()).find("consistent array types and precisions"),
                       std::string::npos)
                 << e.what();
+        }
+    }
+
+    // One of two bricks splitting a 3D field of lengths {4, 6, 8} (batch 1) along its
+    // outermost length axis, at index `split`
+    rocfft_brick_t split_brick(size_t            half,
+                               size_t            split,
+                               rocfft_precision  precision,
+                               rocfft_array_type array_type)
+    {
+        const size_t lower = half ? split : 0;
+        const size_t upper = half ? 8 : split;
+        return {data_descriptor_t(precision,
+                                  array_type,
+                                  {0, 0, lower, 0},
+                                  {4, 6, upper, 1},
+                                  {1, 4, 24, 24 * (upper - lower)}),
+                rocfft_location_t(0, static_cast<int>(half))};
+    }
+
+    rocfft_field_t
+        field_3d(rocfft_precision precision, rocfft_array_type array_type, size_t split = 4)
+    {
+        return rocfft_field_t({split_brick(0, split, precision, array_type),
+                               split_brick(1, split, precision, array_type)});
+    }
+
+    // Expects `sub` to be `field.get_field_for_lengths(len_dims)` with bricks of array type
+    // `array_type` (and the original precision and locations)
+    void expect_field_for_lengths(const rocfft_field_t&   field,
+                                  const std::set<size_t>& len_dims,
+                                  rocfft_array_type       array_type)
+    {
+        const auto sub = field.get_field_for_lengths(len_dims);
+        EXPECT_EQ(sub.get_array_type(), array_type);
+        EXPECT_EQ(sub.get_precision(), field.get_precision());
+        EXPECT_EQ(sub.get_global_data_range().get_len_rank(), len_dims.size());
+        ASSERT_EQ(sub.num_bricks(), field.num_bricks());
+        for(size_t b = 0; b < field.num_bricks(); b++)
+        {
+            const auto& brick = field.get_brick(b);
+            EXPECT_EQ(sub.get_brick(b),
+                      rocfft_brick_t(
+                          brick.layout.get_layout_for_len_axes(len_dims).reinterpret_as(array_type),
+                          brick.location));
         }
     }
 }
@@ -133,4 +179,81 @@ TEST(field_test, failing_reinterpret_as_leaves_field_unchanged)
     EXPECT_THROW(field.reinterpret_as(rocfft_array_type_complex_interleaved), std::logic_error);
     EXPECT_EQ(field, original);
     EXPECT_EQ(field.get_array_type(), rocfft_array_type_real);
+}
+
+TEST(field_test, field_for_lengths_passes_array_type_and_precision_through)
+{
+    for(const auto array_type : {rocfft_array_type_real, rocfft_array_type_complex_interleaved})
+    {
+        const auto field = field_3d(rocfft_precision_double, array_type);
+        for(const auto& len_dims :
+            std::vector<std::set<size_t>>{{0}, {1}, {2}, {0, 1}, {0, 2}, {1, 2}, {0, 1, 2}})
+            expect_field_for_lengths(field, len_dims, array_type);
+        EXPECT_THROW(field.get_field_for_lengths({}), std::invalid_argument);
+        EXPECT_THROW(field.get_field_for_lengths({3}), std::invalid_argument);
+    }
+}
+
+TEST(field_test, field_for_lengths_keeps_hermitian_when_axis_0_is_selected)
+{
+    const auto field = field_3d(rocfft_precision_single, rocfft_array_type_hermitian_interleaved);
+    for(const auto& len_dims : std::vector<std::set<size_t>>{{0}, {0, 1}, {0, 2}})
+        expect_field_for_lengths(field, len_dims, rocfft_array_type_hermitian_interleaved);
+}
+
+TEST(field_test, field_for_lengths_relabels_hermitian_when_axis_0_is_not_selected)
+{
+    const auto field = field_3d(rocfft_precision_single, rocfft_array_type_hermitian_interleaved);
+    for(const auto& len_dims : std::vector<std::set<size_t>>{{1}, {2}, {1, 2}})
+        expect_field_for_lengths(field, len_dims, rocfft_array_type_complex_interleaved);
+}
+
+TEST(field_test, field_for_all_lengths_keeps_hermitian)
+{
+    const auto field = field_3d(rocfft_precision_single, rocfft_array_type_hermitian_interleaved);
+    EXPECT_EQ(field.get_field_for_lengths({0, 1, 2}), field);
+}
+
+TEST(field_test, embedding_field_relabels_hermitian_and_restores_lengths)
+{
+    const auto hermitian = field_3d(rocfft_precision_half, rocfft_array_type_hermitian_interleaved);
+    const auto complex   = field_3d(rocfft_precision_half, rocfft_array_type_complex_interleaved);
+    for(const auto& len_dims : std::vector<std::set<size_t>>{{0}, {0, 1}, {1, 2}, {2}})
+    {
+        EXPECT_EQ(hermitian.get_field_for_lengths(len_dims).get_embedding_field(), complex);
+        EXPECT_EQ(complex.get_field_for_lengths(len_dims).get_embedding_field(), complex);
+    }
+    const auto real = field_3d(rocfft_precision_half, rocfft_array_type_real);
+    EXPECT_EQ(real.get_field_for_lengths({1}).get_embedding_field(), real);
+}
+
+TEST(field_test, embedding_field_of_non_embedded_field_is_identical)
+{
+    const auto field = field_3d(rocfft_precision_half, rocfft_array_type_hermitian_interleaved);
+    EXPECT_EQ(field.get_embedding_field(), field);
+    EXPECT_EQ(field.get_embedding_field().get_array_type(),
+              rocfft_array_type_hermitian_interleaved);
+}
+
+TEST(field_test, is_same_up_to_hermitian_relabel)
+{
+    const auto hermitian
+        = field_3d(rocfft_precision_double, rocfft_array_type_hermitian_interleaved);
+    const auto complex = field_3d(rocfft_precision_double, rocfft_array_type_complex_interleaved);
+    EXPECT_TRUE(hermitian.is_same_up_to_hermitian_relabel(complex));
+    EXPECT_TRUE(complex.is_same_up_to_hermitian_relabel(hermitian));
+    EXPECT_TRUE(hermitian.is_same_up_to_hermitian_relabel(hermitian));
+    EXPECT_TRUE(field_3d(rocfft_precision_double, rocfft_array_type_hermitian_planar)
+                    .is_same_up_to_hermitian_relabel(
+                        field_3d(rocfft_precision_double, rocfft_array_type_complex_planar)));
+
+    // real vs complex, interleaved vs planar, precision and bounds still matter
+    EXPECT_FALSE(field_3d(rocfft_precision_double, rocfft_array_type_real)
+                     .is_same_up_to_hermitian_relabel(complex));
+    EXPECT_FALSE(hermitian.is_same_up_to_hermitian_relabel(
+        field_3d(rocfft_precision_double, rocfft_array_type_complex_planar)));
+    EXPECT_FALSE(hermitian.is_same_up_to_hermitian_relabel(
+        field_3d(rocfft_precision_single, rocfft_array_type_complex_interleaved)));
+    EXPECT_FALSE(hermitian.is_same_up_to_hermitian_relabel(
+        field_3d(rocfft_precision_double, rocfft_array_type_complex_interleaved, 2)));
 }
