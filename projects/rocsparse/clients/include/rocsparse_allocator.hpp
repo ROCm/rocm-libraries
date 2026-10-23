@@ -447,6 +447,16 @@ public:
         catch(const hipError_t& status)
         {
             rocsparse_clients_log_hip_error("rocsparse_allocator::free", status);
+
+            // Consume the error so that it is not reported by the next hipGetLastError
+            // call, as in report_allocation_failure.
+            static_cast<void>(hipGetLastError());
+#ifdef GOOGLE_TEST
+            if(::testing::UnitTest::GetInstance()->current_test_info() != nullptr)
+            {
+                ADD_FAILURE() << "rocsparse_allocator::free failed: " << hipGetErrorString(status);
+            }
+#endif
         }
     }
 };
