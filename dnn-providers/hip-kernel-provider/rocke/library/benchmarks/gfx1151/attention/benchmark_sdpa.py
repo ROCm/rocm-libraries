@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Fixed inference SDPA coverage and timing for public gfx1151 dispatch.
+"""Fixed inference SDPA coverage and timing for public RDNA WMMA dispatch.
 
 Run as a module with the platform and library on PYTHONPATH. Inputs, precision
 and mask semantics are fixed before timing. Every case remains in the report,
@@ -22,7 +22,13 @@ from contextlib import ExitStack
 import numpy as np
 
 from rocke.runtime import hip_module
-from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
+from rocke.core.arch import generic_arch_from_target_id
+from rocke.runtime.hip_module import (
+    Runtime,
+    get_device_arch,
+    get_device_num_cus,
+    get_device_target_id,
+)
 
 from .candidate import RockeKernels, UnsupportedCase
 from .cases import CASES, make_inputs, reference, suite_hash
@@ -258,11 +264,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--graph-count", type=int, default=32)
     parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="compile target; defaults to the visible device's generic target",
+    )
     args = parser.parse_args(argv)
     if args.graph_count < 1 or args.repeats < 3:
         parser.error("graph-count must be positive and repeats must be >=3")
-    if get_device_arch() != "gfx1151":
-        raise RuntimeError(f"Expected gfx1151, got {get_device_arch()!r}")
+    device = get_device_target_id()
+    generic = generic_arch_from_target_id(device or "")
+    arch = args.arch or generic
+    if generic is None or arch not in (generic, get_device_arch()):
+        raise RuntimeError(f"Cannot run {arch!r} code objects on device {device!r}")
     import ml_dtypes
 
     print(
@@ -270,7 +284,9 @@ def main(argv=None):
         + json.dumps(
             {
                 "suite_sha256": suite_hash(),
-                "arch": "gfx1151",
+                "arch": arch,
+                "device": device,
+                "device_arch": get_device_arch(),
                 "compute_units": get_device_num_cus(),
                 "python": sys.version.split()[0],
                 "numpy": np.__version__,
@@ -285,7 +301,7 @@ def main(argv=None):
         flush=True,
     )
     rt = Runtime()
-    kernels = RockeKernels(rt)
+    kernels = RockeKernels(rt, arch)
     rows = []
     try:
         for case in CASES:

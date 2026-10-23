@@ -220,9 +220,9 @@ Coherency hints (`core/ir.py`):
 
 ```text
 CACHE_ALL = 0 # default
-CACHE_GLOBAL = 1 # GLC: skip L2 (one-shot loads)
-CACHE_STREAM = 2 # SLC: streaming hint (don't evict useful lines)
-NON_TEMPORAL = 3 # GLC + SLC: bypass cache hierarchy
+CACHE_GLOBAL = 1 # GLC (gfx90a) / SC0 (gfx942, gfx950)
+CACHE_STREAM = 2 # SLC (gfx90a) / NT (gfx942, gfx950): streaming data
+NON_TEMPORAL = 3 # GLC + SLC / SC0 + NT
 ```
 
 For K-loop streaming tile loads, `CACHE_STREAM` is the documented choice; the tile is consumed in the next iter and never re-read.
@@ -449,9 +449,9 @@ dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale)
 dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 
 # OCP MX E8M0 shared-exponent decode + apply.
-# decode_mx_scale_e8m0(e8m0) -> f32 multiplier ``2^(e - 127)`` with
-# ``e == 0`` and ``e == 255`` mapped to ``0.0`` (matches the AMDGPU
-# MX MFMA hardware path's denormal flush).
+# decode_mx_scale_e8m0(e8m0) -> f32 multiplier, per the OCP MX spec:
+# the byte is unsigned, codes 0..254 give exactly ``2^(code - 127)``
+# (code 0 is the f32 subnormal ``2^-127``) and code 255 gives NaN.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)

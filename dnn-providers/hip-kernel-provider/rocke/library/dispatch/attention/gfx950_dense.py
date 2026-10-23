@@ -29,11 +29,7 @@ from .candidate import (
     DENSE_PERSIST_ALGORITHM,
     make_dense_candidate,
 )
-from .common import (
-    AttentionMaskType,
-    AttentionRequest,
-    _parse_attention_mask_type,
-)
+from .common import AttentionRequest, normalize_band
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -41,7 +37,9 @@ _DENSE_TILE = "default"
 # gfx950 CU count and the shipped occupancy hint.
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
-_FEATURES = frozenset({"causal", "sliding_window", "sinks", "lse"})
+_FEATURES = frozenset(
+    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+)
 
 
 @dataclass(frozen=True)
@@ -91,31 +89,52 @@ GFX950_DENSE_VARIANT_BY_NAME = {v.candidate_name: v for v in GFX950_DENSE_VARIAN
 GFX950_DENSE_VARIANT_BY_SPEC_ID = {v.spec_id: v for v in GFX950_DENSE_VARIANTS}
 
 
-def _ragged_self_attention(
-    sq: int,
-    sk: int,
-    block_m: int,
-    block_n: int,
-    *,
-    moving_bottom_right: bool = False,
-) -> bool:
-    return (sq == sk or moving_bottom_right) and (
-        sq % block_m != 0 or sk % block_n != 0
-    )
+_DENSE_BR_BAND_ERROR = (
+    "dense: a window or lookahead with bottom-right alignment and "
+    "seqlen_q != seqlen_k is not implemented"
+)
+
+
+def _is_ragged(sq: int, sk: int, block_m: int, block_n: int) -> bool:
+    """Lengths that are not tile multiples run the on-chip-padded ragged body (any
+    mask: the padded keys / query rows are handled by the key-pad mask and the
+    guarded store, not by the diagonal)."""
+    return sq % block_m != 0 or sk % block_n != 0
+
+
+def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
+    """``(causal, right_bound, moving_bottom_right)`` the dense body computes for
+    ``req``. Raises ``ValueError`` for a band dense cannot serve.
+
+    ``causal`` False is the unbounded right side; ``right_bound`` is the lookahead
+    (0 = plain causal). The dense body anchors its window / lookahead on the
+    top-left diagonal; only the plain causal mask has a compile-time shifted
+    (bottom-right) variant, so a window or lookahead at bottom-right alignment with
+    ``seqlen_q != seqlen_k`` is rejected here instead of being computed top-left.
+    """
+    band = normalize_band(req, uniform_lengths=True)
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    window = int(req.sliding_window)
+    causal = band.right_bound is not None
+    right_bound = band.right_bound or 0
+    if band.top_left or sq == sk:
+        return causal, right_bound, False  # the diagonals coincide, or top-left
+    # Bottom-right alignment with seqlen_q != seqlen_k.
+    if not causal:
+        if window > 0:
+            raise ValueError(_DENSE_BR_BAND_ERROR)
+        return False, 0, False  # full attention: alignment is moot
+    if window > 0 or right_bound > 0:
+        raise ValueError(_DENSE_BR_BAND_ERROR)
+    return True, 0, True  # plain causal, compile-time shifted diagonal
 
 
 def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
-    """``ragged`` for the tile the knobs choose: non-tile-multiple
-    self-attention lengths take the on-chip ragged path."""
+    """``ragged`` for the tile the knobs choose: non-tile-multiple lengths take
+    the on-chip ragged path."""
     block_m = int(knobs.get("block_m", base.block_m))
     block_n = int(knobs.get("block_n", base.block_n))
-    ragged = _ragged_self_attention(
-        int(base.seqlen_q),
-        int(base.seqlen_kv),
-        block_m,
-        block_n,
-        moving_bottom_right=bool(base.causal_bottom_right),
-    )
+    ragged = _is_ragged(int(base.seqlen_q), int(base.seqlen_kv), block_m, block_n)
     return {"ragged": ragged}
 
 
@@ -144,24 +163,11 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
-    mask_type = _parse_attention_mask_type(req.mask_type)
-    moving_bottom_right = (
-        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
-    )
-    # Cross-length ragged attention is valid only when bottom-right supplies the
-    # shifted diagonal. Equal-length bottom-right is ordinary causal attention.
-    ragged = _ragged_self_attention(
-        sq, sk, bm, bn, moving_bottom_right=moving_bottom_right
-    )
+    causal, right_bound, moving_bottom_right = _dense_band(req)
+    ragged = _is_ragged(sq, sk, bm, bn)
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
-            if not _ragged_self_attention(
-                sq,
-                sk,
-                int(tile["block_m"]),
-                int(tile["block_n"]),
-                moving_bottom_right=moving_bottom_right,
-            ):
+            if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
     return Gfx950AttentionDenseSpec(
@@ -171,7 +177,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=int(req.hdim_q),
-        causal=mask_type != AttentionMaskType.NO_MASK,
+        causal=causal,
         dtype=req.dtype.lower(),
         block_m=bm,
         block_n=bn,
@@ -186,6 +192,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         wide_lds_dma=variant.wide_lds_dma,
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
+        right_bound=right_bound,
     )
 
 

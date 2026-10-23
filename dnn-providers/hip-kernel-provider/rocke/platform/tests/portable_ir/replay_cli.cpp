@@ -40,6 +40,7 @@
 #include "rocke/ir_import.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/recipe_vm.h"
+#include "rocke/rocke_build_id.h"
 
 namespace
 {
@@ -57,7 +58,9 @@ void usage(const char* argv0)
     std::fprintf(stderr,
                  "usage: %s (--ir FILE | --recipe FILE [--cbor] | --bundle FILE --key KEY)\n"
                  "          [--arch GFX] [--flavor llvm20|llvm22|llvm23]\n"
-                 "          [--int NAME=VALUE]... [--str NAME=VALUE]...\n",
+                 "          [--int NAME=VALUE]... [--str NAME=VALUE]...\n"
+                 "       %s --provenance\n",
+                 argv0,
                  argv0);
 }
 
@@ -102,6 +105,7 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     const char* flavor_name = nullptr;
     bool cbor = false;
+    bool print_provenance = false;
 
     // The spec name/value strings must outlive the spec arrays handed to the VM,
     // so they are owned here and only pointed at below.
@@ -112,7 +116,11 @@ int main(int argc, char** argv)
     {
         const char* a = argv[i];
         const bool has_next = (i + 1) < argc;
-        if(std::strcmp(a, "--ir") == 0 && has_next)
+        if(std::strcmp(a, "--provenance") == 0)
+        {
+            print_provenance = true;
+        }
+        else if(std::strcmp(a, "--ir") == 0 && has_next)
         {
             mode = Mode::Ir;
             path = argv[++i];
@@ -172,6 +180,16 @@ int main(int argc, char** argv)
         }
     }
 
+    if(print_provenance)
+    {
+        if(argc != 2)
+        {
+            std::fprintf(stderr, "replay_cli: --provenance accepts no other arguments\n");
+            return 2;
+        }
+        std::printf("%s %s\n", rocke_engine_version(), rocke_build_id());
+        return 0;
+    }
     if(mode == Mode::None || !path)
     {
         usage(argv[0]);

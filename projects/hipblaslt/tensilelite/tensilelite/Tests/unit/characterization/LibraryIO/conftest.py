@@ -35,10 +35,10 @@ snapshotted downstream stays reproducible in the dev container (see
 
 import pytest
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
 
 @pytest.fixture(scope="session")

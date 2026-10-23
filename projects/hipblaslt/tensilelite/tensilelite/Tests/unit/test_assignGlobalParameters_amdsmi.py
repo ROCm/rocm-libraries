@@ -3,7 +3,7 @@
 
 """
 Unit tests for the amd-smi discovery in
-Tensile.Common.GlobalParameters.assignGlobalParameters.
+tensilelite.Common.GlobalParameters.assignGlobalParameters.
 
 amd-smi is only needed at runtime to pin GPU clocks/fans during benchmarking
 and tuning. It must NOT be required to build libraries or validate logic, so a
@@ -20,7 +20,7 @@ import pytest
 # etc.). If that chain is unavailable in the current environment, skip rather
 # than error at collection time.
 try:
-    import Tensile.Common.GlobalParameters as GP
+    import tensilelite.Common.GlobalParameters as GP
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment dependent
     GP = None
@@ -30,7 +30,7 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
         GP is None,
-        reason=f"Tensile.Common.GlobalParameters import unavailable: {_IMPORT_ERROR}",
+        reason=f"tensilelite.Common.GlobalParameters import unavailable: {_IMPORT_ERROR}",
     ),
 ]
 

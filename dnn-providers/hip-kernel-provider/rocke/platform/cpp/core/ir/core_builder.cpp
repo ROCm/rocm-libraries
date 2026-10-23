@@ -385,6 +385,12 @@ rocke_op_t* rocke_i_op(rocke_ir_builder_t* b,
     if(num_regions < 0)
         num_regions = 0;
 
+    for(i = 0; i < num_results; i++)
+    {
+        rocke_i_refuse_packed_only_value(rocke_opcode_name(opcode),
+                                         result_types ? result_types[i] : NULL);
+    }
+
     op = (rocke_op_t*)rocke_arena_calloc(&b->arena, sizeof(*op));
     if(!op)
     {
@@ -640,6 +646,66 @@ int rocke_i_count_of(const rocke_type_t* t)
     return 1;
 }
 
+static const rocke_type_t* packed_only_candidate(const rocke_type_t* t)
+{
+    return (t != NULL && t->kind == ROCKE_TYPE_SMEM) ? t->elem : rocke_i_elem_of(t);
+}
+
+bool rocke_i_is_packed_only(const rocke_type_t* t)
+{
+    const rocke_type_t* elem = packed_only_candidate(t);
+    return elem != NULL && elem->kind == ROCKE_TYPE_SCALAR
+           && (elem->scalar == ROCKE_SCALAR_I4 || elem->scalar == ROCKE_SCALAR_U4);
+}
+
+void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t)
+{
+    if(rocke_i_is_packed_only(t))
+    {
+        const rocke_type_t* elem = packed_only_candidate(t);
+        throw ckc::TypeError(
+            ckc::format_error("%s: %s values travel packed in 32-bit words and have no scalar or "
+                              "vector form -- keep them in i32 storage and unpack explicitly",
+                              op_name,
+                              elem->name));
+    }
+}
+
+void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const char* instead)
+{
+    if(!rocke_type_is_unsigned(t))
+    {
+        return;
+    }
+    const rocke_type_t* elem = rocke_i_elem_of(t);
+    std::string message = ckc::format_error(
+        "%s treats its operands as signed, but %s is unsigned", op_name, elem->name);
+    if(instead != NULL)
+    {
+        message += std::string(" -- use ") + instead;
+    }
+    throw ckc::TypeError(message);
+}
+
+void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead)
+{
+    for(int i = 0; i < op->num_operands; ++i)
+    {
+        rocke_i_refuse_unsigned(rocke_opcode_name(op->opcode), op->operands[i]->type, instead);
+    }
+}
+
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op)
+{
+    const rocke_type_t* source = op->operands[0]->type;
+    if(source->kind == ROCKE_TYPE_SCALAR && source->scalar == ROCKE_SCALAR_U8)
+    {
+        return;
+    }
+    throw ckc::TypeError(ckc::format_error(
+        "%s expects a u8 source, got %s", rocke_opcode_name(op->opcode), source->name));
+}
+
 /* ============================== BUILDER ================================= */
 
 rocke_status_t rocke_ir_builder_init(rocke_ir_builder_t* b, const char* kernel_name)
@@ -819,6 +885,8 @@ rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
                 b, ROCKE_ERR_VALUE, "duplicate kernel parameter '%s'", name);
         }
     }
+
+    rocke_i_refuse_packed_only_value("param", t);
 
     /* Value name carries the leading '%'. */
     full_name = rocke_arena_printf(&b->arena, "%%%s", name);

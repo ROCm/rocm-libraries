@@ -7,7 +7,13 @@ import unittest
 from dataclasses import replace
 from itertools import combinations
 
-from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, wmma_fmha_fwd_grid
+from kernels.gfx1151.wmma_fmha_fwd import (
+    WmmaFmhaFwdSpec,
+    is_valid_spec,
+    wmma_fmha_fwd_grid,
+)
+from rocke.core.arch import ArchTarget
+from rocke.helpers.mfma_attention import _wmma_attn_op_id
 
 
 class TestWmmaFmhaFwdSpec(unittest.TestCase):
@@ -318,6 +324,123 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
                 transposed_qk=True,
                 use_attn_bias=True,
             )
+
+    def test_runtime_head_dims_naming_and_abi_order(self):
+        from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_signature
+
+        def names(spec):
+            return [param["name"] for param in wmma_fmha_fwd_signature(spec)]
+
+        extra = ["head_dim_q", "head_dim_v", "num_v_heads"]
+        for base in (
+            WmmaFmhaFwdSpec(head_size=128),
+            WmmaFmhaFwdSpec(
+                head_size=128,
+                mask_mode="window",
+                use_softcap=True,
+                use_attn_bias=True,
+                layout="paged",
+                page_block_size=16,
+                kv_dtype="fp8e4m3",
+            ),
+        ):
+            with self.subTest(spec=base.kernel_name()):
+                self.assertFalse(base.runtime_head_dims)
+                self.assertNotIn("rtdim", base.kernel_name())
+                spec = replace(base, runtime_head_dims=True)
+                self.assertEqual(spec.kernel_name(), base.kernel_name() + "_rtdim")
+                cut = names(base).index("stride_lse_head") + 1
+                self.assertEqual(
+                    names(spec), names(base)[:cut] + extra + names(base)[cut:]
+                )
+
+    def test_runtime_head_dims_rejects_transposed_and_output_tiles(self):
+        spec = WmmaFmhaFwdSpec(head_size=128, runtime_head_dims=True)
+        for changes in ({"transposed_qk": True}, {"value_tile_size": 64}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(spec, **changes)
+
+    def test_runtime_head_dims_compose_with_standard_features(self):
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd, is_valid_spec
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        def ir(spec, arch):
+            return lower_kernel_to_llvm(build_wmma_fmha_fwd(spec, arch), arch=arch)
+
+        base = WmmaFmhaFwdSpec(head_size=128, runtime_head_dims=True)
+        variants = (
+            {},
+            {"v_head_size": 64, "v_lds_stage": True},
+            {"mask_mode": "causal", "causal_tile_skip": True},
+            {"mask_mode": "window", "query_tail": True, "kv_tail": True},
+            {"use_attn_bias": True, "bias_dtype": "q", "use_sinks": True},
+            {"use_softcap": True, "use_alibi": True, "use_qq_bias": True},
+            {"layout": "ragged", "dtype": "bf16"},
+            {"layout": "paged", "page_block_size": 32, "kv_dtype": "fp8e4m3"},
+        )
+        for changes in variants:
+            spec = replace(base, **changes)
+            for arch in ("gfx1151", "gfx11-generic", "gfx12-generic"):
+                with self.subTest(changes=changes, arch=arch):
+                    ok, why = is_valid_spec(spec, arch=arch)
+                    self.assertTrue(ok, why)
+            # gfx11-generic lowers to the gfx1151 bytes; compare both atoms.
+            for arch in ("gfx1151", "gfx12-generic"):
+                with self.subTest(changes=changes, arch=arch):
+                    exact = replace(spec, runtime_head_dims=False)
+                    self.assertNotEqual(ir(spec, arch), ir(exact, arch))
+        ok, _ = is_valid_spec(base, arch="gfx942")
+        self.assertFalse(ok)
+
+    def test_runtime_head_dims_bound_dense_kv_with_buffer_resources(self):
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        def ir(spec, arch="gfx1151"):
+            return lower_kernel_to_llvm(build_wmma_fmha_fwd(spec, arch), arch=arch)
+
+        base = WmmaFmhaFwdSpec(head_size=128, runtime_head_dims=True)
+        for changes in ({}, {"v_lds_stage": True}, {"dtype": "bf16"}):
+            spec = replace(base, **changes)
+            for arch in ("gfx1151", "gfx12-generic"):
+                with self.subTest(changes=changes, arch=arch):
+                    self.assertIn("raw.ptr.buffer.load", ir(spec, arch))
+        # Ragged, paged and FP8 KV keep the clamped global loads.
+        for changes in (
+            {"layout": "ragged"},
+            {"layout": "paged", "page_block_size": 16},
+            {"kv_dtype": "fp8e4m3"},
+        ):
+            with self.subTest(changes=changes):
+                self.assertNotIn("raw.ptr.buffer.load", ir(replace(base, **changes)))
+        self.assertNotIn(
+            "raw.ptr.buffer.load", ir(replace(base, runtime_head_dims=False))
+        )
+
+
+class TestWmmaFmhaFwdAtomSelection(unittest.TestCase):
+    """The WMMA atom follows the (arch, dtype) pair on both RDNA generations."""
+
+    def test_op_id_tracks_arch_and_dtype(self):
+        for arch, dtype, op_id in (
+            ("gfx1151", "fp16", "wmma_f32_16x16x16_f16"),
+            ("gfx1151", "bf16", "wmma_f32_16x16x16_bf16"),
+            ("gfx1201", "fp16", "wmma_gfx12_f32_16x16x16_f16"),
+            ("gfx1201", "bf16", "wmma_gfx12_f32_16x16x16_bf16"),
+        ):
+            with self.subTest(arch=arch, dtype=dtype):
+                self.assertEqual(
+                    _wmma_attn_op_id(ArchTarget.from_gfx(arch), dtype), op_id
+                )
+
+    def test_is_valid_spec_accepts_both_dtypes_on_rdna(self):
+        for arch in ("gfx1151", "gfx1201"):
+            for dtype in ("fp16", "bf16"):
+                with self.subTest(arch=arch, dtype=dtype):
+                    ok, why = is_valid_spec(
+                        WmmaFmhaFwdSpec(head_size=64, dtype=dtype), arch=arch
+                    )
+                    self.assertTrue(ok, why)
 
 
 if __name__ == "__main__":

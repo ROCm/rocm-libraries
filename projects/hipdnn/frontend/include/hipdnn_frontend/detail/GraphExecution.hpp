@@ -3,13 +3,16 @@
 #pragma once
 
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/VariantPackHelpers.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
@@ -18,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace hipdnn_frontend::detail
 {
@@ -210,17 +214,29 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
     return {ErrorCode::OK, ""};
 }
 
-// Query the backend for an engine's workspace size estimate.
+// Query the backend for an engine's workspace size estimate under the given knob settings.
 // Returns 0 if the query fails at any step (non-fatal — workspace will
-// be determined accurately at plan compilation time).
-inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc, int64_t engineId)
+// be determined accurately at plan compilation time). A failure with knob settings is logged:
+// the caller would otherwise fall back to the knob-free estimate, which can be too low.
+inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc,
+                                        int64_t engineId,
+                                        const std::vector<KnobSetting>& knobSettings = {})
 {
+    const auto failed = [&]() {
+        if(!knobSettings.empty())
+        {
+            HIPDNN_FE_LOG_WARN("Workspace estimate with knob settings failed for engine "
+                               << engineId << "; the estimate may be too low");
+        }
+        return int64_t{0};
+    };
+
     detail::ScopedHipdnnBackendDescriptor engineDesc;
     auto createErr
         = hipdnn_frontend::detail::createEngineDescriptorForGraph(engineDesc, graphDesc, engineId);
     if(createErr.is_bad())
     {
-        return 0;
+        return failed();
     }
 
     auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
@@ -233,23 +249,29 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc, int
                                                        static_cast<const void*>(&engineDesc.get()));
     if(setStatus != HIPDNN_STATUS_SUCCESS)
     {
-        return 0;
+        return failed();
+    }
+
+    if(applyKnobSettingsViaDescriptors(engineConfigDesc->get(), knobSettings).is_bad())
+    {
+        return failed();
     }
 
     auto finStatus = detail::hipdnnBackend()->backendFinalize(engineConfigDesc->get());
     if(finStatus != HIPDNN_STATUS_SUCCESS)
     {
-        return 0;
+        return failed();
     }
 
     int64_t wsSize = 0;
-    detail::hipdnnBackend()->backendGetAttribute(engineConfigDesc->get(),
-                                                 HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
-                                                 HIPDNN_TYPE_INT64,
-                                                 1,
-                                                 nullptr,
-                                                 &wsSize);
-    return wsSize;
+    auto wsStatus
+        = detail::hipdnnBackend()->backendGetAttribute(engineConfigDesc->get(),
+                                                       HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                                       HIPDNN_TYPE_INT64,
+                                                       1,
+                                                       nullptr,
+                                                       &wsSize);
+    return wsStatus == HIPDNN_STATUS_SUCCESS ? wsSize : failed();
 }
 
 } // namespace hipdnn_frontend::detail

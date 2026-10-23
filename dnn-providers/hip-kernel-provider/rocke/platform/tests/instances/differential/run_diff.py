@@ -99,8 +99,15 @@ def collect_ref_shas(results):
     return out
 
 
-MAX_CFG = 256  # hard cap on config enumeration per family
+MAX_CFG = 256  # default cap on config enumeration per family
+FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
 TIMEOUT = 120  # seconds per emitter invocation
+
+
+def config_limit(family: str) -> int:
+    """Share enumeration caps so every differential path covers the same configs."""
+    return FAMILY_MAX_CFG.get(family, MAX_CFG)
+
 
 _CANON = None
 
@@ -614,12 +621,12 @@ def _config_record(
     return record
 
 
-def _batch_complete(emissions: list[Emission], mode: str) -> bool:
+def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) -> bool:
     """Require a hard cap or an explicit terminal record from each producer."""
     if not emissions:
         return False
     tail = emissions[-1]
-    if len(emissions) == MAX_CFG:
+    if len(emissions) == limit:
         return True
     return (
         _is_end_emission(tail)
@@ -631,15 +638,16 @@ def _batch_complete(emissions: list[Emission], mode: str) -> bool:
 
 def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     """Run both emitters once when comparison needs hashes, not raw text."""
+    limit = config_limit(name)
     emitter_workers = min(2, available_cpus())
     with ThreadPoolExecutor(max_workers=emitter_workers) as emitters:
         c_future = emitters.submit(
-            _run_native_configs, binpath, range(MAX_CFG), mode, canonical
+            _run_native_configs, binpath, range(limit), mode, canonical
         )
         p_future = emitters.submit(
             _run_python_batch,
             name,
-            range(MAX_CFG),
+            range(limit),
             mode,
             src_dir=src_dir,
             canonical=canonical,
@@ -658,14 +666,14 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     c_emissions = c_batch.emissions
     p_emissions = p_batch.emissions
     incomplete = []
-    if not _batch_complete(c_emissions, mode):
+    if not _batch_complete(c_emissions, mode, limit):
         detail = (
             f": {c_emissions[-1].error}"
             if c_emissions and c_emissions[-1].error
             else ""
         )
         incomplete.append(f"native returned {len(c_emissions)} records{detail}")
-    if not _batch_complete(p_emissions, mode):
+    if not _batch_complete(p_emissions, mode, limit):
         detail = (
             f": {p_emissions[-1].error}"
             if p_emissions and p_emissions[-1].error

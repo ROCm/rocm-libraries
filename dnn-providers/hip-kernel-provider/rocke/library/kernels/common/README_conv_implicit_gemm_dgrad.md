@@ -203,9 +203,8 @@ write M-outer into a K-outer allocation).
 
 **Not a knob.** The spec field defaults `False`; the value is deduced by
 the keyword-only `DgradConvSpec.default_lds_k_outer(*, arch, dtype_b,
-warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which both library dispatch
-(`library/dispatch/grouped_convolution.py`,
-`_dgrad_lds_k_outer`) and the sweep driver call. The predicate is
+warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which the sweep driver
+calls. The predicate is
 asymmetric with wgrad's — B-side dtype and warp tile only, never the A-side
 counterparts — and additionally keys on `cpg`: the saving is proportional to the
 B load width, which collapses to 1 on an odd channel run, where `axis_b` is

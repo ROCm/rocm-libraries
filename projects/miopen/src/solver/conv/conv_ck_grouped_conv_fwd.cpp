@@ -270,8 +270,6 @@ bool ConvDepthwiseBwdData2D::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!ctx.use_hip_kernels)
         return false;
-    if(64 != ctx.GetStream().GetWavefrontWidth())
-        return false;
     if(!problem.IsLayoutDefault())
         return false;
     if(!problem.IsFp16() && !problem.IsBfp16())

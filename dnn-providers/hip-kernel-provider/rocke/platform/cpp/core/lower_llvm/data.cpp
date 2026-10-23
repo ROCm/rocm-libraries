@@ -158,6 +158,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"minnum.f32", "declare float @llvm.minnum.f32(float, float)"},
     {"minnum.f16", "declare half @llvm.minnum.f16(half, half)"},
     {"minnum.bf16", "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)"},
+    {"fabs.f64", "declare double @llvm.fabs.f64(double)"},
     {"fabs.f32", "declare float @llvm.fabs.f32(float)"},
     {"fabs.f16", "declare half @llvm.fabs.f16(half)"},
     {"fabs.bf16", "declare bfloat @llvm.fabs.bf16(bfloat)"},
@@ -342,6 +343,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"rint.f32", "declare float @llvm.rint.f32(float)"},
     {"smax.i32", "declare i32 @llvm.smax.i32(i32, i32)"},
     {"smin.i32", "declare i32 @llvm.smin.i32(i32, i32)"},
+    /* Unsigned u8 maximum / minimum (u8 renders as i8). */
+    {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
+    {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},

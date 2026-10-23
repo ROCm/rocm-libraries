@@ -29,9 +29,11 @@ namespace
         int                      scale_type;
         bool                     block_scaling;
         int                      block_size;
+        int                      w4a16_group_size;
+        bool                     w4a16_zero_point;
     };
 
-    // Every hipblaslt_scaling_format enumerator, named once, with what the three
+    // Every hipblaslt_scaling_format enumerator, named once, with what the
     // mapping helpers are expected to report for it. Expanded twice: into the
     // expectation table the tests iterate, and into a tripwire switch that makes
     // the compiler reject a list missing an enumerator.
@@ -40,23 +42,39 @@ namespace
     // every enumerator appears; the expected values in each row are the part that
     // still needs a human.
     //
-    // Columns: format, scale type, is block scaling, block size.
-#define HIPBLASLT_TEST_SCALING_FORMATS(X)          \
-    X(none, HIP_R_8F_UE8M0, false, 1)              \
-    X(Scalar, HIP_R_8F_UE8M0, false, 1)            \
-    X(Vector, HIP_R_8F_UE8M0, false, 1)            \
-    X(Block_32_UE8M0, HIP_R_8F_UE8M0, true, 32)    \
-    X(Block_16_UE8M0, HIP_R_8F_UE8M0, true, 16)    \
-    X(Block_32_UE4M3, HIP_R_8F_E4M3, true, 32)     \
-    X(Block_16_UE4M3, HIP_R_8F_E4M3, true, 16)     \
-    X(Block_32_UE5M3, HIP_R_8F_E5M3_EXT, true, 32) \
-    X(Block_16_UE5M3, HIP_R_8F_E5M3_EXT, true, 16) \
-    X(Block_32_UE8M0_32_8_EXT, HIP_R_8F_UE8M0, true, 32)
+    // Columns: format, MX scale type, MX block flag/size, W4A16 group size/zero point.
+    // W4A16 uses separate helpers and retains the MX helper defaults.
+#define HIPBLASLT_TEST_SCALING_FORMATS(X)                          \
+    X(none, HIP_R_8F_UE8M0, false, 1, 0, false)                    \
+    X(Scalar, HIP_R_8F_UE8M0, false, 1, 0, false)                  \
+    X(Vector, HIP_R_8F_UE8M0, false, 1, 0, false)                  \
+    X(Block_32_UE8M0, HIP_R_8F_UE8M0, true, 32, 0, false)          \
+    X(Block_16_UE8M0, HIP_R_8F_UE8M0, true, 16, 0, false)          \
+    X(Block_32_UE4M3, HIP_R_8F_E4M3, true, 32, 0, false)           \
+    X(Block_16_UE4M3, HIP_R_8F_E4M3, true, 16, 0, false)           \
+    X(Block_32_UE5M3, HIP_R_8F_E5M3_EXT, true, 32, 0, false)       \
+    X(Block_16_UE5M3, HIP_R_8F_E5M3_EXT, true, 16, 0, false)       \
+    X(Block_32_UE8M0_32_8_EXT, HIP_R_8F_UE8M0, true, 32, 0, false) \
+    X(Block_32_BF16, HIP_R_8F_UE8M0, false, 1, 32, false)          \
+    X(Block_64_BF16, HIP_R_8F_UE8M0, false, 1, 64, false)          \
+    X(Block_128_BF16, HIP_R_8F_UE8M0, false, 1, 128, false)        \
+    X(Block_32_BF16_ZP, HIP_R_8F_UE8M0, false, 1, 32, true)        \
+    X(Block_64_BF16_ZP, HIP_R_8F_UE8M0, false, 1, 64, true)        \
+    X(Block_128_BF16_ZP, HIP_R_8F_UE8M0, false, 1, 128, true)      \
+    X(Block_32_F16, HIP_R_8F_UE8M0, false, 1, 32, false)           \
+    X(Block_64_F16, HIP_R_8F_UE8M0, false, 1, 64, false)           \
+    X(Block_128_F16, HIP_R_8F_UE8M0, false, 1, 128, false)         \
+    X(Block_32_F16_ZP, HIP_R_8F_UE8M0, false, 1, 32, true)         \
+    X(Block_64_F16_ZP, HIP_R_8F_UE8M0, false, 1, 64, true)         \
+    X(Block_128_F16_ZP, HIP_R_8F_UE8M0, false, 1, 128, true)
 
     const std::vector<ScalingFormatExpectation>& known_scaling_formats()
     {
-#define X(fmt, scale_type, block_scaling, block_size) \
-    {#fmt, hipblaslt_scaling_format::fmt, scale_type, block_scaling, block_size},
+#define X(fmt, type, block, size, group, zp)                              \
+    {                                                                     \
+        #fmt, hipblaslt_scaling_format::fmt, type, block, size, group, zp \
+    }                                                                     \
+    ,
         static const std::vector<ScalingFormatExpectation> formats
             = {HIPBLASLT_TEST_SCALING_FORMATS(X)};
 #undef X
@@ -85,7 +103,8 @@ namespace
     {
         switch(value)
         {
-#define X(fmt, scale_type, block_scaling, block_size) case hipblaslt_scaling_format::fmt:
+#define X(fmt, scale_type, block_scaling, block_size, group_size, zero_point) \
+    case hipblaslt_scaling_format::fmt:
             HIPBLASLT_TEST_SCALING_FORMATS(X)
 #undef X
             break;
@@ -136,6 +155,12 @@ TEST(HostUnitScalingFormat, smoke_RegisteredFormatsMapAsExpected)
             << "scaleDataType(" << e.name << ")";
         EXPECT_EQ(isBlockScaling(e.format), e.block_scaling) << "isBlockScaling(" << e.name << ")";
         EXPECT_EQ(blockSize(e.format), e.block_size) << "blockSize(" << e.name << ")";
+        EXPECT_EQ(w4a16GroupSize(e.format), e.w4a16_group_size)
+            << "w4a16GroupSize(" << e.name << ")";
+        EXPECT_EQ(isW4A16Scaling(e.format), e.w4a16_group_size != 0)
+            << "isW4A16Scaling(" << e.name << ")";
+        EXPECT_EQ(isW4A16ZeroPoint(e.format), e.w4a16_zero_point)
+            << "isW4A16ZeroPoint(" << e.name << ")";
     }
 }
 
@@ -168,6 +193,9 @@ TEST(HostUnitScalingFormat, smoke_EveryEnumeratorIsRegistered)
             << "hipblaslt_scaling_format value " << value << " " << hint;
         EXPECT_EQ(static_cast<int>(scaleDataType(format)), static_cast<int>(HIP_R_8F_UE8M0))
             << "hipblaslt_scaling_format value " << value << " " << hint;
+        EXPECT_EQ(w4a16GroupSize(format), 0) << "hipblaslt_scaling_format value " << value;
+        EXPECT_FALSE(isW4A16Scaling(format)) << "hipblaslt_scaling_format value " << value;
+        EXPECT_FALSE(isW4A16ZeroPoint(format)) << "hipblaslt_scaling_format value " << value;
     }
 }
 
