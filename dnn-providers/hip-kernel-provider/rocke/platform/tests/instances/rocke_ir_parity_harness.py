@@ -1467,6 +1467,21 @@ def build_mxfp8_gemm_case(dtype, matrix_path):
     return _build
 
 
+def build_nvfp4_gemm_case(dtype, k):
+    def _build():
+        from rocke.instances.gfx1250.nvfp4_gemm import (
+            NvFp4GemmSpec,
+            build_nvfp4_gemm,
+        )
+
+        return build_nvfp4_gemm(
+            NvFp4GemmSpec(f"irhash_nvfp4_{dtype}_k{k}", 32, 48, k, dtype),
+            arch="gfx1250",
+        )
+
+    return _build
+
+
 def build_streaming_copy(arch):
     """bf16x8 copy whose load and store both carry TemporalHint.STREAMING, so
     the golden pins the full nontemporal emission (`!nontemporal !5` on both
@@ -1818,6 +1833,16 @@ def cases():
                 f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
                 "gfx1250",
                 build_mxfp8_gemm_case(dtype, matrix_path),
+            )
+
+    # Tensor-scaled FP4/E4M3, including both output epilogues and K unroll counts.
+    for dtype in ("bf16", "fp16"):
+        for k in (128, 256):
+            add(
+                "gemm",
+                f"gemm/gfx1250/nvfp4/{dtype}/k{k}",
+                "gfx1250",
+                build_nvfp4_gemm_case(dtype, k),
             )
 
     # Conv: problem-shape and arch variants.
