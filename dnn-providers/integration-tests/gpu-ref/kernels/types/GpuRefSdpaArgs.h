@@ -51,6 +51,13 @@ struct SdpaFwdArgs
     const int* seqLenQ;
     const int* seqLenKv;
     long long seqLenQStride, seqLenKvStride;
+    // Optional paged K / V (cuDNN): the k / v tensors are containers [blocks, H, blockSize, D]
+    // and logical key j of batch b is block table[b * tableStrB + (j / blockSize) * tableStrT],
+    // slot j % blockSize. nullptr means that side is dense [B, H, seqKv, D].
+    const int* pageTableK;
+    const int* pageTableV;
+    long long pageTableKStrB, pageTableKStrT, blockSizeK;
+    long long pageTableVStrB, pageTableVStrT, blockSizeV;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

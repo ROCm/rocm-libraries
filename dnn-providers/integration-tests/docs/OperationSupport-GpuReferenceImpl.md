@@ -152,9 +152,10 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
 | FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
 | Dropout | Not supported | Not supported |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V addressed through INT32 page tables | Not supported |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
-| Paged KV cache, block-sparse attention | Not supported | Not supported |
+| Block-sparse attention | Not supported | Not supported |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 

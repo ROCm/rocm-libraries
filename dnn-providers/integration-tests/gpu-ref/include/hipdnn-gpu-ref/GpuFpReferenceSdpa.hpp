@@ -55,6 +55,16 @@ struct NonDeduced
 
 } // namespace detail
 
+// One paged K or V side for the SDPA forward kernel: page-table pointer, its batch and
+// table-index strides, and the container's block size. table == nullptr means the side is dense.
+struct SdpaPagedSide
+{
+    const int32_t* table = nullptr;
+    int64_t strideBatch = 0;
+    int64_t strideTable = 0;
+    int64_t blockSize = 0;
+};
+
 class GpuFpReferenceSdpa
 {
 public:
@@ -94,9 +104,22 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
         SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr,
+        int64_t pagedMaxSeqKv = 0)
     {
-        validateInput(q.dims(), k.dims(), v.dims(), o.dims());
+        // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
+        // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
+        // padding. Table entries must name existing blocks; the kernel does not check them.
+        const bool pagedK = pageTableK != nullptr;
+        const bool pagedV = pageTableV != nullptr;
+        if((pagedK || pagedV) && (seqLenKv == nullptr || pagedMaxSeqKv <= 0))
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: paged K/V needs seq_len tensors and a "
+                                        "positive max key length");
+        }
+        validateInput(q.dims(), k.dims(), v.dims(), o.dims(), pagedK, pagedV, pagedMaxSeqKv);
 
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -104,7 +127,18 @@ public:
         const auto headDim = q.dims()[3];
         const auto numHeadsK = k.dims()[1];
         const auto numHeadsV = v.dims()[1];
-        const auto seqKv = k.dims()[2];
+        const auto seqKv = (pagedK || pagedV) ? pagedMaxSeqKv : k.dims()[2];
+
+        SdpaPagedSide pagedKSide;
+        SdpaPagedSide pagedVSide;
+        if(pagedK)
+        {
+            pagedKSide = pagedSide(*pageTableK, k.dims(), batch, seqKv);
+        }
+        if(pagedV)
+        {
+            pagedVSide = pagedSide(*pageTableV, v.dims(), batch, seqKv);
+        }
         const auto headDimV = v.dims()[3];
 
         // An absent scale is 1.0 (no scaling), as in cuDNN.
@@ -202,7 +236,9 @@ public:
                       seqLenQPtr,
                       seqLenKvPtr,
                       seqLenQStride,
-                      seqLenKvStride);
+                      seqLenKvStride,
+                      pagedKSide,
+                      pagedVSide);
 
         o.memory().markDeviceModified();
         if(lse != nullptr)
@@ -215,10 +251,34 @@ private:
     // --- Validation ---
     // No SDPA param validator exists; perform minimal shape checks only.
 
+    static SdpaPagedSide pagedSide(hipdnn_data_sdk::utilities::TensorBase<int32_t>& table,
+                                   const std::vector<int64_t>& containerDims,
+                                   int64_t batch,
+                                   int64_t maxSeqKv)
+    {
+        const auto& tableDims = table.dims();
+        if(tableDims.size() != 4 || tableDims[0] != batch || tableDims[1] != 1 || tableDims[3] != 1)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: page table must be [B, 1, T, 1]");
+        }
+        if(tableDims[2] * containerDims[2] < maxSeqKv)
+        {
+            throw std::invalid_argument(
+                "GpuFpReferenceSdpa: page table capacity is below the max key length");
+        }
+        return {static_cast<const int32_t*>(table.memory().deviceData()),
+                table.strides()[0],
+                table.strides()[2],
+                containerDims[2]};
+    }
+
     static void validateInput(const std::vector<int64_t>& qDims,
                               const std::vector<int64_t>& kDims,
                               const std::vector<int64_t>& vDims,
-                              const std::vector<int64_t>& oDims)
+                              const std::vector<int64_t>& oDims,
+                              bool pagedK = false,
+                              bool pagedV = false,
+                              int64_t pagedMaxSeqKv = 0)
     {
         if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
         {
@@ -231,7 +291,7 @@ private:
         const auto headDim = qDims[3];
         const auto numHeadsK = kDims[1];
         const auto numHeadsV = vDims[1];
-        const auto seqKv = kDims[2];
+        const auto seqKv = (pagedK || pagedV) ? pagedMaxSeqKv : kDims[2];
         const auto headDimV = vDims[3];
 
         if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0 || numHeadsK <= 0
@@ -240,17 +300,15 @@ private:
             throw std::invalid_argument("GpuFpReferenceSdpa: all dimensions must be positive");
         }
 
-        if(kDims[0] != batch || vDims[0] != batch || oDims[0] != batch)
+        // A paged side is a block container, so only dense sides carry the batch and key length.
+        if((!pagedK && (kDims[0] != batch || kDims[2] != seqKv))
+           || (!pagedV && (vDims[0] != batch || vDims[2] != seqKv)) || oDims[0] != batch)
         {
-            throw std::invalid_argument("GpuFpReferenceSdpa: batch dimension mismatch");
+            throw std::invalid_argument("GpuFpReferenceSdpa: batch or key length mismatch");
         }
         if(kDims[3] != headDim)
         {
             throw std::invalid_argument("GpuFpReferenceSdpa: Q head_dim != K head_dim");
-        }
-        if(vDims[2] != seqKv)
-        {
-            throw std::invalid_argument("GpuFpReferenceSdpa: K and V sequence lengths must match");
         }
         if(numHeadsK == 0 || numHeadsV == 0 || numHeads % numHeadsK != 0
            || numHeads % numHeadsV != 0)
@@ -295,7 +353,9 @@ private:
                               const int32_t* seqLenQPtr = nullptr,
                               const int32_t* seqLenKvPtr = nullptr,
                               int64_t seqLenQStride = 0,
-                              int64_t seqLenKvStride = 0);
+                              int64_t seqLenKvStride = 0,
+                              const SdpaPagedSide& pagedK = {},
+                              const SdpaPagedSide& pagedV = {});
 };
 
 } // namespace hipdnn_gpu_ref
