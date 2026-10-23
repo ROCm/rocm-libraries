@@ -139,6 +139,13 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 #### Support matrix
 - Matrix published as a regular CI artifact ⏳
 
+#### Testing
+- **Op coverage: detailed per-op integration tests**, in order Attention, then Convolution, then Normalization
+  - A test plan per tier (quick, standard, comprehensive, full) for each op
+  - Pairwise feature coverage per op, so the smallest set flags obvious breaks across providers
+  - Bundles that execute the plans
+  - Golden-reference baseline per op
+
 #### Universal descriptors
 - Data-driven kernel ingestion via universal kernel, match, dispatch, engine and heuristic descriptors (RFC 0017) ⏳
 
@@ -165,6 +172,10 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Python API wrappers (general availability beyond POC) ⏳
 - Plugin SDK utility expansion to further streamline new-provider development
 
+### Testing
+- Unified gate for a new integration or kernel source, built on the per-op coverage, giving high confidence in its quality
+- Fuzzy mode for release testing (Q1 2027): exploratory runs within an affordable pre-release budget to find uncovered cases, grow the set, and show where coverage stands
+
 ### Increase operational support coverage
 - Additional high performance static fusion support for priority use cases
 - Additional JIT graph support for operations
@@ -175,6 +186,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 ### Benchmarking & performance testing
 - Bindings installable as wheels ⏳
 - App installable as wheel
+- Automated benchmark runs weekly or daily off `develop`, with release-by-release regression tracking (Q1 2027)
 
 ### More framework integrations
 - vLLM backend

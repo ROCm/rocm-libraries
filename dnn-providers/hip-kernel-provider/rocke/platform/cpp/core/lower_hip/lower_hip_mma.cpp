@@ -255,6 +255,31 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
+    /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
+    if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x1 %s = {__builtin_amdgcn_mfma_f64_4x4x4f64(%s, %s, %s[0], 0, 0, 0)};",
+                      rocke_h_name(lw, op->results[0]),
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x4 %s = __builtin_amdgcn_mfma_f64_16x16x4f64(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {
         return h_emit_gfx1250_scaled_wmma(lw, op);
@@ -748,12 +773,6 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr16_b64(rocke_h_lowerer_t* lw, co
 {
     return h_ds_read_tr16(
         lw, op, "ds_read_tr16_b64", "i16x4_raw", "_llvm_amdgcn_ds_read_tr16_b64", 4, 8);
-}
-
-static rocke_status_t rocke_h_op_tile_ds_read_tr16_b128(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    return h_ds_read_tr16(
-        lw, op, "ds_read_tr16_b128", "i16x8_raw", "_llvm_amdgcn_ds_read_tr16_b128", 8, 16);
 }
 
 /* tile.ds_read_tr_b8 has NO _op_tile_ds_read_tr_b8 method in lower_hip.py: the
@@ -1608,7 +1627,6 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_PERMLANEX16, rocke_h_op_tile_permlanex16},
         {ROCKE_OP_TILE_BYTE_PERM, rocke_h_op_tile_byte_perm},
         {ROCKE_OP_TILE_DS_READ_TR16_B64, rocke_h_op_tile_ds_read_tr16_b64},
-        {ROCKE_OP_TILE_DS_READ_TR16_B128, rocke_h_op_tile_ds_read_tr16_b128},
         {ROCKE_OP_TILE_DS_READ_TR_B8, rocke_h_op_tile_ds_read_tr_b8},
         /* barriers / scheduling */
         {ROCKE_OP_TILE_SYNC, rocke_h_op_tile_sync},

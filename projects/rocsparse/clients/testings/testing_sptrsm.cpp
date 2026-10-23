@@ -22,6 +22,7 @@
 * ************************************************************************ */
 
 #include "rocsparse_clients_dnmat_descr.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "testing.hpp"
@@ -354,6 +355,15 @@ namespace rocsparse_clients
             return status;
         }
 
+    private:
+        explicit sptrsm_descr(const config_t& config_)
+            : config(config_)
+        {
+            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_create_sptrsm_descr(&this->m_descr));
+        }
+
+    public:
         sptrsm_descr(rocsparse_handle                handle,
                      int64_t                         batch_count,
                      const rocsparse_operation       operation_A,
@@ -369,7 +379,7 @@ namespace rocsparse_clients
 #endif
                      )
 
-            : config({
+            : sptrsm_descr(config_t {
                 operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
                     ,
@@ -377,23 +387,14 @@ namespace rocsparse_clients
 #endif
             })
         {
-            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);
-            if(status != rocsparse_status_success)
-            {
-                throw(status);
-            }
-            status = this->set(handle);
-            if(status != rocsparse_status_success)
-            {
-                throw(status);
-            }
+            CHECK_ROCSPARSE_THROW_ERROR(this->set(handle));
         }
 
         ~sptrsm_descr()
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            std::ignore = rocsparse_destroy_sptrsm_descr(this->m_descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_sptrsm_descr",
+                                                  rocsparse_destroy_sptrsm_descr(this->m_descr));
         }
 
         inline operator rocsparse_sptrsm_descr&()

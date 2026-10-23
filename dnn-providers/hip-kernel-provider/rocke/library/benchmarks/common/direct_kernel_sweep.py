@@ -50,8 +50,19 @@ from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
     BLOCK_Q,
+    DGRAD_4C_BLOCK_GROUPS,
+    DGRAD_4C_BLOCK_Q,
+    DGRAD_4C_FORMS,
     DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q,
+    DGRAD_FUSED_BLOCK_H,
+    DGRAD_FUSED_BLOCK_H_LARGE,
+    DGRAD_FUSED_CHANNELS,
+    DGRAD_FUSED_EXIT_BLOCK_H,
+    DGRAD_FUSED_FILTERS,
+    DGRAD_FUSED_LDS_PAD,
+    DGRAD_FUSED_WPE,
+    DGRAD_FUSED_WPE_MAX_VGPRS,
     DGRAD_RTC_LOOP_MAX_ATOMS,
     DGRAD_RTC_M_TILES,
     DGRAD_RTC_MAX_KPG,
@@ -71,6 +82,8 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DW_TILED_BLOCK_W,
     DW_TILED_BLOCK_WAVES,
     DW_TILED_UNROLL,
+    DW_WIN_MFMA_FILTERS,
+    DW_WIN_UNROLL_BUDGET,
     WGRAD_HPB,
     WGRAD_MFMA_K,
     WGRAD_WAVES_C_WIDE,
@@ -79,6 +92,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DirectCaps,
     _caps_jobs,
     _caps_of,
+    _dgrad_fused_rule_block_groups,
     _helper_identity,
     _split_reduce_identity,
     count_direct_jobs,
@@ -96,6 +110,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
     DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
+    DIRECT_DGRAD_FPROP_SINGLE as _DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
@@ -103,6 +118,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_dgrad_weight_transforms,
     direct_wgrad_fold_knobs,
     direct_dgrad_workspaces,
+    direct_entry_wave_reason,
     direct_spec_for_problem,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
@@ -477,6 +493,9 @@ def plan_for(
     if not meta.get("kernel_name"):
         return None, "cache entry has no kernel_name (rebuild the cache)"
     variant = identity.algorithm
+    why = direct_entry_wave_reason(variant, identity.wave_size, meta)
+    if why is not None:
+        return None, why
     knobs = json.loads(identity.knobs) if identity.knobs else {}
     if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
         chunks = _batch_chunks(problem)
@@ -486,7 +505,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
-    spec, why = direct_spec_for_problem(variant, problem, knobs, arch)
+    spec, why = direct_spec_for_problem(
+        variant, problem, knobs, arch, identity.wave_size
+    )
     if spec is None:
         return None, why
 
@@ -567,6 +588,13 @@ def plan_for(
         # into atomically (the caller zeroes it).
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        )
+        return DirectPlan(identity, (step,)), "ok"
+    if variant in _DGRAD_FPROP_SINGLE:
+        # A single forward kernel over the transposed problem that reads the
+        # original weights itself: forward ABI, transposed extents.
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", "w", "dx")
         )
         return DirectPlan(identity, (step,)), "ok"
     if variant not in _MFMA_DGRAD:

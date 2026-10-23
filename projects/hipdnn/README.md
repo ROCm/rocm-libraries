@@ -53,10 +53,11 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[RFCs](./docs/rfcs/README.md)** - Design documents and their implementation status
 
 ### Testing
-- **[Testing](./docs/TESTING.md)** - Synopsis of testing information
-- **[Testing Strategy](./docs/testing/TESTING_STRATEGY.md)** - Specific testing approach
-- **[Feature Release Test Plan](./docs/feature_release/TestPlan.md)** - Detailed test planning
-- **[Feature Release Run Template](./docs/feature_release/TestRunTemplate.md)** - Guidelines for test execution
+- **[Testing](./docs/TESTING.md)** - Build and run tests, CI gates, pre-push checklist
+- **[Testing Strategy](./docs/testing/TESTING_STRATEGY.md)** - Methodology, integration strategy, and testing policies
+- **[Known Testing Gaps](./docs/testing/KNOWN_TESTING_GAPS.md)** - What a green run does not prove
+- **[Release Testing](./docs/testing/RELEASE_TESTING.md)** - Release verification procedure
+- **[Release Run Template](./docs/testing/RELEASE_RUN_TEMPLATE.md)** - Record for a release verification run
 
 ---
 
