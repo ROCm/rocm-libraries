@@ -314,7 +314,7 @@ class Tensor {
    private:
     ptrdiff_t checkedElementOffset(std::span<const size_t> indices) const {
         const auto result = m_layout.elementOffset(indices);
-        if (!result) throw std::runtime_error(detail::message(result.error()));
+        if (!result) throw std::runtime_error(result.error().message());
         return *result;
     }
 
