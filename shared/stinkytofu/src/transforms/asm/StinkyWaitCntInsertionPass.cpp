@@ -83,7 +83,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         WaitInsertionPlan plan = df.materializePlan();
 
         ShallowPredPromotion shallowPred;
-        WmmaRunWaitMerge wmmaRunMerge;
+        WmmaRunWaitMerge wmmaRunMerge(options.mergeWaitsInForcedWmmaBursts);
         std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
         if (options.mergeWaitsInWmmaRuns) optimizers.push_back(&wmmaRunMerge);
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);

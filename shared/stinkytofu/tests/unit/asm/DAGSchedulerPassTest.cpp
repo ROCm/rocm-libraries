@@ -2702,6 +2702,40 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_TakesTheLongerBurst) {
     EXPECT_EQ(shapes[3], shapes[1]);
 }
 
+// The WMMAs of a forced burst carry WmmaForcedBurstData so the wait pass can keep their waits
+// apart (MergeDscnt off); the WMMAs after the burst, and every WMMA of an unforced burst, carry
+// none.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_MarksTheBurstWmmas) {
+    std::string marks[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        pfc.dagFeatures.queueStartMinWmmaBurst = 4;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::v_wmma_f32_16x16x16_bf16)
+                marks[v] += inst->getModifier<WmmaForcedBurstData>() != nullptr ? 'B' : 'W';
+        }
+    }
+    EXPECT_EQ(marks[0], std::string(16, 'W'));
+    EXPECT_EQ(marks[1], "BBBB" + std::string(12, 'W'));
+}
+
 // A forced burst never shortens the computed one: with no ds_loads to make room for, the
 // computed burst is the full queue depth, and queueStartMinWmmaBurst = 4 keeps it.
 TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_KeepsALongerComputedBurst) {

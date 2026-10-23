@@ -76,6 +76,11 @@ void WmmaRunWaitMerge::rewrite(WaitInsertionPlan& plan, const DataflowResult&, F
             auto* inst = dyn_cast<StinkyInstruction>(&ir);
             if (inst == nullptr) continue;
             if (isMatrixInstruction(*inst)) {
+                if (!mergeForcedBursts_ && inst->getModifier<WmmaForcedBurstData>() != nullptr) {
+                    mergeRun(plan, run);
+                    run.clear();
+                    continue;
+                }
                 run.push_back(inst);
                 continue;
             }

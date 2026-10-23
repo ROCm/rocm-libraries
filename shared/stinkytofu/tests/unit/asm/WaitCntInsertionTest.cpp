@@ -374,6 +374,8 @@ TEST_F(WaitCntInsertionTest, WmmaRunGetsOneMergedWait) {
         std::string body;
         bool merge;
         std::vector<std::pair<int, int>> waits;  // (WMMA index the wait precedes, dlcnt)
+        int forcedBurst = 0;                     // leading WMMAs marked WmmaForcedBurstData
+        bool mergeForced = false;
     };
     const std::string run4 = wmma(0, 10) + wmma(8, 20) + wmma(16, 30) + wmma(24, 40);
     const std::string split = wmma(0, 10) + wmma(8, 20) + valu + wmma(16, 30) + wmma(24, 40);
@@ -381,13 +383,21 @@ TEST_F(WaitCntInsertionTest, WmmaRunGetsOneMergedWait) {
         {run4, false, {{0, 3}, {1, 2}, {2, 1}, {3, 0}}},
         {run4, true, {{0, 0}}},
         {split, true, {{0, 2}, {2, 0}}},
+        // Forced-burst WMMAs keep their own waits by default and the rest of the run still
+        // merges; with mergeForced on they merge like any other run.
+        {run4, true, {{0, 3}, {1, 2}, {2, 0}}, 2},
+        {run4, true, {{0, 0}}, 2, true},
     };
     for (const Case& c : cases) {
         StinkyIRConverter converter(getArch());
         auto* func = parseIR("st.func @t() {\n^entry:" + loads + c.body + "}\n", converter);
         ASSERT_NE(func, nullptr);
+        for (int i = 0; i < c.forcedBurst; ++i)
+            findNthInst(*func->begin(), GFX::v_wmma_f32_16x16x32_bf16, i)
+                ->addModifier(WmmaForcedBurstData{});
         WaitCntInsertionOptions options;
         options.mergeWaitsInWmmaRuns = c.merge;
+        options.mergeWaitsInForcedWmmaBursts = c.mergeForced;
         runInsertionPass(*func, options);
 
         BasicBlock& bb = *func->begin();

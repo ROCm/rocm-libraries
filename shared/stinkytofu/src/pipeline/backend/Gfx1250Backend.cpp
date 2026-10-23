@@ -236,6 +236,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // A deep WMMA queue issues WMMAs back-to-back: one wait before the first.
                 waitCntOptions.mergeWaitsInWmmaRuns =
                     moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles > 0;
+                waitCntOptions.mergeWaitsInForcedWmmaBursts = moduleOptions.MergeDscnt;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }

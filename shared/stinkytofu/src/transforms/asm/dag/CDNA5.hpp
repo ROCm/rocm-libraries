@@ -1582,6 +1582,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     wmmaIssuedCountThisRegion_++;
     if (burstLeft_ > 0) {
+        if (getPassContext().getPassFeatureConfig().dagFeatures.queueStartForceWmmaBurst &&
+            node->inst->getModifier<WmmaForcedBurstData>() == nullptr)
+            node->inst->addModifier(WmmaForcedBurstData{});
         ++burstWmmasIssued_;
         if (--burstLeft_ == 0) endBurst();
     } else if (wmmaRefilling_ && wmmaRefillLeft_ > 0) {

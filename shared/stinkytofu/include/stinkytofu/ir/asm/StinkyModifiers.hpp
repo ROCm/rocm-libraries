@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        WMMA_FORCED_BURST,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1097,6 +1098,16 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     uint32_t poolIndex = 0;
 
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
+};
+
+/// Marks a WMMA issued in a queue-start burst while dagFeatures.queueStartForceWmmaBurst is on.
+/// Set by the CDNA5 DAG scheduler. MergeDscnt defaults to true, so WmmaRunWaitMerge folds a marked
+/// WMMA into the one wait before its run. With MergeDscnt false, that WMMA keeps its own wait and
+/// ends the run. Not emitted.
+struct WmmaForcedBurstData : public TypedModifier<WmmaForcedBurstData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WMMA_FORCED_BURST;
+
+    WmmaForcedBurstData() : TypedModifier<WmmaForcedBurstData>() {}
 };
 
 /// Holds raw (non-owning) pointers to the original instructions grouped into an

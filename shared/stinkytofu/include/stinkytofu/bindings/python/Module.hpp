@@ -139,6 +139,7 @@
     X(QueueStartForceWmmaBurst, bool,                                                              \
       false)                           /* loop head / barrier wait burst ignores ds windows */     \
     X(QueueStartMinWmmaBurst, int, -1) /* forced burst min WMMAs: 1..depth, -1 = depth */          \
+    X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */     \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(TensorLoadDsLoadGapCycles, int, 64)
 

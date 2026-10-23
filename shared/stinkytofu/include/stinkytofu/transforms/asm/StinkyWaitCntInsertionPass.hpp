@@ -39,6 +39,9 @@ struct WaitCntInsertionOptions {
     /// first WMMA, instead of one per WMMA, so a scheduled WMMA batch stays
     /// back-to-back (see WmmaRunWaitMerge). Set when WMMA batching is on.
     bool mergeWaitsInWmmaRuns = false;
+    /// With mergeWaitsInWmmaRuns, also merge the waits of WMMAs marked WmmaForcedBurstData.
+    /// Default true: one wait before the forced burst. False keeps one wait per forced-burst WMMA.
+    bool mergeWaitsInForcedWmmaBursts = true;
 };
 
 /**

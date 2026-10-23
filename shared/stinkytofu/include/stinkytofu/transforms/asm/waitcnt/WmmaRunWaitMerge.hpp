@@ -31,6 +31,9 @@
 // No memory op issues inside the run, so every counter's queue is the same at each
 // member and the waits compare directly: the run gets one wait, the per-counter
 // minimum, before its first WMMA. finalizePlan then finds the rest already drained.
+//
+// mergeForcedBursts defaults to true: a WMMA marked WmmaForcedBurstData stays in the run.
+// Without it, that WMMA is left out: it keeps its own wait and ends the run before it.
 
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlanOptimizer.hpp"
 
@@ -39,11 +42,17 @@ namespace waitcnt {
 
 class WmmaRunWaitMerge : public WaitPlanOptimizer {
    public:
+    explicit WmmaRunWaitMerge(bool mergeForcedBursts = true)
+        : mergeForcedBursts_(mergeForcedBursts) {}
+
     const char* getName() const override {
         return "WmmaRunWaitMerge";
     }
 
     void rewrite(WaitInsertionPlan& plan, const DataflowResult& dfr, Function& func) override;
+
+   private:
+    bool mergeForcedBursts_;
 };
 
 }  // namespace waitcnt
