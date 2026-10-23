@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -184,6 +184,10 @@ rocblas_status rocsolver_csrrf_analysis_template(rocblas_handle handle,
     // quick return
     if(n == 0)
         return rocblas_status_success;
+
+    hipStream_t stream;
+    ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
+    ROCSPARSE_CHECK(rocsparse_set_stream(rfinfo->sphandle, stream));
 
     if(rfinfo->mode == rocsolver_rfinfo_mode_lu)
     {

@@ -247,6 +247,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2w4hAsLfj
   KernelNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_CLR0_GRVWB8_MIWT1_1_NEPBS2_PLR0_SPO0_WG16_4_1
   SolutionNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_CLR0_GRVWB8_GSU1_MIWT1_1_NEPBS2_PLR0_SU32_SUM1_SUS256_SPO0_WG16_4_1_WGM8
   ActivationFuncCall: false
@@ -384,6 +385,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 1
+  SolutionUID: 0uR2w4hAooRC
   KernelNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_CLR1_GRVWB16_MIWT1_1_NEPBS2_PLR1_SPO0_WG16_4_1
   SolutionNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_CLR1_GRVWB16_GSU1_MIWT1_1_NEPBS2_PLR1_SU32_SUM1_SUS256_SPO0_WG16_4_1_WGM8
   ActivationFuncCall: false
@@ -519,6 +521,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 2
+  SolutionUID: 0uR2w4hAL9Y0
   KernelNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_CLR0_GRVWB8_MIWT1_1_NEPBS2_PLR0_SPO1_WG16_4_1
   SolutionNameMin: Cijk_Alik_Bjlk_F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_CLR0_GRVWB8_GSU1_MIWT1_1_NEPBS2_PLR0_SU32_SUM1_SUS256_SPO1_WG16_4_1_WGM8
   ActivationFuncCall: false

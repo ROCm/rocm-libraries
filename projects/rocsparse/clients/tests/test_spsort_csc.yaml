@@ -30,7 +30,7 @@ Tests:
 - name: spsort_csc
   category: quick
   function: spsort_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: [0, 10]
   N: [0, 33]
@@ -44,7 +44,7 @@ Tests:
 - name: spsort_csc
   category: quick
   function: spsort_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: [300]
   N: [242]
@@ -70,7 +70,7 @@ Tests:
 - name: spsort_csc_batched
   category: quick
   function: spsort_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: [10]
   N: [33]

@@ -24,7 +24,8 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
-from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32
+from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32, \
+    VXorB32
 from rocisa.functions import vectorStaticRemainder, \
     vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply, \
     vectorStaticMultiplyAdd
@@ -1078,6 +1079,16 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     tileDim = "M" if tile01 == 0 else "N"
                     module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes, \
                         "8. (TileSpan wave-split) hiSel = tid / MI_dim(%u)" % matrixInstTO))
+                    if tc == "MXSB" and kernel.get("LDSSegmentBRotate"):
+                        # B-rotate: SIMD pair 1 reads B vIdx v from rot(v) = 1 - v (nV == 2, gated
+                        # in b_rotate_reason). Its scales must follow: flip the half-wave select so
+                        # lanes 0..MI-1 load the partner block and MI..2MI-1 the base block.
+                        pairReg = writer.vgprPool.checkOut(1, tag="bRotatePair")
+                        module.add(vectorStaticDivide(pairReg, dividendReg, waveWidth, tmpVgprRes, \
+                            "8. (B-rotate) wave id = tid / wavelength(%u)" % waveWidth))
+                        module.add(VXorB32(dst=vgpr(dummy), src0=vgpr(pairReg), src1=vgpr(dummy), \
+                            comment="8. (B-rotate) hiSel ^= wave id (pair = wave id & 1)"))
+                        writer.vgprPool.checkIn(pairReg)
                     module.add(VAndB32(dst=vgpr(dummy), src0=1, src1=vgpr(dummy), \
                         comment="8. (TileSpan wave-split) hi = (tid / MI_dim) & 1  (lower/upper half-wave)"))
                     module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), hiOffset, vgpr(tReg), tmpSgprInfo, \

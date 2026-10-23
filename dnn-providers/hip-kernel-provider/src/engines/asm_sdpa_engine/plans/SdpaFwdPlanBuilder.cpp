@@ -445,7 +445,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        const auto band
+            = plan_utils::makeCoveringBoundsUnbound(plan_utils::resolveDiagonalBand(attrs),
+                                                    qTensor->dims()->Get(2),
+                                                    kTensor->dims()->Get(2));
+        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -645,7 +649,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    params.maskType = plan_utils::getMaskType(sdpaAttrs);
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), seqLenQ, seqLenKv);
+    params.maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 
     const auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());

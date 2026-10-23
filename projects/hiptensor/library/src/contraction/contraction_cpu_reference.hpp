@@ -33,7 +33,7 @@
 
 #include "contraction_solution.hpp"
 
-HIPTENSOR_EXPORT hiptensorStatus_t
+hiptensorStatus_t
     hiptensorContractionReference(const hiptensorPlan_t                 plan,
                                   void const*                           alpha,
                                   void const*                           A,

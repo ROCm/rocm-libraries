@@ -216,7 +216,7 @@ for text, message in (("", "empty IR input"), ("not serialized IR", "parse faile
         raise AssertionError("invalid serialized input was accepted")
 
 try:
-    rocke_engine.lower_serialized_ir("not serialized IR", flavor="invalid")
+    rocke_engine.lower_serialized_ir("not serialized IR", arch="gfx950", flavor="invalid")
 except RuntimeError as exc:
     assert "unknown LLVM flavor" in str(exc)
 else:

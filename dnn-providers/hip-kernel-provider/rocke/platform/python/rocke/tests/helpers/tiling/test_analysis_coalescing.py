@@ -33,9 +33,9 @@ def _shuffle(fwd, perm):
 
 
 def test_addr_fn_from_strides_is_generic():
-    a = addr_fn_from_strides((1, 64))  # M stride-1 (col-major)
+    a = addr_fn_from_strides((1, 64))  # M stride-1 (M-contiguous)
     assert a(0, 0) == 0 and a(3, 0) == 3 and a(0, 1) == 64
-    b = addr_fn_from_strides((64, 1))  # N stride-1 (row-major)
+    b = addr_fn_from_strides((64, 1))  # N stride-1 (N-contiguous)
     assert b(0, 0) == 0 and b(0, 3) == 3 and b(1, 0) == 64
 
 
@@ -95,7 +95,7 @@ def test_labels_and_stride1_axis_by_name():
 
 
 def test_operand_agnostic_A_and_B():
-    # NOT just C tiles: an A operand (M,K) and a B operand (K,N) analyze the same way -- generic over labels
+    # NOT just C tiles: an A operand (M,K) and a B operand (N,K) analyze the same way -- generic over labels
     # a simple lane owns 4 contiguous elements on its stride-1 axis -> one b128, fully coalesced
     a_dist = {
         (lane, r): (lane, r) for lane in range(64) for r in range(4)
@@ -107,10 +107,10 @@ def test_operand_agnostic_A_and_B():
         a.stride1_axis == "K" and a.per_instruction[0].vw_elems == 4
     )  # 4 f16 contiguous
     b_dist = {
-        (lane, r): (r, lane) for lane in range(64) for r in range(4)
-    }  # coord (K,N), K stride-1
+        (lane, r): (lane, r) for lane in range(64) for r in range(4)
+    }  # coord (N,K), K stride-1
     b = analyze_coalescing(
-        b_dist, ("K", "N"), (1, 4), 16, direction="load", line_bytes=128
+        b_dist, ("N", "K"), (4, 1), 16, direction="load", line_bytes=128
     )
     assert b.stride1_axis == "K"
 

@@ -114,7 +114,6 @@ class ToolchainDefaults(NamedTuple):
     C_COMPILER = osSelect(linux="amdclang", windows="clang.exe")
     OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
-    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig")
     DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator", windows="hipinfo.exe")
 
 
@@ -163,18 +162,6 @@ def supportedOffloadBundler(bundler: str) -> bool:
     return _supportedComponent(bundler, ["clang-offload-bundler"])
 
 
-def supportedHip(exe: str) -> bool:
-    """Determine if a HIP config executable is supported by Tensile.
-
-    Args:
-        bundler: The name of an offload bundler to test for support.
-
-    Return:
-        If supported True; otherwise, False.
-    """
-    return _supportedComponent(exe, ["hipconfig", "hipcc"])
-
-
 def supportedDeviceEnumerator(enumerator: str) -> bool:
     """Determine if a device enumerator is supported by Tensile.
 
@@ -216,7 +203,6 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
             supportedCxxCompiler(file),
             supportedCCompiler(file),
             supportedOffloadBundler(file),
-            supportedHip(file),
             supportedDeviceEnumerator(file),
         )
     ):

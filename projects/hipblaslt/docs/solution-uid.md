@@ -31,7 +31,10 @@ the optional, unquoted `SolutionUID` field immediately after the local
 ```
 
 YAML readers decode the text immediately and all identity, comparison, and
-mapping operations use the unsigned 64-bit value.
+mapping operations use the unsigned 64-bit value. New dict-format files from
+LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID` immediately
+after `SolutionIndex`. Legacy list-format files keep keys in their existing
+alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
 
 ## Regenerate a UID
 

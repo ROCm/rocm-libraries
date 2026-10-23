@@ -120,6 +120,10 @@ rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v
 
 /* ------------------------------------------------------ fp8 in-register dequant */
 
+/* OCP E4M3FN byte -> f32 using integer/IEEE operations, including signed zero,
+ * subnormals, exponent-15 finite values and NaNs. No native FP8 instruction. */
+rocke_value_t* rocke_decode_fp8e4m3fn_to_f32(rocke_ir_builder_t* b, rocke_value_t* byte);
+
 /* dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype) analogue: in-register dequant
  * of a ``<8 x fp8e4m3>`` to a packed ``<8 x dtype>``.
  *
