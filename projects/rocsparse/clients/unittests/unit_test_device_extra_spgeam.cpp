@@ -146,7 +146,7 @@ namespace
             }
             else
             {
-                pC = DevBuf<I>(static_cast<size_t>(A.m) + 1);
+                pC = DevBuf<I>(std::vector<I>(static_cast<size_t>(A.m) + 1, I(-7)));
                 cC = DevBuf<J>(static_cast<size_t>(nnz));
             }
             vC = DevBuf<T>(static_cast<size_t>(nnz));

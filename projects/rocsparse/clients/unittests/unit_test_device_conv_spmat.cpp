@@ -223,8 +223,9 @@ namespace
         return dense;
     }
 
-    // Device arrays of a matrix: an upload of a host matrix, or uninitialized storage
-    // large enough for any conversion.
+    // Device arrays of a matrix: an upload of a host matrix, or storage large enough for
+    // any conversion, filled with -7 (indices) and -99 (values) so that an entry the
+    // conversion does not write (zeros of a partial BSR block, ELL padding) shows.
     template <typename T, typename I>
     struct DevMat
     {
@@ -239,10 +240,10 @@ namespace
         {
         }
         DevMat()
-            : ptr(32)
-            , ind(2 * (M * N + 16))
-            , row(M * N + 16)
-            , val(M * N + 16)
+            : ptr(std::vector<I>(32, I(-7)))
+            , ind(std::vector<I>(2 * (M * N + 16), I(-7)))
+            , row(std::vector<I>(M * N + 16, I(-7)))
+            , val(std::vector<T>(M * N + 16, make_val<T>(-99)))
         {
         }
     };
@@ -454,6 +455,19 @@ namespace
 
                 const auto out = read_back<T, I>(target, tf, dtgt, meta);
                 EXPECT_EQ(to_dense(out), dense) << "nnz=" << out.nnz << " width=" << out.width;
+                if(tf == fmt_ell)
+                {
+                    // Padding is column -1 with a zero value, every other column is valid.
+                    for(size_t k = 0; k < out.ind.size(); ++k)
+                    {
+                        const int64_t col = static_cast<int64_t>(out.ind[k]);
+                        if(col == -1)
+                            EXPECT_EQ(out.val[k], T{}) << "ELL padding value " << k;
+                        else
+                            EXPECT_TRUE(col >= cfg.base_t && col < N + cfg.base_t)
+                                << "ELL column " << k << " = " << col;
+                    }
+                }
                 // A BSR source stores explicit zeros inside its blocks and the library is
                 // free to keep or drop them: only a lower bound is checked then.
                 int64_t expected = count_blocks(dense, tf == fmt_bsr ? cfg.bd_t : 1);

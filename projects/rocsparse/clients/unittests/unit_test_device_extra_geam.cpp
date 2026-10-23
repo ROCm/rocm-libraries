@@ -71,7 +71,7 @@ namespace
         const T          alpha = from_c<T>(cplx(2.0, 0.0));
         const T          beta  = from_c<T>(cplx(-1.0, 0.0));
 
-        DevBuf<rocsparse_int> ptrC(static_cast<size_t>(m) + 1);
+        DevBuf<rocsparse_int> ptrC(std::vector<rocsparse_int>(static_cast<size_t>(m) + 1, -7));
         ASSERT_TRUE(ptrC.ptr);
         rocsparse_int nnz_C = -1;
         ASSERT_EQ(rocsparse_csrgeam_nnz(handle,
@@ -254,7 +254,7 @@ namespace
                       rocsparse_status_success);
         }
 
-        DevBuf<int32_t> pC(static_cast<size_t>(m) + 1), cC(1);
+        DevBuf<int32_t> pC(std::vector<int32_t>(static_cast<size_t>(m) + 1, -7)), cC(1);
         DevBuf<T>       vC(1);
         ASSERT_TRUE(pC.ptr && cC.ptr && vC.ptr);
         ASSERT_EQ(rocsparse_create_csr_descr(&sC.p,
@@ -324,6 +324,11 @@ namespace
                 return;
             run(rocsparse_spgeam_stage_numeric_compute);
         }
+        if(::testing::Test::HasFatalFailure())
+            return;
+        // C has no entries: every row pointer, each pre-filled with -7, must be
+        // overwritten with 0 (the index base).
+        EXPECT_EQ(pC.host(), std::vector<int32_t>(static_cast<size_t>(m) + 1, 0));
     }
 }
 

@@ -87,7 +87,7 @@ namespace
         DevBuf<rocsparse_int> pB = up_idx<rocsparse_int>(B.ptr, c.base_B);
         DevBuf<rocsparse_int> iB = up_idx<rocsparse_int>(B.col, c.base_B);
         DevBuf<T>             vB = up_raw<T>(bsr_pack<T>(B, c.dir));
-        DevBuf<rocsparse_int> pC(static_cast<size_t>(c.mb) + 1);
+        DevBuf<rocsparse_int> pC(std::vector<rocsparse_int>(static_cast<size_t>(c.mb) + 1, -7));
         ASSERT_TRUE(pA.ptr && iA.ptr && vA.ptr && pB.ptr && iB.ptr && vB.ptr && pC.ptr);
 
         PointerModeGuard mode(handle, mode_of(c.device));

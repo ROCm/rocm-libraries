@@ -181,7 +181,7 @@ namespace
         ASSERT_NO_FATAL_FAILURE(oB.create(Buse, c.bsr, c.dir, c.bB));
         ASSERT_NO_FATAL_FAILURE(oD.create(Duse, c.bsr, c.dir, c.bD));
 
-        DevBuf<I> pC(static_cast<size_t>(c.mb) + 1);
+        DevBuf<I> pC(std::vector<I>(static_cast<size_t>(c.mb) + 1, I(-7)));
         ASSERT_TRUE(pC.ptr);
         SpmatH C;
         if(c.bsr)
@@ -468,7 +468,7 @@ namespace
                       rocsparse_status_success);
         }
 
-        DevBuf<int32_t> pC(static_cast<size_t>(m) + 1);
+        DevBuf<int32_t> pC(std::vector<int32_t>(static_cast<size_t>(m) + 1, -7));
         SpmatH          C;
         ASSERT_EQ(rocsparse_create_csr_descr(&C.p,
                                              m,

@@ -124,7 +124,7 @@ namespace
             iD = up_idx<rocsparse_int>(D.col, c.base_D);
             vD = up_raw<T>(bsr_pack<T>(D, c.dir));
         }
-        DevBuf<rocsparse_int> pC(static_cast<size_t>(c.mb) + 1);
+        DevBuf<rocsparse_int> pC(std::vector<rocsparse_int>(static_cast<size_t>(c.mb) + 1, -7));
         ASSERT_TRUE(pC.ptr);
 
         PointerModeGuard mode(handle, mode_of(c.device));
@@ -640,7 +640,7 @@ namespace
         DevBuf<float>         vA = up_raw<float>(bsr_pack<float>(A, dir));
         DevBuf<float>         vB = up_raw<float>(bsr_pack<float>(B, dir));
         DevBuf<float>         vD = up_raw<float>(bsr_pack<float>(D, dir));
-        DevBuf<rocsparse_int> pC(static_cast<size_t>(mb) + 1);
+        DevBuf<rocsparse_int> pC(std::vector<rocsparse_int>(static_cast<size_t>(mb) + 1, -7));
         MatDescrH             dA, dB, dC, dD;
         MatInfoH              info;
         const float           alpha = 2.0f, beta = -1.0f;
