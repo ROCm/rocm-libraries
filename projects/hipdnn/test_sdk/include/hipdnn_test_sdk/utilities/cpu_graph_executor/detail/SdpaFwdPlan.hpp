@@ -35,7 +35,9 @@ struct SdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -59,6 +61,12 @@ struct SdpaFwdParams
         , descaleVTensor(descaleVAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
                              : std::nullopt)
+        , seqLenQTensor(seqLenQAttributes != nullptr
+                            ? std::make_optional(unpackTensorAttributes(*seqLenQAttributes))
+                            : std::nullopt)
+        , seqLenKvTensor(seqLenKvAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*seqLenKvAttributes))
+                             : std::nullopt)
     {
     }
 
@@ -75,6 +83,8 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
 };
 
 template <typename QDataType,
@@ -145,6 +155,17 @@ public:
                 *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
         }
 
+        // Padding lengths (INT32, one per batch). Applicability guarantees both or neither.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<int32_t>> shallowSeqLenQ;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<int32_t>> shallowSeqLenKv;
+        if(_params.seqLenQTensor.has_value() && _params.seqLenKvTensor.has_value())
+        {
+            shallowSeqLenQ = createShallowTensor<int32_t>(
+                *_params.seqLenQTensor, variantPack.at(_params.seqLenQTensor->uid));
+            shallowSeqLenKv = createShallowTensor<int32_t>(
+                *_params.seqLenKvTensor, variantPack.at(_params.seqLenKvTensor->uid));
+        }
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
@@ -168,7 +189,9 @@ public:
                 shallowLseTensor.get(),
                 shallowDescaleQ.get(),
                 shallowDescaleK.get(),
-                shallowDescaleV.get());
+                shallowDescaleV.get(),
+                shallowSeqLenQ.get(),
+                shallowSeqLenKv.get());
     }
 
 private:
@@ -233,14 +256,13 @@ public:
         }
 
         // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
+        if(nodeAttributes->alibi_mask())
         {
             return false;
         }
 
-        // Unsupported: variable sequence lengths
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
+        // Padding: both seq_len tensors (INT32, one value per batch) or neither.
+        if(!isSupportedSdpaPadding(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -379,7 +401,13 @@ public:
                           lsePtr,
                           descaleQPtr,
                           descaleKPtr,
-                          descaleVPtr));
+                          descaleVPtr,
+                          nodeAttributes->seq_len_q_tensor_uid().has_value()
+                              ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
+                              : nullptr,
+                          nodeAttributes->seq_len_kv_tensor_uid().has_value()
+                              ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
+                              : nullptr));
     }
 };
 

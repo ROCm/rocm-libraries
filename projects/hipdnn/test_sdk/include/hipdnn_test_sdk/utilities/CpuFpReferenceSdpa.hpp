@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -62,6 +63,12 @@ public:
     ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
     ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
     ///                         (descale_s / scale_o) are not modeled here.
+    /// @param seqLenQ          Optional per-batch valid query length, INT32 [B, 1, 1, 1]. Given
+    ///                         together with seqLenKv (padding). Rows past it output O = 0 and
+    ///                         LSE = -inf (cuDNN >= 9.14).
+    /// @param seqLenKv         Optional per-batch valid key length, INT32 [B, 1, 1, 1]. Keys past
+    ///                         it are masked and never read. Bottom-right alignment uses the
+    ///                         per-batch lengths.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -82,7 +89,9 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -168,6 +177,10 @@ public:
         validateDescaleShape(descaleK, "descaleK", batch, numHeadsK);
         validateDescaleShape(descaleV, "descaleV", batch, numHeadsV);
 
+        // Per-batch valid lengths (padding). Resolved on the calling thread for the same reason.
+        const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
+        const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
+
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
@@ -191,9 +204,29 @@ public:
             const auto descaleVFactor
                 = static_cast<ComputeDataType>(getDescaleFactor(descaleV, b, kvHeadV));
 
+            // Padding (cuDNN): a query row past seq_len_q outputs O = 0 and LSE = -inf. Keys past
+            // seq_len_kv are masked and never read, so padding contents cannot leak in.
+            const auto liveQ = validQ[static_cast<size_t>(b)];
+            const auto liveKv = validKv[static_cast<size_t>(b)];
+            if(sq >= liveQ)
+            {
+                for(int64_t dv = 0; dv < headDimV; ++dv)
+                {
+                    o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(0.0F),
+                                   std::vector<int64_t>{b, h, sq, dv});
+                }
+                if(lse != nullptr)
+                {
+                    lse->setHostValue(-std::numeric_limits<float>::infinity(),
+                                      std::vector<int64_t>{b, h, sq, 0});
+                }
+                return;
+            }
+
             // Step 1: Compute scaled dot-product scores S[skv]
-            std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
-            for(int64_t skv = 0; skv < seqKv; ++skv)
+            std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv),
+                                                -std::numeric_limits<ComputeDataType>::infinity());
+            for(int64_t skv = 0; skv < liveKv; ++skv)
             {
                 auto dot = static_cast<ComputeDataType>(0.0);
                 for(int64_t d = 0; d < headDim; ++d)
@@ -209,7 +242,7 @@ public:
             // Step 2: Add additive attention mask (if provided)
             if(attnMask != nullptr)
             {
-                for(int64_t skv = 0; skv < seqKv; ++skv)
+                for(int64_t skv = 0; skv < liveKv; ++skv)
                 {
                     const auto maskIndices = computeMaskIndex(attnMask->dims(), b, h, sq, skv);
                     scores[static_cast<size_t>(skv)]
@@ -217,12 +250,13 @@ public:
                 }
             }
 
-            // Step 3: Apply sliding-window / causal mask.
+            // Step 3: Apply sliding-window / causal mask. Bottom-right alignment uses the batch's
+            // valid lengths, as cuDNN does under padding.
             if(leftBound >= 0 || rightBound >= 0)
             {
-                for(int64_t skv = 0; skv < seqKv; ++skv)
+                for(int64_t skv = 0; skv < liveKv; ++skv)
                 {
-                    if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                    if(isMasked(sq, skv, liveQ, liveKv, leftBound, rightBound, topLeftAlignment))
                     {
                         scores[static_cast<size_t>(skv)]
                             = -std::numeric_limits<ComputeDataType>::infinity();
@@ -265,7 +299,7 @@ public:
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
                 auto acc = static_cast<ComputeDataType>(0.0);
-                for(int64_t skv = 0; skv < seqKv; ++skv)
+                for(int64_t skv = 0; skv < liveKv; ++skv)
                 {
                     acc += probs[static_cast<size_t>(skv)]
                            * static_cast<ComputeDataType>(
@@ -436,6 +470,10 @@ public:
     ///                         scale (the bias is added after scaling), summed over every dim the
     ///                         mask broadcasts. Masked positions and dead rows contribute 0.
     ///                         Requires attnMask.
+    /// @param seqLenQ          Optional per-batch valid query length (see forward). Padded rows
+    ///                         contribute nothing; their dQ is 0.
+    /// @param seqLenKv         Optional per-batch valid key length (see forward). Padded keys get
+    ///                         dK = dV = 0 and are never read.
     ///
     /// Note: For GQA (H_q > H_kv), multiple query heads accumulate gradients to
     /// the same KV heads. This implementation is sequential to ensure correctness.
@@ -467,7 +505,9 @@ public:
         int64_t rightBound = -1,
         bool topLeftAlignment = true,
         hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>* dBias
-        = nullptr)
+        = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -604,6 +644,8 @@ public:
         const auto headsPerHeadK = numHeadsQ / numHeadsK;
         const auto headsPerHeadV = numHeadsQ / numHeadsV;
         const auto scale = static_cast<ComputeDataType>(attnScaleValue.value_or(1.0F));
+        const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
+        const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
 
         // Accumulate gradients in FP32 to match GPU kernel behavior.
         // The GPU ASM kernel uses FP32 accumulators (A32 path) and only converts
@@ -664,6 +706,15 @@ public:
                     const auto kvHeadK = hQ / headsPerHeadK;
                     const auto kvHeadV = hQ / headsPerHeadV;
 
+                    // Padding: a query row past seq_len_q has no output, so it contributes
+                    // nothing (its dQ stays 0); keys past seq_len_kv are never read.
+                    const auto liveQ = validQ[static_cast<size_t>(b)];
+                    const auto liveKv = validKv[static_cast<size_t>(b)];
+                    if(sq >= liveQ)
+                    {
+                        continue;
+                    }
+
                     // Allocate temporary buffers for this query position
                     std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
                     std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
@@ -694,11 +745,11 @@ public:
                         // -inf score.
                         const bool deadRow = std::isinf(lseVal);
 
-                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        for(int64_t skv = 0; skv < liveKv; ++skv)
                         {
                             // Apply sliding-window / causal mask
                             if(isMasked(
-                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                                   sq, skv, liveQ, liveKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -741,11 +792,11 @@ public:
                         // Recompute softmax from scratch (no LSE available)
                         auto maxVal = -std::numeric_limits<ComputeDataType>::infinity();
 
-                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        for(int64_t skv = 0; skv < liveKv; ++skv)
                         {
                             // Apply sliding-window / causal mask
                             if(isMasked(
-                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                                   sq, skv, liveQ, liveKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -778,7 +829,7 @@ public:
 
                         // Compute softmax probabilities
                         auto sumExp = static_cast<ComputeDataType>(0.0);
-                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        for(int64_t skv = 0; skv < liveKv; ++skv)
                         {
                             if(scores[static_cast<size_t>(skv)]
                                == -std::numeric_limits<ComputeDataType>::infinity())
@@ -795,7 +846,7 @@ public:
                         // A fully masked row leaves every probability at zero (sumExp == 0).
                         if(sumExp > static_cast<ComputeDataType>(0.0))
                         {
-                            for(int64_t skv = 0; skv < seqKv; ++skv)
+                            for(int64_t skv = 0; skv < liveKv; ++skv)
                             {
                                 probs[static_cast<size_t>(skv)] /= sumExp;
                             }
@@ -803,7 +854,7 @@ public:
                     }
 
                     // Step 3: Compute dP = dO @ V^T
-                    for(int64_t skv = 0; skv < seqKv; ++skv)
+                    for(int64_t skv = 0; skv < liveKv; ++skv)
                     {
                         auto dpVal = static_cast<ComputeDataType>(0.0);
                         for(int64_t dv = 0; dv < headDimV; ++dv)
@@ -819,9 +870,10 @@ public:
 
                     // Step 4: Compute dS = P * (dP - D)  [softmax backward]
                     // and accumulate gradients
-                    for(int64_t skv = 0; skv < seqKv; ++skv)
+                    for(int64_t skv = 0; skv < liveKv; ++skv)
                     {
-                        if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                        if(isMasked(
+                               sq, skv, liveQ, liveKv, leftBound, rightBound, topLeftAlignment))
                         {
                             continue;
                         }
@@ -951,6 +1003,48 @@ public:
     }
 
 private:
+    /// Per-batch valid sequence lengths. With no seq_len tensor every batch uses the full
+    /// length. The two seq_len tensors must be given together (cuDNN: padding needs both); each
+    /// holds one INT32 value per batch, and every value must lie in [0, maxLen].
+    static std::vector<int64_t>
+        resolveSeqLens(const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLen,
+                       const hipdnn_data_sdk::utilities::TensorBase<int32_t>* otherSeqLen,
+                       int64_t batch,
+                       int64_t maxLen,
+                       const char* name)
+    {
+        if((seqLen == nullptr) != (otherSeqLen == nullptr))
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa: seqLenQ and seqLenKv must be given together");
+        }
+        std::vector<int64_t> lens(static_cast<size_t>(batch), maxLen);
+        if(seqLen == nullptr)
+        {
+            return lens;
+        }
+        if(static_cast<int64_t>(seqLen->elementCount()) != batch || seqLen->dims().empty()
+           || seqLen->dims()[0] != batch)
+        {
+            throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
+                                        + " must hold one value per batch ([B, 1, 1, 1])");
+        }
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            std::vector<int64_t> idx(seqLen->dims().size(), 0);
+            idx[0] = b;
+            const auto len = static_cast<int64_t>(seqLen->getHostValue(idx));
+            if(len < 0 || len > maxLen)
+            {
+                throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name + "["
+                                            + std::to_string(b) + "] = " + std::to_string(len)
+                                            + " is outside [0, " + std::to_string(maxLen) + "]");
+            }
+            lens[static_cast<size_t>(b)] = len;
+        }
+        return lens;
+    }
+
     /// Returns true if position (sq, skv) should be masked given the window bounds.
     /// leftBound = -1 means no left mask; rightBound = -1 means no right mask.
     /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at

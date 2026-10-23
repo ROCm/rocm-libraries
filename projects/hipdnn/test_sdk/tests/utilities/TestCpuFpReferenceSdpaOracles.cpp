@@ -19,6 +19,8 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <limits>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -493,4 +495,256 @@ TEST(TestCpuFpReferenceSdpaProperty, ScaleEqualsPrescaledQuery)
     });
     expectAllNear(scaled.dK, pre.dK, TOL, "dK");
     expectAllNear(scaled.dV, pre.dV, TOL, "dV");
+}
+
+// ---------------------------------------------------------------------------
+// Padding (seq_len_q / seq_len_kv)
+// ---------------------------------------------------------------------------
+
+// A padded batch equals each batch run on its own truncated tensors: O, LSE, dQ, dK and dV agree
+// on live positions; padded query rows give O = 0, LSE = -inf, dQ = 0; padded keys give dK = dV = 0.
+// Every padding slot of Q, K, V and dO holds NaN, so any read of padding fails the test.
+// Bottom-right alignment uses each batch's own lengths (cuDNN).
+struct PaddingCase
+{
+    const char* name;
+    int64_t rightBound; // -1 = no causal, 0 = causal
+    bool topLeft;
+};
+
+class TestCpuFpReferenceSdpaPropertyPadding : public ::testing::TestWithParam<PaddingCase>
+{
+};
+
+TEST_P(TestCpuFpReferenceSdpaPropertyPadding, EqualsTruncatedBatches)
+{
+    const auto p = GetParam();
+    constexpr int64_t BATCH = 3;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 5;
+    constexpr int64_t SKV = 6;
+    constexpr int64_t D = 4;
+    constexpr float SCALE = 0.8F;
+    const std::vector<int32_t> lensQ = {3, 5, 2};
+    const std::vector<int32_t> lensKv = {6, 2, 4};
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    SdpaRun padded({BATCH, H, SQ, D}, {BATCH, H, SKV, D}, {BATCH, H, SKV, D});
+    padded.q.fillWithRandomValues(-1.0F, 1.0F, 101);
+    padded.k.fillWithRandomValues(-1.0F, 1.0F, 102);
+    padded.v.fillWithRandomValues(-1.0F, 1.0F, 103);
+    padded.dO.fillWithRandomValues(-1.0F, 1.0F, 104);
+    forEachIndex(padded.q.dims(), [&](const std::vector<int64_t>& i) {
+        if(i[2] >= lensQ[static_cast<size_t>(i[0])])
+        {
+            padded.q.setHostValue(nan, i);
+            padded.dO.setHostValue(nan, i);
+        }
+    });
+    forEachIndex(padded.k.dims(), [&](const std::vector<int64_t>& i) {
+        if(i[2] >= lensKv[static_cast<size_t>(i[0])])
+        {
+            padded.k.setHostValue(nan, i);
+            padded.v.setHostValue(nan, i);
+        }
+    });
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        seqLenQ.setHostValue(lensQ[static_cast<size_t>(b)], b, 0, 0, 0);
+        seqLenKv.setHostValue(lensKv[static_cast<size_t>(b)], b, 0, 0, 0);
+    }
+
+    CpuFpReferenceSdpa::forward(padded.q,
+                                padded.k,
+                                padded.v,
+                                padded.o,
+                                SCALE,
+                                nullptr,
+                                -1,
+                                p.rightBound,
+                                p.topLeft,
+                                &padded.lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+    CpuFpReferenceSdpa::backward(padded.q,
+                                 padded.k,
+                                 padded.v,
+                                 padded.o,
+                                 padded.dO,
+                                 padded.dQ,
+                                 padded.dK,
+                                 padded.dV,
+                                 SCALE,
+                                 &padded.lse,
+                                 nullptr,
+                                 -1,
+                                 p.rightBound,
+                                 p.topLeft,
+                                 nullptr,
+                                 &seqLenQ,
+                                 &seqLenKv);
+
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        const int64_t lq = lensQ[static_cast<size_t>(b)];
+        const int64_t lkv = lensKv[static_cast<size_t>(b)];
+        SdpaRun live({1, H, lq, D}, {1, H, lkv, D}, {1, H, lkv, D});
+        forEachIndex(live.q.dims(), [&](const std::vector<int64_t>& i) {
+            live.q.setHostValue(padded.q.getHostValue(b, i[1], i[2], i[3]), i);
+            live.dO.setHostValue(padded.dO.getHostValue(b, i[1], i[2], i[3]), i);
+        });
+        forEachIndex(live.k.dims(), [&](const std::vector<int64_t>& i) {
+            live.k.setHostValue(padded.k.getHostValue(b, i[1], i[2], i[3]), i);
+            live.v.setHostValue(padded.v.getHostValue(b, i[1], i[2], i[3]), i);
+        });
+        live.run(SCALE, nullptr, -1, p.rightBound, p.topLeft);
+
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t sq = 0; sq < SQ; ++sq)
+            {
+                const float lse = padded.lse.getHostValue(b, h, sq, 0);
+                const float lseLive = sq < lq ? live.lse.getHostValue(0, h, sq, 0)
+                                              : -std::numeric_limits<float>::infinity();
+                if(std::isinf(lseLive))
+                {
+                    EXPECT_EQ(lse, lseLive) << "b=" << b << " h=" << h << " sq=" << sq;
+                }
+                else
+                {
+                    EXPECT_NEAR(lse, lseLive, TOL) << "b=" << b << " h=" << h << " sq=" << sq;
+                }
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    const float oLive = sq < lq ? live.o.getHostValue(0, h, sq, d) : 0.0F;
+                    const float dqLive = sq < lq ? live.dQ.getHostValue(0, h, sq, d) : 0.0F;
+                    EXPECT_NEAR(padded.o.getHostValue(b, h, sq, d), oLive, TOL)
+                        << "O b=" << b << " h=" << h << " sq=" << sq;
+                    EXPECT_NEAR(padded.dQ.getHostValue(b, h, sq, d), dqLive, TOL)
+                        << "dQ b=" << b << " h=" << h << " sq=" << sq;
+                }
+            }
+            for(int64_t skv = 0; skv < SKV; ++skv)
+            {
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    const float dkLive = skv < lkv ? live.dK.getHostValue(0, h, skv, d) : 0.0F;
+                    const float dvLive = skv < lkv ? live.dV.getHostValue(0, h, skv, d) : 0.0F;
+                    EXPECT_NEAR(padded.dK.getHostValue(b, h, skv, d), dkLive, TOL)
+                        << "dK b=" << b << " h=" << h << " skv=" << skv;
+                    EXPECT_NEAR(padded.dV.getHostValue(b, h, skv, d), dvLive, TOL)
+                        << "dV b=" << b << " h=" << h << " skv=" << skv;
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuFpReferenceSdpaPropertyPadding,
+                         ::testing::Values(PaddingCase{"NoMask", -1, true},
+                                           PaddingCase{"CausalTopLeft", 0, true},
+                                           PaddingCase{"CausalBottomRight", 0, false}),
+                         [](const ::testing::TestParamInfo<PaddingCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+// A batch with no keys (seq_len_kv = 0) has no live row: O = 0, LSE = -inf, all gradients 0.
+TEST(TestCpuFpReferenceSdpaClosedForm, EmptyKeySequence)
+{
+    SdpaRun r({1, 1, 2, 4}, {1, 1, 3, 4}, {1, 1, 3, 4});
+    r.q.fillWithRandomValues(-1.0F, 1.0F, 111);
+    r.k.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    r.v.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    r.dO.fillWithRandomValues(-1.0F, 1.0F, 112);
+    Tensor<int32_t> seqLenQ({1, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({1, 1, 1, 1});
+    seqLenQ.fillWithValue(2);
+    seqLenKv.fillWithValue(0);
+
+    CpuFpReferenceSdpa::forward(r.q,
+                                r.k,
+                                r.v,
+                                r.o,
+                                std::nullopt,
+                                nullptr,
+                                -1,
+                                -1,
+                                true,
+                                &r.lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+    CpuFpReferenceSdpa::backward(r.q,
+                                 r.k,
+                                 r.v,
+                                 r.o,
+                                 r.dO,
+                                 r.dQ,
+                                 r.dK,
+                                 r.dV,
+                                 std::nullopt,
+                                 &r.lse,
+                                 nullptr,
+                                 -1,
+                                 -1,
+                                 true,
+                                 nullptr,
+                                 &seqLenQ,
+                                 &seqLenKv);
+
+    for(int64_t sq = 0; sq < 2; ++sq)
+    {
+        EXPECT_TRUE(std::isinf(r.lse.getHostValue(0, 0, sq, 0))
+                    && r.lse.getHostValue(0, 0, sq, 0) < 0);
+        for(int64_t d = 0; d < 4; ++d)
+        {
+            EXPECT_EQ(r.o.getHostValue(0, 0, sq, d), 0.0F);
+            EXPECT_EQ(r.dQ.getHostValue(0, 0, sq, d), 0.0F);
+        }
+    }
+    expectAllFinite(r.dK, "dK");
+    expectAllFinite(r.dV, "dV");
+}
+
+// The two seq_len tensors go together, and each value must fit the padded length.
+TEST(TestCpuFpReferenceSdpaClosedForm, SeqLenValidation)
+{
+    SdpaRun r({1, 1, 2, 4}, {1, 1, 3, 4}, {1, 1, 3, 4});
+    r.q.fillWithValue(0.0F);
+    r.k.fillWithValue(0.0F);
+    r.v.fillWithValue(0.0F);
+    Tensor<int32_t> lenOk({1, 1, 1, 1});
+    lenOk.fillWithValue(1);
+    Tensor<int32_t> lenTooLong({1, 1, 1, 1});
+    lenTooLong.fillWithValue(4);
+    const TensorBase<int32_t>* none = nullptr;
+    const auto fwd = [&](const TensorBase<int32_t>* lq, const TensorBase<int32_t>* lkv) {
+        CpuFpReferenceSdpa::forward(r.q,
+                                    r.k,
+                                    r.v,
+                                    r.o,
+                                    std::nullopt,
+                                    nullptr,
+                                    -1,
+                                    -1,
+                                    true,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    lq,
+                                    lkv);
+    };
+    EXPECT_THROW(fwd(&lenOk, none), std::invalid_argument);
+    EXPECT_THROW(fwd(none, &lenOk), std::invalid_argument);
+    EXPECT_THROW(fwd(&lenOk, &lenTooLong), std::invalid_argument);
+    EXPECT_NO_THROW(fwd(&lenOk, &lenOk));
 }

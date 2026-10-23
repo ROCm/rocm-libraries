@@ -62,6 +62,53 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
     return {leftBound, rightBound, isTopLeft};
 }
 
+/// Whether the SDPA node's padding attributes are ones the references implement. Padding is
+/// given by both seq_len_q and seq_len_kv, each INT32 with one value per batch ([B, 1, 1, 1]).
+/// padding_mask without both tensors, or only one tensor, is declined (cuDNN requires both). The
+/// tensors without padding_mask are accepted as padding, because hipDNN graphs omit the flag
+/// (SdpaSemanticsRegister.md SEM-008). Works for forward and backward attributes.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isSupportedSdpaPadding(const SdpaAttributesType& nodeAttributes, const TensorMap& tensorMap)
+{
+    const auto seqLenQ = nodeAttributes.seq_len_q_tensor_uid();
+    const auto seqLenKv = nodeAttributes.seq_len_kv_tensor_uid();
+    if(!seqLenQ.has_value() && !seqLenKv.has_value())
+    {
+        return !nodeAttributes.padding_mask();
+    }
+    if(!seqLenQ.has_value() || !seqLenKv.has_value())
+    {
+        return false;
+    }
+    const auto qIt = tensorMap.find(nodeAttributes.q_tensor_uid());
+    if(qIt == tensorMap.end() || qIt->second->dims() == nullptr || qIt->second->dims()->size() == 0)
+    {
+        return false;
+    }
+    const auto batch = qIt->second->dims()->Get(0);
+    for(const auto uid : {seqLenQ.value(), seqLenKv.value()})
+    {
+        const auto it = tensorMap.find(uid);
+        if(it == tensorMap.end()
+           || it->second->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32
+           || it->second->dims() == nullptr || it->second->dims()->size() == 0
+           || it->second->dims()->Get(0) != batch)
+        {
+            return false;
+        }
+        int64_t count = 1;
+        for(const auto dim : *it->second->dims())
+        {
+            count *= dim;
+        }
+        if(count != batch)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
     do                                              \
     {                                               \
