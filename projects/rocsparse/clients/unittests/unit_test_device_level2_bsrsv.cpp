@@ -27,8 +27,10 @@
 // dimension class, both fill modes, unit and non-unit diagonals, no transpose and
 // transpose, both block storage directions, index bases and pointer modes. The
 // blocks of the matrices are strictly diagonally dominant (non-unit diagonal) or
-// small enough for the triangular recurrence to stay bounded (unit diagonal), and
-// the diagonal blocks are triangular, so the host reference is well posed.
+// small enough for the triangular recurrence to stay bounded (unit diagonal).
+// Entries stored in the other triangle of the matrix, including that of the
+// diagonal blocks, hold 37, which the solve must not read and the host reference
+// ignores.
 //
 #include "unit_test_device_level2_common.hpp"
 
@@ -57,7 +59,8 @@ namespace
     };
 
     // Block rows with the block columns {i - 3, i - 1, i} (lower) or {i, i + 1, i + 3}
-    // (upper). With `diag_blocks` false the diagonal block is left out.
+    // (upper), plus the last (lower) or first (upper) block column when it is in the
+    // other triangle. With `diag_blocks` false the diagonal block is left out.
     template <typename T>
     bsrsv_matrix<T> make_bsrsv(int32_t             mb,
                                int32_t             bd,
@@ -100,6 +103,11 @@ namespace
                 if(i + 3 < mb)
                     c.push_back(i + 3);
             }
+            // A block in the other triangle, which the solve must not read.
+            if(lower && i + 1 < mb)
+                c.push_back(mb - 1);
+            if(!lower && i > 0)
+                c.insert(c.begin(), 0);
             cols[i] = c;
         }
 
@@ -124,15 +132,20 @@ namespace
                     for(int32_t c = 0; c < bd; ++c)
                     {
                         T v{};
-                        if(i == j)
+                        if(lower ? j > i : j < i)
+                            v = rocsparse_ut::scalar<T>(37.0f);
+                        else if(i == j)
                         {
-                            // triangular diagonal block
+                            // triangular diagonal block; the solve must not read the
+                            // other triangle, so it holds 37
                             const bool keep = lower ? (c <= r) : (c >= r);
                             if(keep)
                             {
                                 v = value_of<T>(counter++, true);
                                 v = (r == c) ? v + rocsparse_ut::scalar<T>(5.0f) : v * scale;
                             }
+                            else
+                                v = rocsparse_ut::scalar<T>(37.0f);
                         }
                         else
                         {

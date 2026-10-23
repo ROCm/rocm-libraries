@@ -65,10 +65,10 @@ namespace
                + std::to_string(static_cast<int>(c.opX)) + " dev=" + std::to_string(c.device);
     }
 
-    // Block triangular matrix, diagonally dominant on the scalar level. The
-    // diagonal blocks are triangular in the fill mode (diagonal for a unit
-    // diagonal, where the stored diagonal is ignored), so the solve does not
-    // depend on whether the library reads them as blocks or scalar triangles.
+    // Block triangular matrix, diagonally dominant on the scalar level. The solved
+    // triangle of a diagonal block is random (only the diagonal for a unit
+    // diagonal, where the stored diagonal is ignored); its other triangle holds 37,
+    // which the solve must not read.
     template <typename T>
     Bsr block_triangular(const BsrsmCase& c, Rng& rng)
     {
@@ -91,9 +91,18 @@ namespace
                     cols.insert(rng.range(lo, hi));
             }
             cols.insert(i); // the diagonal block, also needed for a unit diagonal
+            // A block of 37 in the other triangle, which the solve must not read.
+            const int64_t ignored = lower ? c.mb - 1 : 0;
+            if(lower ? ignored > i : ignored < i)
+                cols.insert(ignored);
             for(int64_t j : cols)
             {
                 B.col.push_back(j);
+                if(lower ? j > i : j < i)
+                {
+                    B.val.insert(B.val.end(), c.bd * c.bd, round_to<T>(cplx(37.0, 0.0)));
+                    continue;
+                }
                 for(int64_t r = 0; r < c.bd; ++r)
                     for(int64_t k = 0; k < c.bd; ++k)
                     {
@@ -101,13 +110,17 @@ namespace
                                is_complex_t<T>::value ? scale * rng.range(-4, 4) : 0.0);
                         if(j == i)
                         {
+                            // The other triangle of the diagonal block holds 37, which
+                            // the solve must not read.
                             if(r == k)
                                 v = unit ? cplx(11.0, 0.0)
                                          : cplx((rng.range(0, 1) ? 1.0 : -1.0)
                                                     * (2.5 + 0.5 * rng.range(0, 4)),
                                                 is_complex_t<T>::value ? 0.25 * rng.range(-2, 2)
                                                                        : 0.0);
-                            else if(unit || (lower && k > r) || (!lower && k < r))
+                            else if((lower && k > r) || (!lower && k < r))
+                                v = cplx(37.0, 0.0);
+                            else if(unit)
                                 v = cplx(0.0, 0.0);
                             if(j == c.singular_block && r == 0 && k == 0)
                                 v = cplx(0.0, 0.0);

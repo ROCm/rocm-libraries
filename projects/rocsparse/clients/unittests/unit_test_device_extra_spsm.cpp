@@ -83,7 +83,9 @@ namespace
 
     // Well conditioned triangular matrix: up to three off-diagonal entries of
     // magnitude one and a diagonal of 4 or 8. With `imag_off` the off-diagonal
-    // entries are imaginary, so conjugating A changes the solution.
+    // entries are imaginary, so conjugating A changes the solution. Every row
+    // also holds 37 in the last (lower) or first (upper) column when that entry
+    // is in the other triangle, which the solve must not read.
     Csr triangular(int64_t m, bool lower, Rng& rng, bool imag_off = false)
     {
         Csr A;
@@ -101,12 +103,17 @@ namespace
                     cols.push_back(j);
             }
             cols.push_back(i);
+            const int64_t ignored = lower ? m - 1 : 0;
+            if(lower ? ignored > i : ignored < i)
+                cols.push_back(ignored);
             std::sort(cols.begin(), cols.end());
             for(int64_t j : cols)
             {
                 A.col.push_back(j);
                 if(j == i)
                     A.val.push_back(cplx(rng.range(0, 1) == 0 ? 4.0 : 8.0, 0.0));
+                else if(lower ? j > i : j < i)
+                    A.val.push_back(cplx(37.0, 0.0));
                 else
                 {
                     const double s = rng.range(0, 1) == 0 ? -1.0 : 1.0;
