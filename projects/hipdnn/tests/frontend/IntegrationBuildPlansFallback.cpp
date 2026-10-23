@@ -136,4 +136,23 @@ TEST_F(IntegrationBuildPlansFallback, PolicyAllSkipsEngineWithNoSolver)
     EXPECT_EQ(activeEngineId(*graph), goodEngineId());
 }
 
+// With no healthy engine to fall back to, the failing engine's error is reported.
+class IntegrationBuildPlansNoSolverOnly : public IntegrationBuildPlansFallback
+{
+protected:
+    std::vector<std::string> getPluginPaths() const override
+    {
+        return {hipdnn_tests::plugin_constants::testNoSolverPluginPath()};
+    }
+};
+
+TEST_F(IntegrationBuildPlansNoSolverOnly, BuildReportsErrorWhenNoEngineHasASolver)
+{
+    auto graph = createBuiltGraph("BuildReportsErrorWhenNoEngineHasASolver");
+
+    auto result = graph->build(_handle);
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.err_msg.find("no applicable solver"), std::string::npos) << result.err_msg;
+}
+
 } // namespace

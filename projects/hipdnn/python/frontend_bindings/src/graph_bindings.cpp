@@ -249,8 +249,9 @@ void graphBindings(nb::module_& m)
         .def("build_plans",
              &graph::Graph::build_plans,
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-             "Finalize execution plans. HEURISTICS_CHOICE compiles only the "
-             "active plan; ALL compiles every plan.")
+             "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan and "
+             "falls back to the next ranked plans if it fails to finalize; ALL compiles "
+             "every plan.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
