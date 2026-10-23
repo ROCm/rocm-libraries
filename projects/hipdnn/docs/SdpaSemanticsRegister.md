@@ -161,7 +161,8 @@ batch when `seq_len_q/kv` are set).
   - CPU backward: such a row contributes zero to every gradient. It previously produced NaN gradients when an
     additive -inf bias masked the whole row. Pinned by `TestCpuFpReferenceSdpaClosedFormDeadRow` (LSE and
     recomputed-softmax paths).
-  - No GPU backward reference exists yet.
+  - The GPU backward reference (`GpuRefSdpaBwd.cpp`) follows the same rule; pinned by the dead-row cases of
+    `TestGpuSdpaBwdFp32`.
 - **Contract:** O = 0, LSE = -inf, and that row contributes 0 to dQ, dK and dV. Engines whose kernels store
   +inf normalize before returning.
 
@@ -195,7 +196,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-014: Bias gradient (dBias)
 
-- **Status:** Aligned (CPU reference); no GPU backward reference yet.
+- **Status:** Aligned (CPU and GPU backward references).
 - **cuDNN:** dBias is a reduction (ADD) of dS into the dBias tensor, which has the bias tensor's shape
   (cudnn-frontend `node/scaled_dot_product_flash_attention.h`, `red_dP_dBias`). dS is taken before the attention
   scale because the bias is added after scaling. cuDNN's own tests compare it with autograd for a
