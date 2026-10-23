@@ -89,6 +89,7 @@ LOW_RESOURCE = {
     "ExtraMiLatencyLeft": -1,
     "StorePriorityOpt": False,
     "StoreSyncOpt": 0,
+    "WorkGroupMapping": 0,
 }
 
 OFAT_PASSES = 2
