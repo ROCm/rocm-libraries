@@ -34,7 +34,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-#include _THRUST_STD_INCLUDE(__new/bad_alloc.h)
+#include <new>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(cstdint)
@@ -135,7 +135,7 @@ public:
   {
     if (cnt > this->max_size())
     {
-      _THRUST_STD::__throw_bad_alloc();
+      throw ::std::bad_alloc();
     } // end if
 
     // use "::operator new" rather than keyword new
