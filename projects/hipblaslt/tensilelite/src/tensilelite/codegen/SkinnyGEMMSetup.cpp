@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // The kernel body before the K loop: arguments, buffer resources, the skinny
-// dimension dispatch, the tile and K rotation, and the per-lane bases.
+// dimension dispatch, the tile and K rotation (and, in the 3-D launch, the
+// XCD regrouping of the tiles), and the per-lane bases.
 
 #include "SkinnyGEMMEmitter.hpp"
 
@@ -130,6 +131,9 @@ SkinnyDims::SkinnyDims(const SkinnyGEMMConfig &config)
   accumulators = bm * tn;
   columnGroups = 64 / lanesK;
   tileWide = waves * columnGroups * tn;
+  xcdRun = isPowerOfTwo(tileWide) && tileWide < scaleRowColumns
+               ? scaleRowColumns / tileWide
+               : 1;
   ki = 64 * lanesK;
   subgroupLanes = std::min(lanesK, 8);
   halfSubgroup = subgroupLanes / 2;
@@ -423,7 +427,7 @@ void SkinnyGEMMEmitter::dispatchPaths(const SetupScalars &scalars,
 }
 
 // The persistent launch passes the rotation of the tile, the 3-D launch
-// computes it from the workgroup ids.
+// computes it from the workgroup ids and then regroups tx per XCD.
 void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars,
                                     std::optional<RegisterRef> rotation) {
   RegisterRef ty = tile.ty;
@@ -481,6 +485,32 @@ void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars,
                                         rotation->container(), 0);
   }
   multiplyBy(builder, s0.ref(), ty, dims.bm);
+  if (dims.grid3d && dims.xcdRun > 1)
+    groupTilesPerXcd(scalars);
+}
+
+// The xcdRun tiles that share a scale line run on one XCD, so its L2 fetches
+// the line once instead of every XCD fetching it. The dispatcher sends
+// workgroup x to XCD x mod X, so within each full block of X * xcdRun ids the
+// tile is (x mod X) * xcdRun + (x / X) mod xcdRun; the tail of the grid keeps
+// the identity so that every tile still runs exactly once.
+void SkinnyGEMMEmitter::groupTilesPerXcd(const SetupScalars &scalars) {
+  int xcds = kernel.target().xcdCount();
+  int span = xcds * dims.xcdRun;
+  RegisterRange logical = sgpr();
+  RegisterRange term = sgpr();
+  shiftRight(builder, logical.ref(), tile.tx, log2Exact(xcds));
+  bitAnd(builder, logical.ref(), logical.ref(), dims.xcdRun - 1);
+  bitAnd(builder, term.ref(), tile.tx, xcds - 1);
+  shiftLeft(builder, term.ref(), term.ref(), log2Exact(dims.xcdRun));
+  builder.addi32(logical.ref(), logical.ref(), term.ref());
+  bitAnd(builder, term.ref(), tile.tx, -span);
+  builder.addi32(logical.ref(), logical.ref(), term.ref());
+  bitAnd(builder, term.ref(), scalars.blocksX.ref(), -span);
+  // SCC must survive from the compare to the select.
+  builder.create<rocisa::SCmpLtU32>(tile.tx.container(), term.container());
+  builder.create<rocisa::SCSelectB32>(tile.tx.container(), logical.container(),
+                                      tile.tx.container());
 }
 
 // rot = (key + key / 16) mod NI with key the linear block id and NI =

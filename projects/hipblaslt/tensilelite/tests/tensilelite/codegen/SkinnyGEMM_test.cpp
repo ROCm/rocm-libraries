@@ -1005,6 +1005,36 @@ TEST(SkinnyGEMM, Grid3dIgnoresGroupAndXcds) {
   }
 }
 
+// The 3-D launch groups the xcdRun = 32 / BN tiles that share scale lines on
+// one XCD, after the K rotation read the physical id; only a BN that is a
+// power of two below 32 regroups, and the persistent launch never does.
+TEST(SkinnyGEMM, Grid3dGroupsScaleSharingTilesPerXcd) {
+  // BN = 4, so G = 8 and the span is 64.
+  std::string grouped = emitted(config(1, 1, 64, 4, 2, 2));
+  SCOPED_TRACE("assembly:\n" + grouped);
+  std::vector<std::string> lines = allLines(grouped);
+  std::ptrdiff_t select = indexOfLineStartingWith(lines, "s_cselect_b32 s2, ");
+  ASSERT_GE(select, 1);
+  EXPECT_EQ(countLinesContaining(grouped, "s_cselect_b32 s2, "), 1);
+  EXPECT_EQ(countLinesContaining(grouped, "s_cmp_lt_u32 s2, "), 1);
+  EXPECT_EQ(lines[select - 1].rfind("s_cmp_lt_u32 s2, ", 0), 0u);
+  EXPECT_EQ(lines[select - 2].rfind("s_and_b32 s", 0), 0u);
+  EXPECT_NE(lines[select - 2].find(", -64, s"), std::string::npos);
+  EXPECT_NE(lines[select - 4].find(", -64, s2"), std::string::npos);
+  // The rotation key adds the physical id, so it comes before the remap.
+  bool keyBeforeRemap = false;
+  for (std::ptrdiff_t at = 0; at < select - 4; ++at)
+    keyBeforeRemap |=
+        lines[at].rfind("s_add_u32 ", 0) == 0 && lines[at].ends_with(", s2");
+  EXPECT_TRUE(keyBeforeRemap);
+
+  // BN = 32 and BN = 12 keep the physical id, as does the persistent launch.
+  for (SkinnyGEMMConfig ungrouped :
+       {config(1, 1, 4, 2, 1), config(1, 3, 16, 1, 1),
+        persistentConfig(config(1, 1, 64, 4, 2, 2))})
+    EXPECT_EQ(countLinesContaining(emitted(ungrouped), "s_cselect_b32 s2,"), 0);
+}
+
 // The near-register-limit row of the driver (BM = 6, TN = 3) still fits with
 // the lane values and the tile loop state resident.
 TEST(SkinnyGEMM, PersistentNearRegisterLimitConfigEmits) {

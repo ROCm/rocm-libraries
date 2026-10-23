@@ -11,9 +11,10 @@
 
 using namespace rocm::tensilelite::codegen;
 
-Target::Target(IsaVersion isa, int wavefront, std::string_view arch,
+Target::Target(IsaVersion isa, int wavefront, int xcds, std::string_view arch,
                std::string_view isaFullName)
-    : isa(isa), wavefront(wavefront), arch(arch), isaFullName(isaFullName) {
+    : isa(isa), wavefront(wavefront), xcds(xcds), arch(arch),
+      isaFullName(isaFullName) {
   rocisa::rocIsa &rocIsa = rocisa::rocIsa::getInstance();
   rocIsa.init(isa, TENSILELITE_CODEGEN_ASSEMBLER);
   // getIsaInfo returns by value, so keep the copy alive.
@@ -34,7 +35,8 @@ Target Target::get(std::string_view arch) {
                                 std::string(arch) +
                                 "'; supported targets: gfx950");
   // A function-local static runs rocisa's expensive, unsynchronized init once.
-  static const Target gfx950({9, 5, 0}, 64, "gfx950",
+  // rocisa has no XCD cap, so the count is a literal.
+  static const Target gfx950({9, 5, 0}, 64, 8, "gfx950",
                              "amdgcn-amd-amdhsa--gfx950");
   return gfx950;
 }

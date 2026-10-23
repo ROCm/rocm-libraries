@@ -54,7 +54,10 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 /// grid3d = true: the grid is (ceil(max(m, n) / BN), ceil(min(m, n) / bm),
 /// ceil(k / spk)) and the block (x, y, z) is the tile (tx, ty, kz). group and
 /// numXcds are ignored, as in the reference, so the kernel is the one of group
-/// = 1 and numXcds = 1 under another name.
+/// = 1 and numXcds = 1 under another name. Block x runs the wide tile of an
+/// XCD grouping: the 32 / BN tiles that share scale lines (when BN is a power
+/// of two below 32) run on one XCD, and the tail of the grid that is not a
+/// multiple of 8 * (32 / BN) keeps the identity.
 ///
 /// grid3d = false: the persistent launch with the grid (B, 1, 1) for any B >=
 /// 1. Block b runs the tiles b, b + B, ... of the flattened tile space, of

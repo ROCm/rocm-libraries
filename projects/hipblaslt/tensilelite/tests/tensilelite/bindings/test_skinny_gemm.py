@@ -2174,6 +2174,65 @@ def test_gemm_mxfp8_skinny_one_dimensional_launch(M, N, K, SPK):
     run(M, N, K, spk=SPK, blocks=tiles)
 
 
+# (BM, TN, LANES_K, WAVES, PF, M, N, K, SPK, UP). BN = WAVES * (64 / LANES_K) * TN
+# wide columns per tile, G = 32 / BN tiles per XCD run (1 unless BN is a power of
+# two below 32), gx = ceil(wide / BN) blocks along x and the span is 8 * G.
+XCD_GROUPED_PARAMS = [
+    # LANES_K = 64, WAVES = 4, TN = 1: BN 4, G 8, span 64.
+    (1, 1, 64, 4, 1, 768, 1, 4096, 4096, 0),  # B, gx 192 = 3 spans.
+    (1, 1, 64, 4, 1, 789, 1, 4096, 4096, 1),  # B, gx 198: tail of 6, partial tile.
+    (1, 1, 64, 4, 2, 1, 789, 4096, 4096, 1),  # A, gx 198: tail of 6, partial tile.
+    (1, 1, 64, 4, 1, 100, 1, 4096, 4096, 0),  # B, gx 25 < span: identity.
+    (2, 1, 64, 4, 1, 789, 5, 8192, 4096, 1),  # B, gx 198, gy 3, split-K x2.
+    # LANES_K = 64, WAVES = 1, TN = 2: BN 2, G 16, span 128.
+    (1, 2, 64, 1, 1, 300, 1, 4096, 4096, 0),  # B, gx 150: 1 span, tail of 22.
+    (1, 2, 64, 1, 1, 1, 512, 4096, 4096, 1),  # A, gx 256 = 2 spans.
+    # LANES_K = 16, WAVES = 1, TN = 1: BN 4, G 8, span 64.
+    (2, 1, 16, 1, 1, 520, 5, 2048, 1024, 0),  # B, gx 130: 2 spans + 2, gy 3, gz 2.
+    # LANES_K = 16, WAVES = 2, TN = 2: BN 16, G 2, span 16.
+    (1, 2, 16, 2, 1, 3, 512, 1024, 1024, 0),  # A, gx 32 = 2 spans, gy 3.
+    (1, 2, 16, 2, 1, 3, 300, 2048, 1024, 1),  # A, gx 19: tail of 3, gy 3, gz 2.
+    (1, 2, 16, 2, 1, 1, 100, 1024, 1024, 0),  # A, gx 7 < span: identity.
+    # LANES_K = 8, WAVES = 1, TN = 1: BN 8, G 4, span 32.
+    (2, 1, 8, 1, 1, 512, 2, 512, 512, 0),  # B, gx 64 = 2 spans.
+    (2, 1, 8, 1, 1, 1000, 2, 1024, 512, 1),  # B, gx 125: tail of 29, gz 2.
+    # LANES_K = 4, WAVES = 1, TN = 1: BN 16, G 2, span 16.
+    (2, 1, 4, 1, 1, 2, 1024, 256, 256, 0),  # A, gx 64 = 4 spans.
+    (2, 1, 4, 1, 1, 2, 1000, 512, 256, 1),  # A, gx 63: tail of 15, partial tile.
+    # G = 1 controls, no remap.
+    (2, 1, 4, 2, 1, 2, 640, 256, 256, 0),  # LANES_K = 4, WAVES = 2: BN 32.
+    (1, 3, 16, 1, 1, 1, 300, 1024, 1024, 0),  # BN 12, not a power of two.
+]
+
+
+@pytest.mark.parametrize("BM,TN,LANES_K,WAVES,PF,M,N,K,SPK,UP", XCD_GROUPED_PARAMS)
+def test_gemm_mxfp8_skinny_xcd_grouped_tiles(
+    BM, TN, LANES_K, WAVES, PF, M, N, K, SPK, UP
+):
+    """Every wide tile is computed exactly once when the 3-D launch groups the
+    tiles that share scale lines per XCD (a missed tile leaves the D sentinel,
+    so the reference check catches it)."""
+    run(
+        M,
+        N,
+        K,
+        spk=SPK,
+        bm=BM,
+        tn=TN,
+        lanes_k=LANES_K,
+        waves=WAVES,
+        pf=PF,
+        up_scales=UP,
+    )
+
+
+@pytest.mark.parametrize("M,N", [(5120, 1), (1, 5120)])
+def test_gemm_mxfp8_skinny_xcd_grouped_default_knobs(M, N):
+    """The default knobs of the focus shape (BN 4, gx 1280 = 20 spans of 64)
+    compute every tile exactly once."""
+    run(M, N, 8192)
+
+
 def test_default_knobs_run_and_overrides_win():
     """run() without knobs uses pickConfig; an explicit knob replaces its field."""
     problems = [resolve(4, 256, 4096), resolve(4, 256, 4096, tn=1, waves=1)]

@@ -33,6 +33,7 @@ TEST(Target, Gfx950Properties) {
   EXPECT_EQ(target.maxLdsSize(), 163840);
   EXPECT_EQ(target.maxVmcnt(), 63);
   EXPECT_EQ(target.maxLgkmcnt(), 15);
+  EXPECT_EQ(target.xcdCount(), 8);
 }
 
 TEST(Target, SelectsCurrentThreadKernel) {

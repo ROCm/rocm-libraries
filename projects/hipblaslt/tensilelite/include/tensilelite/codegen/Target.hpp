@@ -54,13 +54,17 @@ public:
   int maxVmcnt() const { return maxVmcnts; }
   /// Largest lgkmcnt an s_waitcnt can encode.
   int maxLgkmcnt() const { return maxLgkmcnts; }
+  /// Number of XCDs; the dispatcher assigns workgroup L (x fastest over the
+  /// grid) to XCD L mod xcdCount().
+  int xcdCount() const { return xcds; }
 
 private:
-  Target(IsaVersion isa, int wavefront, std::string_view arch,
+  Target(IsaVersion isa, int wavefront, int xcds, std::string_view arch,
          std::string_view isaFullName);
 
   IsaVersion isa;
   int wavefront;
+  int xcds;
   std::string arch;
   std::string isaFullName;
   int maxVgprs = 0;

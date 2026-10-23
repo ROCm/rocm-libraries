@@ -59,6 +59,11 @@ struct SkinnyDims {
   int columnGroups;
   /// BN = WAVES * CG * TN wide columns per tile.
   int tileWide;
+  /// G: consecutive wide tiles that share their scale lines and so run on one
+  /// XCD in the 3-D launch; 1 when BN is not a power of two below 32.
+  int xcdRun;
+  /// Wide columns of a scale row group, which share every 128-byte scale line.
+  static constexpr int scaleRowColumns = 32;
   /// KI = 64 * LANES_K elements per iteration.
   int ki;
   /// S = min(LANES_K, 8) lanes per subgroup.
@@ -271,6 +276,7 @@ private:
   void computeTile(const SetupScalars &scalars,
                    std::optional<RegisterRef> rotation = std::nullopt);
   void computeRotation(const SetupScalars &scalars, RegisterRef rot);
+  void groupTilesPerXcd(const SetupScalars &scalars);
   void blockRotation(RegisterRef rot, RegisterRef key,
                      std::optional<RegisterRef> ni);
   LaneValues computeLaneValues();
