@@ -21,7 +21,7 @@ GlobalParameters:
   NumWarmups: 0
   NumBenchmarks: 1
   EnqueuesPerSync: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   KernelTime: false
   CpuThreads: 4
   PrintSolutionRejectionReason: true
