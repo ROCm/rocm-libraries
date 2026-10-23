@@ -25,7 +25,8 @@
 
 Terms follow [RFC 0017 § 2](0017_UniversalKernelDescriptor.md#2-the-descriptors): a **UED** is an
 engine, a **KDP** (pack) binds matchers and a dispatch to a set of kernels, a **UKD** is one
-kernel, and a **KMD** is the metadata schema its kernels fill in. An engine's **catalog** is the
+kernel, selected as a unit even when its `sources` launch several kernels (RFC 0017 § 15.1), and a
+**KMD** is the metadata schema its kernels fill in. An engine's **catalog** is the
 kernels applicable to a graph; its **ranker** orders the catalog; a **winner record** stores the
 order measurement found.
 
@@ -39,9 +40,9 @@ knobs and winner records. The slots share the engine's identity, its graph match
 region for the data they hand each other.
 
 Slots sit between the engine and its packs: **UED → slots → KDPs → UKDs**. Everything below a slot
-is unchanged; a UKD is still one kernel. An engine that declares no slots has one implicit slot and
-behaves as it does today. To a caller, a slotted engine looks like any other: a configuration is an
-engine plus knob settings.
+is unchanged; a slot selects one UKD, which may itself launch several kernels through `sources`. An
+engine that declares no slots has one implicit slot and behaves as it does today. To a caller, a
+slotted engine looks like any other: a configuration is an engine plus knob settings.
 
 Independent slots let each stage be tuned on its own: for split SDPA backward, 253 per-kernel
 configurations instead of 613 fixed pairs (§ 2). The cost is that a slot has no time of its own, so
@@ -64,12 +65,15 @@ databases for dK/dV and dQ
 Covering 80% of their tuned problem shapes takes 253 distinct configurations chosen per kernel,
 against 613 distinct (dK/dV, dQ) pairs.
 
-RFC 0017 offers two shapes for multi-kernel work, and neither fits:
+RFC 0017 offers two shapes for multi-kernel work, and neither selects the stages independently:
 
-- **Multi-launch pack (§ 15.1).** One UKD holds every launch and is selected as a unit. Each
-  (dK/dV, dQ) pair must be authored as its own UKD, with `prep` duplicated into each.
+- **Multi-launch UKD (§ 15.1, `sources`).** One UKD holds every launch and is selected as a unit.
+  Choosing dK/dV and dQ separately means one UKD per (dK/dV, dQ) pair, with `prep` repeated in each.
 - **Composite engine (UCD, § 15.2).** Each stage is a separate engine answering a child graph. No
   graph node means "dQ only", and Delta is not a graph tensor.
+
+Slots and `sources` are orthogonal (RFC 0017 § 15.4) and compose: a slot selects among UKDs, and the
+UKD it selects may carry `sources`.
 
 ## 3. The Slot Model
 
@@ -100,8 +104,11 @@ what reads the graph. Four rules define the model:
    computes the same result.
 
 Kernels whose choices depend on each other belong in **one** slot, launched together by that slot's
-dispatch handler. Examples are a backward kernel with an optional output-conversion kernel, or a
-split-KV kernel with the reduction that consumes its splits.
+dispatch handler: either one multi-launch UKD (RFC 0017 § 15.1), or one UKD whose code object holds
+the dependent kernels, which the slot's native handler launches by symbol names its KMD records.
+The second form needs no `sources`, so it also serves code objects authored as `hsaco`, which a
+producer does not pack into `sources`. Examples are a backward kernel with an optional reduction or
+output-conversion kernel, or a split-KV kernel with the reduction that consumes its splits.
 
 ## 4. Descriptor Format
 
@@ -118,9 +125,13 @@ The UED gains two members, and each slot carries the selection members the engin
 
 A KDP gains `slot`, naming the slot its kernels serve. It is required for a slotted engine and
 forbidden otherwise. A slot may have several packs. A UKD is unchanged; it fills the KMD of its
-pack's slot. A kernel serves at most one slot of an engine, so logs and records can name it without
-its slot. A producer also reads `slot` to pick the KMD that completes a pack's metadata and the
-ranker that orders it; no wire format other than the member itself changes.
+pack's slot, with `kernel_source` or `sources`. The launch-set rule of RFC 0017 § 15.1 holds per
+pack, so slots may differ: a single-launch `prep` can sit beside a multi-launch `dkdv`. A pack's
+launch set is its dispatch handler's, so packs with different launch sets name different dispatch
+descriptors; in practice each slot has its own dispatch descriptor and native handler. A kernel
+serves at most one slot of an engine, so logs and records can name it without its slot. A producer
+also reads `slot` to pick the KMD that completes a pack's metadata and the ranker that orders it; no
+wire format other than the member itself changes.
 
 ```jsonc
 // UED
@@ -184,12 +195,13 @@ holds Delta and the sanitized log-sum-exp, sized once for the maximum sequence l
 
 **Workspace size** is the aligned shared region plus the largest scratch any one slot needs. Slots run
 one at a time, so they reuse the same scratch. A slotted kernel's workspace query reports its scratch
-only. Every handler receives the unshifted workspace base; in v1 each slot dispatches through a native
-handler, which reads the offset tokens in `prepare` and adds them to the base at launch. The plan
-rejects a null workspace when shared plus scratch is non-zero. The workspace limit applies to the
-total: a kernel is pruned from its slot when the aligned shared region plus its scratch exceeds the
-limit, and the engine declines when the shared region alone exceeds it. The shared region does not
-depend on any pick, so slots stay independent.
+only; for a multi-launch kernel that is the scratch of all its launches, which its handler owns
+(RFC 0017 § 15.1). Every handler receives the unshifted workspace base; in v1 each slot dispatches
+through a native handler, which reads the offset tokens in `prepare` and adds them to the base at
+launch. The plan rejects a null workspace when shared plus scratch is non-zero. The workspace limit
+applies to the total: a kernel is pruned from its slot when the aligned shared region plus its
+scratch exceeds the limit, and the engine declines when the shared region alone exceeds it. The
+shared region does not depend on any pick, so slots stay independent.
 
 **Shared arguments.** Every runtime argument more than one slot uses (scale, dropout parameters and
 random-number seed, ragged sequence information, maximum sequence lengths) is computed once in the
@@ -264,12 +276,13 @@ At load, the runtime applies RFC 0020 § 13 and rejects a slotted engine, or a p
 rule in § 4: engine-level selection members beside `slots`, an empty or misnamed slot list, a slot
 ranker that declares a metric, `shared_workspace` without a native graph match, a pack with a
 missing or unknown `slot`, or one kernel in two slots. The existing per-engine checks (RFC 0020
-§ 13.2, RFC 0019 § 6.3, RFC 0018 § A.5) run per slot. A slot with no loadable pack is a warning:
-the engine stays registered and declines every graph. An unslotted engine with no loadable pack is
-still dropped, as today. Within a slotted engine, a duplicate metadata tuple in a slot or a duplicate
-kernel id in a slot's arch group drops the offending pack; unslotted engines keep today's behavior.
-The outcomes stay distinct: a broken engine is dropped, a broken pack is dropped, a model with bad
-provenance is disabled while its engine stays, and an empty slot warns.
+§ 13.2, RFC 0019 § 6.3, RFC 0018 § A.5) and the launch-set check (RFC 0017 § 15.1) run per slot. A
+slot with no loadable pack is a warning: the engine stays registered and declines every graph. An
+unslotted engine with no loadable pack is still dropped, as today. Within a slotted engine, a
+duplicate metadata tuple in a slot or a duplicate kernel id in a slot's arch group drops the
+offending pack; unslotted engines keep today's behavior. The outcomes stay distinct: a broken
+engine is dropped, a broken pack is dropped, a model with bad provenance is disabled while its
+engine stays, and an empty slot warns.
 
 A slot ranker whose feature signature reads a `ws.*` token is disabled at load (its engine stays and
 the slot orders its catalog by priority, then id) and is refused by the validator and the producer
@@ -280,13 +293,15 @@ packer: the root is reserved (§ 6), so the feature could never be bound.
 UED and KDP take a minor bump to 1.1, adding `slots`, `shared_workspace` and `slot`; UHD takes 1.1
 for a slot ranker, whose `trained_against` adds `slot`, and a slotted `predict_engine` model, whose
 `trained_against` carries `kmds: [{slot, id, revision}]` instead of `kmd` (RFC 0019 § 8.1). Only
-files that use slots are written as 1.1. A 1.0 runtime skips 1.1 files with a warning, and a 1.1 KDP
-beside a skipped UED is reported as orphaned; a 1.1 runtime reads 1.0 files unchanged. A 1.0-labelled
-file that contains slot members is rejected.
+files that use slots are written as 1.1. Versions are per file type: a UKD's 1.1 means `sources`
+(RFC 0017 § 15.1), independent of slots, so a slotted engine's UKDs are 1.0 or 1.1 by their own
+content. A 1.0 runtime skips 1.1 files with a warning, and a 1.1 KDP beside a skipped UED is
+reported as orphaned; a 1.1 runtime reads 1.0 files unchanged. A 1.0-labelled file that contains
+slot members is rejected.
 
 Producer packers accept the 1.1 forms of all three formats, including the UHD `slot` and `kmds`
-provenance, and refuse them under a 1.0 label. A bundle without slots is written as 1.0 with the
-same bytes it has without slot support.
+provenance, and refuse them under a 1.0 label. A bundle without slots writes its UED, KDP and UHD as
+1.0, with the same bytes it has without slot support.
 
 An engine without slots keeps its knob ids, trained models and winner records, so nothing trained or
 stored is invalidated. Adding, removing, renaming or reordering slots is a breaking engine revision,
@@ -303,7 +318,7 @@ statements about an engine's kernel selection apply per slot. The edit list:
 
 | RFC | Change |
 |---|---|
-| 0017 | Kernel slots replace the multi-launch pack (§ 15.1) and its intermediate buffers (§ 15.3) for multi-kernel engines; the UCD (§ 15.2) is unaffected. KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers that read offset tokens (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 4, § 10). Packaging validation applies the shape rules of RFC 0021 § 4, and a pack's KMD is the KMD of its slot for the packer's compilation completion and desk check (RFC 0021 § 8). |
+| 0017 | Slots are orthogonal to multi-launch `sources` (§ 15.1, § 15.4): a slot's UKD may carry `sources`, and the launch-set check runs per slot pack. Slots need neither the deferred `launches[]` program nor intermediate buffers (§ 15.3): the native graph match publishes the shared region (§ 6). KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers that read offset tokens (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 4, § 10). Packaging validation applies the shape rules of RFC 0021 § 4, and a pack's KMD is the KMD of its slot for the packer's compilation completion and desk check (RFC 0021 § 8). |
 | 0018 | Kernel-scoped matchers check against the KMD of the pack's slot (§ 8, § A.5). |
 | 0019 | KMD, ranker, catalog, winner records, caches and contract checks are per slot; slot rankers are metric-less and train on whole-program times; a slotted engine has no model-based configuration estimate; its benchmark cost is the product of slot catalogs (§ 3, § 4.1, § 5, § 6.3, § 8.1, § 9.2, § 11, § 13.2). Packaging reaches and checks every slot's ranker, and the `trained_against` provenance of a slot ranker or the engine estimate names declared slots and their KMDs (§ 8). |
 | 0019.13 | Slot rankers train per slot (§ 3.5, § 7.3, § 8.3). |
