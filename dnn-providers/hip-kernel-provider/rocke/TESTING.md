@@ -116,7 +116,7 @@ the strategy's biggest holes live (see
   exercise end-to-end kernel wiring for real model shapes.
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
-  on gfx942, gfx950, gfx1151, or gfx1201 using a conservative triangle-inequality
+  on each published architecture using a conservative triangle-inequality
   error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. The gfx1201
   replacement compiles for `gfx12-generic`; gfx1200 uses the same compile target
   but remains qualification-only until its own certificate and archive exist. Required
@@ -150,19 +150,26 @@ the strategy's biggest holes live (see
   For source verification, run
   `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
+  Add `--case <id>` to run only selected cases; that subset run is not a full
+  verification. The same CLI's `cases` and `diff` commands list an
+  architecture's enrolled cases and compare them with a bundle without a GPU;
+  see the [workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#decide-what-must-change).
   The installed GPU suite reuses separate baseline and current worker processes
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
   For replacement baselines and coverage changes, follow the
-  [authoritative reference workflow](docs/gpu-reference-workflow.md).
+  [authoritative reference workflow](library/tests/reference_common/docs/gpu-reference-workflow.md).
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
   used by Python qualification and verification. CMake publication is separate.
-  Each architecture owns its case list, source-dispatch
-  adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
-  separate DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. Each operation
-  owns its directory under `reference_bundles/`, and convolution references
-  use `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
+  Each architecture has its own source-dispatch adapter and, once published,
+  baseline lock under `sdpa_reference/architectures/<arch>/`, with a separate
+  DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. gfx942 and gfx950
+  define their own case lists; gfx1151, gfx1200, and gfx1201 share the WMMA
+  cohort in `sdpa_reference/implementations/wmma.py`, so editing it requires
+  requalifying every published WMMA pair. Each operation owns its directory
+  under `reference_bundles/`, and convolution references use
+  `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
   Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
   the runtime override can select another directory. Installed bundles
   live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
@@ -172,21 +179,24 @@ the strategy's biggest holes live (see
   When reference installation is enabled, CMake installs each pair in
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
-  not publication status. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
-  and convolution/gfx942 are published. Adding another
-  published pair requires its adapter, independently qualified lock, retrievable
-  bundle, and publication entry.
+  not publication status; that CMake file is the list of published pairs. Adding
+  another published pair requires its adapter, independently qualified lock,
+  retrievable bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
 
-- The [convolution reference lane](docs/conv-test-reference.md) implements the
-  same offline qualification and GPU replay workflow for a bounded gfx942
-  forward cohort. It shares artifact, digest, budget, snapshot, and worker
-  transport code with SDPA. Its published gfx942 bundle is installed by default
-  alongside SDPA. Verify replacement candidates with explicit bundle and lock
-  paths through the offline CLI. Both operations use NumPy and ROCm without
-  Torch in CI.
-  Optional Torch cross-checking belongs only to offline convolution qualification.
+- The [convolution reference lane](library/tests/conv_reference/docs/conv-test-reference.md) implements the
+  same offline qualification and GPU replay workflow for bounded forward cohorts.
+  It shares artifact, digest, budget, snapshot, and worker transport code with
+  SDPA. Its published bundles are installed by default alongside SDPA's. Verify
+  replacement candidates with explicit bundle and lock paths through the
+  offline CLI. Both operations use NumPy and ROCm without Torch in CI.
+  Optional Torch cross-checking belongs only to offline qualification: CPU Torch
+  for convolution, and CPU or ROCm GPU Torch for SDPA.
+  Separate gradient tests run the dgrad and wgrad cases in
+  `library/tests/conv_reference/gradient_cases.py` on gfx942 and gfx950
+  against live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md)
+  distinguishes production-selected instances from explicit kernel configurations.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -703,24 +713,62 @@ reference them, don't copy them here.*
 
 ## Pinned-reference documentation
 
-- [Adding or updating a reference: authoritative workflow](docs/gpu-reference-workflow.md)
+Detailed guides live in the reference harnesses' `docs/` directories under
+`library/tests/`. Kernel authors start with the
+[quickstart](library/tests/reference_common/docs/quickstart.md), which covers
+running the pinned suites and adding cases, architectures, and operations. The
+[documentation hub](library/tests/reference_common/docs/README.md) covers kernel
+compatibility, the baseline lifecycle, and a glossary.
 
-- [SDPA implementation and usage](docs/sdpa-test-reference.md)
-- [Convolution implementation and usage](docs/conv-test-reference.md)
+- [Adding or updating a reference: authoritative workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
+- [Triage a failing pinned test](library/tests/reference_common/docs/gpu-reference-workflow.md#triage)
+
+- [SDPA implementation and usage](library/tests/sdpa_reference/docs/sdpa-test-reference.md)
+- [Convolution implementation and usage](library/tests/conv_reference/docs/conv-test-reference.md)
 - [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
-- [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-test-reference-plan.md)
+- [Reference methodology and extension strategy](library/tests/reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md)
 
 ## Pinned convolution references
 
-A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
-available alongside SDPA. Both gfx942 bundles are listed in the publication
-registry and installed by default for provider artifact builds. See [the convolution reference guide](docs/conv-test-reference.md)
-for the cohort and numerical contract. Use the
-[reference workflow](docs/gpu-reference-workflow.md) to add coverage or replace a bundle.
+Each published forward suite runs the cases its architecture enrolls and three
+failure controls without Torch; from the rocKE root,
+`python library/tests/run_conv_reference.py cases --arch <arch>` lists them.
+Published bundles are installed by default for provider artifact builds. See the
+[convolution reference guide](library/tests/conv_reference/docs/conv-test-reference.md)
+for the numerical contract and the [shared workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
+for qualification, publication, and candidate verification.
+
+From an installed provider test directory, run the convolution suites; the
+suites of other processors skip as described below:
+
+```bash
+ctest -R '^rocke_conv_gpu_gfx[0-9a-z]+_pytest$' --output-on-failure
+```
+
+The shared selector consumes TheRock's concrete `AMDGPU_TARGETS` and detected
+processor. Another requested processor's suite skips with exit 77; matching
+hardware requires its own valid bundle. Build-family names do not enroll a
+processor or authorize reuse of another processor's certificate.
+
+Gradient host checks join `rocke_library_conv_pytest`; gradient GPU checks join
+`rocke_library_gpu_pytest`. They use live NumPy oracles, including atomic and
+two-stage execution, with three repetitions per case. Inspect that every
+gradient case in `library/tests/conv_reference/gradient_cases.py` executed on
+the matching processor; aggregate passes in the omnibus suite can include host
+checks and skip unrelated GPU tests. For a focused installed run:
+
+```bash
+python -m pytest tests/library/tests/test_conv_gradient_correctness.py \
+  --rocke-reference-operation conv --rocke-reference-arch gfx942 -v -rs
+```
+
+Use `gfx950` on that processor. Gradients do not need a pinned bundle. Their
+source and installed checks cover Python-emitted kernels, not native provider
+or kernel-pack execution. See the [six-lane validation record](docs/conv-six-lane-validation.md).
 
 ## Shared GPU reference artifacts
 
-Use [Adding or updating a pinned GPU reference](docs/gpu-reference-workflow.md)
+Use [Adding or updating a pinned GPU reference](library/tests/reference_common/docs/gpu-reference-workflow.md)
 for archive creation, qualification, publication, and enrollment. Both operations
 use `library/tests/reference_common/artifact.py`; archive commands require an
 explicit `--operation`, authenticate against a reviewed lock, and use only the
@@ -747,25 +795,28 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx942)_pytest$' --output-on-failure --no-tests=error
+ctest -V -R '^rocke_(reference_common|[a-z0-9_]+_reference_unit|[a-z0-9_]+_gpu_gfx[0-9a-z]+)_pytest$' --output-on-failure --no-tests=error
 ```
 
-Inspect the selected tests: disabling reference installation omits the GPU
-entries, and entries for other architectures skip. A successful CTest command
-alone does not establish GPU coverage. On the matching GPU, expect eight SDPA
-comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failure
-controls. The gfx942 convolution entry adds sixteen comparisons and three failure
-controls. Confirm the matching entries executed with zero selected GPU skips.
+The patterns follow the `rocke_<operation>_reference_unit_pytest` and
+`rocke_<operation>_gpu_<arch>_pytest` names, so they need no edit when a pair
+is published. Inspect the selected tests: disabling reference installation omits
+the GPU entries, and entries for other architectures skip. A successful CTest
+command alone does not establish GPU coverage. On the matching GPU, each
+operation's entry runs one comparison for every case that
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists
+from the rocKE root, plus three failure controls. Confirm the matching entries
+executed with zero selected GPU skips.
 
 For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
 entry with code 77. There is no installed gfx1200 pinned entry until its own
 archive is qualified and published. See
-[gfx120X family selection](docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
+[gfx120X family selection](library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
 for the distinction between a valid skip and GPU reference coverage.
 
-Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
-and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
-missing published archives fail configuration.
+Default publication supplies one bundle for each pair that
+`PublishedGpuReferences.cmake` lists. Fetch all of their DVC archives before
+configuring; missing published archives fail configuration.
 
 The generic gfx1201 replacement is published. A fresh anonymous download matches
 its committed DVC pointer and baseline lock. From the rocm-libraries root:
@@ -776,7 +827,7 @@ dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/refer
 
 See the [reference inventory](platform/tests/README.md#installed-pinned-reference-suites)
 for the expected entries and cases, and the
-[WMMA runtime requirements](docs/sdpa-test-reference.md#standalone-wmma-coverage)
+[WMMA runtime requirements](library/tests/sdpa_reference/docs/sdpa-test-reference.md#standalone-wmma-coverage)
 for the tested gfx1151/gfx1201 environments.
 
 The shared launcher blocks Torch imports in baseline and current worker
@@ -801,8 +852,8 @@ and selects by the physical HIP processor when they are absent. It does not
 infer reference enrollment from family names. A processor without a published
 cohort skips the other processors' suites; this records absent pinned-reference
 coverage. Explicit candidate requests still require their bundle and lock.
-See the [processor-selection rules](docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+See the [processor-selection rules](library/tests/reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 Adding a
-published architecture creates a separate CTest automatically. Add its exact
-test name to the provider category YAML; it also requires an adapter, qualified
-bundle, and matching CI hardware.
+published architecture creates a separate CTest automatically, which the
+provider category YAML selects by pattern. The new architecture also needs an
+adapter, a qualified bundle, and matching CI hardware.

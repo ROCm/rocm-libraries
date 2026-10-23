@@ -62,7 +62,6 @@ Sizes:
                            #   UseSubtileImpl=1 (MI16x16 base, persistent StreamK, CMS off).
 # MACROTILE_OPT: False     # Origami MT tuning (Ductile only)
 # MT_DU: None              # Fixed [MT0, MT1, DU] for MACROTILE_OPT
-# USE_HEURISTICS: False    # Refined heuristic param lists per size
 # SIZE_OPTION: 0           # 0=size list, 1=grid
 # ONE_SIZE_PER_CONFIG: True # One size per output config file
 # CMS: True                # CMS optimization (default True for gfx950, False for gfx942*)

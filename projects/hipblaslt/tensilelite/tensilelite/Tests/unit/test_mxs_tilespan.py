@@ -33,9 +33,9 @@ TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
 try:
-    from Tensile.Components.LocalRead import LocalReadMFMA
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    import Tensile.Component as _Comp
+    from tensilelite.Components.LocalRead import LocalReadMFMA
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    import tensilelite.Component as _Comp
     _IMPORT_ERR = None
 except Exception as exc:  # pragma: no cover - environment guard
     LocalReadMFMA = None

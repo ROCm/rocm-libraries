@@ -54,7 +54,7 @@ Infer options from the user request:
 
 ## Test reference
 
-Test labels are workflow input values (`linux_test_labels`, `windows_test_labels`), not GitHub PR labels; the string is passed through as is. Never create or add `test:hipdnn` or any other hipDNN test label to a PR.
+Test labels are the value of the `pr_labels` workflow input, which stands in for the labels a pull request would carry; they are not GitHub PR labels, and the string is passed through as is. Never create or add `test:hipdnn` or any other hipDNN test label to a PR.
 
 For which components, tiers and ctest labels a run selects, read the TheRock files listed under Inputs, then the test category YAMLs in this repo:
 
@@ -70,13 +70,13 @@ Always dry-run first and show the printed command. The values below are examples
 Multi-arch, Linux only, MIOpen provider and hipDNN tests:
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch -f linux_amdgpu_families=gfx94X,gfx950 -f windows_amdgpu_families=none -f linux_test_labels=test:hipdnn,test:miopenprovider --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch -f linux_amdgpu_families=gfx94X,gfx950 -f windows_amdgpu_families=none -f pr_labels=test:hipdnn,test:miopenprovider --dry-run
 ```
 
 Re-run the tests of a finished multi-arch run without rebuilding (the run must be of the branch's current head commit):
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none -f linux_test_labels=test:miopenprovider,test_filter:quick --reuse-build <run-id> --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none -f pr_labels=test:miopenprovider,test_filter:quick --reuse-build <run-id> --dry-run
 ```
 
 The hipDNN superbuild CI (no inputs):

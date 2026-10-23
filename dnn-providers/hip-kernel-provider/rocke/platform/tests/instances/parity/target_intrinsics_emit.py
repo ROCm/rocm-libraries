@@ -22,7 +22,18 @@
 # below; the C side carries the same table), at llvm_flavor = AUTO. Lowering one
 # for a target that cannot run it would make the arch-domain lane refuse it in
 # error mode, and both engines refusing reads as parity while comparing nothing.
-from rocke.core.ir import CACHE_STREAM, F16, I32, IRBuilder, KernelDef, PtrType
+# Configs 10..12 cover arith.fdot2 (f16, bf16) and the bf16 4x4x4 MFMA atom
+# (the `_1k` intrinsic with its <4 x i16> operand bitcasts); they lower for gfx950.
+from rocke.core.ir import (
+    BF16,
+    CACHE_STREAM,
+    F16,
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+)
 
 from _emit_common import run_emit
 
@@ -148,6 +159,38 @@ def build_wait_event(b: IRBuilder) -> None:
     b.ret()
 
 
+def _build_fdot2(b: IRBuilder, elem) -> None:
+    a_ptr = b.param("A", PtrType(elem, "global"), align=4)
+    d_ptr = b.param("D", PtrType(F32, "global"), align=4)
+    tid = b.thread_id_x()
+    idx = b.mul(tid, b.const_i32(2))
+    a = b.global_load_vN(a_ptr, idx, elem, 2)
+    acc = b.global_load(d_ptr, tid, F32, align=4)
+    dot = b.fdot2(a, a, acc)
+    b.global_store(d_ptr, tid, dot, align=4)
+    b.ret()
+
+
+def build_fdot2_f16(b: IRBuilder) -> None:
+    _build_fdot2(b, F16)
+
+
+def build_fdot2_bf16(b: IRBuilder) -> None:
+    _build_fdot2(b, BF16)
+
+
+def build_mfma_4x4x4_bf16(b: IRBuilder) -> None:
+    a_ptr = b.param("A", PtrType(BF16, "global"), align=8)
+    d_ptr = b.param("D", PtrType(F32, "global"), align=16)
+    tid = b.thread_id_x()
+    idx = b.mul(tid, b.const_i32(4))
+    a = b.global_load_vN(a_ptr, idx, BF16, 4)
+    acc = b.zero_vec_f32(4)
+    out = b.mfma_f32_4x4x4_bf16(a, a, acc)
+    b.global_store_vN(d_ptr, idx, out, 4)
+    b.ret()
+
+
 BUILDERS = [
     build_async_lds_two_allocs,
     build_async_lds_b8,
@@ -159,6 +202,9 @@ BUILDERS = [
     build_scheduler_hints,
     build_warp_shuffle_xor_dpp,
     build_wait_event,
+    build_fdot2_f16,
+    build_fdot2_bf16,
+    build_mfma_4x4x4_bf16,
 ]
 
 # The target each config lowers for: one the committed arch-domain columns say
@@ -174,6 +220,9 @@ ARCHES = [
     "gfx1250",  # s.alloc.vgpr and the async marks
     "gfx950",  # the DPP shuffles
     "gfx1201",  # s.wait.event
+    "gfx950",  # arith.fdot2 f16
+    "gfx950",  # arith.fdot2 bf16
+    "gfx950",  # bf16 4x4x4 MFMA
 ]
 
 

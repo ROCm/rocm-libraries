@@ -151,7 +151,7 @@ Otherwise, you test the old tree.
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
-| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph. **C++ graph tests only**; bundles ignore it (their equivalent is `enforcement_level`). |
+| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph, without executing it or comparing outputs. A bundle is taken only to its applicability rung, whatever its `enforcement_level`, and **skips** when the engine declines. Needs `--test-engine` for bundles. Support claims are still enforced; a claim is left `accepted`, never `confirmed`, because nothing was verified. |
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
@@ -219,7 +219,9 @@ its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 The table shows what each CTest tier selects in the provider lanes. It applies
 to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
 bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
-pattern, and its `full` tier is `*Sdpa*`:
+pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider dense
+attention lane (see [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml))
+selects only `*_SdpaFwd_Default.*` bundles in every tier, `full` included:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
