@@ -15,6 +15,8 @@ inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {
     return {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
 }
 
+// Report failed conversion as a terminal error. Use getConvertScalarValue when
+// the caller needs to handle a conversion failure through its Expected result.
 template <typename Target, typename Source>
 Target convertScalarValue(Source source, const ScalarConversionOptions& options) {
     auto result = getConvertScalarValue<Target>(std::move(source), options);

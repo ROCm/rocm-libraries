@@ -69,18 +69,27 @@ inline constexpr std::string_view message(const ConversionFailure& failure) noex
     return message(failure.code);
 }
 
+// Low-bit mask for a width in [1, 64]: integerMask(8) is 0xff; integerMask(64)
+// is UINT64_MAX. The 64-bit case avoids shifting by the type's width.
 inline constexpr uint64_t integerMask(uint32_t bits) {
     return bits == 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << bits) - 1;
 }
 
+// Two's-complement bits for the signed minimum of a width in [1, 64].
+// signedIntegerMinimumRaw(8) is 0x80, representing -128.
 inline constexpr uint64_t signedIntegerMinimumRaw(uint32_t bits) {
     return uint64_t{1} << (bits - 1);
 }
 
+// Bits for the maximum value of a width in [1, 64]. For eight bits, signed
+// destinations return 0x7f (127), and unsigned destinations return 0xff (255).
 inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestination) noexcept {
     return signedDestination ? signedIntegerMinimumRaw(bits) - 1 : integerMask(bits);
 }
 
+// Round to an integral floating-point value without choosing an integer width.
+// TowardZero maps -3.75 to -3; NearestEven maps 2.5 to 2 and 3.5 to 4 regardless
+// of the host rounding mode. An unsupported policy returns InvalidRounding.
 template <typename Floating>
 Expected<Floating, ConversionFailure> getRoundForIntegerConversion(
     Floating value, IntegerRounding rounding) noexcept {
@@ -106,6 +115,8 @@ Expected<Floating, ConversionFailure> getRoundForIntegerConversion(
     return Unexpected(ConversionFailure{ConversionError::InvalidRounding});
 }
 
+// Test representability before applying an overflow policy. Width is in [1, 64].
+// For value 255 and eight bits, an unsigned destination fits and a signed one does not.
 template <typename Integral>
 bool integralFitsIntegerDestination(Integral value, uint32_t bits,
                                     bool signedDestination) noexcept {
@@ -122,6 +133,8 @@ bool integralFitsIntegerDestination(Integral value, uint32_t bits,
     return !std::cmp_greater(value, integerMask(bits));
 }
 
+// Test whether a value is below the destination's minimum. Width is in [1, 64].
+// With eight bits, -1 is below an unsigned minimum; -128 equals a signed minimum.
 template <typename Integral>
 bool integralIsBelowIntegerDestination(Integral value, uint32_t bits,
                                        bool signedDestination) noexcept {
@@ -132,6 +145,9 @@ bool integralIsBelowIntegerDestination(Integral value, uint32_t bits,
     return std::cmp_less(value, minimum);
 }
 
+// Convert an integral value to destination bits, with width in [1, 64]. Rounding
+// is unnecessary. For signed eight-bit output, 128 fails with IntegerOutOfRange
+// under Reject and produces 0x80 under ModuloWrap.
 template <typename Integral>
 Expected<uint64_t, ConversionFailure> getConvertIntegralToIntegerBits(
     Integral value, uint32_t bits, bool signedDestination,
@@ -160,6 +176,9 @@ Expected<uint64_t, ConversionFailure> getConvertIntegralToIntegerBits(
     return Unexpected(ConversionFailure{ConversionError::InvalidOverflow, bits, signedDestination});
 }
 
+// Round, then convert to destination bits, with width in [1, 64]. For signed
+// eight-bit output, NearestEven maps 2.5 to 0x02; Saturate maps 128.0 to 0x7f.
+// NaN always fails; infinity succeeds only with saturation.
 template <typename Floating>
 Expected<uint64_t, ConversionFailure> getConvertFloatingToIntegerBits(
     Floating value, uint32_t bits, bool signedDestination,
@@ -217,6 +236,9 @@ Expected<uint64_t, ConversionFailure> getConvertFloatingToIntegerBits(
     return Unexpected(ConversionFailure{ConversionError::InvalidOverflow, bits, signedDestination});
 }
 
+// Select integral or floating conversion for a numeric source. Width is in [1, 64].
+// Boolean and enum sources use their integer values. A complex source (2, 0)
+// converts like 2; (2, 1) fails with Nonreal rather than discarding its imaginary part.
 template <typename Source>
 Expected<uint64_t, ConversionFailure> getConvertToIntegerBits(
     Source source, uint32_t bits, bool signedDestination,
@@ -241,6 +263,8 @@ Expected<uint64_t, ConversionFailure> getConvertToIntegerBits(
     }
 }
 
+// Interpret the low destination-width bits as a native integer. For raw 0xff,
+// integerFromBits<int8_t> returns -1 and integerFromBits<uint8_t> returns 255.
 template <typename Target>
 Target integerFromBits(uint64_t raw) noexcept {
     using Value = std::remove_cv_t<Target>;
@@ -262,6 +286,9 @@ Target integerFromBits(uint64_t raw) noexcept {
     }
 }
 
+// Checked, allocation-free conversion to a non-Boolean native integer, returning
+// Expected without throwing. getConvertToInteger<int8_t>(128, {}) returns
+// IntegerOutOfRange; with Saturate it returns 127.
 template <typename Target, typename Source>
 Expected<Target, ConversionFailure> getConvertToInteger(
     Source source, const ScalarConversionOptions& options) noexcept {
@@ -272,6 +299,9 @@ Expected<Target, ConversionFailure> getConvertToInteger(
     if (!result) return Unexpected(result.error());
     return integerFromBits<Value>(*result);
 }
+
+// Checked native conversion, applying integer policies when needed. Converting
+// 1.5 to complex<double> gives (1.5, 0); converting (2, 1) to double returns Nonreal.
 template <typename Target, typename Source>
 Expected<Target, ConversionFailure> getConvertScalarValue(Source source,
                                                           const ScalarConversionOptions& options) {
