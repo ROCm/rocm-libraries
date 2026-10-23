@@ -5694,10 +5694,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         // stall the next matmul as long again for the same
                         // result, and at the default log level silently, since
                         // a shape's start and failure are each reported once.
-                        // A completed tune needs no latch, since its entry closes
-                        // the gate. The declines made before tuning-start cost
-                        // microseconds and are retried, so a transient condition
-                        // can clear.
+                        // A completed tune is not latched: its entry closes the
+                        // gate for every call it supports, and a call it does
+                        // not, such as one with less workspace, tunes again. The
+                        // declines made before tuning-start cost microseconds
+                        // and are retried, so a transient condition can clear.
                         if(result == TensileLite::TuningAttempt::SkippedBudget
                            || result == TensileLite::TuningAttempt::FallbackSetup
                            || result == TensileLite::TuningAttempt::FallbackEnumeration
