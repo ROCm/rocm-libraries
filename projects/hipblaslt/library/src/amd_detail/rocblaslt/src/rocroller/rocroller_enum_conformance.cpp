@@ -6,9 +6,12 @@
 // The tile ranker is built without a rocRoller checkout, so it declares the two
 // rocRoller enumerations it names itself. A KernelType it fills in is read by
 // the rocRoller call path, which is built against rocRoller's headers, so the
-// two declarations have to agree on every value. This translation unit is the
-// only one that sees both, and it is compiled only when rocRoller is enabled --
-// which is also the only configuration in which disagreeing would matter.
+// two declarations have to agree on every value. rocroller_enums.hpp reuses
+// rocRoller's own namespace and type names, so no translation unit can include
+// both: this one includes rocRoller's headers and spells the values
+// rocroller_enums.hpp declares as literals. It is compiled only when rocRoller
+// is enabled, which is also the only configuration in which disagreeing would
+// matter.
 //
 // A failure here means rocRoller renumbered an enumeration. Take the new value
 // from rocRoller/DataTypes/DataTypes.hpp or rocRoller/Operations/BlockScale_fwd.hpp
