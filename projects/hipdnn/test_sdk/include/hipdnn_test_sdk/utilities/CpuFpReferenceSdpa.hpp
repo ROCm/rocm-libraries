@@ -146,6 +146,9 @@ public:
     /// @param dropoutMask      Optional explicit dropout mask (cuDNN custom dropout), FP32
     ///                         [B or 1, H or 1, Sq, Skv]. O uses P * dropoutScale * mask.
     /// @param dropoutScale     Dropout scale (usually 1 / (1 - p)); 1 when unset.
+    /// @param softcap          Optional logit softcap c: scores become c * tanh(s / c) after the
+    ///                         attention scale and before bias and masks. A hipDNN extension the
+    ///                         graph API cannot express yet (register SEM-020).
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -171,7 +174,8 @@ public:
                         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
-                        std::optional<float> dropoutScale = std::nullopt)
+                        std::optional<float> dropoutScale = std::nullopt,
+                        std::optional<float> softcap = std::nullopt)
     {
         if(q.dims().size() != 4)
         {
@@ -261,6 +265,7 @@ public:
         const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
         const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
         validateDropoutMask(dropoutMask, batch, numHeads, seqQ, seqKv);
+        validateSoftcap(softcap);
         // Dropout with an explicit mask (cuDNN): O uses P * dropoutScale * mask; LSE does not.
         const auto dropoutFactor = static_cast<ComputeDataType>(dropoutScale.value_or(1.0F));
 
@@ -327,7 +332,7 @@ public:
                            * static_cast<ComputeDataType>(
                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
-                scores[static_cast<size_t>(skv)] = dot * scale * descaleQK;
+                scores[static_cast<size_t>(skv)] = applySoftcap(dot * scale * descaleQK, softcap);
             }
 
             // Step 2: Add additive attention mask (if provided)
@@ -613,7 +618,8 @@ public:
         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
         const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
         std::optional<float> dropoutScale = std::nullopt,
-        std::optional<float> dropoutScaleInv = std::nullopt)
+        std::optional<float> dropoutScaleInv = std::nullopt,
+        std::optional<float> softcap = std::nullopt)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -753,6 +759,7 @@ public:
         const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
         const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
         validateDropoutMask(dropoutMask, batch, numHeadsQ, seqQ, seqKv);
+        validateSoftcap(softcap);
         // Dropout with an explicit mask, composed as cuDNN's backward does: D is scaled by
         // dropoutScaleInv (1 when unset), dP is masked, dS is scaled by dropoutScale, and dV uses
         // P * dropoutScale * mask. dBias reduces the dropout-scaled dS.
@@ -831,6 +838,9 @@ public:
                     std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
                     std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
                     std::vector<ComputeDataType> dpBuffer(static_cast<size_t>(seqKv));
+                    // d(softcap)/d(score) per key: 1 - tanh^2(score / c), or 1 without softcap.
+                    std::vector<ComputeDataType> softcapGrad(static_cast<size_t>(seqKv),
+                                                             static_cast<ComputeDataType>(1.0));
 
                     // Step 1: Compute D[b,hQ,sq] = sum(dO[b,hQ,sq,:] * O[b,hQ,sq,:])
                     auto dVal = static_cast<ComputeDataType>(0.0);
@@ -879,8 +889,10 @@ public:
                                          * static_cast<ComputeDataType>(k.getHostValue(
                                              std::vector<int64_t>{b, kvHeadK, skv, d}));
                             }
-                            scores[static_cast<size_t>(skv)]
-                                = qkDot * static_cast<ComputeDataType>(scale);
+                            scores[static_cast<size_t>(skv)] = applySoftcap(
+                                qkDot * static_cast<ComputeDataType>(scale), softcap);
+                            softcapGrad[static_cast<size_t>(skv)]
+                                = softcapDerivative(scores[static_cast<size_t>(skv)], softcap);
 
                             // Apply additive attention mask if provided
                             if(attnMask != nullptr)
@@ -925,8 +937,10 @@ public:
                                          * static_cast<ComputeDataType>(k.getHostValue(
                                              std::vector<int64_t>{b, kvHeadK, skv, d}));
                             }
-                            scores[static_cast<size_t>(skv)]
-                                = qkDot * static_cast<ComputeDataType>(scale);
+                            scores[static_cast<size_t>(skv)] = applySoftcap(
+                                qkDot * static_cast<ComputeDataType>(scale), softcap);
+                            softcapGrad[static_cast<size_t>(skv)]
+                                = softcapDerivative(scores[static_cast<size_t>(skv)], softcap);
 
                             // Apply additive attention mask if provided
                             if(attnMask != nullptr)
@@ -997,8 +1011,11 @@ public:
                         const ComputeDataType dsVal = dropoutFactor
                                                       * probs[static_cast<size_t>(skv)]
                                                       * (dpBuffer[static_cast<size_t>(skv)] - dVal);
-                        const ComputeDataType dsScaled
-                            = dsVal * static_cast<ComputeDataType>(scale);
+                        // dBias takes dsVal (the bias is added after softcap); Q and K also go
+                        // through the softcap derivative and the attention scale.
+                        const ComputeDataType dsScaled = dsVal
+                                                         * softcapGrad[static_cast<size_t>(skv)]
+                                                         * static_cast<ComputeDataType>(scale);
 
                         // The bias is added after scaling, so its gradient is the unscaled dS.
                         if(dBias != nullptr)
@@ -1122,6 +1139,39 @@ public:
     }
 
 private:
+    static void validateSoftcap(std::optional<float> softcap)
+    {
+        if(softcap.has_value() && !(softcap.value() > 0.0F && std::isfinite(softcap.value())))
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa: softcap must be finite and > 0");
+        }
+    }
+
+    /// Logit softcap: c * tanh(s / c), applied after the attention scale and before bias and masks
+    /// (vLLM / FlexAttention order). Not expressible in the hipDNN graph yet (register SEM-020).
+    template <class ComputeDataType>
+    static ComputeDataType applySoftcap(ComputeDataType score, std::optional<float> softcap)
+    {
+        if(!softcap.has_value())
+        {
+            return score;
+        }
+        const auto c = static_cast<ComputeDataType>(softcap.value());
+        return c * std::tanh(score / c);
+    }
+
+    /// Derivative of the softcap at a capped score s' = c * tanh(s / c): 1 - (s' / c)^2.
+    template <class ComputeDataType>
+    static ComputeDataType softcapDerivative(ComputeDataType capped, std::optional<float> softcap)
+    {
+        if(!softcap.has_value())
+        {
+            return static_cast<ComputeDataType>(1.0);
+        }
+        const auto t = capped / static_cast<ComputeDataType>(softcap.value());
+        return static_cast<ComputeDataType>(1.0) - t * t;
+    }
+
     /// Explicit dropout mask (cuDNN custom dropout): rank-4 [B or 1, H or 1, Sq, Skv].
     static void validateDropoutMask(const hipdnn_data_sdk::utilities::TensorBase<float>* mask,
                                     int64_t batch,

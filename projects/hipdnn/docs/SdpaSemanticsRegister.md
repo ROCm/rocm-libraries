@@ -234,10 +234,17 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-020: Softcap
 
-- **Status:** Extension (pending API).
+- **Status:** Extension, implemented in the references only; not expressible in the graph.
 - **cuDNN:** no attribute; only possible through score_mod.
 - **vLLM (Gemma2) and Flex:** `c * tanh(S / c)` after scaling, before the mask and bias.
-- **Contract:** to be defined. Proposed order: scale, then softcap, then bias, then ALiBi, then mask.
+- **hipDNN today:** the CPU forward/backward references and the GPU forward/backward references take an optional
+  `softcap` argument (finite, > 0) with that order: scale, softcap, bias, masks. Backward: dBias takes the
+  post-softcap gradient, dQ and dK also take `1 - tanh^2(s / c)`. Pinned by
+  `TestCpuFpReferenceSdpaGradCheck.Softcap`, `SoftcapClosedFormAndLargeCapLimit` and
+  `TestGpuSdpaSoftcapFp32` (mutations: missing derivative, missing forward cap).
+- **Decided 2026-10-23 (C4):** a first-class attribute will be added, but the schema / frontend / backend / engine
+  plumbing waits for a team discussion. Until then nothing in a graph reaches it. Plumbing checklist and the
+  engine-gating finding (hand-written decline lists ignore new attributes) are in the decisions notes.
 
 ### SEM-021: ALiBi
 

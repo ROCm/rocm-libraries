@@ -1969,6 +1969,142 @@ TEST(TestCpuFpReferenceSdpaFp64, ExplicitMaskDropoutForwardClosedForm)
     EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(3.0), 1e-6);
 }
 
+// Logit softcap (reference-only extension, SEM-020): scores become c * tanh(s / c) after the
+// scale and before bias and masks. The backward is the exact gradient, including dBias.
+TEST(TestCpuFpReferenceSdpaGradCheck, Softcap)
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ_Q = 3;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr float SCALE = 1.5f;
+    constexpr float SOFTCAP = 0.8f; // small cap so tanh is well into its nonlinear range
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> bias({SEQ_Q, SEQ_KV});
+    q.fillWithRandomValues(-0.8f, 0.8f, 9600);
+    k.fillWithRandomValues(-0.8f, 0.8f, 9601);
+    v.fillWithRandomValues(-0.5f, 0.5f, 9602);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 9603);
+    bias.fillWithRandomValues(-0.5f, 0.5f, 9604);
+
+    const auto fwd = [&]() {
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    SCALE,
+                                    &bias,
+                                    -1,
+                                    0,
+                                    false,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    std::nullopt,
+                                    SOFTCAP);
+    };
+    fwd();
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dBias({SEQ_Q, SEQ_KV});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 SCALE,
+                                 nullptr,
+                                 &bias,
+                                 -1,
+                                 0,
+                                 false,
+                                 &dBias,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 SOFTCAP);
+
+    auto fwdLoss = [&]() -> double {
+        fwd();
+        return computeDotProductLoss(dO, o);
+    };
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (softcap)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (softcap)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dV (softcap)");
+    checkGradient(bias, dBias, {SEQ_Q, SEQ_KV}, fwdLoss, "dBias (softcap)");
+}
+
+// Softcap closed form: one query, two keys with scores 3 and 0 (q = [3, 0], k0 = [1, 0],
+// k1 = [0, 0]); with c = 1 the capped scores are tanh(3) and 0, and LSE = ln(e^tanh(3) + 1).
+// A very large cap is (to fp32 precision) no cap.
+TEST(TestCpuFpReferenceSdpaFp64, SoftcapClosedFormAndLargeCapLimit)
+{
+    Tensor<double> q({1, 1, 1, 2});
+    Tensor<double> k({1, 1, 2, 2});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 1, 1});
+    Tensor<float> lse({1, 1, 1, 1});
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    q.setHostValue(3.0, 0, 0, 0, 0);
+    k.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(0.0, 0, 0, 1, 0);
+    const TensorBase<float>* noMask = nullptr;
+    const auto run = [&](std::optional<float> cap) {
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    std::nullopt,
+                                    noMask,
+                                    -1,
+                                    -1,
+                                    true,
+                                    &lse,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    std::nullopt,
+                                    cap);
+    };
+    run(1.0f);
+    const double capped = std::tanh(3.0);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(std::exp(capped) + 1.0), 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), std::exp(capped) / (std::exp(capped) + 1.0), 1e-5);
+
+    run(1.0e6f);
+    const double oLarge = o.getHostValue(0, 0, 0, 0);
+    run(std::nullopt);
+    EXPECT_NEAR(oLarge, o.getHostValue(0, 0, 0, 0), 1e-5);
+
+    EXPECT_THROW(run(0.0f), std::invalid_argument);
+    EXPECT_THROW(run(-1.0f), std::invalid_argument);
+}
+
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
 {
     // Combined: GQA + causal mask

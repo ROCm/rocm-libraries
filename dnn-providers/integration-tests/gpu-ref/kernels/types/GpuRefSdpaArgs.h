@@ -66,6 +66,9 @@ struct SdpaFwdArgs
     const float* dropoutMask;
     SdpaStrides dropoutMaskStr;
     float dropoutScale;
+    // Optional logit softcap c (> 0 enables): scores become c * tanh(s / c) after the attention
+    // scale and before bias and masks. Reference-only extension (SEM-020).
+    float softcap;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -111,6 +114,7 @@ struct SdpaBwdArgs
     SdpaStrides dropoutMaskStr;
     float dropoutScale;
     float dropoutScaleInv;
+    float softcap; // > 0 enables the logit softcap, as in SdpaFwdArgs
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
