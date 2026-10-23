@@ -175,6 +175,9 @@ def _mask_from_attributes(
             raise SystemExit(
                 f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
+    # left_bound follows cuDNN (L keeps the L keys ending at the diagonal), so 0 keeps none.
+    if left == 0:
+        raise SystemExit(f"FAIL: {path}: invalid left_bound 0; expected -1 or >= 1")
     causal = attrs.get("causal_mask")
     causal_bottom_right = attrs.get("causal_mask_bottom_right")
     if causal and causal_bottom_right:
@@ -202,7 +205,9 @@ def _mask_from_attributes(
             "mask_type": _causal_mask_type(bottom_right, seqlen_q, seqlen_k),
             "sliding_window": 0,
         }
-    return _mask_fields(SLIDING_WINDOW, left + 1)
+    # hipDNN's left_bound and the request's sliding_window both count the keys kept,
+    # diagonal included (cuDNN semantics), so the width passes through unchanged.
+    return _mask_fields(SLIDING_WINDOW, left)
 
 
 #: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
