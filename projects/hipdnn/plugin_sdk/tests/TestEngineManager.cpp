@@ -148,6 +148,35 @@ TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
     EXPECT_EQ(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), 2048u);
 }
 
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateWhenTheCallerSuppliesAName)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048), "hipkernel:ConvFwd");
+    manager.addEngine(createTestEngine(1, true, 4096), "hipkernel:ConvFwd");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "hipkernel:ConvFwd"));
+
+    // The name joins the id rather than replacing it: the id is what greps against the
+    // admission logs.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "0x0000000000000001"));
+}
+
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateFromTheRegistryWhenNoNameIsGiven)
+{
+    using hipdnn_data_sdk::utilities::formatEngineIdHex;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 2048));
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 4096));
+
+    // No name was declared, so this one comes from the static registry.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "MIOPEN_ENGINE"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, formatEngineIdHex(MIOPEN_ENGINE_ID)));
+}
+
 TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
 {
     TestEngineManager manager;
@@ -190,4 +219,26 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
+}
+
+TEST(TestEngineManager, NonEnumerableEngineDeclinesWithoutLosingNormalExecutionSupport)
+{
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
+    TestHandle handle;
+    const NiceMock<MockGraph> graph;
+    const NiceMock<MockEngineConfig> config;
+    ON_CALL(config, engineId()).WillByDefault(Return(1));
+    hipdnnPluginConstData_t page{};
+    try
+    {
+        manager.enumerateCandidates(handle, graph, config, 0, 10, page);
+        FAIL() << "Non-enumerable engine must decline explicitly";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    }
+    EXPECT_EQ(manager.getApplicableEngineIds(handle, graph), std::vector<int64_t>{1});
+    EXPECT_EQ(manager.getMaxWorkspaceSize(handle, graph, config), 2048U);
 }

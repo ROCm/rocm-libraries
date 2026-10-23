@@ -16,8 +16,8 @@ namespace utilities
 /// Ordering rationale:
 /// - MIOPEN_ENGINE first: Default engine with full operation support
 /// - Other engines middle: Stable order preserved for predictability
-/// - MIOPEN_ENGINE_DETERMINISTIC last: Limited to conv operations only,
-///   deprioritized due to performance trade-offs and reduced operation support
+/// - MIOPEN_ENGINE_DETERMINISTIC last: reduced operation support relative to
+///   MIOPEN_ENGINE, deprioritized due to performance trade-offs
 ///
 /// @param engineIds Vector of engine IDs to sort (modified in-place)
 void sortEngineIds(std::vector<int64_t>& engineIds);

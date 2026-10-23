@@ -208,6 +208,7 @@ struct settings
     uint32_t    spaces_per_indent       = 4; ///< JSON indentation spaces.
     double stream_blocking_timeout_secs = 10.0; ///< Max duration before stream blocking times out.
     bool   skip_header                  = false; //< Skip printing the header to output.
+    bool   skip_tests                   = false; //< Skip correctness tests
 
     using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
     std::map<std::string, custom_arg_value>
@@ -1331,6 +1332,7 @@ private:
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
         ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs;
         ss << ",\"skip_header\":" << s.skip_header;
+        ss << ",\"skip_tests\":" << s.skip_tests;
 
         ss << "}";
         return ss.str();
@@ -2027,6 +2029,8 @@ public:
 
     /// Empirically measures the GPU wall-clock tick rate in kHz
     /// by sampling the on-device clock one second apart
+
+#ifdef __HIP__
     long long measure_wall_clk_rate_khz()
     {
         long long* d_tick;
@@ -2061,6 +2065,7 @@ public:
 
         return std::llround(tot_ticks / (1000 * elapsed_time_s));
     }
+#endif
 
     /// Destructor that unregisters host memory.
     ~stream_blocker()
@@ -2498,6 +2503,7 @@ public:
         , m_index_column_width(index_column_width)
         , m_print_index(print_index)
         , m_cache(cache)
+        , m_skip_tests(settings.skip_tests)
     {}
 
     /// Sets the total number of items processed per iteration.
@@ -2585,6 +2591,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
@@ -2644,6 +2655,7 @@ public:
     /// Define `PRIMBENCH_NO_TEST` to disable.
     void test(std::function<void()> test_lambda)
     {
+
         if(m_has_run)
         {
             std::cerr << "Error: Can't call test() after calling run()\n";
@@ -2713,8 +2725,9 @@ private:
 
         elapsed_gpu_secs += batch_gpu_secs;
 
-        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+        double bytes_per_batch  = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec    = bytes_per_batch / batch_gpu_secs;
+        m_last_bytes_per_second = bytes_per_sec;
 
         double items_per_batch = m_items * m_kernels_per_batch;
         double items_per_sec   = items_per_batch / batch_gpu_secs;
@@ -2831,7 +2844,7 @@ private:
         for(auto& event : events)
             PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
-        if(m_test_lambda)
+        if(m_test_lambda && !m_skip_tests)
         {
             primbench::log("Running tests");
             m_test_lambda();
@@ -3034,6 +3047,7 @@ private:
     bool   m_has_set_items    = false;
     bool   m_has_set_writes   = false;
     bool   m_has_run          = false;
+    bool   m_skip_tests       = false;
     size_t m_items            = 0;
     size_t m_read_write_bytes = 0;
 
@@ -3282,7 +3296,8 @@ public:
                                                                      "output-batches",
                                                                      "spaces-per-indent",
                                                                      "stream-blocking-timeout-secs",
-                                                                     "skip-header"};
+                                                                     "skip-header",
+                                                                     "skip-tests"};
 
         auto parse_value = [](const std::string& value) -> settings::custom_arg_value
         {
@@ -3680,6 +3695,14 @@ public:
         return m_last_bytes_per_second;
     }
 
+    /**
+     * \brief Returns a vector containing all bytes per second
+     */
+    std::vector<double> get_all_bytes_per_second()
+    {
+        return m_all_bytes_per_second;
+    }
+
 private:
     /// Parse optional arguments.
     void parse()
@@ -3838,6 +3861,8 @@ private:
 
         s.skip_header
             = cli.get<bool>("skip-header", s.skip_header, "Skip printing the header to output.");
+
+        s.skip_tests = cli.get<bool>("skip-tests", s.skip_tests, "Skip running correctness tests.");
     }
 
     /// Only keep filtered specializations, based on their name.
@@ -3984,6 +4009,7 @@ private:
                 auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
                 m_last_bytes_per_second = state.get_last_bytes_per_second();
+                m_all_bytes_per_second.push_back(m_last_bytes_per_second);
             }
 
             specialization_index++;
@@ -4071,6 +4097,8 @@ private:
     detail::cli m_cli; ///< Command-line argument parser.
 
     double m_last_bytes_per_second = 0.0; /**< Last bytes per second */
+    std::vector<double>
+        m_all_bytes_per_second; /**< Vector that stores all run's bytes per second. Useful for some Kernel Tuning algorithms */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; ///< Stream blocker to serialize output.

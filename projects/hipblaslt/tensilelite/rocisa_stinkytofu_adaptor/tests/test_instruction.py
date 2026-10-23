@@ -195,6 +195,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VMinI32,
     VMed3I32,
     VMed3F32,
+    VMaximumMinimumF32,
     VNotB32,
     VPrngB32,
     VRndneF32,
@@ -1690,6 +1691,7 @@ _VECTOR_MINMAX = [
 _VECTOR_TERNARY_MISC = [
     (VMed3I32, "v_med3_i32", InstType.INST_I32),
     (VMed3F32, "v_med3_f32", InstType.INST_F32),
+    (VMaximumMinimumF32, "v_maximumminimum_f32", InstType.INST_F32),
     (VLShiftLeftOrB32, "v_lshl_or_b32", InstType.INST_B32),
 ]
 
@@ -2670,9 +2672,10 @@ class TestWaitCntInstructions(unittest.TestCase):
         m.add(_SWaitCnt(lgkmcnt=0, vmcnt=0))
         m.add(SWaitTensorcnt(cnt=0))
         m.add(SWaitXCnt(cnt=0))
-        # _SWaitCnt(lgkmcnt=0, vmcnt=0) decomposes into 2 typed waits
-        # (dscnt from lgkmcnt + loadcnt from vmcnt) + tensorcnt + xcnt = 4
-        self.assertEqual(len(m._collect_logical_insts()), 4)
+        # _SWaitCnt carries dscnt and loadcnt in one logical wait. The C++
+        # legalization pass splits it into typed waits after collection.
+        # Together with tensorcnt and xcnt, the pre-lowering count is 3.
+        self.assertEqual(len(m._collect_logical_insts()), 3)
 
 
 class TestSWaitAlu(unittest.TestCase):

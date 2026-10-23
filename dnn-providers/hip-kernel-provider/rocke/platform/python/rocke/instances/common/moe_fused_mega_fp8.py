@@ -78,6 +78,11 @@ from ...helpers.mfma_gemm_inner import (
 )
 from ...helpers.quant import quant_max_abs
 from ...helpers.tensor_view import TensorDescriptor, TensorView
+from ._moe_fused_mega_lds import (
+    LdsAlloc,
+    lds_elem_bytes,
+    validate_mega_lds_budget,
+)
 
 
 __all__ = [
@@ -1547,6 +1552,74 @@ def f32_view_load(b: IRBuilder, view, row: Value, col: Value) -> Value:
 
 
 # ---------------------------------------------------------------------------
+# Spec validation
+# ---------------------------------------------------------------------------
+
+# L6: the unscaled fp8 16x16x128 hero atom is NOT a catalog shape on ANY target
+# -- the wide-K f8 MFMA is only reachable through
+# ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (see
+# :meth:`MfmaAtom.fp8_16x16x128`), which the JSON MMA catalog does not model, so
+# ``validate_mfma_atom_in_catalog`` would raise a spurious NotImplementedError
+# even on the target that HAS the instruction. That is why the catalog guard is
+# skipped for ``atom.k == 128``. Skipping it outright, though, also stopped
+# rejecting the targets that genuinely lack the instruction, which then reached
+# comgr as an uncatchable LLVM abort. This is the arch fact the catalog is
+# missing: the scaled f8f6f4 family ships on the gfx950 target family.
+_SCALED_F8F6F4_TARGET_FAMILY = "gfx950"
+
+
+def _validate_fp8_atom(atom: MfmaAtom, target, arch: str) -> None:
+    """Reject an fp8 MFMA atom the target cannot issue.
+
+    ``atom.k == 128`` selects the scaled-f8f6f4 hero atom, gated on the target
+    family that owns the instruction (see
+    :data:`_SCALED_F8F6F4_TARGET_FAMILY`); every other fp8 atom IS a catalog
+    shape and goes through the shared per-arch catalog guard.
+    """
+    if atom.k != 128:
+        validate_mfma_atom_in_catalog(atom, arch, where="moe_fused_mega_fp8")
+        return
+    if target.target_family != _SCALED_F8F6F4_TARGET_FAMILY:
+        raise NotImplementedError(
+            f"moe_fused_mega_fp8 MFMA atom {atom.name!r} "
+            f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) lowers to the scaled "
+            f"f8f6f4 instruction, which {arch} does not have; this "
+            f"configuration requires a different target (or gate_up_k / "
+            f"down_k = 32 for the catalog 16x16x32 atom)."
+        )
+
+
+def _lds_allocs(spec: FusedMegaKernelSpecFp8) -> Tuple[LdsAlloc, ...]:
+    """Every LDS buffer :func:`build_moe_fused_mega_gemm_fp8` allocates, in order.
+
+    Keep in lock-step with the ``b.smem_alloc`` calls in the builder: this is
+    what the whole-kernel budget in :mod:`._moe_fused_mega_lds` is computed
+    from. ``BStage_smem`` is allocated unconditionally but only *referenced*
+    under ``use_dtla``; the smem packer dead-strips unreferenced allocations, so
+    it is only counted when the DTLA path is on.
+    """
+    tile_m = spec.tile_m
+    tile_n = spec.tile_n_inter
+    n_blocks = tile_n // GROUP_K
+    n_warps = spec.warp_m * spec.warp_n
+    fp8_b = lds_elem_bytes(FP8E4M3)
+    f32_b = lds_elem_bytes(F32)
+    allocs = [
+        LdsAlloc("Hidden_smem", fp8_b, tile_m * tile_n),
+        LdsAlloc("HiddenScale_smem", f32_b, tile_m * n_blocks),
+        LdsAlloc("HiddenF32_smem", f32_b, tile_m * tile_n),
+        LdsAlloc("WarpAmax_smem", f32_b, n_warps),
+    ]
+    if spec.use_dtla:
+        atom = spec.gate_up_atom()
+        dtla_slots = 5 if _USE_X_DTLA else 4
+        dtla_chunks = (atom.b_per_lane + DTLA_CHUNK - 1) // DTLA_CHUNK
+        bstage_rows = n_warps * dtla_slots * dtla_chunks * spec.wave_size
+        allocs.append(LdsAlloc("BStage_smem", fp8_b, bstage_rows * DTLA_CHUNK))
+    return tuple(allocs)
+
+
+# ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
 
@@ -1585,20 +1658,30 @@ def build_moe_fused_mega_gemm_fp8(
     The ``persistent=False`` path emits the IDENTICAL op stream (no extra
     params, no loop, no extra sync) so the default build is byte-identical.
     """
-    ok, why, _ = validate_arch_and_block_size(arch, spec.block_size)
+    ok, why, target = validate_arch_and_block_size(arch, spec.block_size)
     if not ok:
         raise ValueError(f"invalid fp8 fused-mega spec for {arch}: {why}")
+    # Every lane map in this file is wave64 (the amax butterfly below is a
+    # hardcoded 6-stage xor over lanes 1..32), so a wave32 target would be
+    # silently wrong rather than merely slow.
+    if spec.wave_size != target.wave_size:
+        raise ValueError(
+            f"invalid fp8 fused-mega spec for {arch}: spec wave_size "
+            f"{spec.wave_size} != {arch} wave_size {target.wave_size}"
+        )
     atom = spec.gate_up_atom()
-    # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
-    # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
-    # scales pinned to the neutral value (verified numerically standalone), so it
-    # is gfx950-valid even though the plain unscaled 16x16x128 fp8 SHAPE is not a
-    # separate JSON catalog row. Only run the per-arch catalog guard for atoms
-    # that ARE catalog shapes (the legacy 16x16x32 path); skip it for the hero
-    # atom to avoid a spurious NotImplementedError (this is a guard against
-    # gfx950-only intrinsics reaching comgr -- which this atom is not).
-    if atom.k != 128:
-        validate_mfma_atom_in_catalog(atom, arch, where="moe_fused_mega_fp8")
+    # The hero atom reuses the ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with
+    # the in-instruction E8M0 scales pinned to the neutral value (verified
+    # numerically standalone). Both the gate/up and the down atom are selectable
+    # (``gate_up_k`` / ``down_k``), so both are checked.
+    _validate_fp8_atom(atom, target, arch)
+    _validate_fp8_atom(spec.down_atom(), target, arch)
+    # Whole-kernel LDS: the persistent Hidden bridge, its scales, the f32 amax
+    # scratch and the DTLA landing zone all coexist, and nothing else validates
+    # their total against the per-WG budget.
+    ok, why = validate_mega_lds_budget(_lds_allocs(spec), arch)
+    if not ok:
+        raise ValueError(f"invalid fp8 fused-mega spec for {arch}: {why}")
 
     # L9 flag (sched_cadence): pin the per-loop scheduler-hint cadence on the
     # spec, or (default None) defer to the import-time ``ROCKE_FP8_SCHED`` env
@@ -1781,6 +1864,8 @@ def build_moe_fused_mega_gemm_fp8(
         _select_item(b.block_id_y(), None)
 
     # ---- LDS allocations ----------------------------------------------
+    # Mirrored by :func:`_lds_allocs` for the whole-kernel budget above; the two
+    # must stay in lock-step.
     # Persistent fp8 Hidden buffer (half the f16 bytes): silu(gate)*up quantized
     # here, reused as the down-GEMM LDS-resident A operand in STAGE 2.
     Hidden_smem = b.smem_alloc(FP8E4M3, [tile_m, tile_n], name_hint="Hidden_smem")

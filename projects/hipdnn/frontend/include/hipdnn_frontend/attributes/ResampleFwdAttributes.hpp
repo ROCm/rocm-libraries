@@ -166,6 +166,14 @@ public:
         return *this;
     }
 
+    // cuDNN frontend spells this setter `set_resampling_mode`; provide that
+    // spelling for API compatibility. Same field, same semantics.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    ResampleFwdAttributes& set_resampling_mode(ResampleMode value)
+    {
+        return set_resample_mode(value);
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     PaddingMode get_padding_mode() const
     {

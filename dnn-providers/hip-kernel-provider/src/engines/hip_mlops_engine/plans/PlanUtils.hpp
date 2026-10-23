@@ -51,6 +51,15 @@ inline const char* getKernelParamTypeString(hipdnn_flatbuffers_sdk::data_objects
     }
 }
 
+/**
+* Given a value and a step, returns the rounded up division of value over step (i.e. ceil).
+*/
+template <typename T>
+inline T align(T value, T step)
+{
+    return (value + step - 1) / step;
+}
+
 namespace batchnorm
 {
 

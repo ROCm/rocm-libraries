@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -18,6 +19,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -28,8 +30,10 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file KernelIngestorTestFixtures.hpp
@@ -38,6 +42,8 @@
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::GraphId;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::makeGraphId;
 constexpr const char* BLOCK_SIZE = "block_size";
 constexpr const char* DTYPE = "dtype";
 constexpr const char* GRAPH_MATCH_SYMBOL = "hipdnn.kernel_ingestor.test.graph_match";
@@ -91,6 +97,11 @@ public:
         return true;
     }
 
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {_builder.GetBufferPointer(), _builder.GetSize()};
+    }
+
     uint32_t nodeCount() const override
     {
         return 0;
@@ -132,15 +143,6 @@ private:
         _tensors;
 };
 
-inline GraphId makeGraphId(uint8_t seed)
-{
-    GraphId id{};
-    id.fill(seed);
-    id[6] = static_cast<uint8_t>((id[6] & 0x0fU) | 0x40U);
-    id[8] = static_cast<uint8_t>((id[8] & 0x3fU) | 0x80U);
-    return id;
-}
-
 inline GraphId makeNonV4GraphId(uint8_t seed)
 {
     GraphId id{};
@@ -154,11 +156,66 @@ inline GraphId makeNilGraphId()
     return GraphId{};
 }
 
+/// A serialized single-node matmul C[m, n] = A[m, k] x B[k, n], so `graph.flops` = 2mnk;
+/// TestGraph has no node and so no work. @p graphId, when given, makes the catalog cacheable.
+class MatmulTestGraph
+{
+public:
+    MatmulTestGraph(int64_t m, int64_t n, int64_t k, std::optional<GraphId> graphId = std::nullopt)
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        GraphT graph;
+        graph.name = "matmul";
+        if(graphId.has_value())
+        {
+            graph.id = std::make_unique<Uuid>(
+                hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId));
+        }
+        const auto addTensor = [&graph](int64_t uid, int64_t rows, int64_t columns) {
+            auto tensor = std::make_unique<TensorAttributesT>();
+            tensor->uid = uid;
+            tensor->dims = {rows, columns};
+            tensor->strides = {columns, 1};
+            tensor->data_type = DataType::HALF;
+            graph.tensors.push_back(std::move(tensor));
+        };
+        addTensor(1, m, k);
+        addTensor(2, k, n);
+        addTensor(3, m, n);
+        MatmulAttributesT matmul;
+        matmul.a_tensor_uid = 1;
+        matmul.b_tensor_uid = 2;
+        matmul.c_tensor_uid = 3;
+        auto node = std::make_unique<NodeT>();
+        node->compute_data_type = DataType::FLOAT;
+        node->attributes.Set(matmul);
+        graph.nodes.push_back(std::move(node));
+        _buffer.Finish(Graph::Pack(_buffer, &graph));
+        _graph = std::make_unique<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper>(
+            _buffer.GetBufferPointer(), _buffer.GetSize());
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph() const
+    {
+        return *_graph;
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _buffer;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper> _graph;
+};
+
 inline DeviceProperties testDeviceProperties()
 {
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    // Non-zero memory facts, so corpus rows carry meaningful `device.*` columns.
+    properties.multiProcessorCount = 304;
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = size_t{64} * 1024;
     return properties;
 }
 
@@ -440,9 +497,9 @@ public:
 
 constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score";
 
-/// Scores the largest block size NaN and everything else by block size, so a ranking
-/// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
-/// one pack poisoning the order for the rest, not merely losing its own place.
+/// Scores the largest block size NaN and everything else by block size, modeling one
+/// pack poisoning the whole ranking: a comparator that mishandles NaN misorders the
+/// finite kernels too, not just the NaN-scored one.
 inline double scoreNanForLargestBlock(const MatchContext& /*context*/,
                                       const BoundTokens& /*bound*/,
                                       const KernelDefinition& kernel)
@@ -549,18 +606,64 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 }
 
+inline KernelSource makeEmbeddedSource(const std::string& sourceFile = "Test.cpp",
+                                       const std::string& entryPoint = "TestKernel")
+{
+    KernelSource source;
+    source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    source.sourceFile = sourceFile;
+    source.entryPoint = entryPoint;
+    return source;
+}
+
+/// Defaults spell the shape the descriptor packager emits.
+inline KernelSource
+    makeKpackSource(const std::string& library = "kpack/hip_kernel_provider_gfx942.kpack",
+                    const std::string& tocKey = "test-toc-key",
+                    const std::string& symbol = "TestKernel",
+                    const std::string& sha256 = std::string(64, 'a'),
+                    const std::vector<KernelArgument>& signature = {{"global_buffer", 8, 0, ""}})
+{
+    KernelSource source;
+    source.kind = KernelSourceKind::KPACK;
+    source.library = library;
+    source.tocKey = tocKey;
+    source.symbol = symbol;
+    source.sha256 = sha256;
+    source.signature = signature;
+    return source;
+}
+
 inline KernelDefinition makeDefinition(const DescriptorId& id,
                                        int64_t blockSize,
                                        int64_t priority = 0,
                                        const std::vector<std::string>& arch = {})
 {
-    return {id,
-            PACK_ID,
-            DISPATCH_ID,
-            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
-            {{BLOCK_SIZE, MetadataValue{blockSize}}},
-            priority,
-            arch};
+    KernelDefinition definition;
+    definition.kernelId = id;
+    definition.packId = PACK_ID;
+    definition.dispatchId = DISPATCH_ID;
+    definition.source = makeEmbeddedSource();
+    definition.metadata = {{BLOCK_SIZE, MetadataValue{blockSize}}};
+    definition.priority = priority;
+    definition.arch = arch;
+    return definition;
+}
+
+/// @p originDirectory is what `source.library` resolves against; a test that only reads
+/// the coordinates can leave it empty.
+inline KernelDefinition makeKpackDefinition(const DescriptorId& id,
+                                            int64_t blockSize,
+                                            const std::filesystem::path& originDirectory = {},
+                                            const KernelSource& source = makeKpackSource(),
+                                            int64_t priority = 0,
+                                            const std::vector<std::string>& arch = {})
+{
+    KernelDefinition definition = makeDefinition(id, blockSize, priority, arch);
+    definition.source = source;
+    definition.originDirectory = originDirectory;
+    definition.name = "kpack kernel";
+    return definition;
 }
 
 /// RAII: registers the engine's graph match and one kernel matcher under
@@ -620,6 +723,39 @@ inline std::unique_ptr<StateManager>
         "test.graph",
         "engine 'test fixture'",
         cacheCapacity);
+}
+
+/// The same engine as makeStateManager(), but carrying @p engine so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the identity empty, which
+/// disables the disk cache, so every test that does not opt in stays in-memory only.
+/// @param winnerCacheCapacity Lets a test reach the eviction bound without recording the
+///        thousands of rankings the production default holds.
+inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
+    EngineIdentity engine, size_t winnerCacheCapacity = StateManager::DEFAULT_WINNER_CACHE_CAPACITY)
+{
+    std::vector<MatchDescriptor> matchers{
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    ensureNoopDispatchRegistered<TestHandle>();
+    std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
+
+    return std::make_unique<StateManager>(
+        makeSchema(),
+        std::move(matchers),
+        std::move(dispatches),
+        std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph",
+        "engine 'test fixture'",
+        StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+        std::move(engine),
+        winnerCacheCapacity);
+}
+
+/// An engine identified by name alone: no revision, no UHD, no model hash. Pairs with
+/// `winnerCacheShardPath({engineName}, ...)`.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    return makeIdentifiedStateManager(EngineIdentity{engineName});
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing
@@ -700,6 +836,11 @@ struct StubContext
     bool hasPlan() const
     {
         return _plan != nullptr;
+    }
+
+    const hipdnn_plugin_sdk::IPlan<StubHandle>& plan() const
+    {
+        return *_plan;
     }
 
 private:

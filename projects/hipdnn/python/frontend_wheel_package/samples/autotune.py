@@ -70,7 +70,7 @@ def run_autotune():
 
     # 1. Discover the engines that can run this graph, and their knobs.
     print("\nDiscovering engines...")
-    configs = graph.get_engine_configs()
+    configs = graph.get_engine_configs(handle=handle)
     for config in configs:
         print(
             f"  engine {config.engine_id} ({config.engine_name}): "
@@ -98,10 +98,10 @@ def run_autotune():
         print(f"✗ add_all_engines failed: {add_result.get_message()}")
         return
 
-    # 3. Allocate device buffers plus workspace. The pre-compile estimate is a
-    #    lower bound, so give the budget headroom; plans needing more are skipped.
+    # 3. Allocate device buffers plus workspace. The pre-compile estimate covers the
+    #    exhaustive priming configuration; plans needing more are skipped.
     estimated_workspace = graph.get_estimated_max_workspace_size()
-    workspace_size = max(2 * estimated_workspace, 1 << 20)
+    workspace_size = max(estimated_workspace, 1 << 20)
     print(f"Workspace estimate: {estimated_workspace} B, budget {workspace_size} B")
 
     tensors = {
@@ -158,7 +158,7 @@ def run_autotune():
 
     # 5. The winning plan is already active: execute uses it directly.
     print(
-        f"\nActive plan after autotune: {graph.get_plan_name()} "
+        f"\nActive plan after autotune: {graph.get_plan_name(handle)} "
         f"(engine {graph.get_execution_plan_engine_id()})"
     )
     exec_result = graph.execute(

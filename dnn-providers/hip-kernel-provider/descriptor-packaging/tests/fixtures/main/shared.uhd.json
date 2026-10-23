@@ -1,7 +1,10 @@
 {
-  "version": "0.1",
-  "id": "uhd-shared",
+  "version": "1.0",
+  "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
   "name": "Shared static-order heuristic",
-  "adapter": "static_order",
-  "order": ["priority", "id"]
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.shared.score"
+  }
 }

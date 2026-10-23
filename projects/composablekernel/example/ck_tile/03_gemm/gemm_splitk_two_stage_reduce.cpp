@@ -258,9 +258,18 @@ float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& 
             // rotating mem
             rotating_mem.Next();
             // clear c mem
+            //
+            // The whole [k_batch, M, N] workspace, not one slice. Each k_id atomic-adds into the
+            // slice GetOutputOffset gives it, so every slice must be reset before each timed
+            // launch or slices 1..k_batch-1 accumulate across warmup + repeat iterations while
+            // slice 0 alone is cleared. The cast is load-bearing: the product is index_t
+            // arithmetic and overflows for the default shape at k_batch >= 4.
             if(args.k_batch > 1)
-                hipGetErrorString(hipMemsetAsync(
-                    args.e_ptr, 0, args.M * args.N * sizeof(CDataType), s.stream_id_));
+                hipGetErrorString(hipMemsetAsync(args.e_ptr,
+                                                 0,
+                                                 static_cast<size_t>(args.k_batch) * args.M *
+                                                     args.N * sizeof(CDataType),
+                                                 s.stream_id_));
         };
         return ck_tile::launch_kernel_time_mask(
             s,
@@ -911,6 +920,7 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig<ck_tile::half_t>, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
+#if !CK_TILE_USE_WMMA || defined(CK_USE_WMMA_FP8)
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>,
@@ -925,6 +935,7 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
                                           ck_tile::bf8_t,
                                           ck_tile::half_t>(a_layout, b_layout, arg_parser);
     }
+#endif
     else if(data_type == "int8")
     {
         return run_gemm_example_prec_type<GemmConfig<ck_tile::int8_t>,

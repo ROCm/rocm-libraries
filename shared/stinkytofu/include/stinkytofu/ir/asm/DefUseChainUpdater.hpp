@@ -70,6 +70,16 @@ class DefUseChainUpdater {
         oldInst->users.clear();
     }
 
+    /// Drop this instruction's def-use edges without repairing its neighbours.
+    ///
+    /// Only valid while clearing every instruction in a function, which is what
+    /// happens when the chains are about to be rebuilt or abandoned. Clearing a
+    /// single instruction would leave its neighbours pointing at it.
+    static void clearChains(StinkyInstruction* inst) {
+        inst->sources.clear();
+        inst->users.clear();
+    }
+
    private:
     /// Remove inst from every source's users list, then clear inst->sources.
     static void unlinkFromSources(StinkyInstruction* inst) {

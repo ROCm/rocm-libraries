@@ -126,6 +126,34 @@ namespace hiptensor
         return indices;
     }
 
+    // Reorders `strides`, which are given in `modes` order, into `refModes` order, so that
+    // entry i of the result is the stride of the mode `refModes[i]`. This lets a set of
+    // tensors whose modes are ordered differently be indexed against one common iteration
+    // space. A mode of `refModes` that `modes` does not carry gets stride 0, so that every
+    // index along that mode maps to the same element and the tensor is broadcast along it.
+    // An empty return means `modes` and `strides` disagree in length, which the caller must
+    // treat as an unsupported layout.
+    template <typename T>
+    std::vector<T> alignStridesToModes(std::vector<int32_t> const& refModes,
+                                       std::vector<int32_t> const& modes,
+                                       std::vector<T> const&       strides)
+    {
+        if(modes.size() != strides.size())
+        {
+            return {};
+        }
+
+        std::vector<T> aligned;
+        aligned.reserve(refModes.size());
+        for(auto mode : refModes)
+        {
+            auto it = std::find(modes.cbegin(), modes.cend(), mode);
+            aligned.push_back(it == modes.cend() ? T{0}
+                                                 : strides[std::distance(modes.cbegin(), it)]);
+        }
+        return aligned;
+    }
+
     inline void printErrorMessage(hiptensor::Logger& logger,
                                   hiptensorStatus_t  errorCode,
                                   const std::string& paramName)
@@ -292,6 +320,15 @@ namespace hiptensor
     {                                                             \
         printErrorMessage(logger, errorCode, #paramName);         \
         checkResult = errorCode;                                  \
+    }
+
+// A rank-0 tensor carries no modes, so a null mode array is only an error when its
+// descriptor declares at least one. `descName` must already be known to be non-null.
+#define CheckApiModes(checkResult, logger, errorCode, descName, modeName) \
+    if(!descName->mLengths.empty() && !modeName)                          \
+    {                                                                     \
+        printErrorMessage(logger, errorCode, #modeName);                  \
+        checkResult = errorCode;                                          \
     }
 
 } // namespace hiptensor

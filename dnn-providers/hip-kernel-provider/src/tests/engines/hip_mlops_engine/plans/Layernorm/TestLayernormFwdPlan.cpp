@@ -3,6 +3,7 @@
 
 #include "../TestPlanCommon.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -90,6 +91,23 @@ TEST(TestLayernormFwdParams, IsMoveConstructible)
 TEST(TestLayernormFwdParams, IsNotCopyConstructible)
 {
     EXPECT_FALSE(std::is_copy_constructible_v<LayernormFwdParams>);
+}
+
+TEST(TestLayernormProblemDescription, ComputesExecutionGeometry)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
+    const LayernormFwdParams params(attr, graph.getTensorMap());
+
+    const ProblemDescription problem(params.x(), params.scale(), params.mean(), Direction::FORWARD);
+
+    EXPECT_EQ(problem.direction(), Direction::FORWARD);
+    EXPECT_EQ(problem.normalizedDim(), 1);
+    EXPECT_EQ(problem.outerSize(), 1);
+    EXPECT_EQ(problem.innerSize(), 588);
+    EXPECT_EQ(problem.stride(), 1);
 }
 
 namespace

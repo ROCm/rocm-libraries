@@ -5,10 +5,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -19,15 +22,19 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file PointwiseNative.cpp
@@ -64,6 +71,18 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view INPUT_A_TOKEN = "pointwise.input_a.uid";
 constexpr std::string_view INPUT_B_TOKEN = "pointwise.input_b.uid";
 constexpr std::string_view OUTPUT_TOKEN = "pointwise.output.uid";
+
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
+constexpr std::string_view INPUT_A_ROOT = "pointwise.input_a";
+constexpr std::string_view INPUT_B_ROOT = "pointwise.input_b";
+constexpr std::string_view OUTPUT_ROOT = "pointwise.output";
+
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
+constexpr std::string_view FLOPS_TOKEN = "pointwise.flops";
+constexpr std::string_view BYTES_TOKEN = "pointwise.bytes";
 
 /// Scratch reported by the larger-block kernel; keeps max-across-survivors non-zero.
 constexpr size_t LARGE_BLOCK_WORKSPACE_BYTES = 1024;
@@ -159,6 +178,10 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
+using pack_features::bindTensorFields;
+using pack_features::elementCount;
+using pack_features::movedBytes;
+
 /// The node this engine's matchers read, or nullptr if the graph isn't a single
 /// pointwise node. Shared so the operation check doesn't depend on matcher order,
 /// which the descriptor controls.
@@ -236,6 +259,26 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
+
+    // The validated dims and dtypes are the features a UHD ranks this op on.
+    bindTensorFields(bound, INPUT_A_ROOT, *inputA);
+    bindTensorFields(bound, INPUT_B_ROOT, *inputB);
+    bindTensorFields(bound, OUTPUT_ROOT, *output);
+
+    // One operation per output element (ADD, MUL, SUB); no reduction or masking, so the
+    // effective and dense flop conventions agree.
+    const auto flops = elementCount(*output);
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+
+    const auto bytes = movedBytes({inputA, inputB, output});
+    if(bytes.has_value())
+    {
+        bound[std::string(BYTES_TOKEN)] = *bytes;
+    }
+
     return bound;
 }
 
@@ -322,18 +365,17 @@ PointwiseBinding pointwiseBinding(const BoundTokens& bound)
 class PreparedPointwise : public PreparedDispatch
 {
 public:
-    PreparedPointwise(std::unique_ptr<compilation::ICompiledProgram> program,
-                      std::unique_ptr<compilation::IRunnableKernel> kernel,
-                      PointwiseBinding binding)
-        : _program(std::move(program))
-        , _kernel(std::move(kernel))
+    PreparedPointwise(IngestorKernelCode code, PointwiseBinding binding)
+        : _code(std::move(code))
         , _binding(binding)
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// The kernel for the device this dispatch is running on. Resolved here rather than
+    /// at prepare() because a plan outlives the handle it was built from.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_kernel;
+        return _code.kernelForStream(stream);
     }
 
     const PointwiseBinding& binding() const
@@ -342,10 +384,9 @@ public:
     }
 
 private:
-    // Runnable kernel is a view into its program's module; both are held for the
-    // plan's lifetime.
-    std::unique_ptr<compilation::ICompiledProgram> _program;
-    std::unique_ptr<compilation::IRunnableKernel> _kernel;
+    // Owns each device's program alongside the kernel viewing into it, so a module
+    // outlives every function resolved from it for the plan's lifetime.
+    IngestorKernelCode _code;
     PointwiseBinding _binding;
 };
 
@@ -380,6 +421,21 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
     return *it->second;
 }
 
+/// The argument list this pack marshals: three device pointers, in operand order, matching
+/// the launch() below one for one. It sits here rather than in the adapter that consumes it
+/// so that it is edited alongside that launch -- a stale copy rejects the correct kernel
+/// rather than the drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& pointwiseKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise
  *        kernel. Shared across packs -- the operation is just the selected kernel's
@@ -391,10 +447,14 @@ class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDisp
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted is
+    /// the selected kernel's source kind, decided in buildIngestorKernelCode.
     /// Device properties aren't held here -- they arrive per call via MatchContext,
     /// so each call compiles for the device it's actually for.
-    explicit PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                             const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -422,14 +482,13 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, pointwiseKernelSignature());
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(1, 1, 1);
+        code.setBlockSize(blockSize, 1, 1);
+        code.setGridSize(1, 1, 1);
 
-        return std::make_unique<PreparedPointwise>(
-            std::move(program), std::move(runnableKernel), binding);
+        return std::make_unique<PreparedPointwise>(std::move(code), binding);
     }
 
     void launch(const Handle& handle,
@@ -448,20 +507,43 @@ public:
         const auto output
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.output, deviceBuffers, numDeviceBuffers);
 
-        preparedPointwise.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
+        // Changing this argument list means changing pointwiseKernelSignature() with it.
+        preparedPointwise.kernelForStream(handle.getStream())
+            .launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
     }
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
+
+} // namespace
+
+compilation::KpackModuleCache& pointwiseKpackModuleCache()
+{
+    // Process-lifetime, and exposed rather than hidden inside the loader so a test can
+    // observe that two dispatches over the same (archive, toc_key, arch) loaded one
+    // module -- which is otherwise unobservable.
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetPointwiseModuleCache()
+{
+    pointwiseKpackModuleCache().clear();
+}
+
+namespace
+{
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const compilation::KpackKernelLoader s_kpackLoader(pointwiseKpackModuleCache());
+    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     add_subdirectory(llvm)
 else()
     add_subdirectory(msgpack)
@@ -11,7 +11,6 @@ add_subdirectory(hip)
 
 target_sources(tensilelite-host
     PRIVATE
-        #"${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUnitTypes.cpp" # this file isn't built in existing src tree
         "${CMAKE_CURRENT_SOURCE_DIR}/Activation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AMDGPU.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblem.cpp"
