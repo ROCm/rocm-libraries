@@ -15,29 +15,15 @@
 
 // TODO(libhipcxx): remove this file and replace ::internal* with _THRUST_STD* in rocThrust
 // once libhipcxx gets ready
-
-#include <thrust/detail/config/libcxx.h>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(detail/libcxx/include/stdexcept)
-#else
-#  include <thrust/detail/libcxx_wrapper/std/__cccl/attributes.h>
-#  include <thrust/detail/libcxx_wrapper/std/__cccl/exceptions.h>
-#  include <thrust/detail/libcxx_wrapper/std/__cccl/execution_space.h>
-#  include <thrust/detail/libcxx_wrapper/std/__exception/terminate.h>
-
-#  ifndef THRUST_NO_EXCEPTIONS
-#    include <stdexcept>
-#  endif // THRUST_NO_EXCEPTIONS
-#endif
+#include <thrust/detail/libcxx_wrapper/std/__cccl/exceptions.h>
+#include <thrust/detail/libcxx_wrapper/std/__cccl/execution_space.h>
+#include <thrust/detail/libcxx_wrapper/std/__exception/terminate.h>
+#ifndef THRUST_NO_EXCEPTIONS
+  #include <stdexcept>
+#endif // THRUST_NO_EXCEPTIONS
 
 namespace internal
 {
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-
-using _THRUST_STD::__throw_runtime_error;
-
-#else
 
 THRUST_NORETURN inline THRUST_HOST_DEVICE void __throw_runtime_error(const char* msg)
 {
@@ -48,8 +34,6 @@ THRUST_NORETURN inline THRUST_HOST_DEVICE void __throw_runtime_error(const char*
   terminate();
 #  endif // THRUST_NO_EXCEPTIONS
 }
-
-#endif
 
 } // namespace internal
 
