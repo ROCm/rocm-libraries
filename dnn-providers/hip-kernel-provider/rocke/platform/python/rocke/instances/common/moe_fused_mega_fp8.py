@@ -1555,39 +1555,6 @@ def f32_view_load(b: IRBuilder, view, row: Value, col: Value) -> Value:
 # Spec validation
 # ---------------------------------------------------------------------------
 
-# L6: the unscaled fp8 16x16x128 hero atom is NOT a catalog shape on ANY target
-# -- the wide-K f8 MFMA is only reachable through
-# ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (see
-# :meth:`MfmaAtom.fp8_16x16x128`), which the JSON MMA catalog does not model, so
-# ``validate_mfma_atom_in_catalog`` would raise a spurious NotImplementedError
-# even on the target that HAS the instruction. That is why the catalog guard is
-# skipped for ``atom.k == 128``. Skipping it outright, though, also stopped
-# rejecting the targets that genuinely lack the instruction, which then reached
-# comgr as an uncatchable LLVM abort. This is the arch fact the catalog is
-# missing: the scaled f8f6f4 family ships on the gfx950 target family.
-_SCALED_F8F6F4_TARGET_FAMILY = "gfx950"
-
-
-def _validate_fp8_atom(atom: MfmaAtom, target, arch: str) -> None:
-    """Reject an fp8 MFMA atom the target cannot issue.
-
-    ``atom.k == 128`` selects the scaled-f8f6f4 hero atom, gated on the target
-    family that owns the instruction (see
-    :data:`_SCALED_F8F6F4_TARGET_FAMILY`); every other fp8 atom IS a catalog
-    shape and goes through the shared per-arch catalog guard.
-    """
-    if atom.k != 128:
-        validate_mfma_atom_in_catalog(atom, arch, where="moe_fused_mega_fp8")
-        return
-    if target.target_family != _SCALED_F8F6F4_TARGET_FAMILY:
-        raise NotImplementedError(
-            f"moe_fused_mega_fp8 MFMA atom {atom.name!r} "
-            f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) lowers to the scaled "
-            f"f8f6f4 instruction, which {arch} does not have; this "
-            f"configuration requires a different target (or gate_up_k / "
-            f"down_k = 32 for the catalog 16x16x32 atom)."
-        )
-
 
 def _lds_allocs(spec: FusedMegaKernelSpecFp8) -> Tuple[LdsAlloc, ...]:
     """Every LDS buffer :func:`build_moe_fused_mega_gemm_fp8` allocates, in order.
@@ -1670,12 +1637,11 @@ def build_moe_fused_mega_gemm_fp8(
             f"{spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
     atom = spec.gate_up_atom()
-    # The hero atom reuses the ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with
-    # both E8M0 scales at literal 0 (unscaled instruction; verified
-    # numerically standalone). Both the gate/up and the down atom are selectable
-    # (``gate_up_k`` / ``down_k``), so both are checked.
-    _validate_fp8_atom(atom, target, arch)
-    _validate_fp8_atom(spec.down_atom(), target, arch)
+    # Both the gate/up and the down atom are selectable (``gate_up_k`` /
+    # ``down_k``), so both are checked against the target's MMA catalog, which
+    # lists the K=128 hero atom where the target has it.
+    validate_mfma_atom_in_catalog(atom, arch, where="moe_fused_mega_fp8")
+    validate_mfma_atom_in_catalog(spec.down_atom(), arch, where="moe_fused_mega_fp8")
     # Whole-kernel LDS: the persistent Hidden bridge, its scales, the f32 amax
     # scratch and the DTLA landing zone all coexist, and nothing else validates
     # their total against the per-WG budget.

@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The f32, i8 and f64 MFMAs on gfx90a hardware.
+"""The f32, i8, f64 and bf16 (without the ``_1k`` suffix) MFMAs on gfx90a hardware.
 
 Each case runs one MFMA on one wave and compares the result with numpy. The
 host places a random A (M x K) and B (K x N) into each lane's registers through
@@ -35,10 +35,19 @@ _OPS = (
     "mfma_i32_16x16x16_i8",
     "mfma_i32_32x32x8_i8",
     "mfma_f64_16x16x4_f64",
+    "mfma_f32_16x16x8_bf16",
+    "mfma_f32_32x32x4_bf16",
 )
 
-# Catalog dtype -> the host array that holds its values.
-_HOST = {"fp32": np.float32, "fp64": np.float64, "i8": np.int8, "i32": np.int32}
+# Catalog dtype -> the host array that holds its values (bf16 values are built
+# as f32 and keep the high half).
+_HOST = {
+    "fp32": np.float32,
+    "fp64": np.float64,
+    "bf16": np.float32,
+    "i8": np.int8,
+    "i32": np.int32,
+}
 
 
 def _operand(b: IRBuilder, name: str, register):
@@ -76,6 +85,10 @@ def _registers(layout, matrix: np.ndarray, dtype: str) -> np.ndarray:
         [matrix[coord] for coord in lane_placements(layout, _WAVE)],
         dtype=_HOST[dtype],
     )
+    if dtype == "bf16":
+        # A bf16 value is the high half of the f32 with the same value; the
+        # small integers used here are exact in both.
+        lanes = (lanes.view(np.uint32) >> 16).astype(np.uint16)
     return np.ascontiguousarray(lanes).view(np.int32)
 
 

@@ -26,7 +26,12 @@ from types import MappingProxyType
 
 from ..arch.mfma_scale import INTRINSIC_KEY as SCALED_MFMA_INTRINSIC_KEY
 from ..arch.mfma_scale import MATRIX_FORMATS
-from ..arch.target import integer_mma_op_ids, narrow_f8f6f4_op_ids
+from ..arch.target import (
+    GFX950_FP8_16X16X128_OP_ID,
+    gfx950_eight_bit_f8f6f4_op_ids,
+    integer_mma_op_ids,
+    narrow_f8f6f4_op_ids,
+)
 from ..dtypes import DTypeCategory, dtype_info, dtype_names
 from ..ir import (
     BF16,
@@ -594,6 +599,18 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
             VectorType(BF16, 8),
             _GFX1250_WMMA_ARGS,
         ),
+        # gfx1250 fp8 / bf8 -> f32 at K 128: 64 8-bit values of A and of B per
+        # lane in sixteen words, eight results.
+        **{
+            f"wmma_gfx1250_f32_16x16x128_{a}_{b}": _wmma(
+                f"wmma.f32.16x16x128.{a}.{b}.v8f32.v16i32",
+                _I32_X16,
+                _F32_X8,
+                _GFX1250_FP8_WMMA_ARGS,
+            )
+            for a in ("fp8", "bf8")
+            for b in ("fp8", "bf8")
+        },
         # gfx1250 fp8 / bf8 -> f16: 32 8-bit values of A and of B per lane in
         # eight words (K 64), 64 in sixteen words (K 128); eight f16 results.
         **{
@@ -637,6 +654,14 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
             for op_id, (a, b) in narrow_f8f6f4_op_ids(
                 f"mfma_f32_{m}x{n}x{k}_f8f6f4"
             ).items()
+        },
+        # The same instructions for each 8-bit x 8-bit format pair, except fp8
+        # x fp8 at 16x16x128, which its hand-written handler lowers.
+        **{
+            op_id: _gfx950_f8f6f4_mfma(shape, a, b)
+            for shape in _GFX950_F8F6F4_MFMA
+            for op_id, (a, b) in gfx950_eight_bit_f8f6f4_op_ids(shape).items()
+            if op_id != GFX950_FP8_16X16X128_OP_ID
         },
     }
 )

@@ -4,11 +4,14 @@
  * tests/core/gfx1250_wmma_ops.cpp -- the C++ engine's gfx1250 catalog rows for
  * the WMMA instructions with a 16-bit or integer result (f16 -> f16 and
  * bf16 -> bf16 at K 32, fp8 / bf8 -> f16 at K 64 and K 128, i8 -> i32 at K 64
- * in every operand signedness) and the lane maps of f32 -> f32 at K 4.
+ * in every operand signedness), fp8 / bf8 -> f32 at K 128, and the lane maps of
+ * f32 -> f32 at K 4.
  *
  * For each new instruction: the catalog row (dtypes, shape, fragment lengths
  * in logical values per lane), the tile.mma result rocke_b_mma builds from the
- * bare op_id (<8 x c>), and that it has no lane maps yet. For f32 16x16x4: the
+ * bare op_id (<8 x c>), and that it has no A or B lane maps yet; the fp8 / bf8
+ * -> f32 K 128 rows keep the result map of their K 64 forms and are what
+ * selection picks, the others have no result map. For f32 16x16x4: the
  * A and B maps, evaluated on every (lane, slot) of a wave, are CK's -- lane l
  * holds row l % 16 of A (column l % 16 of B) and K 2 * (l / 16) + slot -- and
  * the result map is the gfx12 accumulator's. Mirrors
@@ -45,17 +48,46 @@ struct Case
     const char* c;
     int k;
     int k_per_lane; /* values of A and of B per lane */
+    const char* k64_op_id; /* the K 64 form whose result map it keeps, or NULL */
 };
 
 static std::vector<Case> cases()
 {
     std::vector<Case> out = {
-        {"wmma_gfx1250_f16_16x16x32_f16", "fp16", "fp16", "fp16", 32, 16},
-        {"wmma_gfx1250_bf16_16x16x32_bf16", "bf16", "bf16", "bf16", 32, 16},
-        {"wmma_gfx1250_i32_16x16x64_iu8", "i8", "i8", "i32", 64, 32},
-        {"wmma_gfx1250_i32_16x16x64_iu8_u8_i8", "u8", "i8", "i32", 64, 32},
-        {"wmma_gfx1250_i32_16x16x64_iu8_i8_u8", "i8", "u8", "i32", 64, 32},
-        {"wmma_gfx1250_i32_16x16x64_iu8_u8_u8", "u8", "u8", "i32", 64, 32},
+        {"wmma_gfx1250_f16_16x16x32_f16", "fp16", "fp16", "fp16", 32, 16, NULL},
+        {"wmma_gfx1250_bf16_16x16x32_bf16", "bf16", "bf16", "bf16", 32, 16, NULL},
+        {"wmma_gfx1250_i32_16x16x64_iu8", "i8", "i8", "i32", 64, 32, NULL},
+        {"wmma_gfx1250_i32_16x16x64_iu8_u8_i8", "u8", "i8", "i32", 64, 32, NULL},
+        {"wmma_gfx1250_i32_16x16x64_iu8_i8_u8", "i8", "u8", "i32", 64, 32, NULL},
+        {"wmma_gfx1250_i32_16x16x64_iu8_u8_u8", "u8", "u8", "i32", 64, 32, NULL},
+        {"wmma_gfx1250_f32_16x16x128_fp8_fp8",
+         "fp8e4m3",
+         "fp8e4m3",
+         "fp32",
+         128,
+         64,
+         "wmma_gfx1250_f32_16x16x64_fp8_fp8"},
+        {"wmma_gfx1250_f32_16x16x128_fp8_bf8",
+         "fp8e4m3",
+         "bf8e5m2",
+         "fp32",
+         128,
+         64,
+         "wmma_gfx1250_f32_16x16x64_fp8_bf8"},
+        {"wmma_gfx1250_f32_16x16x128_bf8_fp8",
+         "bf8e5m2",
+         "fp8e4m3",
+         "fp32",
+         128,
+         64,
+         "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
+        {"wmma_gfx1250_f32_16x16x128_bf8_bf8",
+         "bf8e5m2",
+         "bf8e5m2",
+         "fp32",
+         128,
+         64,
+         "wmma_gfx1250_f32_16x16x64_bf8_bf8"},
     };
     const char* const names[] = {"fp8", "bf8"};
     const char* const dtypes[] = {"fp8e4m3", "bf8e5m2"};
@@ -68,7 +100,8 @@ static std::vector<Case> cases()
                                dtypes[b],
                                "fp16",
                                k,
-                               k / 2});
+                               k / 2,
+                               NULL});
     return out;
 }
 
@@ -141,7 +174,17 @@ static void check_case(const rocke_arch_target_t* arch, const Case& t)
     CHECK(op->a_frag_len == t.k_per_lane && op->b_frag_len == t.k_per_lane && op->c_frag_len == 8
               && op->wave_size == 32,
           id);
-    CHECK(op->a_layout == NULL && op->b_layout == NULL && op->c_layout == NULL, id);
+    CHECK(op->a_layout == NULL && op->b_layout == NULL, id);
+    if(t.k64_op_id)
+    {
+        const rocke_mma_op_t* k64 = rocke_mma_catalog_by_op_id(&arch->mma, t.k64_op_id);
+        CHECK(k64 != NULL && op->c_layout != NULL && op->c_layout == k64->c_layout, id);
+        CHECK(rocke_mma_catalog_select_largest_k(&arch->mma, "wmma", t.a, t.b, t.c, 16, 16, -1)
+                  == op,
+              id);
+    }
+    else
+        CHECK(op->c_layout == NULL, id);
 
     /* rocke_b_mma sizes the result from the bare op_id: <8 x c>. */
     rocke_ir_builder_t b;
