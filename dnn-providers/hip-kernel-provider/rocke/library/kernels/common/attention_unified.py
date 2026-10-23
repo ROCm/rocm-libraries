@@ -3046,15 +3046,35 @@ def _spec_kv_addr_limit(
     return min(limits, key=lambda limit: limit.nbytes, default=None)
 
 
+def _3d_spec_kv_addr_limit(
+    problem: UnifiedAttentionProblem, spec, arch: str
+) -> _KvAddrLimit | None:
+    """Largest paged K cache, in bytes, the 3D segment kernel built from ``spec``
+    reads. gfx942 has no i64 path, so its K/V loader sets the limit."""
+    if arch == "gfx942":
+        from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+        return _KvAddrLimit(
+            i32_kv_cache_bytes(
+                kv_fp8=spec.kv_storage_dtype is not None,
+                use_wide_kv_load=spec.use_wide_kv_load,
+                tile_size=spec.tile_size,
+                head_size=spec.head_size,
+            ),
+            _KV_LIMIT_NO_I64_PATH,
+        )
+    return _spec_kv_addr_limit(problem, spec)
+
+
 def _kv_addr_fix(
     problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
 ) -> str:
     """What a caller can do about a cache past ``kv_addr_limit``."""
     if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
         return (
-            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
-            "gfx1250 kernels index at most 2^31 elements), so fixing "
-            "num_kv_blocks will not help. Use a smaller cache."
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA, "
+            "gfx942 tiled 3D and gfx1250 kernels), so fixing num_kv_blocks "
+            "will not help. Use a smaller cache."
         )
     if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
         return (
@@ -4187,9 +4207,9 @@ def _attn_values(
     _require_additive_bias(problem, additive_bias)
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
-    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
-    # covered: the 3D path and the gfx1250 tiled_2d_verify harness, which pack
-    # their own.
+    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). The 3D
+    # path checks in ``_run_3d_tiled_on_stream``; the gfx1250 tiled_2d_verify
+    # harness packs its own and is not covered.
     _check_kv_addr_width(problem, k, kv_addr_limit)
     vals = {
         "output_ptr": out,
@@ -4412,6 +4432,19 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
+    # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
+    if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
+        if cache_key not in _3D_KV_ADDR_LIMITS:
+            segment_spec = (
+                tuning_spec.kernel_spec
+                if tuning_spec is not None
+                else _tiled_3d_spec_from_problem(problem, _launch_arch)
+            )
+            _3D_KV_ADDR_LIMITS[cache_key] = _3d_spec_kv_addr_limit(
+                problem, segment_spec, _launch_arch
+            )
+        _check_kv_addr_width(problem, k, _3D_KV_ADDR_LIMITS[cache_key])
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
@@ -4793,6 +4826,8 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 # Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
 # function of the cache key, so it is built once per kernel, not per total_q.
 _2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
+# The same for the 3D segment kernel, from ``_3d_spec_kv_addr_limit``.
+_3D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}

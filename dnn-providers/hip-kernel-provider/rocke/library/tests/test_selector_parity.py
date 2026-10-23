@@ -24,7 +24,6 @@ written for the CORRECT behavior (bias should block combo_2d) and are being skip
 
 from __future__ import annotations
 
-import os
 import unittest
 from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
@@ -501,7 +500,7 @@ class TestI64KvAddr(unittest.TestCase):
 _AT_2GIB = 131072
 
 
-def _gfx942_decode_prob(num_kv_blocks: int, **kw) -> UnifiedAttentionProblem:
+def _decode_prob(num_kv_blocks: int, **kw) -> UnifiedAttentionProblem:
     fields = dict(
         total_q=64,
         num_seqs=64,
@@ -518,16 +517,39 @@ def _gfx942_decode_prob(num_kv_blocks: int, **kw) -> UnifiedAttentionProblem:
     return UnifiedAttentionProblem(**fields)
 
 
+class _ReachedPipeline(Exception):
+    pass
+
+
+def _launch_3d(problem: UnifiedAttentionProblem, num_blocks: int, arch: str) -> None:
+    """Run the 3D launch on a shape-only cache of ``num_blocks`` up to the
+    pipeline build, which raises ``_ReachedPipeline``."""
+    with _patch_arch(arch), mock.patch.dict(
+        _au._3D_KV_ADDR_LIMITS, clear=True
+    ), mock.patch.object(_au, "_get_3d_pipeline", side_effect=_ReachedPipeline):
+        _au._run_3d_tiled_on_stream(
+            problem=problem,
+            q=None,
+            k=_kv_cache(num_blocks, problem),
+            v=None,
+            out=None,
+            cu_seqlens_q=None,
+            seqused_k=None,
+            softmax_scale=1.0,
+            block_table=None,
+            softcap=0.0,
+            sinks=None,
+            bt_stride=0,
+            warmup=0,
+            attempts=1,
+            use_graph=False,
+        )
+
+
 class TestGfx942Tiled3DKvAddr(unittest.TestCase):
     """The gfx942 tiled 3D kernel has no i64 path; its K/V loader sets the cache
     it reads. The flat loaders read to 2^31 bytes, the async copies to the
     0x7FFF0000 buffer range."""
-
-    def setUp(self):
-        env = mock.patch.dict(os.environ)
-        env.start()
-        self.addCleanup(env.stop)
-        os.environ.pop("HIPDNN_GFX942_3D_WKV", None)
 
     def test_loader_limits(self):
         limit = _gfx942_3d.i32_kv_cache_bytes
@@ -545,36 +567,73 @@ class TestGfx942Tiled3DKvAddr(unittest.TestCase):
 
     def test_exactly_2gib_decode_builds_on_wide_loader(self):
         for hq in (64, 32):
-            p = _gfx942_decode_prob(_AT_2GIB, num_query_heads=hq)
+            p = _decode_prob(_AT_2GIB, num_query_heads=hq)
             with self.subTest(num_query_heads=hq), _patch_arch("gfx942"):
                 spec = _asb._tiled_3d_spec_from_problem(p, "gfx942")
                 self.assertTrue(spec.use_wide_kv_load)
                 self.assertFalse(spec.use_i64_kv_addr)
 
     def test_past_2gib_wide_loader_refused(self):
-        p = _gfx942_decode_prob(_AT_2GIB + 1)
+        p = _decode_prob(_AT_2GIB + 1)
         with _patch_arch("gfx942"), self.assertRaises(NotImplementedError):
             _asb._tiled_3d_spec_from_problem(p, "gfx942")
 
-    def test_exactly_2gib_async_loader_refused(self):
-        os.environ["HIPDNN_GFX942_3D_WKV"] = "0"
-        p = _gfx942_decode_prob(_AT_2GIB)
-        with _patch_arch("gfx942"), self.assertRaises(NotImplementedError):
-            _asb._tiled_3d_spec_from_problem(p, "gfx942")
+    def test_async_loader_bounded_by_buffer_range(self):
+        # Head size 256 takes the async copies. Its 32 KiB blocks fill the
+        # buffer range at 65534 and reach 2^31 bytes at 65536.
+        with _patch_arch("gfx942"):
+            spec = _asb._tiled_3d_spec_from_problem(
+                _decode_prob(65534, head_size=256), "gfx942"
+            )
+            self.assertFalse(spec.use_wide_kv_load)
+            self.assertFalse(spec.use_i64_kv_addr)
+            for n in (65535, 65536):
+                with self.subTest(num_kv_blocks=n), self.assertRaises(
+                    NotImplementedError
+                ):
+                    _asb._tiled_3d_spec_from_problem(
+                        _decode_prob(n, head_size=256), "gfx942"
+                    )
 
     def test_3d_key_follows_loader_limit(self):
         # No i64 binary exists, so caches the loader reads share one key, and a
         # cache past it gets its own key and reaches the spec's refusal.
-        small = _gfx942_decode_prob(_AT_I32_LIMIT)
-        at_2gib = _gfx942_decode_prob(_AT_2GIB)
-        over = _gfx942_decode_prob(_AT_2GIB + 1)
+        small = _decode_prob(_AT_I32_LIMIT)
+        at_2gib = _decode_prob(_AT_2GIB)
+        over = _decode_prob(_AT_2GIB + 1)
         with _patch_arch("gfx942"):
             key = _au._tiled_3d_cache_key(small, "gfx942")
             self.assertEqual(key, _au._tiled_3d_cache_key(at_2gib, "gfx942"))
             self.assertNotEqual(key, _au._tiled_3d_cache_key(over, "gfx942"))
 
+    def test_3d_launch_checks_the_real_cache(self):
+        # A stale num_kv_blocks builds the spec for a small cache, so the launch
+        # checks the real cache against what the K/V loader reads.
+        wide = _decode_prob(1024)
+        with self.assertRaises(_ReachedPipeline):
+            _launch_3d(wide, _AT_2GIB, "gfx942")
+        with self.assertRaisesRegex(ValueError, "fixing num_kv_blocks will not help"):
+            _launch_3d(wide, _AT_2GIB + 1, "gfx942")
+        not_wide = _decode_prob(1024, head_size=256)
+        with self.assertRaises(_ReachedPipeline):
+            _launch_3d(not_wide, 65534, "gfx942")
+        with self.assertRaisesRegex(ValueError, "fixing num_kv_blocks will not help"):
+            _launch_3d(not_wide, 65535, "gfx942")
+
+    def test_gfx950_3d_launch_checks_the_real_cache(self):
+        # 131068 of these 16 KiB blocks fill the i32 buffer range. A stale count
+        # builds an i32 spec, which the launch refuses past that; the real count
+        # builds an i64 spec, which reads the whole cache.
+        stale = _decode_prob(1024)
+        with self.assertRaises(_ReachedPipeline):
+            _launch_3d(stale, 131068, "gfx950")
+        with self.assertRaisesRegex(ValueError, "below the cache's block count"):
+            _launch_3d(stale, 131069, "gfx950")
+        with self.assertRaises(_ReachedPipeline):
+            _launch_3d(_decode_prob(131069), 131069, "gfx950")
+
     def test_explicit_3d_spec_and_bind_follow_loader_limit(self):
-        p = _gfx942_decode_prob(_AT_2GIB)
+        p = _decode_prob(_AT_2GIB)
         config = ExplicitAttention3DConfig(
             num_segments=0, knobs=(("use_wide_kv_load", True),)
         )

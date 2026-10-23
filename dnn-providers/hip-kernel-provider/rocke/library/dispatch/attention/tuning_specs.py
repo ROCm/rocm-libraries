@@ -14,6 +14,7 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _kv_block_bytes,
     _kv_cache_policy_3d,
     _num_segments,
     _tiled_2d_impl,
@@ -131,23 +132,13 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
     return fields
 
 
-def _kv_block_stride(problem: UnifiedAttentionProblem) -> int:
-    elem_bytes = 1 if problem.use_fp8 else 2
-    return (
-        int(problem.block_size)
-        * int(problem.num_kv_heads)
-        * int(problem.head_size)
-        * elem_bytes
-    )
-
-
 def _semantic_fields(
     problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
 ) -> dict:
     kv_storage_dtype = "fp8e4m3" if problem.use_fp8 else None
     elem_bytes = 1 if problem.use_fp8 else 2
     use_i64 = kv_addr_width_for_builder(
-        builder_kind, int(problem.num_kv_blocks), _kv_block_stride(problem), elem_bytes
+        builder_kind, int(problem.num_kv_blocks), _kv_block_bytes(problem), elem_bytes
     )
     return {
         "head_size": int(problem.head_size),
@@ -321,7 +312,7 @@ def make_explicit_attention_3d_specs(
     if arch == "gfx942":
         semantic["use_i64_kv_addr"] = gfx942_3d_kv_needs_i64_addr(
             int(problem.num_kv_blocks),
-            _kv_block_stride(problem),
+            _kv_block_bytes(problem),
             kv_fp8=semantic["kv_storage_dtype"] is not None,
             use_wide_kv_load=bool(knobs.get("use_wide_kv_load", False)),
             tile_size=int(tile),
