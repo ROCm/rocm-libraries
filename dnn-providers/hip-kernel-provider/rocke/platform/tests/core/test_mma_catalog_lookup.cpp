@@ -330,8 +330,9 @@ static int test_scale_contracts()
         }
     }
     // Ordered identity fingerprint from the independently filtered 72c28a69 catalog,
-    // plus the bf16-result row and the 16-bit-output, fp8-to-f16 and i8 rows.
-    // Also exercises all generated static ID pointers after repeated queries.
+    // plus the bf16-result row, the 16-bit-output, fp8-to-f16 and i8 rows, and
+    // the f8f6f4 and f4 32x16x128 rows. Also exercises all generated static ID
+    // pointers after repeated queries.
     uint64_t fingerprint = UINT64_C(14695981039346656037);
     for(int i = 0; i < arch->mma.num_ops; ++i)
     {
@@ -342,8 +343,8 @@ static int test_scale_contracts()
             fingerprint *= UINT64_C(1099511628211);
         } while(*text++);
     }
-    CHECK(arch->mma.num_ops == 108);
-    CHECK(fingerprint == UINT64_C(10203731204529937841));
+    CHECK(arch->mma.num_ops == 130);
+    CHECK(fingerprint == UINT64_C(1804322249094935693));
     CHECK(packed_rows == 4 && scaled_rows == 86);
     return 0;
 }

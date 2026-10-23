@@ -20,8 +20,9 @@ module docstring.
 
 ``assert_target_accepts`` turns ``"cannot_judge"`` into a named pytest skip, so a
 host whose toolchain predates a target reports the gap instead of passing.
-``target_mnemonics`` compiles the same way and returns the instruction mnemonics
-of the code object, for a test that pins the instruction LLVM selected.
+``target_instructions`` compiles the same way and returns the code object's
+disassembled instruction lines, and ``target_mnemonics`` their mnemonics, for a
+test that pins the instruction LLVM selected and its operands.
 """
 
 from __future__ import annotations
@@ -40,7 +41,13 @@ from rocke.assets import platform_root
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
-__all__ = ["Verdict", "arbiter_verdict", "assert_target_accepts", "target_mnemonics"]
+__all__ = [
+    "Verdict",
+    "arbiter_verdict",
+    "assert_target_accepts",
+    "target_instructions",
+    "target_mnemonics",
+]
 
 
 def _validity_tool() -> ModuleType | None:
@@ -108,6 +115,15 @@ def _require_accepted(verdict: Verdict, text: str, target: str) -> None:
 def target_mnemonics(ir_text: str, target: str) -> list[str]:
     """The instruction mnemonics of ``ir_text`` compiled and linked for ``target``.
 
+    Fails and skips as :func:`target_instructions` does.
+    """
+    return [_extract_mnemonic(line) for line in target_instructions(ir_text, target)]
+
+
+def target_instructions(ir_text: str, target: str) -> list[str]:
+    """The disassembled instruction lines of ``ir_text`` compiled and linked for
+    ``target``, each with its operands and modifiers.
+
     Fails when LLVM rejects the module, like :func:`assert_target_accepts`;
     skips, naming the reason, when no verdict is possible or no
     ``llvm-objdump`` is found next to the host clang.
@@ -123,4 +139,4 @@ def target_mnemonics(ir_text: str, target: str) -> list[str]:
             text=True,
             check=True,
         ).stdout
-    return [_extract_mnemonic(line) for line in _instruction_lines(listing)]
+    return list(_instruction_lines(listing))

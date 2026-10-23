@@ -517,12 +517,12 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` | f32, f16, bf16, fp8, bf8, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, i8, u8 (+ fp8 block-scaled) |
+| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
-  and twenty-four matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1
+  and forty-six matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1
   lists the omitted block-scaled formats.
 - `wmma_gfx1250_bf16f32_16x16x32_bf16` accumulates bf16 x bf16 in fp32 and
   returns bf16: its row records the result dtype as `dst` (`bf16`) beside the
@@ -533,6 +533,15 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   and K 128) and `iu8` WMMA atoms are declared; they have no lane maps yet, and
   no family uses them. The `iu8` call is the LLVM 23 form: LLVM 22 declares the
   instruction without its clamp argument and rejects it.
+- The gfx1250 dense f8f6f4 atoms (`wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>`,
+  one per (A, B) format pair with a 6-bit or 4-bit operand, `<a>` and `<b>` the
+  canonical dtype names) and `wmma_gfx1250_f32_32x16x128_f4` are declared. Each
+  f8f6f4 operand holds 64 values per lane in the f8f6f4 operand layout of its
+  own format (`matrix_operand_layout`: K runs of 16 for fp8 / bf8 and 32 for
+  fp6 / bf6 / fp4, the same runs the scaled atoms use); an fp8 / bf8 operand is
+  passed as its logical values and a narrower one as its packed words, which
+  the call zero-pads to sixteen words. The f4 atom has no lane maps yet. No
+  family uses them yet.
 - `wmma_gfx1250_f32_16x16x4_f32` lowers; its A and B lane maps follow CK's
   parameters (lane `l` holds row `l % 16` of A, column `l % 16` of B, and K
   `2 * (l // 16) + slot`) and are not validated on hardware.
@@ -563,6 +572,8 @@ The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
 `V_WMMA_F32_32X16X128_F4`, and block-size-16 scaling. The catalog declares only the
 **fp8×fp8** `SCALE`/`SCALE16` slice; the entry's own comment records that
 "FP4/FP6/BF6 block-scaled forms remain intentionally omitted."
+The dense `F8F6F4` form for every format pair with a 6-bit or 4-bit operand
+and the dense `F4` form are declared (section 4B).
 
 #### 4C.2 gfx1201 -- fp8/bf8 WMMA (closed)
 RDNA4 provides `V_WMMA_F32_16X16X16_{FP8,BF8}_{FP8,BF8}` and the matching SWMMAC
