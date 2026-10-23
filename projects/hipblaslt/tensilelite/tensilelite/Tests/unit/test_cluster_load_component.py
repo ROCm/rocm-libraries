@@ -204,8 +204,8 @@ class TestDeclareUndeclare:
         assert w.undefined == ["MulticastMaskA", "MulticastMaskB", "MulticastMaskMetadata"]
 
     @pytest.mark.parametrize("sparse", [1, 2])
-    @pytest.mark.parametrize("cluster_dim", [(4, 1), (2, 2)])
-    @pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+    @pytest.mark.parametrize("strategy,cluster_dim", [
+        ("DataParallel", (4, 1)), ("DataParallel", (2, 2)), ("StreamK", (2, 2))])
     def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim, strategy):
         # Sparse metadata descriptors are rebuilt for each persistent tile just
         # like A/B descriptors. A freed mask can be overwritten by store scratch

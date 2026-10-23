@@ -153,6 +153,7 @@ class TestValidation:
             assert streamKCluster(state)
             assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
             assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+            assert state["InternalSupportParams"]["SupportStreamKClusterParallel"] is True
             assert state["Multicast"] is multicast
             assert state["ClusterBarrier"] is multicast
 

@@ -239,8 +239,8 @@ def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
     assert state["StreamKAtomic"] == 1
 
 
-@pytest.mark.parametrize("declared,regenerate,expected", [(0, False, 0), (2, False, 2), (0, True, 2)])
-def test_streamk_cluster_serializes_only_the_internal_payload_capability(declared, regenerate, expected):
+@pytest.mark.parametrize("declared,regenerate,expected,parallel", [(0, False, 0, None), (2, False, 2, False), (0, True, 2, True)])
+def test_streamk_cluster_serializes_only_the_internal_payload_capability(declared, regenerate, expected, parallel):
     from tensilelite.Common import state as serialized_state
     from tensilelite.Common.GlobalParameters import defaultInternalSupportParams
     from tensilelite.Contractions import InternalArgsSupport
@@ -249,6 +249,9 @@ def test_streamk_cluster_serializes_only_the_internal_payload_capability(declare
     source = minimal_size_mapping_state()
     source.update(ClusterDim=[2, 1], InternalSupportParams=dict(defaultInternalSupportParams))
     source["InternalSupportParams"].update(KernArgsVersion=3, PersistentLoopArgsVersion=declared)
+    source["InternalSupportParams"].pop("SupportStreamKClusterParallel", None)
+    if parallel is not None:
+        source["InternalSupportParams"]["SupportStreamKClusterParallel"] = parallel
     if not regenerate:
         source["StreamKClusterMulticast"] = True
     normalized = normalize_execution_policy(source, regenerate=regenerate)
@@ -258,6 +261,7 @@ def test_streamk_cluster_serializes_only_the_internal_payload_capability(declare
     assert mapping["workAssignment"] == "StaticGrid"
     assert "streamKClusterMulticast" not in mapping
     assert support["persistentLoopArgsVersion"] == expected
+    assert support["streamKClusterParallel"] is (parallel is True)
 
 
 @pytest.mark.parametrize("strategy,use_beta,initial_strides", [

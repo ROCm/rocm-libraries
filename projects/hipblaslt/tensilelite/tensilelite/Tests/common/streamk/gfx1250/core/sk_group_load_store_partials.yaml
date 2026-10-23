@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 # MAF partial-store regression: multiple vectors share a scalar workspace offset.
-# This shape selects split-K with the default scheduler. FP32 output exposes lost
+# This shape selects split-K with the fixed-grid schedule below. FP32 output exposes lost
 # contributions that FP8 saturation hid; 257 samples keep the long-K check small.
 TestParameters:
+  streamk_schedules: [{grid: 48, reduction: tree}]
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940,
           skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011,
           skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102,
