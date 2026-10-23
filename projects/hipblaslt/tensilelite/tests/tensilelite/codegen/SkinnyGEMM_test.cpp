@@ -9,9 +9,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -84,22 +87,6 @@ std::string rejectionMessage(const SkinnyGEMMConfig &config) {
   }
   ADD_FAILURE() << "expected std::invalid_argument";
   return {};
-}
-
-// The features of later milestones are rejected with a message naming the knob.
-TEST(SkinnyGEMM, RejectsUnimplementedFeatures) {
-  SkinnyGEMMConfig persistent;
-  persistent.grid3d = false;
-  EXPECT_EQ(rejectionMessage(persistent),
-            "grid3d = false (persistent launch) is not implemented yet");
-
-  SkinnyGEMMConfig grouped;
-  grouped.group = 4;
-  EXPECT_EQ(rejectionMessage(grouped), "grid3d requires group = 1");
-
-  SkinnyGEMMConfig remapped;
-  remapped.numXcds = 8;
-  EXPECT_EQ(rejectionMessage(remapped), "grid3d requires numXcds = 1");
 }
 
 // A configuration that needs more registers than the target has is rejected.
@@ -860,6 +847,170 @@ TEST(SkinnyGEMM, VectorStoresOnlyWhenPreconditionHolds) {
             std::string::npos);
   EXPECT_NE(emitted(config(4, 2, 16, 1, 1)).find("buffer_store_dwordx4"),
             std::string::npos);
+}
+
+// The 1-D launch form of base, with the tile order knobs.
+SkinnyGEMMConfig persistentConfig(SkinnyGEMMConfig base, int group = 1,
+                                  int numXcds = 1) {
+  base.grid3d = false;
+  base.group = group;
+  base.numXcds = numXcds;
+  return base;
+}
+
+// The persistent kernel only enables the workgroup id x and reads only the
+// block count x of the hidden arguments, which is the number of blocks.
+TEST(SkinnyGEMM, PersistentLaunchAbi) {
+  std::string assembly = emitted(persistentConfig(config(1, 1, 16, 1, 1)));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  EXPECT_NE(assembly.find(".amdhsa_system_sgpr_workgroup_id_x 1"),
+            std::string::npos);
+  EXPECT_EQ(assembly.find("workgroup_id_y"), std::string::npos);
+  EXPECT_EQ(assembly.find("workgroup_id_z"), std::string::npos);
+  EXPECT_NE(assembly.find(".kernarg_segment_size: 104"), std::string::npos);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 88"), 1);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 92"), 0);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 96"), 0);
+}
+
+std::ptrdiff_t indexOfLineStartingWith(const std::vector<std::string> &lines,
+                                       std::string_view prefix,
+                                       std::ptrdiff_t from = 0) {
+  for (std::ptrdiff_t i = from; i < std::ssize(lines); ++i)
+    if (lines[i].rfind(prefix, 0) == 0)
+      return i;
+  return -1;
+}
+
+// The loop counter is the block id in s2: the guard skips the loop when the
+// block has no tile, the body is emitted once, and the back edge adds the block
+// count and tests again, right before the end of the program.
+TEST(SkinnyGEMM, PersistentTileLoopStructure) {
+  for (SkinnyGEMMConfig base :
+       {config(1, 1, 16, 1, 1), config(2, 2, 16, 1, 2, 1),
+        config(1, 1, 64, 4, 2, 2, 1)}) {
+    std::string assembly = emitted(persistentConfig(base, 4, 8));
+    SCOPED_TRACE("assembly:\n" + assembly);
+    std::vector<std::string> lines = allLines(assembly);
+    std::ptrdiff_t body = indexOfLineStartingWith(lines, "label_tile_loop_0:");
+    std::ptrdiff_t end =
+        indexOfLineStartingWith(lines, "label_tile_loop_end_1:");
+    ASSERT_GE(body, 2);
+    ASSERT_GT(end, body + 4);
+    EXPECT_EQ(lines[body - 2].rfind("s_cmp_lt_i32 s2, ", 0), 0u);
+    EXPECT_EQ(lines[body - 1], "s_cbranch_scc0 label_tile_loop_end_1");
+    EXPECT_EQ(lines[end - 3].rfind("s_add_u32 s2, s2, ", 0), 0u);
+    EXPECT_EQ(lines[end - 2].rfind("s_cmp_lt_i32 s2, ", 0), 0u);
+    EXPECT_EQ(lines[end - 1], "s_cbranch_scc1 label_tile_loop_0");
+    EXPECT_EQ(lines[end + 1], "s_endpgm");
+    EXPECT_EQ(countLinesContaining(assembly, "s_endpgm"), 1);
+  }
+}
+
+// Only the LDS-shared scales need the barrier, first in the body: the previous
+// tile's reads must be done before this tile writes. The barrier waits for the
+// loads and the LDS operations first (rocisa prints the two zero counts as
+// s_waitcnt 0).
+TEST(SkinnyGEMM, PersistentBarrierOnlyWhenShared) {
+  std::string shared = emitted(persistentConfig(config(1, 1, 64, 4, 2, 2)));
+  SCOPED_TRACE("assembly:\n" + shared);
+  std::vector<std::string> lines = allLines(shared);
+  std::ptrdiff_t body = indexOfLineStartingWith(lines, "label_tile_loop_0:");
+  ASSERT_GE(body, 0);
+  EXPECT_EQ(lines[body + 1], "s_waitcnt 0");
+  EXPECT_EQ(lines[body + 2], "s_barrier");
+  // The other barrier publishes the staged scales.
+  EXPECT_EQ(countLinesContaining(shared, "s_barrier"), 2);
+
+  EXPECT_EQ(
+      emitted(persistentConfig(config(1, 1, 16, 1, 2, 2))).find("s_barrier"),
+      std::string::npos);
+  EXPECT_EQ(emitted(persistentConfig(config(1, 1, 16, 1, 1))).find("s_barrier"),
+            std::string::npos);
+  // The 3-D launch has no tile loop and so no per-tile barrier.
+  EXPECT_EQ(
+      countLinesContaining(emitted(config(1, 1, 64, 4, 2, 2)), "s_barrier"), 1);
+}
+
+// The lines of the tile loop body before its first buffer load: the barrier,
+// the remap, the decode, the rotation and the bases.
+std::string tileDecode(const SkinnyGEMMConfig &config) {
+  return joined(
+      linesBetween(emitted(config), "label_tile_loop_0:", "buffer_load"));
+}
+
+// Every dynamic division is one v_rcp_iflag_f32. The plain order decodes kz and
+// ty (2), keys the rotation on the block id outside the loop and has no remap.
+// The grouped decode divides for kz, the band and tx; the reordered rotation
+// divides by NI unless it is absent with one up-front entry. A power of two X
+// remaps with shifts and a mask.
+TEST(SkinnyGEMM, PersistentDecodeAndRotationShape) {
+  SkinnyGEMMConfig ring = config(1, 1, 16, 1, 1);
+  SkinnyGEMMConfig upFront = config(1, 1, 16, 1, 2, 2);
+  SkinnyGEMMConfig oneEntry = config(1, 1, 16, 1, 2, 1);
+
+  std::string plain = tileDecode(persistentConfig(ring));
+  EXPECT_EQ(countLinesContaining(plain, "v_rcp_iflag_f32"), 2);
+  EXPECT_EQ(countLinesContaining(plain, ", 7, s2"), 0);
+  EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(upFront)),
+                                 "v_rcp_iflag_f32"),
+            2);
+
+  std::string grouped = tileDecode(persistentConfig(ring, 4, 8));
+  SCOPED_TRACE("body:\n" + grouped);
+  EXPECT_EQ(countLinesContaining(grouped, "v_rcp_iflag_f32"), 4);
+  EXPECT_EQ(countLinesContaining(grouped, ", s2, 3"), 1);
+  EXPECT_EQ(countLinesContaining(grouped, ", 7, s2"), 1);
+  EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(upFront, 4, 8)),
+                                 "v_rcp_iflag_f32"),
+            4);
+  EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(oneEntry, 4, 8)),
+                                 "v_rcp_iflag_f32"),
+            3);
+  // Only reordering by the XCDs: kz, ty and the slab rotation.
+  EXPECT_EQ(countLinesContaining(tileDecode(persistentConfig(ring, 1, 8)),
+                                 "v_rcp_iflag_f32"),
+            3);
+  // Only grouping: the same, without the remap.
+  std::string groupOnly = tileDecode(persistentConfig(ring, 4, 1));
+  EXPECT_EQ(countLinesContaining(groupOnly, "v_rcp_iflag_f32"), 4);
+  EXPECT_EQ(countLinesContaining(groupOnly, ", 7, s2"), 0);
+
+  // A divisor that is not a power of two uses the magic division, not a
+  // dynamic one.
+  std::string odd = tileDecode(persistentConfig(ring, 1, 3));
+  EXPECT_EQ(countLinesContaining(odd, "v_rcp_iflag_f32"), 3);
+  EXPECT_EQ(countLinesContaining(odd, "s_mul_hi_i32"), 1);
+}
+
+// The 3-D launch ignores GROUP and NUM_XCDS, as the reference does: the kernel
+// is the one of group = 1 and numXcds = 1 under another name.
+TEST(SkinnyGEMM, Grid3dIgnoresGroupAndXcds) {
+  for (SkinnyGEMMConfig base :
+       {config(1, 1, 16, 1, 1), config(2, 2, 16, 1, 2, 1, 2),
+        config(1, 1, 64, 4, 2, 2)}) {
+    SkinnyGEMMConfig reordered = base;
+    reordered.group = 4;
+    reordered.numXcds = 8;
+    std::string plain = emitted(base);
+    std::string ignored = emitted(reordered);
+    for (std::string *text : {&plain, &ignored}) {
+      const SkinnyGEMMConfig &owner = text == &plain ? base : reordered;
+      std::string name = skinnyGEMMKernelName(owner);
+      for (std::size_t at = text->find(name); at != std::string::npos;
+           at = text->find(name, at))
+        text->replace(at, name.size(), "gemm");
+    }
+    EXPECT_EQ(plain, ignored);
+  }
+}
+
+// The near-register-limit row of the driver (BM = 6, TN = 3) still fits with
+// the lane values and the tile loop state resident.
+TEST(SkinnyGEMM, PersistentNearRegisterLimitConfigEmits) {
+  SkinnyGEMMConfig wide = config(6, 3, 16, 1, 1);
+  EXPECT_NO_THROW(emitted(persistentConfig(wide)));
+  EXPECT_NO_THROW(emitted(persistentConfig(wide, 4, 8)));
 }
 
 bool isLabelOrComment(const std::string &line) {

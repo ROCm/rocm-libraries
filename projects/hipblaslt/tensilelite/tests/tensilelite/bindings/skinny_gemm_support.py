@@ -873,15 +873,6 @@ def makeInputs(p: Problem, seed: int, withReference: bool = True) -> Inputs:
     return Inputs(aBuf, bBuf, sclABuf, sclBBuf, expected.astype(np.float32))
 
 
-def missingMilestones(p: Problem) -> list[str]:
-    """The later milestones the emitter needs for the problem; empty when it
-    runs with the current one."""
-    missing = []
-    if not p.grid3d:
-        missing.append("M9 (persistent launch / tile reordering)")
-    return missing
-
-
 # Kernels are emitted and loaded once per session; the modules stay loaded
 # until the process exits.
 _kernelCache: dict[str, LoadedKernel] = {}

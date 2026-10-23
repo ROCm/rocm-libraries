@@ -118,7 +118,9 @@ void SkinnyGEMMEmitter::packScaleVectors() {
   else
     packPerWave();
   selectors.release();
-  addresses.release();
+  // The persistent launch reuses the lane's addresses every tile.
+  if (dims.grid3d)
+    addresses.release();
 }
 
 // An entry is packed in two phases, the 2 * NC fetches back to back and then
@@ -137,7 +139,8 @@ void SkinnyGEMMEmitter::packPerWave() {
 // of its entries.
 void SkinnyGEMMEmitter::packShared() {
   stageScalesInLds();
-  ldsStage.reset();
+  if (dims.grid3d)
+    ldsStage.reset();
   for (int entry = 0; entry < dims.upIters; ++entry)
     readSharedEntry(entry);
 }

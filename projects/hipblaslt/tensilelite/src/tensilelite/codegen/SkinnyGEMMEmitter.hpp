@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 // Private header of the skinny MXFP8 GEMM emitter, which implements @gemm,
-// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for GRID_3D = 1 and any
-// PARTIAL_STEPS, with ring scales (UP_ITERS = 0) or up-front scales. The method
-// names follow the MLIR functions: the setup is in SkinnyGEMMSetup.cpp, the K
-// loop in SkinnyGEMMLoop.cpp, the up-front scales in SkinnyGEMMScales.cpp, the
-// partial K steps in SkinnyGEMMSteps.cpp and the epilogue in
-// SkinnyGEMMEpilogue.cpp.
+// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for both launch forms
+// (GRID_3D = 1 and the persistent GRID_3D = 0) and any PARTIAL_STEPS, with ring
+// scales (UP_ITERS = 0) or up-front scales. The method names follow the MLIR
+// functions: the setup is in SkinnyGEMMSetup.cpp, the K loop in
+// SkinnyGEMMLoop.cpp, the up-front scales in SkinnyGEMMScales.cpp, the partial
+// K steps in SkinnyGEMMSteps.cpp, the epilogue in SkinnyGEMMEpilogue.cpp and
+// the persistent tile loop in SkinnyGEMMTiles.cpp.
 
 #ifndef ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
 #define ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
@@ -40,6 +41,12 @@ struct SkinnyDims {
   static constexpr int chunks = 4;
 
   int bm, tn, lanesK, waves, prefetch;
+  /// GRID_3D; group and numXcds only apply to the persistent launch.
+  bool grid3d;
+  int group, numXcds;
+  /// Whether the persistent launch reorders the tiles (GROUP or NUM_XCDS not
+  /// 1), which changes the key of the K rotation.
+  bool reordered;
   /// UP_ITERS up-front scale entries per split, 0 for ring scales.
   int upIters;
   /// PARTIAL_STEPS: 0, 1 (tail step only) or 2 (head and tail steps).
@@ -80,6 +87,9 @@ struct SkinnyDims {
 
 /// The modifiers of a buffer load or store addressed with a voffset.
 rocisa::MUBUFModifiers offen();
+
+/// Returns whether value is a positive power of two.
+bool isPowerOfTwo(int value);
 
 /// Returns log2 of a power of two.
 int log2Exact(int value);
@@ -153,23 +163,56 @@ public:
   void emit();
 
 private:
-  // SGPRs that the setup reads after the resources are made.
-  struct SetupScalars {
-    explicit SetupScalars(IRBuilder &builder);
-    RegisterRange blocksX, blocksY, rowGroup, ldS, ldW;
+  // The tile of the workgroup as SGPRs: the workgroup ids in the 3-D launch,
+  // the decoded tile of the current iteration in the persistent launch.
+  struct TileIds {
+    RegisterRef tx, ty, kz;
   };
 
-  // SGPRs that only the resources and the path dispatch read.
+  // SGPRs that the setup reads after the resources are made. blocksX is the
+  // block count x, the number of persistent blocks in the 1-D launch, which has
+  // no blocksY and keeps the split count of the workspace size in splits.
+  struct SetupScalars {
+    SetupScalars(IRBuilder &builder, bool grid3d);
+    RegisterRange blocksX;
+    std::optional<RegisterRange> blocksY;
+    RegisterRange rowGroup, ldS, ldW;
+    std::optional<RegisterRange> splits;
+  };
+
+  // SGPRs that only the resources and the path dispatch read; blocksZ, the
+  // split count, only exists in the 3-D launch.
   struct ResourceScalars {
-    explicit ResourceScalars(IRBuilder &builder);
-    RegisterRange ldD, ldA, ldB, m, n, blocksZ;
+    ResourceScalars(IRBuilder &builder, bool grid3d);
+    RegisterRange ldD, ldA, ldB, m, n;
+    std::optional<RegisterRange> blocksZ;
     RegisterRange aPtr, bPtr, sclAPtr, sclBPtr;
     RegisterRange aBytes, bBytes, sclABytes, sclBBytes;
   };
 
-  // Per-lane values that only the setup reads.
+  // Per-lane values, which only depend on the thread id. In the 3-D launch
+  // w0Load is the wide column the lane loads scales for and the values die with
+  // the setup. In the persistent launch they live through the tile loop, w0Lane
+  // and w0Load are the lane part of the wide columns without the tile's tx * BN
+  // and both are absent when the wide column is uniform.
   struct LaneValues {
-    RegisterRange laneBytes, sclOff, w0Load;
+    RegisterRange laneBytes, sclOff;
+    std::optional<RegisterRange> w0Load, w0Lane;
+  };
+
+  // The values of the persistent tile loop that do not depend on the tile.
+  struct TileLoop {
+    // The number of tiles and the tiles per wide and skinny row, and tilesX *
+    // tilesY.
+    RegisterRange numTiles, tilesX, plane;
+    // Only the grouped decode needs tilesY.
+    std::optional<RegisterRange> tilesY;
+    // NI, the iterations of a split, and the rotation of the block id.
+    std::optional<RegisterRange> ni, blockRot;
+    // The remap of the XCDs: tiles per XCD and the XCDs with one more.
+    std::optional<RegisterRange> perXcd, tall;
+    // GROUP * tilesX, the tiles of a band.
+    std::optional<RegisterRange> bandSize;
   };
 
   // Layout of the reduced accumulators: the natural p order, or runs of
@@ -218,16 +261,23 @@ private:
 
   // Setup (SkinnyGEMMSetup.cpp).
   void loadArguments(SetupScalars &scalars, ResourceScalars &resources);
+  void computeSplits(RegisterRef splits);
   void makeResources(const SetupScalars &scalars,
                      const ResourceScalars &resources);
   void makeBufferSizes(const SetupScalars &scalars,
                        const ResourceScalars &resources);
   void dispatchPaths(const SetupScalars &scalars,
                      const ResourceScalars &resources);
-  void computeTile(const SetupScalars &scalars);
+  void computeTile(const SetupScalars &scalars,
+                   std::optional<RegisterRef> rotation = std::nullopt);
   void computeRotation(const SetupScalars &scalars, RegisterRef rot);
+  void blockRotation(RegisterRef rot, RegisterRef key,
+                     std::optional<RegisterRef> ni);
   LaneValues computeLaneValues();
   void computeWideBase();
+  void computeLaneWideBase(RegisterRef dst);
+  void addTileBase(RegisterRef dst);
+  std::optional<RegisterRange> computeTileWideBases(const LaneValues &lane);
   RegisterRange computeLaneBytes(RegisterRef klv);
   RegisterRange computeRoleJ(RegisterRef tid);
   void threadInDomain(RegisterRef dst, RegisterRef tid, RegisterRef roleJ);
@@ -235,14 +285,32 @@ private:
                                    const std::optional<RegisterRange> &roleJ);
   RegisterRange computeWideLoadBase(RegisterRef tid, RegisterRef lane,
                                     const std::optional<RegisterRange> &roleJ);
+  void computeWideLoadSlot(RegisterRef slot, RegisterRef tid, RegisterRef lane,
+                           const std::optional<RegisterRange> &roleJ);
   void computeAddresses(RegisterRef klv, RegisterRef lane);
   void computeSharedAddress(RegisterRef klv, RegisterRef tid);
   void fillDataBases(const SetupScalars &scalars, LaneValues &lane);
-  void fillScaleBases(const SetupScalars &scalars, const LaneValues &lane);
+  void fillScaleBases(const SetupScalars &scalars, const LaneValues &lane,
+                      RegisterRef w0Load);
   void fillSelectors();
   void zeroAccumulators();
   RegisterRef selector(int column) const;
   void selectorValue(RegisterRef dst, RegisterRef col);
+
+  // Persistent launch (SkinnyGEMMTiles.cpp).
+  void emitPersistent();
+  TileLoop computeTileLoop(SetupScalars &scalars);
+  void computeRemapInvariants(TileLoop &loop);
+  void emitTileLoop(const SetupScalars &scalars, LaneValues &lane,
+                    const TileLoop &loop);
+  void runPersistentTile(const SetupScalars &scalars, LaneValues &lane,
+                         const TileLoop &loop);
+  void tileBarrier();
+  void remapXcd(const TileLoop &loop, RegisterRef logical,
+                RegisterRef tileIndex);
+  void decodeTile(const TileLoop &loop, RegisterRef logical);
+  void decodeGroupedTile(const TileLoop &loop, RegisterRef pos);
+  void slabRotation(const TileLoop &loop, RegisterRef rot);
 
   // K loop (SkinnyGEMMLoop.cpp).
   void runTile();
@@ -372,6 +440,7 @@ private:
   IRBuilder &builder;
   SkinnyDims dims;
   SkinnyArguments arguments;
+  TileIds tile{};
 
   // VGPRs, in allocation order: the ring first so that its tuples are
   // aligned, then the values that live through the K loop.

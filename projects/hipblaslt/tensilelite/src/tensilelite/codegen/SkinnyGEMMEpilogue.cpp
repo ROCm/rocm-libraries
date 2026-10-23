@@ -130,7 +130,7 @@ void SkinnyGEMMEmitter::emitEpilogueVariant(bool skinnyContiguous) {
   builder.create<rocisa::SBranch>(done->getLabelName());
   builder.insert(workspace);
   RegisterRange slice = sgpr();
-  builder.muli32(slice.ref(), kernel.workgroupIdZ().ref(), mn.ref());
+  builder.muli32(slice.ref(), tile.kz, mn.ref());
   storeTile(state, StoreTarget{wsRsrc.ref(), wsStrideS.ref(), wsStrideW.ref(),
                                slice.ref(), false});
   builder.insert(done);
@@ -244,9 +244,9 @@ void SkinnyGEMMEmitter::computeTileFull(RegisterRef tileFull) {
   RegisterRange wideEnd = sgpr();
   RegisterRange skinnyIn = sgpr();
   RegisterRange wideIn = sgpr();
-  builder.addi32(skinnyEnd.ref(), kernel.workgroupIdY().ref(), 1);
+  builder.addi32(skinnyEnd.ref(), tile.ty, 1);
   multiplyBy(builder, skinnyEnd.ref(), skinnyEnd.ref(), dims.bm);
-  builder.addi32(wideEnd.ref(), kernel.workgroupIdX().ref(), 1);
+  builder.addi32(wideEnd.ref(), tile.tx, 1);
   multiplyBy(builder, wideEnd.ref(), wideEnd.ref(), dims.tileWide);
   builder.cmpi32(Predicate::ule, skinnyIn.ref(), skinnyEnd.ref(),
                  skinnyCols.ref());

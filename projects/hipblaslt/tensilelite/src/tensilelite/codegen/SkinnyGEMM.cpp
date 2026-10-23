@@ -55,17 +55,6 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config) {
 
 namespace {
 
-// The reference's features that are not emitted yet.
-void requireImplemented(const SkinnyGEMMConfig &config) {
-  if (!config.grid3d)
-    throw std::invalid_argument(
-        "grid3d = false (persistent launch) is not implemented yet");
-  if (config.group != 1)
-    throw std::invalid_argument("grid3d requires group = 1");
-  if (config.numXcds != 1)
-    throw std::invalid_argument("grid3d requires numXcds = 1");
-}
-
 // The kernarg layout of the reference: the pointers, the i32 scalars, then
 // the hidden group sizes and block counts.
 detail::SkinnyArguments declareArguments(KernelSignature &signature) {
@@ -100,7 +89,6 @@ detail::SkinnyArguments declareArguments(KernelSignature &signature) {
 std::string emitSkinnyGEMM(const Target &target,
                            const SkinnyGEMMConfig &config) {
   validate(config);
-  requireImplemented(config);
   detail::SkinnyDims dims(config);
   if (dims.ldsBytes > target.maxLdsSize())
     throw std::invalid_argument(
@@ -109,8 +97,10 @@ std::string emitSkinnyGEMM(const Target &target,
   Kernel kernel(target, skinnyGEMMKernelName(config), 64 * config.waves);
   if (dims.scalesShared)
     kernel.setLdsSize(dims.ldsBytes);
-  // The workgroup ids are the tile (tx, ty) and the split kz.
-  kernel.enableWorkgroupIds(true, true);
+  // The workgroup ids are the tile (tx, ty) and the split kz; the persistent
+  // launch only has the block id x.
+  if (config.grid3d)
+    kernel.enableWorkgroupIds(true, true);
   detail::SkinnyArguments arguments = declareArguments(kernel.signature());
   detail::SkinnyGEMMEmitter(kernel, config, arguments).emit();
   try {

@@ -20,8 +20,6 @@ namespace {
 
 constexpr int selectorMaskStep = 0x01010101;
 
-bool isPowerOfTwo(int value) { return value > 0 && (value & (value - 1)) == 0; }
-
 bool isScalar(RegisterRef ref) { return ref.kind == RegisterKind::sgpr; }
 
 // Bytes of an operand of cols columns: (cols - 1) * ld + alignUp(k, 4), as
@@ -64,6 +62,8 @@ void selectOnScc(IRBuilder &builder, RegisterRef dst, RegisterRef ifSet,
 }
 
 } // namespace
+
+bool isPowerOfTwo(int value) { return value > 0 && (value & (value - 1)) == 0; }
 
 int log2Exact(int value) {
   if (!isPowerOfTwo(value))
@@ -122,8 +122,10 @@ void divideByConstant(IRBuilder &builder, RegisterRef quotient,
 
 SkinnyDims::SkinnyDims(const SkinnyGEMMConfig &config)
     : bm(config.bm), tn(config.tn), lanesK(config.lanesK), waves(config.waves),
-      prefetch(config.prefetch), upIters(config.upIters),
-      partialSteps(config.partialSteps) {
+      prefetch(config.prefetch), grid3d(config.grid3d), group(config.group),
+      numXcds(config.numXcds),
+      reordered(config.group != 1 || config.numXcds != 1),
+      upIters(config.upIters), partialSteps(config.partialSteps) {
   columns = bm + tn;
   accumulators = bm * tn;
   columnGroups = 64 / lanesK;
@@ -196,15 +198,22 @@ int loadsIssuedAfter(const SkinnyDims &dims, SlotLoadPosition where) {
   return sameSlot + where.groupsAfter * dims.loadsPerSlot + where.ownRefill;
 }
 
-SkinnyGEMMEmitter::SetupScalars::SetupScalars(IRBuilder &builder)
-    : blocksX(builder.allocateSgpr(1)), blocksY(builder.allocateSgpr(1)),
+SkinnyGEMMEmitter::SetupScalars::SetupScalars(IRBuilder &builder, bool grid3d)
+    : blocksX(builder.allocateSgpr(1)),
+      blocksY(grid3d ? std::optional<RegisterRange>(builder.allocateSgpr(1))
+                     : std::nullopt),
       rowGroup(builder.allocateSgpr(1)), ldS(builder.allocateSgpr(1)),
-      ldW(builder.allocateSgpr(1)) {}
+      ldW(builder.allocateSgpr(1)),
+      splits(grid3d ? std::nullopt
+                    : std::optional<RegisterRange>(builder.allocateSgpr(1))) {}
 
-SkinnyGEMMEmitter::ResourceScalars::ResourceScalars(IRBuilder &builder)
+SkinnyGEMMEmitter::ResourceScalars::ResourceScalars(IRBuilder &builder,
+                                                    bool grid3d)
     : ldD(builder.allocateSgpr(1)), ldA(builder.allocateSgpr(1)),
       ldB(builder.allocateSgpr(1)), m(builder.allocateSgpr(1)),
-      n(builder.allocateSgpr(1)), blocksZ(builder.allocateSgpr(1)),
+      n(builder.allocateSgpr(1)),
+      blocksZ(grid3d ? std::optional<RegisterRange>(builder.allocateSgpr(1))
+                     : std::nullopt),
       aPtr(builder.allocateSgpr(2, 2)), bPtr(builder.allocateSgpr(2, 2)),
       sclAPtr(builder.allocateSgpr(2, 2)), sclBPtr(builder.allocateSgpr(2, 2)),
       aBytes(builder.allocateSgpr(1)), bBytes(builder.allocateSgpr(1)),
@@ -263,17 +272,23 @@ bool SkinnyGEMMEmitter::uniformWide() const {
 }
 
 void SkinnyGEMMEmitter::emit() {
+  if (!dims.grid3d) {
+    emitPersistent();
+    return;
+  }
+  tile = TileIds{kernel.workgroupIdX().ref(), kernel.workgroupIdY().ref(),
+                 kernel.workgroupIdZ().ref()};
   {
-    SetupScalars scalars(builder);
+    SetupScalars scalars(builder, /*grid3d=*/true);
     {
-      ResourceScalars resources(builder);
+      ResourceScalars resources(builder, /*grid3d=*/true);
       loadArguments(scalars, resources);
       makeResources(scalars, resources);
     }
     computeTile(scalars);
     LaneValues lane = computeLaneValues();
     fillDataBases(scalars, lane);
-    fillScaleBases(scalars, lane);
+    fillScaleBases(scalars, lane, lane.w0Load->ref());
     fillSelectors();
     zeroAccumulators();
   }
@@ -286,9 +301,11 @@ void SkinnyGEMMEmitter::emit() {
 // the workspace; the others wait in pairs for the path dispatch.
 void SkinnyGEMMEmitter::loadArguments(SetupScalars &scalars,
                                       ResourceScalars &resources) {
-  kernel.loadArgument(resources.blocksZ.ref(), arguments.blocksZ);
+  if (resources.blocksZ)
+    kernel.loadArgument(resources.blocksZ->ref(), arguments.blocksZ);
   kernel.loadArgument(scalars.blocksX.ref(), arguments.blocksX);
-  kernel.loadArgument(scalars.blocksY.ref(), arguments.blocksY);
+  if (scalars.blocksY)
+    kernel.loadArgument(scalars.blocksY->ref(), arguments.blocksY);
   kernel.loadArgument(spk.ref(), arguments.spk);
   kernel.loadArgument(k.ref(), arguments.k);
   kernel.loadArgument(resources.n.ref(), arguments.n);
@@ -341,12 +358,24 @@ void SkinnyGEMMEmitter::makeBufferSizes(const SetupScalars &scalars,
   shiftLeft(builder, alignedK.ref(), resources.m.ref(), 1);
   builder.addi32(dBytes, dBytes, alignedK.ref());
   // The workspace holds splits * m * n f32 elements; the splits are the
-  // blocks of the grid's z dimension.
+  // blocks of the grid's z dimension, or ceilDiv(k, spk) in the 1-D launch.
+  RegisterRef splits =
+      resources.blocksZ ? resources.blocksZ->ref() : scalars.splits->ref();
+  if (!resources.blocksZ)
+    computeSplits(splits);
   RegisterRef wsBytes = wsRsrc.ref(2);
-  builder.muli32(wsBytes, resources.m.ref(), resources.blocksZ.ref());
+  builder.muli32(wsBytes, resources.m.ref(), splits);
   builder.muli32(wsBytes, wsBytes, resources.n.ref());
   shiftLeft(builder, wsBytes, wsBytes, 2);
   builder.muli32(mn.ref(), resources.m.ref(), resources.n.ref());
+}
+
+// splits = ceilDiv(k, spk) with the exact signed division, as the reference
+// divides at run time.
+void SkinnyGEMMEmitter::computeSplits(RegisterRef splits) {
+  builder.addi32(splits, k.ref(), spk.ref());
+  builder.addi32(splits, splits, -1);
+  builder.divsi32(splits, splits, spk.ref(), /*useIEEE=*/true);
 }
 
 // Selects the operands, strides and extents of the skinny and the wide
@@ -393,9 +422,12 @@ void SkinnyGEMMEmitter::dispatchPaths(const SetupScalars &scalars,
     builder.makeRsrc(rsrc->ref(), rsrc->ref(0, 2), rsrc->ref(2));
 }
 
-void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars) {
-  RegisterRef ty = kernel.workgroupIdY().ref();
-  RegisterRef kz = kernel.workgroupIdZ().ref();
+// The persistent launch passes the rotation of the tile, the 3-D launch
+// computes it from the workgroup ids.
+void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars,
+                                    std::optional<RegisterRef> rotation) {
+  RegisterRef ty = tile.ty;
+  RegisterRef kz = tile.kz;
   // With partial steps the bounds outlive the setup, in members.
   std::optional<RegisterRange> startLocal;
   std::optional<RegisterRange> endLocal;
@@ -435,13 +467,18 @@ void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars) {
     builder.create<rocisa::SCSelectB32>(vecOff->container(), 1, 0);
   }
   if (fitRot) {
-    RegisterRange rot = sgpr();
-    computeRotation(scalars, rot.ref());
+    std::optional<RegisterRange> computed;
+    if (!rotation) {
+      computed = sgpr();
+      computeRotation(scalars, computed->ref());
+      rotation = computed->ref();
+    }
     // The rotation falls back to 0 when it is not below the iteration count,
     // so the physical iteration wraps once without a division.
-    builder.create<rocisa::SCmpLtU32>(rot.container(), nIterFull.container());
-    builder.create<rocisa::SCSelectB32>(fitRot->container(), rot.container(),
-                                        0);
+    builder.create<rocisa::SCmpLtU32>(rotation->container(),
+                                      nIterFull.container());
+    builder.create<rocisa::SCSelectB32>(fitRot->container(),
+                                        rotation->container(), 0);
   }
   multiplyBy(builder, s0.ref(), ty, dims.bm);
 }
@@ -452,11 +489,11 @@ void SkinnyGEMMEmitter::computeTile(const SetupScalars &scalars) {
 // signed division instead of LLVM's srem expansion.
 void SkinnyGEMMEmitter::computeRotation(const SetupScalars &scalars,
                                         RegisterRef rot) {
-  RegisterRef tx = kernel.workgroupIdX().ref();
-  RegisterRef ty = kernel.workgroupIdY().ref();
-  RegisterRef kz = kernel.workgroupIdZ().ref();
+  RegisterRef tx = tile.tx;
+  RegisterRef ty = tile.ty;
+  RegisterRef kz = tile.kz;
   RegisterRange key = sgpr();
-  builder.muli32(key.ref(), scalars.blocksY.ref(), kz);
+  builder.muli32(key.ref(), scalars.blocksY->ref(), kz);
   builder.addi32(key.ref(), key.ref(), ty);
   builder.muli32(key.ref(), key.ref(), scalars.blocksX.ref());
   builder.addi32(key.ref(), key.ref(), tx);
@@ -466,13 +503,20 @@ void SkinnyGEMMEmitter::computeRotation(const SetupScalars &scalars,
     builder.addi32(ni->ref(), spk.ref(), dims.ki - 1);
     shiftRight(builder, ni->ref(), ni->ref(), dims.log2Ki);
   }
+  blockRotation(rot, key.ref(),
+                ni ? std::optional<RegisterRef>(ni->ref()) : std::nullopt);
+}
+
+// rot = (key + key / 16) mod NI, or mod the literal UP_ITERS without ni.
+void SkinnyGEMMEmitter::blockRotation(RegisterRef rot, RegisterRef key,
+                                      std::optional<RegisterRef> ni) {
   RegisterRange sum = sgpr();
-  shiftRight(builder, sum.ref(), key.ref(), 4);
-  builder.addi32(sum.ref(), sum.ref(), key.ref());
+  shiftRight(builder, sum.ref(), key, 4);
+  builder.addi32(sum.ref(), sum.ref(), key);
   if (ni) {
     RegisterRange quotient = sgpr();
-    builder.divsi32(quotient.ref(), sum.ref(), ni->ref(), /*useIEEE=*/true);
-    builder.muli32(quotient.ref(), quotient.ref(), ni->ref());
+    builder.divsi32(quotient.ref(), sum.ref(), *ni, /*useIEEE=*/true);
+    builder.muli32(quotient.ref(), quotient.ref(), *ni);
     builder.subi32(rot, sum.ref(), quotient.ref());
     return;
   }
@@ -490,17 +534,44 @@ void SkinnyGEMMEmitter::computeRotation(const SetupScalars &scalars,
 // w0 = tx * BN + (wave * CG + cg) * TN. The slot wave * CG + cg is the thread
 // id divided by LANES_K.
 void SkinnyGEMMEmitter::computeWideBase() {
-  RegisterRef tx = kernel.workgroupIdX().ref();
   if (uniformWide()) {
-    builder.muli32(w0.ref(), tx, dims.tileWide);
+    builder.muli32(w0.ref(), tile.tx, dims.tileWide);
     return;
   }
+  computeLaneWideBase(w0.ref());
+  addTileBase(w0.ref());
+}
+
+// dst = (wave * CG + cg) * TN, the lane part of w0.
+void SkinnyGEMMEmitter::computeLaneWideBase(RegisterRef dst) {
   RegisterRef tid = kernel.workitemId().ref();
-  shiftRight(builder, w0.ref(), tid, dims.log2LanesK);
-  multiplyBy(builder, w0.ref(), w0.ref(), dims.tn);
+  shiftRight(builder, dst, tid, dims.log2LanesK);
+  multiplyBy(builder, dst, dst, dims.tn);
+}
+
+// dst += tx * BN.
+void SkinnyGEMMEmitter::addTileBase(RegisterRef dst) {
   RegisterRange tileBase = sgpr();
-  builder.muli32(tileBase.ref(), tx, dims.tileWide);
-  builder.addi32(w0.ref(), w0.ref(), tileBase.ref());
+  builder.muli32(tileBase.ref(), tile.tx, dims.tileWide);
+  builder.addi32(dst, dst, tileBase.ref());
+}
+
+// The persistent launch adds the tile's part to the lane part of the wide
+// columns every tile: w0 = w0Lane + tx * BN and, for the scale loads, a
+// temporary w0Load = w0LoadLane + tx * BN, absent when the wide column is
+// uniform and w0 itself serves.
+std::optional<RegisterRange>
+SkinnyGEMMEmitter::computeTileWideBases(const LaneValues &lane) {
+  if (uniformWide()) {
+    builder.muli32(w0.ref(), tile.tx, dims.tileWide);
+    return std::nullopt;
+  }
+  RegisterRange tileBase = sgpr();
+  builder.muli32(tileBase.ref(), tile.tx, dims.tileWide);
+  builder.addi32(w0.ref(), lane.w0Lane->ref(), tileBase.ref());
+  RegisterRange w0Load = vgpr();
+  builder.addi32(w0Load.ref(), lane.w0Load->ref(), tileBase.ref());
+  return w0Load;
 }
 
 // The byte address of the lanes that hold scale dwords 0 and 1 of this lane:
@@ -633,13 +704,20 @@ RegisterRange SkinnyGEMMEmitter::computeScaleOffset(
 RegisterRange SkinnyGEMMEmitter::computeWideLoadBase(
     RegisterRef tid, RegisterRef lane,
     const std::optional<RegisterRange> &sharedRoleJ) {
-  RegisterRef tx = kernel.workgroupIdX().ref();
   RegisterRange w0Load = uniformWide() ? sgpr() : vgpr();
   if (uniformWide()) {
-    builder.muli32(w0Load.ref(), tx, dims.tileWide);
+    builder.muli32(w0Load.ref(), tile.tx, dims.tileWide);
     return w0Load;
   }
-  RegisterRef slot = w0Load.ref();
+  computeWideLoadSlot(w0Load.ref(), tid, lane, sharedRoleJ);
+  addTileBase(w0Load.ref());
+  return w0Load;
+}
+
+// slot = (wave * CG + lane mod CG) * TN, the lane part of w0Load.
+void SkinnyGEMMEmitter::computeWideLoadSlot(
+    RegisterRef slot, RegisterRef tid, RegisterRef lane,
+    const std::optional<RegisterRange> &sharedRoleJ) {
   if (sharedRoleJ) {
     threadInDomain(slot, tid, sharedRoleJ->ref());
   } else {
@@ -657,10 +735,6 @@ RegisterRange SkinnyGEMMEmitter::computeWideLoadBase(
     }
   }
   multiplyBy(builder, slot, slot, dims.tn);
-  RegisterRange tileBase = sgpr();
-  builder.muli32(tileBase.ref(), tx, dims.tileWide);
-  builder.addi32(slot, slot, tileBase.ref());
-  return w0Load;
 }
 
 SkinnyGEMMEmitter::LaneValues SkinnyGEMMEmitter::computeLaneValues() {
@@ -681,7 +755,13 @@ SkinnyGEMMEmitter::LaneValues SkinnyGEMMEmitter::computeLaneValues() {
     bitAnd(builder, klStorage->ref(), tid, dims.lanesK - 1);
     klv = klStorage->ref();
   }
-  computeWideBase();
+  std::optional<RegisterRange> w0Lane;
+  if (dims.grid3d) {
+    computeWideBase();
+  } else if (!uniformWide()) {
+    w0Lane = vgpr();
+    computeLaneWideBase(w0Lane->ref());
+  }
   if (dims.scalesShared)
     computeSharedAddress(klv, tid);
   else
@@ -695,11 +775,18 @@ SkinnyGEMMEmitter::LaneValues SkinnyGEMMEmitter::computeLaneValues() {
     shiftLeft(builder, ldsStage->ref(), tid, 2);
   }
   RegisterRange sclOff = computeScaleOffset(lane, roleJ);
-  RegisterRange w0Load = computeWideLoadBase(tid, lane, roleJ);
+  std::optional<RegisterRange> w0Load;
+  if (dims.grid3d) {
+    w0Load = computeWideLoadBase(tid, lane, roleJ);
+  } else if (!uniformWide()) {
+    w0Load = vgpr();
+    computeWideLoadSlot(w0Load->ref(), tid, lane, roleJ);
+  }
   // v0 keeps kl for the epilogue; every use of the thread id is done.
   if (dims.waves > 1 || dims.lanesK < 64)
     bitAnd(builder, tid, tid, dims.lanesK - 1);
-  return LaneValues{std::move(laneBytes), std::move(sclOff), std::move(w0Load)};
+  return LaneValues{std::move(laneBytes), std::move(sclOff), std::move(w0Load),
+                    std::move(w0Lane)};
 }
 
 // dBase[r] = (s0 + r < skinnyCols) ? (s0 + r) * ldS + laneBytes : -1, and
@@ -736,13 +823,16 @@ void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
     }
     builder.select(base, valid, base, outOfRange);
   }
-  lane.laneBytes.release();
+  // The persistent launch reuses the lane's bytes every tile.
+  if (dims.grid3d)
+    lane.laneBytes.release();
 }
 
 // sBase[c] is the voffset of the scale dword that the lane loads for column
 // c: the load column of the wide operand differs from the lane's own column.
 void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
-                                       const LaneValues &lane) {
+                                       const LaneValues &lane,
+                                       RegisterRef w0Load) {
   constexpr int outOfRange = -1;
   if (scaleGroup)
     bitAnd(builder, scaleGroup->ref(), lane.sclOff.ref(), -256);
@@ -760,7 +850,7 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
     RegisterRange valid = sgpr(2, 2);
     RegisterRange col = uniformWide() ? sgpr() : vgpr();
     RegisterRange row = uniformWide() ? sgpr() : vgpr();
-    builder.addi32(col.ref(), lane.w0Load.ref(), t);
+    builder.addi32(col.ref(), w0Load, t);
     builder.cmpi32(Predicate::ult, valid.ref(), col.ref(), wideCols.ref());
     scaleRowOffset(builder, row.ref(), col.ref(), scalars.rowGroup.ref());
     builder.addi32(base, row.ref(), lane.sclOff.ref());

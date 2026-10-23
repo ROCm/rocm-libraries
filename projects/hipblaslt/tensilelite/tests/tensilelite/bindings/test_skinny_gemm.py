@@ -77,18 +77,31 @@ def test_kernel_name(knobs, expected):
     assert codegen.skinnyGEMMKernelName(codegen.SkinnyGEMMConfig(**knobs)) == expected
 
 
-UNIMPLEMENTED_FEATURES = [
-    ({"grid3d": False}, "grid3d"),
-    ({"group": 2}, "group"),
-    ({"numXcds": 8}, "numXcds"),
-]
+def kernelBody(asm, config):
+    """The assembly with the kernel name replaced, so that kernels of
+    different names compare equal."""
+    return asm.replace(codegen.skinnyGEMMKernelName(config), "gemm")
 
 
-@pytest.mark.parametrize(("knobs", "match"), UNIMPLEMENTED_FEATURES)
-def test_unimplemented_features_are_rejected(knobs, match):
-    config = codegen.SkinnyGEMMConfig(lanesK=16, waves=1, prefetch=1, **knobs)
-    with pytest.raises(ValueError, match=match):
-        codegen.emitSkinnyGEMM(config)
+def test_grid3d_ignores_group_and_xcds():
+    knobs = {"lanesK": 16, "waves": 1, "prefetch": 1}
+    plain = codegen.SkinnyGEMMConfig(**knobs)
+    grouped = codegen.SkinnyGEMMConfig(group=4, numXcds=8, **knobs)
+    assert plain.grid3d and grouped.grid3d
+    assert kernelBody(codegen.emitSkinnyGEMM(plain), plain) == kernelBody(
+        codegen.emitSkinnyGEMM(grouped), grouped
+    )
+
+
+@pytest.mark.parametrize("reordering", [{}, {"group": 4, "numXcds": 8}])
+def test_persistent_launch_assembles(reordering):
+    config = codegen.SkinnyGEMMConfig(
+        lanesK=16, waves=1, prefetch=1, grid3d=False, **reordering
+    )
+    asm = codegen.emitSkinnyGEMM(config)
+    assert "workgroup_id_y" not in asm
+    assert "workgroup_id_z" not in asm
+    assert jit.assembleToHSACO(asm, support.TARGET)[:4] == ELF_MAGIC
 
 
 def test_emit_skinny_gemm_assembles():
@@ -233,9 +246,7 @@ def test_splitk_reduce_truncates_instead_of_rounding(reduceKernel):
     assert (nearest.astype(np.uint32) != actual).any()
 
 
-# The skinny GEMM tests of the aster driver. A problem that needs a feature of a
-# later milestone (see support.missingMilestones) is skipped; those milestones
-# un-skip its rows by implementing the feature.
+# The skinny GEMM tests of the aster driver.
 
 
 def resolve(m, n, k, **knobs):
@@ -248,14 +259,7 @@ def resolve(m, n, k, **knobs):
 
 
 def skipUnlessRunnable(*problems):
-    """Skips the test if a problem needs a later milestone or there is no GPU."""
-    missing = []
-    for p in problems:
-        missing += [
-            name for name in support.missingMilestones(p) if name not in missing
-        ]
-    if missing:
-        pytest.skip(f"needs {', '.join(missing)}")
+    """Skips the test if there is no GPU."""
     if not support.gpuAvailable():
         pytest.skip("no HIP device or hip-python is not usable")
 

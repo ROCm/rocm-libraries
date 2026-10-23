@@ -43,18 +43,28 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 
 /// Emits the GEMM kernel as the assembly text of one kernel, for
 /// assembleToHSACO, replicating the behavior and the schedule of the MLIR
-/// reference for the 3-D launch: grid3d with group = 1 and numXcds = 1, and any
-/// upIters and partialSteps (the partial K steps handle a k or spk that is not
-/// a multiple of 64 * lanesK). The kernargs are the pointers D, A, B,
-/// scalesA, scalesB and ws, then ldD, ldA, ldB, m, n, k and spk (i32), then the
-/// hidden group sizes x, y, z and block counts x, y, z, in the layout of the
-/// reference. The block is (64 * waves, 1, 1) and the grid is (ceil(max(m, n) /
-/// BN), ceil(min(m, n) / bm), ceil(k / spk)) with BN = waves * (64 / lanesK) *
-/// tn. With a single split the kernel stores bf16 into D, else each split
-/// stores its f32 slice into the workspace, which splitk_reduce sums. Throws
-/// std::invalid_argument for invalid knobs, for the features that are not
-/// emitted yet (grid3d = false, group != 1 and numXcds != 1, each naming the
-/// knob) and when the configuration exceeds the register budget.
+/// reference, for any upIters and partialSteps (the partial K steps handle a k
+/// or spk that is not a multiple of 64 * lanesK). The kernargs are the pointers
+/// D, A, B, scalesA, scalesB and ws, then ldD, ldA, ldB, m, n, k and spk (i32),
+/// then the hidden group sizes x, y, z and block counts x, y, z, in the layout
+/// of the reference. The block is (64 * waves, 1, 1). With a single split the
+/// kernel stores bf16 into D, else each split stores its f32 slice into the
+/// workspace, which splitk_reduce sums. BN = waves * (64 / lanesK) * tn.
+///
+/// grid3d = true: the grid is (ceil(max(m, n) / BN), ceil(min(m, n) / bm),
+/// ceil(k / spk)) and the block (x, y, z) is the tile (tx, ty, kz). group and
+/// numXcds are ignored, as in the reference, so the kernel is the one of group
+/// = 1 and numXcds = 1 under another name.
+///
+/// grid3d = false: the persistent launch with the grid (B, 1, 1) for any B >=
+/// 1. Block b runs the tiles b, b + B, ... of the flattened tile space, of
+/// ceil(max(m, n) / BN) * ceil(min(m, n) / bm) * ceil(k / spk) tiles, in the
+/// order of the XCD remap (numXcds) and the grouped decode (group); blocks past
+/// the tile count do nothing. The kernel computes the split count in the
+/// kernel and reads only the hidden block count x.
+///
+/// Throws std::invalid_argument for invalid knobs and when the configuration
+/// exceeds the LDS or the register budget.
 std::string emitSkinnyGEMM(const Target &target,
                            const SkinnyGEMMConfig &config);
 
