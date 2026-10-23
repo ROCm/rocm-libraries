@@ -435,6 +435,22 @@ TEST(OutputSelectionCpp, DefaultConstruction) {
     EXPECT_EQ(selection.selectedCount(4), 4);
 }
 
+TEST(OutputSelectionCpp, OrderDirectionAndDeferredEmptyOrder) {
+    const Shape shape{2, 3};
+    const auto ascending = OutputSelection::explicitIndices({1}, std::vector<size_t>{0, 1});
+    const auto descending = OutputSelection::explicitIndices({1}, std::vector<size_t>{1, 0});
+    EXPECT_EQ(shape.coordinates(ascending.indices(6).front(), ascending.indexOrder()),
+              (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(shape.coordinates(descending.indices(6).front(), descending.indexOrder()),
+              (std::vector<size_t>{1, 0}));
+
+    const auto deferred = OutputSelection::explicitIndices({1}, {});
+    EXPECT_TRUE(deferred.indexOrder().empty());
+    EXPECT_EQ(deferred.indices(6), (std::vector<size_t>{1}));
+    EXPECT_EQ(shape.coordinates(1), (std::vector<size_t>{0, 1}));
+    EXPECT_THROW(shape.coordinates(1, deferred.indexOrder()), std::runtime_error);
+}
+
 TEST(OutputSelectionCpp, OwnsSpanOrdersAndIndices) {
     auto selections = [] {
         std::array<size_t, 3> order{2, 1, 0};
@@ -454,7 +470,7 @@ TEST(OutputSelectionCpp, OwnsSpanOrdersAndIndices) {
                   (std::vector<size_t>{2, 1, 0}));
     }
     auto copied = selections[2];
-    selections[2] = OutputSelection::all();
+    selections[2] = OutputSelection::all({});
     EXPECT_EQ(copied.indices(8), (std::vector<size_t>{1, 7}));
     const auto moved = std::move(copied);
     EXPECT_EQ(moved.indices(8), (std::vector<size_t>{1, 7}));
@@ -464,12 +480,12 @@ TEST(OutputSelectionCpp, OwnsSpanOrdersAndIndices) {
 
 TEST(OutputSelectionCpp, SizeBoundaries) {
     const size_t maximum = std::numeric_limits<size_t>::max();
-    EXPECT_EQ(OutputSelection::strided(0, 1).selectedCount(maximum), maximum);
-    EXPECT_EQ(OutputSelection::strided(maximum - 2, 3).indices(maximum),
+    EXPECT_EQ(OutputSelection::strided(0, 1, maximum, {}).selectedCount(maximum), maximum);
+    EXPECT_EQ(OutputSelection::strided(maximum - 2, 3, maximum, {}).indices(maximum),
               (std::vector<size_t>{maximum - 2}));
-    EXPECT_EQ(OutputSelection::strided(1, maximum - 2).indices(maximum),
+    EXPECT_EQ(OutputSelection::strided(1, maximum - 2, maximum, {}).indices(maximum),
               (std::vector<size_t>{1, maximum - 1}));
-    EXPECT_THROW(OutputSelection::primeStride(2, maximum, 1), std::runtime_error);
+    EXPECT_THROW(OutputSelection::primeStride(2, maximum, 1, {}), std::runtime_error);
 }
 
 }  // namespace
