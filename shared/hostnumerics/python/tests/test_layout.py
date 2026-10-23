@@ -247,7 +247,8 @@ class LayoutTests(unittest.TestCase):
             hn.Layout.contiguous_first_dimension_fastest(hn.Shape([2, 0, 3])).strides,
             [1, 2, 0],
         )
-        # The shared factory preserves order-dependent intermediate overflow checks.
+        # Overflow depends on traversal order: a zero extent visited first makes
+        # every slower stride zero, so a later huge extent cannot overflow.
         self.assertEqual(
             hn.Layout.contiguous_first_dimension_fastest(
                 hn.Shape([0, PTRDIFF_MAX, 2])
