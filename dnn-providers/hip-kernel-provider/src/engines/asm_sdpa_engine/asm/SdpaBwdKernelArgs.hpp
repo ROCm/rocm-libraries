@@ -144,7 +144,7 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad2 _p8;
 
     // ---- Attention scale ---------------------------------------------------
-    float scalar; // co:scalar  Attention scale (1 / sqrt(D_qk))
+    float scalar; // co:scalar  attn_scale_value, 1.0 when unset
     SgprPad3 _p9;
     float log2e; // co:log2e  Constant: log2(e) ≈ 1.44269504
     SgprPad3 _p10;

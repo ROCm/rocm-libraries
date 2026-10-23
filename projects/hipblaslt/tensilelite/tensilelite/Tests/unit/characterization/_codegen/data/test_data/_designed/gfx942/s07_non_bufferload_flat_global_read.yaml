@@ -1,0 +1,50 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S07 Non-BufferLoad (flat) global-read address VGPRs for A/B.
+#
+# Target: Tensile/KernelWriter.py flat (non-BufferLoad) global-read VGPR arms:
+#   - 8339 : numVgprGlobalReadAddressesB = ... (else of BufferLoad, B)
+#   - 8342 : numVgprGlobalReadIncsB (globalReadIncsUseVgpr, flat)
+#   - 8606-8610 : startVgprGlobalReadAddressesA/B else (flat) branch
+#   - 8611-8616 : MXSA/MXSB flat addr (needs MXBlockA/B) - likely B_impossible on gfx942
+#
+# Mechanism: BufferLoad=False forces the flat (non-buffer) global-read address
+# path. Simple fp32 NN GEMM, no StreamK/UseE/Bias (all require BufferLoad).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - BufferLoad: [False]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

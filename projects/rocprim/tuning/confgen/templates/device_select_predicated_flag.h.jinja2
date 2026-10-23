@@ -1,7 +1,7 @@
 {% extends "device_partition.h.jinja2" %}
 
-{% block target_tparams -%}
-template<class Target, class data_type, class flag_type>
+{% block tparams -%}
+class data_type, class flag_type
 {%- endblock %}
 
 {% block config_guard scoped %}

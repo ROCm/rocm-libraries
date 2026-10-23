@@ -29,6 +29,22 @@
  *  15  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 two_stage fp16
  *  16  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
  *  17  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250 (WMMA w32), lds_k_outer fp32 out
+ *  18  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, unroll_k, split_k=4 fp32
+ *  19  N8H56W56C3_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=2 two_stage fp16
+ *  20  N10H8W8C64_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950, lds_k_outer + async_dma, split_k=2
+ *  21  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk linear fp16
+ *  22  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk tree fp16
+ *  23  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk atomic fp32
+ *  24  N8H56W56C64_K64Y3X3, a32x32x16, gfx950, streamk dp_sk workspace fp16
+ *  25  N8H56W56C64_K64Y3X3, a16x16x16, gfx942, streamk persistent linear fp16
+ *  26  N4H28W28C96_K120Y3X3G3 pad1, a32x32x16, gfx950, streamk dp_sk linear fp16
+ *  27  N4H28W28C64_K128Y3X3G2 pad1, a32x32x16, gfx950, streamk persistent tree bf16 dW
+ *  28  N4H28W28C64_K128Y3X3G2 pad1, a32x32x16, gfx950, streamk persistent atomic fp32
+ *  29  N8H56W56C64_K64Y3X3, a16x16x16, gfx942, streamk persistent workspace fp16
+ *  30  N4H14W14C64_K96Y3X3G2 pad1, a32x32x16, gfx950, streamk dp_sk linear fp16, lds_k_outer
+ *  (21-30 carry a CTA pool, but it is a launch parameter and leaves the IR as is.)
+ *  31-48  prefetch_addr=true on a base config (pfa_base below); 45-47 pair it
+ *         with async_dma / unroll_k / WMMA and must be rejected by both engines
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,9 +56,77 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* prefetch_addr configs 31-48: the base config each one flips the flag on.
+ * Must match _PFA_BASES in the Python emitter. -1 = not a prefetch_addr index. */
+static int pfa_base(int idx)
+{
+    static const int bases[] = {1, 11, 4, 13, 7, 11, 15, 19, 14, 3, 8, 16, 0, 10, 12, 18, 5, 4};
+    if(idx < 31 || idx >= 31 + (int)(sizeof(bases) / sizeof(bases[0])))
+        return -1;
+    return bases[idx - 31];
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch);
+
+/* Stream-K fields of configs 21-29 (Python _STREAMK_CFGS). */
+static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    /* idx: dtype a/b, dtype d, atom edge, streamk, reduction, ctas, arch */
+    static const struct
+    {
+        const char *dt_ab, *dt_d;
+        int edge;
+        const char *mode, *reduction;
+        int ctas;
+        const char* arch;
+    } cfgs[9] = {
+        {"fp16", "fp16", 32, "dp_sk", "linear", 16, "gfx950"},
+        {"fp16", "fp16", 32, "dp_sk", "tree", 16, "gfx950"},
+        {"fp16", "fp32", 32, "dp_sk", "atomic", 4, "gfx950"},
+        {"fp16", "fp16", 32, "dp_sk", "workspace", 4, "gfx950"},
+        {"fp16", "fp16", 16, "persistent", "linear", 4, "gfx942"},
+        {"fp16", "fp16", 32, "dp_sk", "linear", 6, "gfx950"},
+        {"fp16", "bf16", 32, "persistent", "tree", 5, "gfx950"},
+        {"fp16", "fp32", 32, "persistent", "atomic", 3, "gfx950"},
+        {"fp16", "fp16", 16, "persistent", "workspace", 6, "gfx942"},
+    };
+    const int i = idx - 21;
+    spec->dtype_a = cfgs[i].dt_ab;
+    spec->dtype_b = cfgs[i].dt_ab;
+    spec->dtype_d = cfgs[i].dt_d;
+    spec->warp_tile_m = cfgs[i].edge;
+    spec->warp_tile_n = cfgs[i].edge;
+    spec->streamk = cfgs[i].mode;
+    spec->streamk_reduction = cfgs[i].reduction;
+    spec->streamk_ctas = cfgs[i].ctas;
+    *arch = cfgs[i].arch;
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    int base = pfa_base(idx);
+    if(base < 0)
+        return make_base_cfg(idx, spec, arch);
+    if(make_base_cfg(base, spec, arch) != 0)
+        return -1;
+    spec->prefetch_addr = true;
+    if(idx == 36)
+        spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
+    if(idx == 43)
+        spec->pipeline = "compv3";
+    if(idx == 48)
+    {
+        /* C = K = 3 on the 128x128x64 base: both operands load scalar, so
+         * more carried offsets than accumulators */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 3, 3, 3);
+    }
+    return 0;
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
     spec->tile_m = 64;
@@ -212,6 +296,63 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->epilogue = "default";
         spec->lds_k_outer = true;
         *arch = "gfx1250";
+        return 0;
+    case 18:
+        /* unroll_k under split-K: the double-buffered loop's odd-tail prefetch
+         * is redirected to wg_K so it cannot read the next slice's tile. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->unroll_k = true;
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* Split-K (degree chosen at launch) + two-stage scratch; odd wg_N = 27,
+         * which the packed 16-bit atomic cannot address. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 64, 3, 3);
+        spec->split_k = 2;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 20:
+        /* K-outer + async_dma + split-K=2, fp16 cshuffle atomic epilogue; 3 K
+         * tiles per slice, so phase B's prefetch takes the zero-fill redirect. */
+        spec->problem = rocke_conv_problem_default(10, 8, 8, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+    case 29:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        return streamk_cfg(idx, spec, arch);
+    case 26:
+        spec->problem = rocke_conv_problem_default(4, 28, 28, 96, 120, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 3;
+        return streamk_cfg(idx, spec, arch);
+    case 27:
+    case 28:
+        spec->problem = rocke_conv_problem_default(4, 28, 28, 64, 128, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 2;
+        return streamk_cfg(idx, spec, arch);
+    case 30:
+        spec->problem = rocke_conv_problem_default(4, 14, 14, 64, 96, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->problem.groups = 2;
+        streamk_cfg(26, spec, arch);
+        spec->streamk_ctas = 7;
+        spec->lds_k_outer = true;
         return 0;
     default:
         return -1;

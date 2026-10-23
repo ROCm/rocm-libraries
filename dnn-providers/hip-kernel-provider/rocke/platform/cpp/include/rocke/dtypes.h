@@ -28,6 +28,24 @@ extern "C" {
  * Mirrors core/dtypes.py::normalize_dtype (strip + lower + _DTYPE_ALIASES.get). */
 const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratch_cap);
 
+/* Borrowed immutable encoding descriptor, valid for the process lifetime. */
+typedef enum rocke_dtype_category
+{
+    ROCKE_DTYPE_FLOAT,
+    ROCKE_DTYPE_INTEGER,
+    ROCKE_DTYPE_PREDICATE
+} rocke_dtype_category_t;
+
+typedef struct rocke_dtype_info
+{
+    const char* name;
+    rocke_dtype_category_t category;
+    int encoded_bits;
+} rocke_dtype_info_t;
+
+/* NULL for unknown encodings. No architecture or operation support implied. */
+const rocke_dtype_info_t* rocke_dtype_info(const char* name);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

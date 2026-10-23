@@ -45,7 +45,6 @@ using WeiType                     = ck::half_t;
 using AccType                     = float;
 using OutType                     = ck::half_t;
 constexpr ck::index_t NDimSpatial = 2;
-constexpr ck::index_t BlockSize   = 64;
 constexpr bool RequirePadding     = false;
 constexpr bool FlipFilter         = true; // rot180 weights => dgrad via fwd kernel
 
@@ -55,6 +54,7 @@ constexpr bool FlipFilter         = true; // rot180 weights => dgrad via fwd ker
 // Generalized over filter size and padding; tuning mirrors the proven fwd stride-1
 // instances. Covers convnext (7x7) and efficientnet/mobilenet-style (3x3, 5x5) depthwise.
 template <typename DType,
+          ck::index_t BlockSize, // same as the wavefront size: 64 on CDNA, 32 on RDNA
           ck::index_t Filter,
           ck::index_t Pad,
           ck::index_t TileHW,
@@ -85,20 +85,59 @@ using DwBwd = ck::tensor_operation::device::DeviceGroupedConvFwd<
     FlipFilter>;
 
 template <typename DType>
-using DeviceConvBwdDataFactoryT = std::tuple<
+using DeviceConvBwdDataFactoryT64 = std::tuple<
     // 7x7 stride-1 pad-3 (convnext)
-    DwBwd<DType, 7, 3, 7, 32, 4, 4, 1, 1>,
-    DwBwd<DType, 7, 3, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 7, 3, 28, 32, 4, 4, 4, 4>,
-    DwBwd<DType, 7, 3, 56, 8, 7, 8, 8, 8>,
+    DwBwd<DType, 64, 7, 3, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 64, 7, 3, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 64, 7, 3, 28, 32, 4, 4, 4, 4>,
+    DwBwd<DType, 64, 7, 3, 56, 8, 7, 8, 8, 8>,
     // 3x3 stride-1 pad-1 (efficientnet/mobilenet)
-    DwBwd<DType, 3, 1, 7, 32, 4, 4, 1, 1>,
-    DwBwd<DType, 3, 1, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 3, 1, 56, 8, 7, 8, 8, 8>,
+    DwBwd<DType, 64, 3, 1, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 64, 3, 1, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 64, 3, 1, 28, 32, 4, 4, 4, 4>,
+    DwBwd<DType, 64, 3, 1, 56, 8, 7, 8, 8, 8>,
     // 5x5 stride-1 pad-2 (efficientnet/mobilenet)
-    DwBwd<DType, 5, 2, 7, 32, 4, 4, 1, 1>,
-    DwBwd<DType, 5, 2, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 5, 2, 28, 32, 4, 4, 4, 4>>;
+    DwBwd<DType, 64, 5, 2, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 64, 5, 2, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 64, 5, 2, 28, 32, 4, 4, 4, 4>>;
+
+// Wave32 (RDNA gfx10/gfx11/gfx12) counterparts of the instances above: same tiles with
+// BlockSize=32. As in the wave32 forward set (ck_depthwise_fwd_impl.cpp), the 28x28, 56x56 and
+// 112x112 tiles use wider subtiles so the subtile count fits in a 32-lane wavefront. The 3x3
+// 112x112 tile (EfficientNet/MobileNet first depthwise stage) mirrors the wave32 forward
+// instance; it has no wave64 dgrad counterpart yet.
+template <typename DType>
+using DeviceConvBwdDataFactoryT32 = std::tuple<
+    // 7x7 stride-1 pad-3 (convnext)
+    DwBwd<DType, 32, 7, 3, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 32, 7, 3, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 32, 7, 3, 28, 32, 3, 12, 4, 4>,
+    DwBwd<DType, 32, 7, 3, 56, 8, 7, 16, 8, 8>,
+    // 3x3 stride-1 pad-1 (efficientnet/mobilenet)
+    DwBwd<DType, 32, 3, 1, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 32, 3, 1, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 32, 3, 1, 28, 32, 3, 12, 4, 4>,
+    DwBwd<DType, 32, 3, 1, 56, 8, 7, 16, 8, 8>,
+    DwBwd<DType, 32, 3, 1, 112, 2, 7, 56, 8, 8>,
+    // 5x5 stride-1 pad-2 (efficientnet/mobilenet)
+    DwBwd<DType, 32, 5, 2, 7, 32, 4, 4, 1, 1>,
+    DwBwd<DType, 32, 5, 2, 14, 32, 4, 4, 2, 2>,
+    DwBwd<DType, 32, 5, 2, 28, 32, 3, 12, 4, 4>>;
+
+#ifndef MIOPEN_CK_DEPTHWISE_WAVE_SIZE
+// Fallback when the per-arch value is not provided by the build (wave64 default).
+// src/ck_impl/CMakeLists.txt sets this per target GPU.
+#define MIOPEN_CK_DEPTHWISE_WAVE_SIZE 64
+#endif
+
+#if MIOPEN_CK_DEPTHWISE_WAVE_SIZE == 32
+template <typename DType>
+using DeviceConvBwdDataFactoryT = DeviceConvBwdDataFactoryT32<DType>;
+#else
+template <typename DType>
+using DeviceConvBwdDataFactoryT = DeviceConvBwdDataFactoryT64<DType>;
+#endif
+
 using DeviceConvBwdDataFactory     = DeviceConvBwdDataFactoryT<ck::half_t>;
 using DeviceConvBwdDataFactoryBf16 = DeviceConvBwdDataFactoryT<ck::bhalf_t>;
 

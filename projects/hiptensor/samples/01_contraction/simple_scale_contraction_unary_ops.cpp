@@ -305,6 +305,7 @@ void scaleContractionSampleUnaryOps(void* alpha, hiptensorOperator_t opA, hipten
 #endif
 
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+    CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
     if(a_ms_ks)

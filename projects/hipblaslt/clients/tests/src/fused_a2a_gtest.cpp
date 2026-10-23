@@ -244,7 +244,7 @@ namespace
 
     TEST_F(FusedA2ABuilder_pre_checkin, CompletionModeAcceptsInKernelOnly)
     {
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
                       fused,
                       HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
@@ -352,89 +352,6 @@ namespace
     {
         completeForOneRank();
         EXPECT_EQ(attach(), HIPBLAS_STATUS_SUCCESS);
-    }
-
-    TEST_F(FusedA2AAttach_pre_checkin, AttachRejectsMissingExtent)
-    {
-        void* recv = reinterpret_cast<void*>(0x1000);
-        ASSERT_EQ(
-            hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
-            HIPBLAS_STATUS_SUCCESS);
-        hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      &queue,
-                      sizeof(queue)),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        EXPECT_EQ(attach(), HIPBLAS_STATUS_INVALID_VALUE);
-    }
-
-    TEST_F(FusedA2AAttach_pre_checkin, AttachRejectsMissingRecvPointers)
-    {
-        const int64_t am = 512;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                  HIPBLAS_STATUS_SUCCESS);
-        hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      &queue,
-                      sizeof(queue)),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        EXPECT_EQ(attach(), HIPBLAS_STATUS_INVALID_VALUE);
-    }
-
-    TEST_F(FusedA2AAttach_pre_checkin, AttachRejectsMissingQueues)
-    {
-        const int64_t am = 512;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                  HIPBLAS_STATUS_SUCCESS);
-        void* recv = reinterpret_cast<void*>(0x1000);
-        ASSERT_EQ(
-            hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
-            HIPBLAS_STATUS_SUCCESS);
-
-        EXPECT_EQ(attach(), HIPBLAS_STATUS_INVALID_VALUE);
-    }
-
-    TEST_F(FusedA2AAttach_pre_checkin, AttachRejectsNullPeerEntry)
-    {
-        completeForOneRank();
-        void* recv[2] = {reinterpret_cast<void*>(0x1000), nullptr};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, recv, sizeof(recv)),
-                  HIPBLAS_STATUS_SUCCESS);
-        hipblasLtSdmaQueue_t queues[2] = {fakeQueue(0x2000), fakeQueue(0x3000)};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      queues,
-                      sizeof(queues)),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        EXPECT_EQ(attach(), HIPBLAS_STATUS_INVALID_VALUE);
-    }
-
-    TEST_F(FusedA2AAttach_pre_checkin, AttachRejectsIncompleteQueueEntry)
-    {
-        completeForOneRank();
-        hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-        queue.doorbell             = nullptr;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      &queue,
-                      sizeof(queue)),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        EXPECT_EQ(attach(), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2AAttach_pre_checkin, AttachedDescriptorReadsBack)
@@ -761,14 +678,63 @@ namespace
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
     };
 
-    // The distinction the whole error table turns on: a request that is merely
-    // unserved by this release reports missing capability, not a bad shape.
-    TEST_F(FusedA2ADispatch_pre_checkin, WellFormedRequestReportsMissingCapability)
+    TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)
+    {
+        registerOneRank();
+        void* recv = reinterpret_cast<void*>(0x1000);
+        ASSERT_EQ(
+            hipblasLtFusedEpilogueSetAttribute(
+                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
+            HIPBLAS_STATUS_SUCCESS);
+        hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
+        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused,
+                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
+                      &queue,
+                      sizeof(queue)),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(matmulDesc,
+                                                  HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
+                                                  &fused,
+                                                  sizeof(fused)),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeD();
+
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // One entry, matching world, so the length check is not what rejects these two.
+    TEST_F(FusedA2ADispatch_pre_checkin, RejectsNullPeerEntry)
     {
         registerOneRank();
         completeAndAttach();
         makeD();
-        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        void* recv = nullptr;
+        ASSERT_EQ(
+            hipblasLtFusedEpilogueSetAttribute(
+                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, RejectsIncompleteQueueEntry)
+    {
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
+        queue.doorbell             = nullptr;
+        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused,
+                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
+                      &queue,
+                      sizeof(queue)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)

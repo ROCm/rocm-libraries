@@ -158,8 +158,8 @@ namespace TensileLite
             return m_fallbackStatus;
         }
 
-        // StreamK=5 hybrid-mode toggle. Forwarded by the host into
-        // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
+        // Hybrid assignment toggle, read by the host when selecting work
+        // assignment at solve time. Values:
         //   0 = OFF  (default; SK3 static unless smCountTarget() > 0, then
         //             the origami hybrid heuristic runs like AUTO),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),
@@ -189,12 +189,6 @@ namespace TensileLite
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
-            const bool preciseSMTarget = Debug::Instance().usePreciseSMTarget();
-            // Round down to multiple of 32 if not precise SM target
-            if(!preciseSMTarget)
-            {
-                m_smCountTarget = (m_smCountTarget / 32) * 32;
-            }
         }
 
         int smCountTarget() const
@@ -370,6 +364,8 @@ namespace TensileLite
             MXSA          = 15,
             MXSB          = 16,
             GATE_RESIDUAL = 17,
+            // Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
+            SCALEZEROA    = 18,
             TENSOR_COUNT
         };
 
@@ -797,6 +793,73 @@ namespace TensileLite
             m_useScaleAB = useScaleAB;
         }
 
+        /// Shape SCALEA as [rows][kGroups], where rows=M and kGroups=ceil(K/blockSize).
+        void setW4A16ScaleBlockSizeA(int              blockSize,
+                                    rocisa::DataType scaleType,
+                                    size_t           rows,
+                                    size_t           kGroups,
+                                    bool             zeroPoint = false)
+        {
+            m_scaleBlockSizeA  = blockSize;
+            m_scaleZeroPointA  = blockSize ? zeroPoint : false;
+            if(blockSize)
+            {
+                m_scaleAType = scaleType;
+                m_tensors[ContractionProblemGemm::TENSOR::SCALEA]
+                    = {"scaleA", scaleType, {kGroups, rows}, {1, kGroups}};
+
+                if(zeroPoint)
+                {
+                    // Eight output rows per uint32 word, with K-groups contiguous.
+                    // Word (m/8)*kGroups+g holds m in bits 4*(m%8)..4*(m%8)+3.
+                    size_t zeroBytes = CeilDivide<size_t>(rows, 8) * kGroups * 4;
+                    m_tensors[ContractionProblemGemm::TENSOR::SCALEZEROA]
+                        = {"scaleZeroA", rocisa::DataType::Int8, {zeroBytes}, {1}};
+                }
+            }
+        }
+
+        /// Int4 weight encoding of A.
+        enum class Int4Encoding : int
+        {
+            /// Two's-complement int4 in [-8, 7], nibbles in K order.
+            Signed = 0,
+            /// Unsigned int4 in K order; implicit zero-point 8 without a zero-point tensor.
+            UnsignedBias8 = 1,
+        };
+
+        friend std::ostream& operator<<(std::ostream& stream, Int4Encoding encoding)
+        {
+            switch(encoding)
+            {
+            case Int4Encoding::Signed:
+                return stream << "Signed";
+            case Int4Encoding::UnsignedBias8:
+                return stream << "UnsignedBias8";
+            }
+            return stream << "Invalid(" << static_cast<int>(encoding) << ")";
+        }
+
+        void setInt4EncodingA(Int4Encoding encoding)
+        {
+            m_int4EncodingA = encoding;
+        }
+
+        Int4Encoding int4EncodingA() const
+        {
+            return m_int4EncodingA;
+        }
+
+        int scaleBlockSizeA() const
+        {
+            return m_scaleBlockSizeA;
+        }
+
+        bool scaleZeroPointA() const
+        {
+            return m_scaleZeroPointA;
+        }
+
         void setUseScaleCD(bool useScaleCD)
         {
             m_useScaleCD = useScaleCD;
@@ -933,6 +996,9 @@ namespace TensileLite
 
         void setScaleA(rocisa::DataType type, size_t length)
         {
+            // Preserve the group-scale descriptor set by setW4A16ScaleBlockSizeA.
+            if(m_scaleBlockSizeA)
+                return;
             m_scaleAType = type;
             if(type != rocisa::DataType::None && !m_useScaleAB.empty())
             {
@@ -1540,6 +1606,9 @@ namespace TensileLite
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
         int              m_useScaleAlphaVec        = 0;
+        int              m_scaleBlockSizeA         = 0;
+        bool             m_scaleZeroPointA         = false;
+        Int4Encoding     m_int4EncodingA           = Int4Encoding::Signed;
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
@@ -1685,6 +1754,7 @@ namespace TensileLite
         void const* scaleC        = nullptr;
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
+        void const* scaleZeroA    = nullptr;
         void const* mxsa          = nullptr;
         void const* mxsb          = nullptr;
 

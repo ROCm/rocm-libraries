@@ -87,6 +87,7 @@ target_sources(
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_kernels.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_strided_batched.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_batched_kernels.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv_kernels.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv_batched.cpp

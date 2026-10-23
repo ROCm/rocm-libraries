@@ -16,10 +16,10 @@ Record at least:
   "slice_id": "utilities",
   "source_sha": "<full git SHA>",
   "only_mutate": [
-    "Tensile/Common/Utilities.py"
+    "tensilelite/Common/Utilities.py"
   ],
   "test_selection": [
-    "Tensile/Tests/unit/characterization/CommonUtilities"
+    "tensilelite/Tests/unit/characterization/CommonUtilities"
   ],
   "container": "tl-mut",
   "source_root": "projects/hipblaslt/tensilelite",

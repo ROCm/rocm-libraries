@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 add_subdirectory(src)
+add_subdirectory(unit)
 
 set(HIPBLASLT_TEST_DATA "${CMAKE_CURRENT_BINARY_DIR}/../hipblaslt_gtest.data")
 

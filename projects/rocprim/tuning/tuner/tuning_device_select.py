@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import List, Optional, OrderedDict, Callable
+from typing import List, Optional, OrderedDict, Callable, Dict, Any
 import sys
 
 sys.path.append("../")
@@ -33,19 +33,17 @@ class TunerSelect(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        element_size = TYPE_CONFIGS[key_type].size
+        element_size = TYPE_CONFIGS[types["data_type"]].size if "data_type" in types else TYPE_CONFIGS[types["key_type"]].size 
         max_items = min(64 // element_size, 32)
         params["block_size_x"] = list(range(128, 513, 64))
         params["ipt"] = list(range(4, max_items + 1, 1))
         return params
 
-    def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
 
         # No constraints needed al handled in the parameters.
@@ -54,6 +52,4 @@ class TunerSelect(BaseTuner):
 
         return validate
 
-    def _get_key_type_name(self) -> str:
-        return "data_type"
 

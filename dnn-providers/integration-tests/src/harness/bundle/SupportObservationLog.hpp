@@ -35,8 +35,8 @@ struct ObservedGraphSupport
 
     // The engine was in the ranked list for this graph. False means the engine
     // resolved and declined -- it does not mean "we could not tell". The writer
-    // reads false as "erase this claim", so recording an unknown as false
-    // deletes a true claim; see the log's precondition below.
+    // records true and ignores false, so recording an unknown as true authors a
+    // claim nothing stands behind; see the log's precondition below.
     bool engineIsSupported = false;
 };
 
@@ -46,7 +46,7 @@ struct ObservedGraphSupport
 //
 // Precondition on every recorded observation: the query that produced it resolved (OK
 // or GRAPH_NOT_SUPPORTED). An unresolved query is not an observation of
-// "unsupported" and must never null an existing claim. The type cannot express
+// "supported" and must never author a claim. The type cannot express
 // this -- the guard is the early return in
 // IntegrationBundleVerificationHarness::observeSupportOnly(), which is the only
 // production source of the vectors passed to recordGraph().

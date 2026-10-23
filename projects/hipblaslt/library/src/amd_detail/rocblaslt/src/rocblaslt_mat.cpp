@@ -25,8 +25,10 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 #include <array>
@@ -249,12 +251,29 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
-    problem.streamKFlags = streamKFlags;
+    problem.streamKFlags  = streamKFlags;
+    problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle->device_comm_world;
+    problem.fused_a2a_rank      = handle->device_comm_rank;
+    problem.fused_a2a_peer_flag = handle->device_comm_peer_flags;
+
+    if(auto gate = validate_fused_a2a(handle, problem); gate != rocblaslt_status_success)
+        return gate;
+
+    if(fused_a2a_lacks_sdma_queues(problem))
+        return rocblaslt_status_invalid_value;
+#endif
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
     if(st == rocblaslt_status_success)
     {
+        // No-op unless HIPBLASLT_CHECK_SYNCHRONIZER is set.
+        hipblaslt_check_synchronizer_scan(handle, stream, "rocblaslt_matmul_impl");
+
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
         if(call_id != 0)
         {
@@ -447,6 +466,22 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
+    problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
+
+    // The all-to-all stage is available through hipblasLtMatmul only.
+    RocblasltFusedEpilogueInfo fused_info;
+    if(rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, fused_info)
+       && fused_info.hasA2APrefix)
+    {
+        log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
+        return rocblaslt_status_invalid_value;
+    }
+#endif
+
+
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -547,6 +582,10 @@ rocblaslt_status
                                             matmul_descr[i]->compute_type,
                                             matmul_descr[i]->op_A,
                                             matmul_descr[i]->op_B,
+                                            lda,
+                                            ldb,
+                                            ldc,
+                                            ldd,
                                             num_batches_a,
                                             num_batches_b,
                                             num_batches_c,
@@ -591,6 +630,14 @@ rocblaslt_status
                                                       bias_type,
                                                       scaleAlphaVec,
                                                       gradient);
+        if(validArgs == rocblaslt_status_continue)
+            validArgs = validateW4A16Args(matA[i]->type,
+                                          matB[i]->type,
+                                          matmul_descr[i]->scaleAType,
+                                          matmul_descr[i]->scaleA,
+                                          num_batches_a,
+                                          num_rows_a,
+                                          lda);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 
@@ -750,6 +797,7 @@ rocblaslt_status
                                         matmul_descr[i]->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr[i], nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr[i])});
+        problems.back().int4EncodingA = matmul_descr[i]->int4_encoding_a_ext;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -798,6 +846,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         log_error(__func__, "invalid workspace pointer");
         return rocblaslt_status_invalid_pointer;
     }
+    workspaceSizeInBytes = clampWorkspaceSize(__func__, workspaceSizeInBytes);
 
     if(matC->type != matD->type)
     {
@@ -970,6 +1019,10 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                      compute_type,
                                      opA,
                                      opB,
+                                     lda,
+                                     ldb,
+                                     ldc,
+                                     ldd,
                                      b,
                                      b,
                                      b,
@@ -978,6 +1031,17 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                      batch_stride_b,
                                      batch_stride_c,
                                      batch_stride_d);
+
+    // Bypasses rocblaslt_matmul_valid_args; apply the w4a16 checks here.
+    if(status == rocblaslt_status_continue)
+        status = validateW4A16Args(
+            type_a,
+            type_b,
+            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_a_type),
+            inputs.scaleA,
+            b,
+            opA == HIPBLAS_OP_N ? m : k,
+            lda);
 
     void *      bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
     int64_t     lde = 0, batch_stride_e = 0;
@@ -1100,6 +1164,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         0, // streamk_tile_scheduling_ext: OFF (matches struct default)
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
+    problem.int4EncodingA = problemtype.int4_encoding_a;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1218,6 +1283,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     hipDataType            type_d       = problemtype[0].type_d;
     hipblasLtOrder_t       orderA       = problemtype[0].order_a;
     hipblasLtOrder_t       orderB       = problemtype[0].order_b;
+    int32_t                int4EncA     = problemtype[0].int4_encoding_a;
 
     std::vector<const void*>        A_vec, B_vec, C_vec, alpha_vec, beta_vec;
     std::vector<void*>              D_vec, E_vec, amaxD_vec;
@@ -1255,6 +1321,10 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                             compute_type,
                                             opA,
                                             opB,
+                                            lda[i],
+                                            ldb[i],
+                                            ldc[i],
+                                            ldd[i],
                                             b[i],
                                             b[i],
                                             b[i],
@@ -1305,6 +1375,16 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                 scaleAlphaVec,
                 gradient);
         }
+        // Bypasses rocblaslt_matmul_valid_args; apply the w4a16 checks here.
+        if(validArgs == rocblaslt_status_continue)
+            validArgs = validateW4A16Args(type_a,
+                                          type_b,
+                                          static_cast<RocblasltContractionProblem::ScalingFormat>(
+                                              rocEpilogue[iIdx].scaling_a_type),
+                                          inputs[i].scaleA,
+                                          b[i],
+                                          opA == HIPBLAS_OP_N ? m[i] : k[i],
+                                          lda[i]);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 
@@ -1431,6 +1511,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         0, // streamk_tile_scheduling_ext: OFF (matches struct default)
                                         effective_sm_count_target(handle, nullptr, nullptr),
                                         effective_uniform_summation_order(handle, nullptr)});
+        problems.back().int4EncodingA = int4EncA;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1588,7 +1669,7 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                         algo,
                         tuning,
                         workspace,
-                        workspaceSizeInBytes,
+                        clampWorkspaceSize(__func__, workspaceSizeInBytes),
                         useUserArgs,
                         stream,
                         gemmData);

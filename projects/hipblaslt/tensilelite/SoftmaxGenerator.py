@@ -38,13 +38,14 @@ import json
 from contextlib import contextmanager
 import os.path
 
-from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
-from Tensile.Common.RegisterPool import allocTmpGpr
-from Tensile.Common.Types import IsaVersion
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Common.Utilities import _global_ti
+from tensilelite.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
+from tensilelite.Common.RegisterPool import allocTmpGpr
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
     @wraps(f)
@@ -644,7 +645,7 @@ def kernel_rodata(name: str, gfx_arch: Tuple[int, int, int]):
         header += f'.amdhsa_accum_offset 8\n'
     header += f'.amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n'
     header += f'.amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n'
-    if _global_ti.getArchCaps()["HasWave32"]:
+    if _global_ti.getArchCaps()["HasWavefrontSize32Directive"]:
         header += f'.amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     return header
@@ -733,11 +734,21 @@ if __name__ == '__main__':
 
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
-        assignGlobalParameters({})
         enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
-        isa = detectGlobalCurrentISA(0, enumerator)
-        arch = isaToGfx(isa)
+        # `arch` is the compile target for this kernel, so it has to be the name
+        # the device reported: gfx1250 and gfx1250-strict share an ISA, and
+        # deriving the name back from it would build for gfx1250 on either --
+        # code the strict device then refuses to load.
+        arch = detectGlobalCurrentArch(0, enumerator)
+        isa = gfxToIsa(arch)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
+        # Capabilities can only be built once the ISA is known, which is why this
+        # follows detection instead of preceding it. The overrides are what
+        # separate two architectures sharing an ISA, so a detected stepping is
+        # only actually honoured here.
+        isaInfoMap = makeIsaInfoMap([isa], toolchain_path)
+        applyArchCapOverrides(isaInfoMap, [arch])
+        assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
     waveFrontSize = 32 if isa[0] in [11, 12] else 64

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@
 #include "unit.hpp"
 
 #include "client_utility.hpp"
+
+#include <vector>
 
 #include "../../library/src/include/check_numerics_matrix.hpp"
 #include "../../library/src/include/check_numerics_vector.hpp"
@@ -298,6 +300,58 @@ namespace
             rocblas_simple_dispatch<helper_utilities_testing>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(helper_utilities);
+
+    //
+    // version and commit-hash string queries
+
+    template <typename SizeFn, typename CopyFn>
+    void expect_get_string_rejects_short_buffer(SizeFn size_fn, CopyFn copy_fn)
+    {
+        size_t size = 0;
+        EXPECT_ROCBLAS_STATUS(size_fn(&size), rocblas_status_success);
+        ASSERT_GT(size, 1u);
+
+        std::vector<char> buf(size - 1, 'x');
+        std::vector<char> before = buf;
+        EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), rocblas_status_invalid_size);
+        EXPECT_EQ(before, buf);
+    }
+
+    template <typename...>
+    struct testing_get_string : rocblas_test_valid
+    {
+        void operator()(const Arguments&)
+        {
+            expect_get_string_rejects_short_buffer(rocblas_get_version_string_size,
+                                                   rocblas_get_version_string);
+            expect_get_string_rejects_short_buffer(rocblas_get_commit_hash_string_size,
+                                                   rocblas_get_commit_hash_string);
+        }
+    };
+
+    struct get_string : RocBLAS_Test<get_string, testing_get_string>
+    {
+        static bool type_filter(const Arguments&)
+        {
+            return true;
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "get_string");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return RocBLAS_TestName<get_string>(arg.name);
+        }
+    };
+
+    TEST_P(get_string, auxiliary)
+    {
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_get_string<>{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(get_string);
 
     //
     // check numerics

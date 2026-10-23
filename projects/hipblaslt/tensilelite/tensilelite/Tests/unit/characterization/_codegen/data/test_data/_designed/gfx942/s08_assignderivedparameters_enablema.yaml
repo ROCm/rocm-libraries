@@ -1,0 +1,65 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S08 assignDerivedParameters EnableMatrixInstruction validation & type/MI
+# reject cluster in Tensile/SolutionStructs/Solution.py (mode=derive).
+#
+# Target lines (probe-confirmed 4/4): 1968, 1970, 2015, 2016.
+#
+# DGEMM (double) TN, MI fork -> two currently-missing reject sites:
+#   Variant 1: MI [16,16,4,1,1,1,1,3,1]  (valid f64 MFMA shape 16x16x4)
+#     -> mi[7]=3 => waves=3 => MIWaveGroup=[3,1]; 3 is non-power-of-two, so the
+#        LraTileAssignment vectorStaticRemainder pow2 guard fires -> 1968/1970.
+#   Variant 2: MI [4,4,4,4,1,1,1,1,1] + ScheduleIterAlg=3
+#     -> ComputeDataType double && MatrixInstruction==[4,4,4,4]
+#        && ISA (9,4,x) != IsaVersion(9,0,10) && _ScheduleIterAlg==3
+#        -> "[4,4,4,4] is disabled" reject -> 2015/2016.
+#
+# Both rejects live inside Solution.assignDerivedParameters AFTER the earlier
+# validateMIParameters gate (both MI4 shapes are valid f64 MFMA, so they pass
+# that gate and reach the cluster). Each fork permutation is an independent
+# Solution, so each trips exactly its own first reject (early-return). All forks
+# reject -> 0 valid solutions survive (reachable-invalid, category A).
+#
+# Arch: gfx942 (HasMFMA + HasMFMA_f64; most stable CPU-emit derive target).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # DGEMM double TN: MI fork -> 1968 (non-pow2 MIWaveGroup) + 2015 ([4,4,4,4])
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      ComputeDataType: d
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 3, 1]
+          - [4, 4, 4, 4, 1, 1, 1, 1, 1]
+        - DepthU: [16]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1]
+        - SourceSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

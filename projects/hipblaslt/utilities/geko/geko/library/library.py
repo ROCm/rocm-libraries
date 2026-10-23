@@ -43,7 +43,8 @@ from pathlib import Path
 from typing import List, Tuple, Iterator
 
 from geko import bench
-from geko.constants import INDEX_TYPE_MAP
+from geko.constants import INDEX_TYPE_MAP, MX_SCALE_DATATYPE_ENUM
+from geko.config_generator.constants import mx_scale_code
 from geko.concurrency import parallel_for
 
 __all__ = ["Library", "LibraryCollection"]
@@ -147,6 +148,32 @@ class Library:
         if isinstance(self.data[2], dict):
             return self.data[2].get("Architecture")
         return self.data[2]
+
+    @property
+    def schedule(self) -> str:
+        """Get the ``--architecture`` value TensileCreateLibrary needs for this library.
+
+        TensileCreateLibrary selects logic files by their architecture, so that is
+        the value. ScheduleName can hold a codename instead (gfx942:
+        "aquavanjaram"), which ``--architecture`` rejects.
+
+        Returns:
+            str: The library's architecture, e.g. "gfx950" or "gfx1250-strict".
+
+        Raises:
+            ValueError: For gfx1250 A0 logic in the retired convention
+                (ScheduleName "gfx1250v0" over architecture "gfx1250"), which
+                TensileCreateLibrary would build into the gfx1250 (B0) library.
+        """
+        arch = self.arch
+        if self._get(1, "ScheduleName") == "gfx1250v0":
+            raise ValueError(
+                f"Library '{self.name}' is gfx1250 A0 logic in the retired gfx1250v0 convention "
+                f"(ScheduleName gfx1250v0, architecture {arch}). Set ScheduleName and "
+                "ArchitectureName to gfx1250-strict; as written it would be built into the "
+                "gfx1250 library."
+            )
+        return arch
 
     @property
     def problem(self) -> dict:
@@ -356,7 +383,7 @@ class Library:
         iters: int = 100,
         cold_iters: int = 100,
         rotating: int = 512,
-        beta: bool = True,
+        beta: bool = False,
         flush: bool = True,
         print_kernel_info: bool = True,
         initialization: str = "trig_float",
@@ -376,7 +403,7 @@ class Library:
             rotating (int, optional): Memory rotation parameter.
                 Defaults to 512.
             beta (bool, optional): Whether to use non-zero beta values.
-                Defaults to True.
+                Defaults to False.
             flush (bool, optional): Whether to flush GPU caches.
                 Defaults to True.
             print_kernel_info (bool, optional): Whether to print solution information.
@@ -447,6 +474,19 @@ class Library:
 
         if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 9:  # TF32
             common["math_mode"] = 1
+        
+        # A block-scaled problem must declare its scaling format or the client
+        # matches an unscaled kernel instead: fp4 finds none, fp8 finds the
+        # wrong one. The format encodes block size and scale type together.
+        # Unscaled problems carry MXBlock 0, so test the value, not the key.
+        for operand in ("A", "B"):
+            block = self.problem.get(f"MXBlock{operand}")
+            if not block:
+                continue
+            scale_enum = self.problem.get(f"DataTypeMXS{operand}", 22)
+            if scale_enum not in MX_SCALE_DATATYPE_ENUM:
+                raise ValueError(f"Unsupported MX scale DataType {scale_enum} for operand {operand}")
+            common[f"scale{operand}"] = mx_scale_code(self.arch, (block, MX_SCALE_DATATYPE_ENUM[scale_enum]))
 
         gemms = []
         latency = []

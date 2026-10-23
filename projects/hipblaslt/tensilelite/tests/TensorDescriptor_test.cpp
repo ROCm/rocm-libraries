@@ -18,14 +18,6 @@
 //     N/4 bytes for N Float4 elements instead of the correct N/2.
 //
 // All tests are pure CPU and do not require a GPU.
-//
-// Float6/BFloat6/Float4 are registered via TypeInfo<Float[*]x[*]> when the
-// TENSILE_USE_FP6 / TENSILE_USE_BF6 / TENSILE_USE_FP4 macros are defined
-// (see tensilelite/src/DataTypes.cpp registerAllTypeInfo). When those macros
-// are off (e.g. on Windows) the same enums are still registered with the
-// equivalent elementSize / packing via registerThinOcpFpTypesWhenNoExtOcp's
-// addIfMissing fallback, so the per-element-bytes assertions below hold
-// unconditionally.
 
 namespace
 {
@@ -70,18 +62,15 @@ TEST(TensorDescriptor, ElementBytes_Float8)
 
 TEST(TensorDescriptor, ElementBytes_Float4)
 {
-    // Float4 (registered as Float4x2 when TENSILE_USE_FP4 is defined, or via
-    // addIfMissing otherwise) has packing == 2 and per-element size 0.5 byte.
+    // Float4 has per-element size 0.5 byte.
     // Pick 64x128 = 8192 elements, divisible by packing == 2.
     expectElementAndTotalBytes(rocisa::DataType::Float4, 0.5f, 64, 128);
 }
 
 TEST(TensorDescriptor, ElementBytes_Float6)
 {
-    // Float6: per-element size 0.75 byte. With TENSILE_USE_FP6 the type is
-    // registered as Float6x32 (packing == 32); without TENSILE_USE_FP6 the
-    // addIfMissing fallback registers it with packing == 16. 64x128 = 8192
-    // elements is divisible by both.
+    // Float6 has per-element size 0.75 byte. 64x128 = 8192 elements is
+    // divisible by the Float6x32 packing of 32.
     expectElementAndTotalBytes(rocisa::DataType::Float6, 0.75f, 64, 128);
 }
 

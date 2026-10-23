@@ -819,4 +819,208 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex);
-void testing_csrgemm_extra(const Arguments& arg) {}
+
+//
+// Regression test for AISPARSE-675: the csrgemm row-compute kernels derive the
+// output row from the block index as `hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid`.
+// That product was evaluated in 32-bit unsigned arithmetic and wrapped at
+// 4,294,967,296 regardless of the (wider) index type J. For the diagonal
+// operands below every C row has a single intermediate product, so all rows land
+// in the smallest bucket, which launches `csrgemm_(numeric|symbolic)_fill_wf_per_row`
+// with BLOCKSIZE = 256 and WFSIZE = 8 and grid.x sized directly from the row
+// count. The row therefore wraps at 2^32 / WFSIZE = 4,294,967,296 / 8 =
+// 536,870,912. Any row past that boundary was silently misread before the fix,
+// producing wrong (or missing) C entries; after the fix it is computed correctly.
+//
+// This exercises a single bucket with more than 536,870,912 rows, so it needs
+// tens of GB of host + device memory and is therefore a nightly, memory-guarded
+// test that auto-skips on smaller cards.
+//
+void testing_csrgemm_extra_675(const Arguments& arg)
+{
+    if(!arg.unit_check)
+    {
+        return;
+    }
+
+    // Row where the pre-fix 32-bit block-index product wraps for the wf-per-row
+    // kernel used by the smallest bucket (2^32 / WFSIZE, WFSIZE == 8).
+    static constexpr rocsparse_int wrap_row = 536870912;
+
+    // Size the problem so that at least one full block of rows is computed past
+    // the wrap boundary, and probe a row that lives beyond it.
+    const rocsparse_int M         = wrap_row + 16000000; // ~552.9M rows
+    const rocsparse_int probe_row = wrap_row + 4000000; //  ~540.9M, past the wrap
+
+    const rocsparse_index_base base   = rocsparse_index_base_zero;
+    const rocsparse_operation  transA = rocsparse_operation_none;
+    const rocsparse_operation  transB = rocsparse_operation_none;
+
+    // C = alpha * A * B with A == identity and B == 2 * identity, so C == 2 * identity.
+    // A misread row reads/writes the wrong location, so the probe row is only
+    // correct (single nnz, column == probe_row, value == 2) once the fix is in.
+    using T                   = float;
+    static constexpr T a_diag = static_cast<T>(1);
+    static constexpr T b_diag = static_cast<T>(2);
+    host_scalar<T>     h_alpha(static_cast<T>(1));
+
+    // Build the two diagonal operands on the host.
+    host_csr_matrix<T> h_A, h_B;
+    h_A.define(M, M, M, base);
+    h_B.define(M, M, M, base);
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        h_A.ptr[i] = i;
+        h_A.ind[i] = i;
+        h_A.val[i] = a_diag;
+
+        h_B.ptr[i] = i;
+        h_B.ind[i] = i;
+        h_B.val[i] = b_diag;
+    }
+    h_A.ptr[M] = M;
+    h_B.ptr[M] = M;
+
+    // Unused D operand (mult-only scenario).
+    host_csr_matrix<T> h_D;
+
+    // Move to device.
+    device_csr_matrix<T> d_A(h_A), d_B(h_B), d_C, d_D(h_D);
+    d_C.define(M, M, 0, base);
+
+    rocsparse_local_handle handle;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+    rocsparse_local_mat_descr descrA, descrB, descrC, descrD;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrA, base));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrB, base));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrC, base));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrD, base));
+
+    rocsparse_local_mat_info info;
+
+    const T* beta = (const T*)nullptr;
+
+    // Query buffer size.
+    size_t buffer_size;
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrgemm_buffer_size<T>(handle,
+                                                           transA,
+                                                           transB,
+                                                           M,
+                                                           M,
+                                                           M,
+                                                           h_alpha,
+                                                           descrA,
+                                                           d_A.nnz,
+                                                           d_A.ptr,
+                                                           d_A.ind,
+                                                           descrB,
+                                                           d_B.nnz,
+                                                           d_B.ptr,
+                                                           d_B.ind,
+                                                           beta,
+                                                           descrD,
+                                                           d_D.nnz,
+                                                           d_D.ptr,
+                                                           d_D.ind,
+                                                           info,
+                                                           &buffer_size));
+
+    void* dbuffer = nullptr;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+    // Symbolic phase: compute the number of non-zeros and the C row pointers.
+    rocsparse_int out_nnz;
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrgemm_nnz(handle,
+                                                transA,
+                                                transB,
+                                                M,
+                                                M,
+                                                M,
+                                                descrA,
+                                                d_A.nnz,
+                                                d_A.ptr,
+                                                d_A.ind,
+                                                descrB,
+                                                d_B.nnz,
+                                                d_B.ptr,
+                                                d_B.ind,
+                                                descrD,
+                                                d_D.nnz,
+                                                d_D.ptr,
+                                                d_D.ind,
+                                                descrC,
+                                                d_C.ptr,
+                                                &out_nnz,
+                                                info,
+                                                dbuffer));
+
+    // C is diagonal, so it must have exactly one non-zero per row.
+    unit_check_scalar<rocsparse_int>(M, out_nnz);
+
+    d_C.define(M, M, out_nnz, base);
+
+    // Numeric phase: fill the C column indices and values.
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrgemm<T>(handle,
+                                               transA,
+                                               transB,
+                                               M,
+                                               M,
+                                               M,
+                                               h_alpha,
+                                               descrA,
+                                               d_A.nnz,
+                                               d_A.val,
+                                               d_A.ptr,
+                                               d_A.ind,
+                                               descrB,
+                                               d_B.nnz,
+                                               d_B.val,
+                                               d_B.ptr,
+                                               d_B.ind,
+                                               beta,
+                                               descrD,
+                                               d_D.nnz,
+                                               d_D.val,
+                                               d_D.ptr,
+                                               d_D.ind,
+                                               descrC,
+                                               d_C.val,
+                                               d_C.ptr,
+                                               d_C.ind,
+                                               info,
+                                               dbuffer));
+
+    // Read back the probe row of C and check it is the expected diagonal entry.
+    // Before the fix the wrapped block index misreads this row (past 536,870,912),
+    // so it has the wrong non-zero count / column / value.
+    const rocsparse_int* d_ptr_C = (const rocsparse_int*)d_C.ptr;
+    rocsparse_int        h_ptr_probe[2];
+    CHECK_HIP_ERROR(hipMemcpy(
+        h_ptr_probe, d_ptr_C + probe_row, sizeof(rocsparse_int) * 2, hipMemcpyDeviceToHost));
+
+    // Exactly one non-zero on the probe row.
+    unit_check_scalar<rocsparse_int>(1, h_ptr_probe[1] - h_ptr_probe[0]);
+
+    const rocsparse_int probe_offset = h_ptr_probe[0] - base;
+
+    rocsparse_int probe_col;
+    T             probe_val;
+    CHECK_HIP_ERROR(hipMemcpy(&probe_col,
+                              ((const rocsparse_int*)d_C.ind) + probe_offset,
+                              sizeof(rocsparse_int),
+                              hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(
+        &probe_val, ((const T*)d_C.val) + probe_offset, sizeof(T), hipMemcpyDeviceToHost));
+
+    // Diagonal column and value at the probe row.
+    unit_check_scalar<rocsparse_int>(probe_row + base, probe_col);
+    unit_check_scalar<T>(*h_alpha * a_diag * b_diag, probe_val);
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+}
+
+void testing_csrgemm_extra(const Arguments& arg)
+{
+    testing_csrgemm_extra_675(arg);
+}

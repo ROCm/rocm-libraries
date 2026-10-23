@@ -158,6 +158,10 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
+    // Off here, on at the command line: main.cpp resolves --enforce-support-claims
+    // (default true) and its opt-out into this field before initializing. In-process
+    // callers get the inert value, so a test that never mentions claims cannot be
+    // failed by one.
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
 };
@@ -457,6 +461,9 @@ public:
         return _validatorDevice.value_or(ValidatorDevice::AUTO);
     }
 
+    /// Query every claim-bearing bundle against the engine under test, print the
+    /// summary, and fail the test on a broken claim. One flag for all three: whether
+    /// the sidecar is read and whether a break is fatal are the same decision.
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();

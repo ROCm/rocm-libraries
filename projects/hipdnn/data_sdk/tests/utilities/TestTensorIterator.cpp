@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -467,7 +468,7 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
-    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 
@@ -488,12 +489,36 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
     EXPECT_EQ(count, 20);
 }
 
+TEST(TestTypeErasedIteratorRagged, RaggedCompositeIndexKeepsLegacyPublicMembers)
+{
+    using Index = ITensorIterator<false>::RaggedCompositeIndex;
+    static_assert(std::is_same_v<decltype(Index::indices), std::vector<int64_t>>);
+    static_assert(std::is_same_v<decltype(Index::rowOffsets), std::vector<int64_t>>);
+    static_assert(std::is_same_v<decltype(Index::tensor), ITensorIterator<false>::TensorType>);
+    static_assert(std::is_same_v<decltype(Index::seqAxis), int>);
+    static_assert(std::is_same_v<decltype(Index::seqStride), int64_t>);
+    static_assert(std::is_constructible_v<Index,
+                                          ITensorIterator<false>::TensorType,
+                                          RaggedIterationInfo,
+                                          bool>);
+
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
+    const auto info = tensor.raggedIterationInfo();
+    ASSERT_TRUE(info.has_value());
+
+    const auto index = std::get<Index>(tensor.begin().index());
+    EXPECT_EQ(index.rowOffsets, info->rowOffsets);
+    EXPECT_EQ(index.seqAxis, info->seqAxis);
+    EXPECT_EQ(index.seqStride, info->seqStride);
+}
+
 TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
 {
     // Same geometry, over a borrowed buffer.
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 

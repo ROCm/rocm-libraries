@@ -14,10 +14,10 @@ Use the generator venv and absolute paths, independent of the current directory:
 <PY> <GEN>/tools/sweep.py --config <absolute-YAML>
 ```
 
-`<PY>` is `<GEN>/.venv/bin/python`. Start from
-`configs/sweep-isolation.sweep.yaml.example` and set paths, identities and counts from the
-actual experiment. The runner reads safe YAML as data: configuration is never executed,
-commands are argument lists, and there is no environment interpolation.
+`<PY>` is `<GEN>/.venv/bin/python`. Start from `configs/reduction.sweep.yaml.example` and
+set paths, identities and counts from the actual experiment. The runner reads safe YAML as
+data: configuration is never executed, commands are argument lists, and there is no
+environment interpolation.
 
 Prerequisites: the requested GPU on the execution host, a visible writable sweep root,
 readable graph corpora, each current installed provider arm, and a working benchmark
@@ -54,7 +54,7 @@ is also each child's cwd.
 | `corpus_dir` | Required existing corpus root; corpus entries still declare their paths explicitly |
 | `arch` | Required exact gfx architecture token |
 | `engine_ued_name` | Required exact installed UED engine name |
-| `engine_name` | Required exact identity in benchmark results, never a prefix or regex; installed baseline discovery must connect it to `engine_ued_name` |
+| `engine_name` | Required exact label of the `engine_ued_name` engine, never a prefix or regex: the UED name, or `engine_<hex ID>` with the ID unsigned or signed (see below); installed baseline discovery must connect it to `engine_ued_name` |
 | `corpora` | Nonempty ordered list of `{name, path, expected_graphs}`; explicit directory path and positive count covering every staged graph |
 | `arms` | Nonempty ordered list of `{name, install_tree, expected_descriptors}`; descriptor count is the positive total of all KDP `kernelDescriptors` entries in the installed tree |
 | `warmup_arm` | Required arm name or explicit `null`; comparative runs use the first/baseline arm |
@@ -89,18 +89,26 @@ correctness:
 probe_env: null
 ```
 
-Do not assume the benchmark uses the UED spelling: if discovery reports `engine_<id>`,
-record that exact identity in `engine_name` and retain its observed mapping to
-`engine_ued_name`. Another engine's timings never credit this engine. There is no benchmark
-engine-selection flag; targeted device proof comes from the installed engine-pinned
-integration registration.
+Get the engine's ID from the installed tree, not from benchmark output:
+`LD_LIBRARY_PATH=<install>/lib <install>/bin/hipdnn_list_engines --plugin-dir
+<install>/lib/hipdnn_plugins/engines` (without `LD_LIBRARY_PATH` it cannot load
+`libhipdnn_backend.so`; the driver sets it for its own discovery run) prints one
+`  <UED name> (0x<unsigned hex ID>)` line per engine, for example
+`hipkernel:Gfx950AttentionDense (0x89C9139111D7C3A5)`. dnn-benchmark labels a row with
+the registered name when its bindings resolve one, else `engine_<hex>` of the ID read as
+signed int64, so the same engine appears as `engine_-0x7636ec6eee283c5b`. The driver
+accepts any of the three spellings in `engine_name` (UED name,
+`engine_0x89c9139111d7c3a5`, `engine_-0x7636ec6eee283c5b`), refuses anything else and
+names the accepted ones, and attributes a row carrying any of them only when its
+`engine_id` is the discovered ID. Another engine's timings never credit this engine.
+Each phase pins the benchmark to that engine with `--engine <signed decimal ID>`.
 
 ## Corpus and coverage accounting
 
 Keep external caller workloads separate from kernel-owner benchmark/published graphs, and
 preserve original corpus/source/graph identities and manifests: a `microbench` path says
 nothing about provenance. Stage actual graph JSON, not the semantic request list
-mining/parity tools consume.
+`mine_shapes.py` emits; owner ground truth from `ground_truth.py graphs` is its own corpus.
 
 Declare every corpus count before measurement; hazard exclusions do not shrink that
 denominator. For attention use the exact names from the miner's
@@ -110,8 +118,7 @@ empty population.
 
 Coverage, numerical correctness and performance answer different questions. Retain served,
 explicitly declined, execution-error, missing and ambiguous outcomes; a missing timing row
-is not a decline. Complete the final runtime outcome join before
-`reconcile_applicability.py --declines` -- see
+is not a decline. Complete the final runtime outcome join before reporting declines -- see
 [workloads.md](../../ai/skills/hipdnn-ingestor-engine/workloads.md) for the join and
 semantic identity contract. Offline reconciliation proves no dispatch.
 
@@ -123,22 +130,33 @@ is round order, then YAML corpus order, then YAML arm order: baseline first, nev
 rotated or reordered. Several rounds expose drift.
 
 Each phase invokes `benchmark.argv` directly with `--graph <staged-corpus/*.json>`,
-`--plugin-path <arm-install>/lib/hipdnn_plugins/engines`, `--warmup <count>`,
-`--iters <count>` and `-o <attempt-output.json>`. Correctness runs once per ordered
-corpus/arm after the timed grid, with `--validate <correctness.reference>`, never mixed
-into timed sampling.
+`--plugin-path <arm-install>/lib/hipdnn_plugins/engines`, `--engine <signed decimal ID>`,
+`--warmup <count>`, `--iters <count>` and `-o <attempt-output.json>`. Correctness runs
+once per ordered corpus/arm after the timed grid, with
+`--validate <correctness.reference>`, never mixed into timed sampling.
 
 Construct each child's environment afresh from the caller environment, setting the current
-arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating prior arms. Use
-phase-specific `HIPDNN_CACHE_DIR` and `HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` for
-timing and `HIPDNN_LOG_LEVEL=info`; correctness has its own cache and logs, and another
-sweep's paths are not shared state.
+arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating prior arms. Every
+phase attempt, correctness included, gets its own `HIPDNN_CACHE_DIR` and
+`HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` and `HIPDNN_LOG_LEVEL=info`; another
+sweep's paths are not shared state. A `benchmark.argv` passing a phase option above,
+`--backend`, `--autotune` or `--hipdnn-cache-dir` (the driver owns the rankings' cache) is
+invalid configuration.
 
 Report geometric mean of per-graph ratios and time-weighted
 `sum(baseline time) / sum(arm time)` together, split by corpus provenance and round; a
 geometric mean alone is not a wall-clock saving. Take byte-identical controls from
 descriptor/payload hashes, never from graphs that timed alike: their ratio is the noise
 floor, not an exact 1.000x.
+
+### Autotune rankings
+
+Every attempt benchmarks, so the ingestor ranks the candidates it timed per graph in its
+cache's `winners.jsonl` shards; the driver copies them into `<attempt>/winners/`, hashes
+them into `phase.json`'s `evidence_hashes` and deletes the cache. Times compare only
+within one ranking. For `tools/variant_reduce.py`, a round is every successful timing
+`phase.json` with the same `phase.round`, merged across corpora; a passed correctness
+attempt only tags the variants it served as numerically checked.
 
 ## Phase gates and completion
 
@@ -147,15 +165,31 @@ the expected installed descriptor count, and plugin-path provenance for the inte
 Result inventory must account for the staged graph identities without merging duplicate
 names or accepting unknown/missing rows. Timing credits only `status: success` rows with
 finite positive `mean_ms` for the **exact** configured engine, counting unique graphs
-against `min_served`; `role: reference` and other-engine rows cannot satisfy it, and an
-omitted `role` means engine. Failures stay in the outcome ledger, and benchmark
-`graph_name` is the graph JSON name or file stem.
+against `min_served`; reference rows and other-engine rows cannot satisfy it. An engine
+row reporting `plugin_path` is attributed to the arm only when, with both paths
+resolved, it names the arm's `lib/hipdnn_plugins/engines`
+directory itself or a plugin directly inside it; a sibling tree or a deeper descendant
+makes that graph ambiguous. Failures stay in the outcome ledger.
+
+Each graph's identity (`graph_name` in the ledger, and the `name` the driver writes into
+its staged copy, which the benchmark reports back) is the graph JSON `name`, or the file
+stem when there is none. When several files in one corpus share that name, for example
+two sources shipping the same shape, each of them is keyed by its corpus-relative path
+(`hipkittens/a.json`) instead; `source_name` keeps the original name. A corpus where a
+graph name equals another graph's relative path cannot be told apart and is refused as
+invalid configuration.
 
 With correctness enabled, every claimed served graph needs a real comparison against the
 declared independent reference with `passed: true`, `execution_success: true` and
 `tolerance_match: true`. A failed/missing comparison, malformed result, nonzero command
 exit, unavailable reference, NaN or unwritten output fails the gate, and
-reference-provider rows without comparison evidence are not validated graphs.
+reference-provider rows without comparison evidence are not validated graphs. The reference
+gate needs, for every served graph, exactly one successful row from the
+`correctness.reference` provider that is the reference: either it says `role: reference`,
+or it has no `role` and has `engine_id: 0`, which is how dnn-benchmark (through at least
+dnn-benchmarking 73fff8a) writes its validation row. An unlabelled row from another
+provider or with a nonzero `engine_id` is an engine row, and a reference row from another
+provider does not count, so a run without the configured provider's row fails the gate.
 
 Select a reference capable of the actual graph semantics: neither current CPU nor GPU SDPA
 reference supports a sink UID, and an unsupported reference means **BLOCKED**, not a CPU

@@ -89,6 +89,32 @@ There is no ctest filter to run only the unit tests currently.
 
 **Coverage expectation:** The hardware-independent surface area in hipTensor is small relative to the total codebase. The current unit test suite covers the identifiable CPU-only subsystems (logging, YAML parsing, option handling, utility math, op type traits). A target of >95% line coverage for the CPU-only subsystems is the goal; overall repository coverage is not meaningful because the dominant code paths are device kernels instantiated from CK templates. Coverage is currently not measured in CI — see the Coverage section below.
 
+#### ABI export-surface test (`abi_exported_symbols`)
+
+A host-only, non-GoogleTest check that guards the shared-library ABI. It runs
+`scripts/check_exported_symbols.py` over the built `libhiptensor.so` and fails if any symbol
+outside the public allowlist is exported. The allowlist is the public `extern "C"` C API plus
+the two shared-state singletons that the test harness and the library must share
+(`hiptensor::HiptensorOptions`, `hiptensor::Logger`); everything else, internal C++ classes and
+Composable Kernel template instantiations, must be hidden. This enforces the hidden-visibility
+baseline and the version script (`library/src/hiptensor.map`) so internal symbols cannot silently
+re-leak.
+
+- **Platform:** Linux/ELF only. On Windows the DLL export set is driven by `__declspec` and there
+  is no version script, so the test is not registered there. It is also skipped if a Python 3.9+
+  interpreter or an `nm`/`llvm-nm` tool is not found at configure time.
+- **Requires a GPU:** No. It inspects the `.so` with `nm -D` and runs in any environment.
+- **CTest label:** `symbol-visibility` (build tree). In the installed tree it is registered as
+  `abi_exported_symbols quick`, so the tier nesting carries it into the `quick`, `standard`,
+  `comprehensive`, and `full` label sets — it runs in every validation tier.
+
+```bash
+# Build tree:
+ctest -R abi_exported_symbols            # run just the ABI check
+# Or invoke the checker directly against any built/installed library:
+python3 scripts/check_exported_symbols.py build/lib/libhiptensor.so
+```
+
 ---
 
 ### Integration Testing Strategy
@@ -197,6 +223,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 |---|---|---|---|
 | Build | Yes | CI / DevOps | `cmake --build` on all supported GPU_TARGETS |
 | Unit tests | Yes | Component team | All `00_unit/` binaries pass |
+| ABI export surface | Yes | Component team | `abi_exported_symbols` CTest (runs in the standard tier); Linux-only, no GPU |
 | Integration / smoke tests | Yes | Component team | `ctest -L '^standard$'` on at least one supported ASIC |
 | Static analysis | No | — | Not currently gated |
 | Formatting checks | No | — | `clang-format` is available but not enforced in CI |
@@ -214,6 +241,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `elementwise_op_test` | Trusted gate | CPU-only, reliable |
 | `util_test` | Trusted gate | CPU-only, reliable |
 | `hiptensor_options_test` | Trusted gate | CPU-only, reliable |
+| `abi_exported_symbols` | Trusted gate | Host-only ABI allowlist check (Linux/ELF); no GPU |
 | `plan_lifetime_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
 | `*standard*` device tests | Trusted gate | Run on dedicated GPU runners |
 | `*comprehensive*` / `*full*` | Informational | Nightly only; not PR gates |

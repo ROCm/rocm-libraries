@@ -1,0 +1,7 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::reduce_config<{{ config.block_size_x }}, {{ config.ipt }}, ::rocprim::block_reduce_algorithm::using_warp_reduce>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_segmented_reduce_benchmark<key_type, rocprim::plus<key_type>, config>;
+{% endblock %}

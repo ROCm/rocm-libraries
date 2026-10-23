@@ -1,15 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// The output comparison, driven directly. It used to sit inside the harness with an
-// EXPECT_TRUE in the middle of it, so the only way to reach it was to run a whole
-// TestBody() and read the failure back out of a fake part-result reporter. It now
-// returns its mismatches, so these assert on them.
+// The output comparison, driven directly. It returns its mismatches, so these assert on
+// them.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
 #include <cstring>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,6 +17,8 @@
 #include <vector>
 
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -77,7 +79,7 @@ flatbuffers::DetachedBuffer makeGraphBuffer()
     return buffer;
 }
 
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, float value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
@@ -87,7 +89,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // A [1, 3, 1, 1] tensor with the three values written individually, so a test can build
 // the magnitude spread that separates allclose from RMS.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor3(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                  float v0,
                  float v1,
@@ -104,7 +106,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // An integer tensor, filled with one value. Integer outputs exist in this suite, and
 // the RMS validator has no implementation for them.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     intTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int32_t value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
@@ -131,6 +133,34 @@ void overwriteOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
 }
 
 constexpr float K_RMS_THRESHOLD = 1e-4f;
+
+constexpr float K_INF = std::numeric_limits<float>::infinity();
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+
+ComparisonTolerance exactMatchingInfinities()
+{
+    return ComparisonTolerance::allCloseMatchingInfinities(0.0f, 0.0f);
+}
+
+// A ragged [B, H, S, D] = [2, 3, 4, 5] tensor in the BSHD physical layout, holding 2 and 3
+// sequence rows, filled with one value.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedFloatTensor(float value)
+{
+    const std::vector<int32_t> offsets = {0, 30, 75};
+    auto offsetTensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::RaggedTensor<float>>(
+        std::vector<int64_t>{2, 3, 4, 5},
+        std::vector<int64_t>{60, 5, 15, 1},
+        hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
+        offsetTensor);
+    tensor->fillWithValue(value);
+    return tensor;
+}
 
 } // namespace
 
@@ -649,6 +679,302 @@ TEST(TestGpuOutputComparison, DeviceSiteAcceptsMatchingDeviceValues)
         compareTensor(
             K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "Bundle: b")
             .has_value());
+}
+
+// ---------------------------------------------------------------------------
+// ALLCLOSE_MATCHING_INFINITIES. An output whose correct value is infinite on both
+// sides — a fully masked SDPA forward log-sum-exp row — cannot be graded by
+// |ref - impl|, which is NaN for two infinities and so fails a tensor that is right.
+// The kind relaxes exactly that element and nothing else.
+// ---------------------------------------------------------------------------
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               exactMatchingInfinities(),
+                               ValidationSite::HOST,
+                               "b")
+                     .has_value())
+        << "both sides are -inf and both are right";
+
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
+            .has_value())
+        << "plain allclose computes |ref - impl| = NaN for two infinities and rejects";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsOppositeSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, K_INF, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "the sign is part of the match; +inf where -inf belongs is a real disagreement";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsNaN)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "a NaN is not an infinity: matching NaNs stay a failure on both sides";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsFiniteVersusInfinite)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    auto actual = floatTensor3(attrs, -1e30f, 1.0f, 1.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "a very large finite value is not an infinity, however large";
+}
+
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsByAtolRtol)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *expected,
+                              *actual,
+                              exactMatchingInfinities(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "the matched infinity must not carry the drifted element through with it";
+
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               ComparisonTolerance::allCloseMatchingInfinities(0.2f, 0.0f),
+                               ValidationSite::HOST,
+                               "b")
+                     .has_value())
+        << "atol still decides the finite elements";
+}
+
+// Both tensors hold -inf, so the kind alone decides which of them passes.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& map = wrapper.getTensorMap();
+
+    OutputTensors expected;
+    expected[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
+    expected[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+
+    OutputTensors actual;
+    actual[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
+    actual[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+
+    std::vector<std::string> labelsSeen;
+    const auto mismatches = compareOutputs(
+        wrapper,
+        {K_UID_A, K_UID_B},
+        actual,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
+        [&](const std::string& label, auto) {
+            labelsSeen.push_back(label);
+            return label == "uid=4" ? exactMatchingInfinities() : exact();
+        },
+        ValidationSite::HOST,
+        "Bundle: b");
+
+    EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "uid=4"}))
+        << "the lookup must be given the label a TOML glob would match on";
+    ASSERT_EQ(mismatches.size(), 1u)
+        << "uid 4 accepts its matched infinities; y_out is still graded by plain allclose";
+    EXPECT_EQ(mismatches[0].uid, K_UID_A);
+}
+
+// Integers have no infinity, so this kind is undefined for them — the same shape of
+// over-matched glob RMS already has.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = intTensor(attrs, 7);
+    auto actual = intTensor(attrs, 7);
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_INT,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             exactMatchingInfinities(),
+                                             ValidationSite::HOST,
+                                             "Bundle: b"));
+
+    // Equal tensors, so this is not a numerical verdict: it reports that the override
+    // could not be honoured at all.
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->label, "counts");
+    EXPECT_NE(mismatch->report.find("counts"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("INT32"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("validator_overrides"), std::string::npos)
+        << "the operator has to be told which config section over-matched";
+    EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
+        << "and which of the three validators that section named";
+    // The only sentence in the message that says what to do about it.
+    EXPECT_NE(mismatch->report.find("Narrow that entry's 'tensors' glob"), std::string::npos);
+}
+
+// This kind exists only as a host validator. A GPU reference leaves its output on the
+// device, so the comparison runs there: identical data passes on the host and is refused
+// on the device. Serving the device request from the host validator would read device
+// memory through host pointers.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnTheDeviceIsRefusedNotHostGraded)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+
+    // The control. Without it, a refusal that fired on every site would still pass.
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               exactMatchingInfinities(),
+                               ValidationSite::HOST,
+                               "b")
+                     .has_value())
+        << "on the host this kind accepts the matched infinities";
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_B,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             exactMatchingInfinities(),
+                                             ValidationSite::DEVICE,
+                                             "Bundle: b"));
+
+    ASSERT_TRUE(mismatch.has_value())
+        << "a device-site request must not be served by the host validator";
+    EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
+        << "the operator has to be told which validator could not be honoured";
+    EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos)
+        << "and the one flag that makes the run grade on the host instead";
+    EXPECT_EQ(mismatch->report.find("does not support this data type"), std::string::npos)
+        << "the report must not blame the data type for a site refusal";
+}
+
+// Unlike RMS, this kind does not replace what decided the verdict: atol and rtol are
+// exactly what graded every finite element, so the report keeps printing them.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, 1.0f, 2.0f, 3.0f);
+    auto actual = floatTensor3(attrs, 1.0f, 2.5f, 3.0f);
+
+    const auto mismatch
+        = compareTensor(K_UID_B,
+                        attrs,
+                        *expected,
+                        *actual,
+                        ComparisonTolerance::allCloseMatchingInfinities(1e-3f, 1e-3f),
+                        ValidationSite::HOST,
+                        "b");
+
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("atol="), std::string::npos);
+    EXPECT_EQ(mismatch->report.find("relative RMS"), std::string::npos)
+        << "no threshold decided this failure; reporting one would name a check that did not run";
+}
+
+// The device validators index every padded position, which for a ragged tensor reads other
+// batches' rows, so a device-site ragged comparison is refused with a pointer to the host.
+TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    auto expected = raggedFloatTensor(3.5f);
+    auto actual = raggedFloatTensor(3.5f);
+
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
+            .has_value())
+        << "on the host a ragged pair compares normally";
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(
+                        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b"));
+
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->uid, K_UID_A);
+    EXPECT_NE(mismatch->report.find("y_out"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

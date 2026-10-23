@@ -289,6 +289,7 @@ try
     std::string filter;
     std::string activation_type;
     std::string aux_type;
+    std::string int4_encoding;
     int         scaleAFormat;
     int         scaleBFormat;
     int         scaleCFormat;
@@ -588,7 +589,17 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
+         "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
+         "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
+         "order. The named scale type must match --b_type.")
+
+        ("int4_encoding",
+         value<std::string>(&int4_encoding)->default_value("signed"),
+         "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
+         "signed = two's complement, unsigned_bias8 = unsigned with an implicit "
+         "zero-point of 8 (GPTQ). The numerals 0 and 1 are also accepted.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
@@ -697,6 +708,14 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("cotenant-cus",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_cus())->default_value(0),
+         "Cotenant workgroup count on a separate stream; 0 (default) disables it. Must not exceed the device CU count. With max occupancy > 1, workgroups may share CUs.")
+
+        ("cotenant-max-occupancy",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_max_occupancy())->default_value(1),
+         "Cotenant LDS-based workgroups-per-CU limit, 1-64 (default: 1).")
+
         ("sm_count_target",
          value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
          "Target compute-unit (CU) count for the matmul kernel selection and "
@@ -705,10 +724,16 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Select the StreamK=5 tile scheduling sub-path via the "
+         "Legacy alias for hybrid_assignment_policy via the "
          "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
-         "leaves the attribute unset so the library default (auto) applies.")
+         "leaves the attribute unset so the library default applies.")
+
+        ("hybrid_assignment_policy",
+         value<std::string>(&hipblaslt_bench_options::hybrid_assignment_policy_str())->default_value(""),
+         "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. "
+         "Default preserves the existing behavior, including the heuristic with a positive sm_count_target. "
+         "This option does not select a kernel family.")
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
@@ -879,6 +904,15 @@ try
         return 1;
     }
 
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
+       !err.empty())
+    {
+        hipblaslt_cerr << err << std::endl;
+        return 1;
+    }
+
     if(hipblaslt_bench_options::sm_count_target() < 0)
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
@@ -902,13 +936,17 @@ try
         return -2;
     };
 
+    try
     {
-        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::streamk_tile_scheduling_mode_str(),
-                                               true,
-                                               "streamk_tile_scheduling must be one of off|0, on|1, auto|2.");
-        if(resolved == -2)
-            return 1;
-        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+        hipblaslt_bench_options::streamk_tile_scheduling_mode()
+            = hipblaslt_bench_options::resolve_hybrid_assignment_policy(
+                hipblaslt_bench_options::hybrid_assignment_policy_str(),
+                hipblaslt_bench_options::streamk_tile_scheduling_mode_str());
+    }
+    catch(std::invalid_argument const& error)
+    {
+        hipblaslt_cerr << error.what() << std::endl;
+        return 1;
     }
 
     {
@@ -992,6 +1030,10 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
+    if(hipblaslt_bench_options::cotenant_cus() > props.multiProcessorCount)
+        throw std::invalid_argument("cotenant-cus must not exceed the device CU count ("
+                                    + std::to_string(props.multiProcessorCount) + ").");
+
     auto perf_monitor = EfficiencyMonitor::create();
     if(perf_monitor->enabled())
         perf_monitor->setDeviceId(device_id);
@@ -1065,9 +1107,14 @@ try
     else
         arg.bias_type = string_to_hip_datatype(bias_type);
 
-    arg.initialization = string2hipblaslt_initialization(initialization);
-    if(arg.initialization == static_cast<hipblaslt_initialization>(0))
+    if(auto parsed = string2hipblaslt_initialization(initialization))
+    {
+        arg.initialization = *parsed;
+    }
+    else
+    {
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
+    }
 
     if(vm["initialization"].defaulted()
        && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
@@ -1144,6 +1191,9 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
+        if(s >= 1006 && s <= 1017)
+            return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -1207,6 +1257,34 @@ try
                                         + hip_datatype_to_string(arg.d_type));
     }
 
+    // Require int4 A, 16-bit B, and group scales together.
+    {
+        const auto encoding = string_to_int4_encoding(int4_encoding);
+        if(encoding == HIPBLASLT_INT4_ENCODING_END_EXT)
+            throw std::invalid_argument("Invalid --int4_encoding "s + int4_encoding
+                                        + "; expected one of " + c_int4_encoding_names);
+        arg.int4_encoding = static_cast<int32_t>(encoding);
+
+        // w4a16 modes are A-only; reject here rather than surface a bare B_SCALE_MODE status.
+        if(isW4A16Scaling(arg.scaleB))
+            throw std::invalid_argument(
+                "--scaleB does not accept the w4a16 group-scale modes 1006..1017; got "s
+                + std::to_string(static_cast<int>(arg.scaleB)));
+
+        const bool int4A = (arg.a_type == HIP_R_4I);
+        if(int4A != isW4A16Scaling(arg.scaleA))
+            throw std::invalid_argument(
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1017; got --a_type "s
+                + hip_datatype_to_string(arg.a_type) + " --scaleA "
+                + std::to_string(static_cast<int>(arg.scaleA)));
+        if(int4A)
+        {
+            if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+                throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
+                                            + hip_datatype_to_string(arg.b_type));
+        }
+    }
+
     if(arg.M[0] < 0)
         throw std::invalid_argument("Invalid value for -m " + std::to_string(arg.M[0]));
     if(arg.N[0] < 0)
@@ -1255,6 +1333,11 @@ try
     return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
+{
+    hipblaslt_cerr << exp.what() << std::endl;
+    return -1;
+}
+catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;

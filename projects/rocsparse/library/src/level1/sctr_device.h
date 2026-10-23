@@ -32,12 +32,11 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void sctr_kernel(I nnz, const T* x_val, const I* x_ind, T* y, rocsparse_index_base idx_base)
     {
-        // Cast to the (possibly 64-bit) index type I before the multiply so the
-        // thread index does not wrap in 32-bit arithmetic for large nnz.
-        const I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
-        const I gid    = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        // Keep the grid-stride arithmetic wide even when I is 32-bit.
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        for(I idx = gid; idx < nnz; idx += stride)
+        for(int64_t idx = gid; idx < nnz; idx += stride)
         {
             y[x_ind[idx] - idx_base] = x_val[idx];
         }

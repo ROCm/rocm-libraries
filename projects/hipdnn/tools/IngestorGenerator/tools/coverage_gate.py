@@ -9,10 +9,12 @@ answers none of them.
      rung that catches an engine dropped for a duplicate catalog tuple.
   3. SERVES -- does it serve graphs on a device, and how many? Needs a GPU.
 
-This tool runs 1 and 2 and reports 3's requirement explicitly.
+This tool runs 1 and 2 and reports 3's requirement explicitly. It cannot run rung 3:
+`--min-served N` with N > 0 fails the gate (``serving-not-run``). Exit 0: rungs 1 and 2
+passed; 1: a rung failed, or serving was required; 2: a missing tree.
 
     coverage_gate.py --tree <descriptors> --mode full \\
-                     --profile <profile.yaml> \\
+                     --manifest <engine manifest> \\
                      --validator <build>/bin/hipdnn_validate_descriptors \\
                      --expect-engine hipkernel:Gfx942AttentionDense
 
@@ -36,11 +38,13 @@ MODES = ("full", "structural")
 
 def run_static(
     tree: Path,
-    profile: Path | None,
+    manifest: Path | None,
     tool: Path,
     mode: str,
     arch: str | None = None,
     kpack_python_dir: str | None = None,
+    *,
+    provenance_root: str | None = None,
 ) -> tuple[bool, str]:
     """Rung 1: structural properties of the set, plus compiled agreement in
     full mode, read off `verify_variant_sets`' exit code.
@@ -50,12 +54,14 @@ def run_static(
     the rung reports itself as structural-only.
     """
     argv = [sys.executable, str(tool), "set", str(tree), "--mode", mode]
-    if profile:
-        argv += ["--profile", str(profile)]
+    if manifest:
+        argv += ["--manifest", str(manifest)]
     if arch:
         argv += ["--arch", arch]
     if kpack_python_dir:
         argv += ["--kpack-python-dir", kpack_python_dir]
+    if provenance_root:
+        argv += ["--provenance-root", f"set={provenance_root}"]
     result = subprocess.run(argv, capture_output=True, text=True)
     # Both streams on failure: progress goes to stdout and refusals -- an
     # unresolvable reference, an ambiguous tree -- to stderr.
@@ -128,7 +134,21 @@ def main(argv=None) -> int:
         "verify_variant_sets.py so --mode full can read the payload bytes a packed "
         "descriptor names. Omit it to use the installed one.",
     )
-    parser.add_argument("--profile", help="Kernel profile for the static rung.")
+    parser.add_argument(
+        "--provenance-root",
+        help="Where a packed tree's provenance sidecars live when they are not "
+        "beside its descriptors, as in an installed production tree, forwarded to "
+        "verify_variant_sets.py. It mirrors --tree: the sidecar of "
+        "<tree>/<rel>/<name>.kdp.json is <dir>/<rel>/<name>.kdp.provenance.json.gz. "
+        "Every descriptor directory under --tree must hold the packer's "
+        "hkp-packed.marker.",
+    )
+    parser.add_argument(
+        "--manifest",
+        help="Engine manifest (`configs/<slug>.engine.yaml`, JSON or YAML), "
+        "forwarded to rung 1. Only engine.name and specialization.vocabulary are "
+        "read; the rest of the file is not checked.",
+    )
     parser.add_argument(
         "--validator",
         help="Path to hipdnn_validate_descriptors. Without it rung 2 is reported as "
@@ -144,8 +164,9 @@ def main(argv=None) -> int:
         "--min-served",
         type=int,
         default=0,
-        help="Graphs rung 3 must serve on a device. Recorded in the summary as the "
-        "threshold a GPU preflight has to clear; this tool cannot check it.",
+        help="Graphs rung 3 must serve on a device. This tool cannot check serving, so "
+        "any N > 0 fails the gate (serving-not-run); the device sweep is "
+        "tools/sweep.py's min_served gate.",
     )
     args = parser.parse_args(argv)
 
@@ -155,13 +176,19 @@ def main(argv=None) -> int:
         return 2
 
     static_tool = Path(__file__).resolve().parent / "verify_variant_sets.py"
-    profile = Path(args.profile) if args.profile else None
+    manifest = Path(args.manifest) if args.manifest else None
 
     print("coverage gate")
     failures = []
 
     ok, detail = run_static(
-        tree, profile, static_tool, args.mode, args.arch, args.kpack_python_dir
+        tree,
+        manifest,
+        static_tool,
+        args.mode,
+        args.arch,
+        args.kpack_python_dir,
+        provenance_root=args.provenance_root,
     )
     if not ok:
         verdict = "FAIL"
@@ -209,6 +236,9 @@ def main(argv=None) -> int:
         "      Filter on engine_name: a graph another engine served is not coverage,\n"
         "      and an aggregate that does not filter reports its work as yours."
     )
+
+    if args.min_served > 0:
+        failures.append("serving-not-run")
 
     print()
     if failures:

@@ -1,0 +1,13 @@
+{% extends "device_partition.h.jinja2" %}
+
+{% block target_tparams -%}
+template<class Target, class data_type, class flag_type>
+{%- endblock %}
+
+{% block config_guard scoped %}
+    ({%- if not type.data_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<data_type>::value)
+    && (sizeof(data_type) <= {{ type.data_type.size }})
+    {%- if type.data_type.size_min > 0 %}&& (sizeof(data_type) > {{ type.data_type.size_min }}){% endif %}
+    && (sizeof(flag_type) <= {{ type.flag_type.size }})
+    {%- if type.flag_type.size_min > 0 %}&& (sizeof(flag_type) > {{ type.flag_type.size_min }}){% endif %})
+{%- endblock %}

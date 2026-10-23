@@ -1,0 +1,83 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx950AttentionDense external integration test categories.
+#
+# Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Selects the shared sweeps
+# integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/Default/ by suite,
+# not by text in the case id: import_graph.py names cases in its own format, so a name
+# pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
+# claimed case the engine declines fails its lane, an unclaimed one it declines skips,
+# and an unclaimed one it accepts runs and is reported as unclaimed support.
+# Tiers cascade: standard runs quick + standard, comprehensive runs quick +
+# standard + comprehensive; only "full" runs the full-tier bundles.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+  - "*SdpaBackward*"
+
+test_categories:
+  quick:
+    description: "Quick gfx950 dense attention BSHD bundle coverage"
+    test_patterns:
+      - "quick_SdpaFwd_Default.*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard gfx950 dense attention BSHD bundle coverage"
+    test_patterns:
+      - "quick_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_Default.*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive gfx950 dense attention coverage: quick + standard + comprehensive-tier bundles"
+    test_patterns:
+      - "quick_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_Default.*"
+      - "comprehensive_SdpaFwd_Default.*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full gfx950 dense attention coverage"
+    test_patterns:
+      - "*_SdpaFwd_Default.*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: BSHD quick bundles"
+    test_patterns:
+      - "quick_SdpaFwd_Default.*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+# category_timeouts are CTest kill limits, set to 2x the tier's runtime budget
+# (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
+# quick+standard; full has no budget) so a budget overrun is a failure to
+# investigate while ordinary run-to-run variance does not trip the timeout.
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 3600
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

@@ -113,44 +113,6 @@ if(BUILD_ADDRESS_SANITIZER)
 
 endif()
 
-# DLL-shadowing workaround (remove once ROCm fixes this on Windows): a stale System32 amd_comgr.dll
-# shadows the TheRock one and breaks MIOpen's kernel JIT. PATH can't fix it (System32 precedes PATH),
-# but the exe's own dir wins, so stage the DLL there for any Windows build that JITs MIOpen kernels.
-# Tests.cmake wires stage_shadowed_rocm_dlls to test targets; the GLOBAL guard defines it once.
-if(WIN32)
-    block(SCOPE_FOR VARIABLES)
-        get_property(_dll_shadow_staged GLOBAL PROPERTY _rocm_dlls_staged_dll_shadow_workaround)
-        if(NOT _dll_shadow_staged)
-            # ROCM_CMAKE_PATH and ROCM_PATH are mutually-exclusive ways to point at the ROCm root
-            # (see ClangToolChain.cmake); prefer the former, fall back to the latter.
-            set(_rocm_root "${ROCM_CMAKE_PATH}")
-            if(NOT _rocm_root)
-                set(_rocm_root "${ROCM_PATH}")
-            endif()
-            if(_rocm_root)
-                set_property(GLOBAL PROPERTY _rocm_dlls_staged_dll_shadow_workaround TRUE)
-                file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}" _build_bin_dir)
-                set(_shadowed_dlls amd_comgr.dll)
-                set(_staged_dlls "")
-                foreach(_dll_name IN LISTS _shadowed_dlls)
-                    set(_dst "${_build_bin_dir}/${_dll_name}")
-                    add_custom_command(
-                        OUTPUT "${_dst}"
-                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                                "${_rocm_root}/bin/${_dll_name}" "${_dst}"
-                        DEPENDS "${_rocm_root}/bin/${_dll_name}"
-                        COMMENT "Staging ${_dll_name} into build bin (DLL-shadowing workaround)"
-                        VERBATIM
-                    )
-                    list(APPEND _staged_dlls "${_dst}")
-                endforeach()
-                add_custom_target(stage_shadowed_rocm_dlls ALL DEPENDS ${_staged_dlls}
-                    COMMENT "Staging shadowed ROCm DLLs into build bin")
-            endif()
-        endif()
-    endblock()
-endif()
-
 # Enable Thread Sanitizer and set linker flags. This configuration is for standalone builds outside
 # of TheRock. TSAN is host-side only and does not require specific GPU targets.
 if(BUILD_THREAD_SANITIZER)
@@ -189,6 +151,21 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     # ~/.miopen and cleared once per ctest run (Tests.cmake registers the clearing fixture from this
     # variable) so a stale/poisoned entry cannot mask a failure across runs.
     set(HIPDNN_TEST_MIOPEN_CACHE_DIR "${CMAKE_BINARY_DIR}/miopen_test_cache")
+
+    # SKIP_IF_ASAN() -- named here on purpose, because an audit for tests held back by a known ASAN
+    # error greps for that token and would otherwise never reach this mechanism.
+    #
+    # Suppressions for interceptor-detected errors in upstream libraries come from
+    # __asan_default_suppressions() in test_sdk/src/AsanDefaultSuppressions.cpp, compiled into each
+    # test executable, so they apply to an installed or relocated tree with no file to locate. Its
+    # suppression list is the second place an unfixed ASAN error can be parked, alongside any
+    # SKIP_IF_ASAN() call sites; audit both.
+    #
+    # ASAN_OPTIONS is deliberately not set here, so a developer's own value survives (ctest's
+    # ENVIRONMENT property assigns unconditionally). It cannot switch these suppressions off,
+    # though: a user-supplied suppressions file is ADDED to them rather than replacing them, and no
+    # ASan flag disables them. Seeing the suppressed errors needs an edit to
+    # AsanDefaultSuppressions.cpp and a rebuild.
 
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).

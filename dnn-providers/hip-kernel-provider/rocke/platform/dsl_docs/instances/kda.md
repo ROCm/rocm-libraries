@@ -147,7 +147,8 @@ swizzled LDS store/load pairing here is specific to `a_per_lane == 4`.
 - `head_v` a multiple of 64 (the partition above)
 - `seqlen` a multiple of `chunk`. **No varlen path**: a ragged batch must be
   padded by the caller
-- prefill only; there is no KDA decode kernel here
+- this page covers gfx942 prefill only. The shared gfx950 GDN/KDA single-token
+  decode emitter is documented in [`gdn_decode.md`](gdn_decode.md)
 
 ## Host drivers
 

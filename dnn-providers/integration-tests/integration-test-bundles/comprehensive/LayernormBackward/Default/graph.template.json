@@ -1,0 +1,107 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "unset",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "LayernormBwdTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "dy_tensor_uid": 4,
+        "epsilon_tensor_uid": 5,
+        "inv_variance_tensor_uid": null,
+        "mean_tensor_uid": null,
+        "scale_tensor_uid": 6,
+        "x_tensor_uid": 3
+      },
+      "name": "LayernormBackward_0",
+      "normalized_dim_count": "${case.attributes.normalized_dim_count}",
+      "outputs": {
+        "dbias_tensor_uid": 0,
+        "dscale_tensor_uid": 1,
+        "dx_tensor_uid": 2
+      },
+      "type": "LayernormBackwardAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "LayernormBackward_0::DBIAS",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "LayernormBackward_0::DSCALE",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "LayernormBackward_0::DX",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "X",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "dY",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "value": 9.999999747378752e-06,
+      "value_type": "Float32Value",
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    }
+  ]
+}

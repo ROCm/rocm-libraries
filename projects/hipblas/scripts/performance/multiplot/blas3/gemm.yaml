@@ -24,8 +24,8 @@ Tests:
   - name: gemm
     function: gemm
     precision: *single_double_precisions_complex_real
-    transA: N
-    transB: T
+    transA: [N, T]
+    transB: [N, T]
     alpha: 1
     beta: 1
     matrix_size: *sizes

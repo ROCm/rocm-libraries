@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionDense": [
+      {
+        "cases": [
+          "1_2_384_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_32_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_32_512_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_8_2048_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
+          "1_8_288_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
+          "2_8_1024_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
+          "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

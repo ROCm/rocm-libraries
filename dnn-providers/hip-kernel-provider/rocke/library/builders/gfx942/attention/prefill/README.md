@@ -32,9 +32,12 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
-sliding-window. The deferred-findings backlog lives in the optimization plan for this
-port, which is kept outside the repo.
+Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged.
+Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
+online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
+loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
+deferred-findings backlog lives in the optimization plan for this port, which is kept
+outside the repo.
 
 ### Gain over the unified-attention baseline
 
@@ -45,7 +48,7 @@ reference; one run on a 304-CU gfx942 part. Every cell is a **ratio**, so per
 `AGENTS.md` the absolute throughputs stay in the protected results page.
 
 Both arms run the config that actually **ships**: dense builds its spec through the
-production dispatch factory (`dispatch/attention/gfx942.py::_dense_spec`, so the
+production dispatch factory (`dispatch/attention/gfx942_dense.py::_base_spec`, so the
 measured binary carries the shipped `waves_per_eu` / `d64_kpad` / persistent
 decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
 `attention_tiled_2d` selects for that shape.
@@ -81,7 +84,8 @@ named follow-up, now as upside rather than as a fix for a deficit.
 
 ## Scope
 
-gfx942 only · forward-inference prefill · dense causal (no paging / bias / SWA / sinks)
+gfx942 only · forward-inference prefill · dense causal or full, optional SWA and sinks
+(no paging / bias)
 · bf16 + fp16 · head dims **D64 & D128** · MHA + GQA incl. non-power-of-2 (40/8, 28/4)
 · default **and** persistent grids. D256 is out of scope — it is served by its own
 wide-atom candidates.
@@ -91,6 +95,36 @@ whole number of DMA row-groups, and `K_lds + V_lds` must fit the 64 KB gfx942 LD
 all enforced by `supports_attention_dense`, so `supports(spec)[0] is True` implies
 `build_attention_dense(spec)` succeeds. That equivalence is what stops dispatch from
 selecting a spec it cannot build.
+
+### Optional LSE through the direct runner
+
+LSE (log-sum-exp — the logarithm of the softmax denominator) is a compile-time
+opt-in on `Gfx942AttentionDenseSpec`, with the same contract as the gfx950 dense
+kernel. The caller allocates a contiguous FP32 `[B, Hq, Sq, 1]` buffer on the
+inputs' device; the runner still returns only `out`.
+
+```python
+import torch
+from kernels.gfx942.attention_dense import (
+    Gfx942AttentionDenseSpec,
+    run_attention_dense_torch,
+)
+
+spec = Gfx942AttentionDenseSpec(
+    batch=1, seqlen_q=512, seqlen_kv=512,
+    num_query_heads=32, num_kv_heads=8, head_size=128,
+    causal=True, dtype="fp16", emit_lse=True,
+)
+lse = torch.empty((1, 32, 512, 1), dtype=torch.float32, device=q.device)
+run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=128**-0.5)
+```
+
+Values are natural-log FP32. A row with no allowed key (only possible with a sliding
+window shorter than the distance to the last key) writes exact-zero output and
+`LSE=-inf`. With the flag off the emitted kernel is unchanged. The LSE buffer must not
+overlap any input or the output; supplying it with the flag off is an error. The
+dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
+with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.
 
 ## Why a separate kernel (not an arch branch in the gfx950 file)
 
@@ -172,6 +206,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 python attention_dense_prefill.py                        # parity + bench, default shapes
 python attention_dense_prefill.py --dtype fp16 --d 64
 python attention_dense_prefill.py --persistent --np 304  # persistent grid
+python attention_dense_prefill.py --use-sinks --sw 256   # SWA + sinks
 ```
 
 Full-cohort parity and perf are driven by the live harness at

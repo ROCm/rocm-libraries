@@ -17,7 +17,7 @@
 # TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
 # which ran two suites unconditionally:
 #   - rocisa_tests/            (rocisa pytest modules)
-#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
+#   - tensilelite/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
 # comprehensive/full reproduce that legacy set exactly (GPU tests included).
 # quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
@@ -34,7 +34,7 @@ test_categories:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -48,7 +48,7 @@ test_categories:
     description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
@@ -62,7 +62,7 @@ test_categories:
     description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
@@ -74,12 +74,43 @@ test_categories:
     description: "Complete suite (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
       - "full"
       - "all"
+
+  # Common-GEMM tests on real hardware, matching Math CI's `preliminary` stage
+  # (`tox -e py3 -- tensilelite/Tests -m common`). Selected by TheRock's
+  # tensilelite-common job, which pins this category via TEST_CATEGORY.
+  #
+  # Unlike the emulation categories below, arch selection here is opt-out:
+  # configMarks() tags every config `common` from its path and turns each
+  # config's declared skip-gfxNNNN marks into skips for the arch that
+  # rocm_agent_enumerator reports. Selecting on a concrete gfx target instead
+  # would match almost nothing, so do not use {AMDGPU_TARGETS} here.
+  #
+  # --gpu-targets is deliberately absent. Hardware detection also sets
+  # PyTestBuildArchNames, which Tensile reads as the build architecture, so a
+  # gfx120X runner builds for whichever of gfx1200/gfx1201 it actually has.
+  hw-common:
+    description: "Common GEMM tests on real hardware"
+    test_paths:
+      - "tensilelite/Tests/common"
+    pytest_markers:
+      - "common"
+    # On a 1-GPU runner every worker is pinned to the same GPU and
+    # worker_lock_path serializes their client runs, so extra workers only
+    # parallelize codegen and builds. 4 is what Math CI runs (tox default);
+    # the 16 used by the FFM categories assumes one emulator per worker.
+    parallel_workers: 4
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"
+    labels:
+      - "hw-common"
 
   # Common-GEMM tests (GPU emulation). These are the only tests that
   # build/run kernels through the client, so they require the TensileLite-specific
@@ -88,7 +119,7 @@ test_categories:
   ffm-quick:
     description: "Common GEMM tests (FFM emulation)"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     # These GEMM tests build/run independent kernels; run them across xdist
@@ -98,7 +129,7 @@ test_categories:
     # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
     # execution_settings.environment block). The `--prebuilt-client`,
     # `--global-parameters` and `--tensile-options` flags are custom options
-    # registered in tensilelite's conftest.py (Tensile/Tests/conftest.py).
+    # registered in tensilelite's conftest.py (tensilelite/Tests/conftest.py).
     pytest_args:
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
@@ -114,7 +145,7 @@ test_categories:
   emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
@@ -129,7 +160,7 @@ test_categories:
   emu-full:
     description: "All common GEMM tests for emulation nightly"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     parallel_workers: 16
@@ -154,6 +185,9 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    # Hang guard only; Math CI runs this suite with no per-test timeout. The
+    # slowest config seen there (streamk/sk_I8gemm_quick.yaml) took 3173s.
+    hw-common: 5400       # 90 minutes
     ffm-quick: 2700       # 45 minutes
     emu-fast: 2400        # 40 minutes
     emu-full: 28800       # 8 hours

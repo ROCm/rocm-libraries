@@ -29,14 +29,11 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
 
 #include <cstddef>
-
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 
 namespace TensileLite
 {

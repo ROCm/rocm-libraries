@@ -97,9 +97,11 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
 (dY, W, dX, dY_bytes, W_bytes, dX_bytes, sub_gemm_buf, num_sub_gemms)
 ```
 
-All kernels — stride=1 and strided — share this 8-param ABI. For stride=1
-`sub_gemm_buf` holds exactly one record and the binary search trivially
-returns index 0.
+All kernels — stride=1 and strided — share this 8-param ABI. The binary
+search runs `ceil(log2(num_sub_gemms))` steps, so for stride=1 (exactly one
+record) it is skipped and returns index 0. `max_sub_gemms` (default 1024,
+strides up to 32x32) only bounds the record count a kernel accepts; the
+search does not grow with it.
 
 ## Grid Layout
 
@@ -201,13 +203,37 @@ write M-outer into a K-outer allocation).
 
 **Not a knob.** The spec field defaults `False`; the value is deduced by
 the keyword-only `DgradConvSpec.default_lds_k_outer(*, arch, dtype_b,
-warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which both library dispatch
-(`library/dispatch/grouped_convolution.py`,
-`_dgrad_lds_k_outer`) and the sweep driver call. The predicate is
+warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which the sweep driver
+calls. The predicate is
 asymmetric with wgrad's — B-side dtype and warp tile only, never the A-side
 counterparts — and additionally keys on `cpg`: the saving is proportional to the
 B load width, which collapses to 1 on an odd channel run, where `axis_b` is
 already `"col"` and there is no scatter to remove.
+
+## Per-tile K decode (`uniform_k_decode`)
+
+The kernel is shape-generic: `kpg`, the tap counts and every stride are
+kernargs or record fields. The plain K loop therefore splits each load chunk's
+reduction index into `(ydot, xdot, k_out)` with two runtime signed divisions
+and builds the offset from runtime-stride products, per chunk and per
+iteration, ahead of the first `buffer_load`.
+
+`uniform_k_decode=True` adds a second K loop for problems with
+`kpg % tile_k == 0` (checked at run time). There a K tile never straddles a
+filter tap, so every element's `k_out` is the tile's base `k_out` plus its
+column. The loop carries the tile's `(k_out, xdot, ydot)` as uniform iteration
+arguments, advances them with a compare-and-wrap, and splits each offset into a
+loop-invariant per-element part and a uniform per-tile part; the `dY` bounds
+compare the invariant `(ho, wo)` base against shifted uniform limits. It issues
+all of the tile's reads before its LDS writes. The plain loop is emitted as
+well and runs for every other `kpg`, so the binary serves the same problems.
+Both loops visit the same k values in the same order: with `split_k == 1`, `dX`
+is bit-identical to the plain loop's.
+
+Rejected with `pipeline="wavelet"`, which has its own K loop. **Not a knob**:
+the field defaults `False`, and the sweep driver and the AOT job generator take
+the value from `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size,
+pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
 
 ## Key Files
 

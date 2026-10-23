@@ -28,6 +28,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -581,27 +582,12 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    hipdnnSeverity_t savedLogLevel = HIPDNN_SEV_OFF;
-    ASSERT_EQ(getGlobalLogLevel(savedLogLevel).code, ErrorCode::OK);
-
     // The diagnostics are the deliverable here as much as the fallback is: a failure the
     // engine swallows silently is indistinguishable from one that never happened.
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    ASSERT_EQ(setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                 HIPDNN_SEV_WARN,
-                                 LogCallbackMode::SYNC,
-                                 this)
-                  .code,
-              ErrorCode::OK);
-    ASSERT_EQ(setGlobalLogLevel(HIPDNN_SEV_WARN).code, ErrorCode::OK);
+    const ScopedPluginLogCapture capture(this, HIPDNN_SEV_WARN);
+    auto& recorder = capture.recorder();
 
     result = graph->build_plans(BuildPlanPolicy::ALL);
-
-    setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                       HIPDNN_SEV_OFF,
-                       LogCallbackMode::SYNC,
-                       this);
-    setGlobalLogLevel(savedLogLevel);
 
     ASSERT_EQ(result.code, ErrorCode::OK)
         << "the shipped " << SHIPPED_POINTWISE_ENGINE_NAME

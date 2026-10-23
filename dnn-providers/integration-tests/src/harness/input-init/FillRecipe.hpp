@@ -37,6 +37,15 @@ struct FillRecipe
         f.value = v;
         return f;
     }
+
+    friend bool operator==(const FillRecipe& a, const FillRecipe& b)
+    {
+        return a.kind == b.kind && a.lo == b.lo && a.hi == b.hi && a.value == b.value;
+    }
+    friend bool operator!=(const FillRecipe& a, const FillRecipe& b)
+    {
+        return !(a == b);
+    }
 };
 
 } // namespace hipdnn_integration_tests

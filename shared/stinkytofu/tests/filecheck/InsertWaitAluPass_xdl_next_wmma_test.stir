@@ -1,0 +1,60 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,xdlCountFromNextWmma --print-output
+#
+# A matrix producer's followers are counted from the NEXT matrix op onward; the CSMACC ops
+# between the two are not followers.
+
+#===----------------------------------------------------------------------===#
+# wmma0 vadd1 vadd2 wmma1 vadd3, consumer reads wmma0's dest.
+# Own pipe sees 1 follower (wmma1). Counting from wmma1 onward gives 2 (wmma1, vadd3);
+# vadd1/vadd2 are excluded.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_xdl_counts_from_next_wmma
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
+# CHECK: ds_load_b32
+
+st.func @gfx1250_xdl_counts_from_next_wmma() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# No matrix op follows the producer, so there is nothing to count from and the
+# per-pipe count stands. Three CSMACC ops follow but none of them is a follower.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_xdl_no_next_wmma_keeps_per_pipe
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: ds_load_b32
+
+st.func @gfx1250_xdl_no_next_wmma_keeps_per_pipe() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# The anchor is the nearer of the next matrix op or the next TRANS. Here the TRANS is
+# nearer, so counting from it gives 3 against 1 from the producer's own pipe.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_xdl_next_anchor_takes_the_nearer_trans
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 3
+# CHECK: ds_load_b32
+
+st.func @gfx1250_xdl_next_anchor_takes_the_nearer_trans() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

@@ -26,16 +26,14 @@ from __future__ import annotations
 
 import pytest
 
+torch = pytest.importorskip("torch", reason="ROCm torch required")
+
 
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch.
 
     Gate on ``gcnArchName`` (the ISA target), NOT the marketing name.
     """
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
     if not torch.cuda.is_available():
         return False
     arch = torch.cuda.get_device_properties(0).gcnArchName.lower()

@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "CudnnShimTestSupport.hpp"
+
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
 #include <cstdint>
@@ -24,19 +26,13 @@ static_assert(std::is_same_v<cudaGraph_t, void*>);
 namespace
 {
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
+using hipdnn_shim_test::expectGraphNotSupported;
 
 void expectNoPlanError(const fe::error_t& error)
 {
     ASSERT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
     EXPECT_EQ(error.get_message(), "Graph has no compiled execution plan");
-}
-
-void expectGraphStubError(const fe::error_t& error, const std::string& methodName)
-{
-    ASSERT_TRUE(error.is_bad());
-    EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(error.get_message().find(methodName), std::string::npos);
 }
 
 TEST(TestCudnnShimPlanSurface, EmptyGraphIntrospectionAndPlanMethodsUseNoPlanGuard)
@@ -92,14 +88,14 @@ TEST(TestCudnnShimPlanSurface, CudaGraphStubsReturnNamedUnsupportedErrors)
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> tensorMap;
     cudaGraph_t cudaGraph = nullptr;
 
-    expectGraphStubError(graph.populate_cuda_graph(nullptr, uidMap, nullptr, cudaGraph),
-                         "populate_cuda_graph");
-    expectGraphStubError(graph.populate_cuda_graph(nullptr, tensorMap, nullptr, cudaGraph),
-                         "populate_cuda_graph");
-    expectGraphStubError(graph.update_cuda_graph(nullptr, uidMap, nullptr, cudaGraph),
-                         "update_cuda_graph");
-    expectGraphStubError(graph.update_cuda_graph(nullptr, tensorMap, nullptr, cudaGraph),
-                         "update_cuda_graph");
+    expectGraphNotSupported(graph.populate_cuda_graph(nullptr, uidMap, nullptr, cudaGraph),
+                            "populate_cuda_graph");
+    expectGraphNotSupported(graph.populate_cuda_graph(nullptr, tensorMap, nullptr, cudaGraph),
+                            "populate_cuda_graph");
+    expectGraphNotSupported(graph.update_cuda_graph(nullptr, uidMap, nullptr, cudaGraph),
+                            "update_cuda_graph");
+    expectGraphNotSupported(graph.update_cuda_graph(nullptr, tensorMap, nullptr, cudaGraph),
+                            "update_cuda_graph");
 }
 
 TEST(TestCudnnShimPlanSurface, TensorKeyedExecutePlanRejectsNullTensorBeforeNoPlan)

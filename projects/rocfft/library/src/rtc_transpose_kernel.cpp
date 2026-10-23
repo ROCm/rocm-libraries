@@ -69,8 +69,10 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
     generator.blockDim = {tileX, tileY};
 
     size_t largeTwdSteps = 0;
-    if(node.large1D > (size_t)256 * 256 * 256 * 256)
+    if(node.large1D > (size_t)256 * 256 * 256 * 256 * 256)
         throw std::runtime_error("large1D twiddle size too large error");
+    if(node.large1D > (size_t)256 * 256 * 256 * 256)
+        largeTwdSteps = 5;
     else if(node.large1D > (size_t)256 * 256 * 256)
         largeTwdSteps = 4;
     else if(node.large1D > (size_t)256 * 256)

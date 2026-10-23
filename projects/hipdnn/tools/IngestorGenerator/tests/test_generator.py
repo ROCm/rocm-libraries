@@ -20,7 +20,7 @@ from codegen.generator import (
     emitted_inventory,
     mint_ids,
 )
-from codegen.models import DEFAULT_FIXTURE_ARCH, KmdField
+from codegen.models import DEFAULT_FIXTURE_ARCH, KernelSource, KmdField
 from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
 
 
@@ -53,10 +53,11 @@ class TestUuidThreading:
         ued = build_ued(scale_add_config, ids)
         assert ued["metadata"] == ids["kmd"]
 
-    def test_ued_heuristic_references_uhd_id(self, scale_add_config):
+    def test_ued_sort_kernel_catalog_references_uhd_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
         ued = build_ued(scale_add_config, ids)
-        assert ued["heuristic"] == ids["uhd"]
+        assert ued["sort_kernel_catalog"] == {"default": ids["uhd"]}
+        assert "heuristic" not in ued
 
     def test_kdp_engine_references_ued_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
@@ -379,7 +380,7 @@ class TestAllowListedKeys:
         "id",
         "name",
         "graph_match",
-        "heuristic",
+        "sort_kernel_catalog",
         "metadata",
         "knobs",
         "behavior_notes",
@@ -388,7 +389,7 @@ class TestAllowListedKeys:
     }
     _UMD_KEYS = {"version", "id", "name", "scope", "match_symbol"}
     _UDD_KEYS = {"version", "id", "name", "dispatch_symbol"}
-    _UHD_KEYS = {"version", "id", "name", "kind", "payload"}
+    _UHD_KEYS = {"version", "id", "name", "adapter", "objective", "native"}
     _KDP_KEYS = {
         "version",
         "id",
@@ -398,7 +399,7 @@ class TestAllowListedKeys:
         "engine",
         "dispatch",
         "kernelDescriptors",
-        # An extension key the loader warns about and ignores
+        # The packager's extension key the loader ignores without a warning
         # (DescriptorLoader.hpp isExtensionKey), carrying the pack's one
         # specialization_contract.
         "provenance",
@@ -581,7 +582,7 @@ class TestSpecializationContractEmission:
     @staticmethod
     def _consumers(kdp):
         """What each kernel of this KDP resolves to, through the real reader."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         return [
@@ -665,7 +666,7 @@ class TestSpecializationContractEmission:
     ):
         """Asserting the shape here and hoping it matches ``hkp_pack`` is how the two
         drift."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         ids = mint_ids(scale_add_config)
@@ -676,9 +677,30 @@ class TestSpecializationContractEmission:
             assert len(consumers) == 1
             agreement.validate_consumer(consumers[0], kmd)
 
+    def test_the_packaged_bundle_passes_the_packers_load(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        """hkp_pack loads the rendered tree as it would at pack time: every id and
+        cross-reference a packed bundle carries (the UED's `id` and `metadata` among
+        them) must be a UUID the packer resolves."""
+        descriptors = _import_hkp_pack("descriptors")
+        generic_targets = _import_hkp_pack("generic_targets")
+        if descriptors is None or generic_targets is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
+        config = gfx950_attention_dense_config
+        generator.render(config, tmp_path)
+        # The shipped generic target table, as the packer loads it at pack time.
+        flat = descriptors.load_flat_input(
+            tmp_path / config.descriptor_dir,
+            generic_targets.GenericTargets.load(generic_targets.DEFAULT_TABLE_PATH),
+            log=lambda _message: None,
+        )
+        # A wrong root would load nothing and pass vacuously.
+        assert flat.by_type("ued") and flat.by_type("kmd")
 
-def _import_agreement():
-    """``hkp_pack.agreement``, or ``None`` where the provider tree is absent: descriptor
+
+def _import_hkp_pack(module: str):
+    """``hkp_pack.<module>``, or ``None`` where the provider tree is absent: descriptor
     generation must not require the kernel toolchain, so this is a test-only bridge."""
     import importlib
     import sys
@@ -686,12 +708,12 @@ def _import_agreement():
 
     root = Path(__file__).resolve().parents[5]
     package = root / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
-    if not (package / "hkp_pack" / "agreement.py").exists():
+    if not (package / "hkp_pack" / f"{module}.py").exists():
         return None
     if str(package) not in sys.path:
         sys.path.insert(0, str(package))
     try:
-        return importlib.import_module("hkp_pack.agreement")
+        return importlib.import_module(f"hkp_pack.{module}")
     except ImportError:
         return None
 
@@ -725,45 +747,42 @@ class TestCatalogIdentity:
             "twin.right",
         ]
 
-    def test_equal_tuples_on_overlapping_arches_are_refused_naming_both(self):
-        """Same tuple, same device, DIFFERENT binary: dropping the second discards a
-        binary somebody built, keeping both drops the engine at load, so the generator
-        names both."""
+    @pytest.mark.parametrize(
+        ("pack_arch", "left_arch", "right_arch", "other_binary"),
+        [
+            (["gfx942"], [], [], True),
+            (["gfx942", "gfx950"], ["gfx942"], ["gfx942", "gfx950"], False),
+            (["gfx11-generic"], [], [], True),
+        ],
+    )
+    def test_equal_tuples_tied_on_a_device_are_refused_naming_both(
+        self, pack_arch, left_arch, right_arch, other_binary
+    ):
         config, pack, left, right = self._twin_config()
-        # Same matcher-visible metadata, different compiled source.
-        right.kernel_source.entry_point = "ScaleAddOther"
+        pack.arch = pack_arch
+        left.arch = left_arch
+        right.arch = right_arch
+        if other_binary:
+            right.kernel_source.entry_point = "ScaleAddOther"
 
         with pytest.raises(ValueError) as excinfo:
             build_kdp(config, pack, mint_ids(config))
         message = str(excinfo.value)
         assert "twin.left" in message and "twin.right" in message
 
-    def test_one_candidate_on_unequal_overlapping_arches_names_the_coverage(self):
-        """Same tuple, same device, SAME binary: there is no kernel_source or priority
-        difference to find, so the diagnostic must name the coverage."""
-        config, pack, left, right = self._twin_config()
-        pack.arch = ["gfx942", "gfx950"]
-        left.arch = ["gfx942"]
-        right.arch = ["gfx942", "gfx950"]
-
-        with pytest.raises(ValueError) as excinfo:
-            build_kdp(config, pack, mint_ids(config))
-        message = str(excinfo.value)
-        assert "SAME candidate" in message
-        assert "kernel_source/priority differ" not in message
-
-    def test_a_wildcard_arch_overlapping_a_concrete_one_is_refused(self):
-        """An absent ``arch`` is the loader's wildcard: treated as no coverage it sits
-        beside a concrete candidate holding the same tuple and collides on that
-        device."""
+    def test_a_wildcard_arch_and_a_concrete_one_with_one_tuple_both_survive(self):
+        """A concrete arch outranks an empty one on its own device, so they never tie."""
         config, pack, left, right = self._twin_config()
         pack.arch = []
         left.arch = []  # every device
         right.arch = ["gfx942"]
         right.kernel_source.entry_point = "ScaleAddOther"
 
-        with pytest.raises(ValueError, match="overlapping architectures"):
-            build_kdp(config, pack, mint_ids(config))
+        kdp = build_kdp(config, pack, mint_ids(config))
+        assert [k["name"] for k in kdp["kernelDescriptors"]] == [
+            "twin.left",
+            "twin.right",
+        ]
 
     def test_an_omitted_field_and_the_kmd_default_are_one_key(self):
         """One tuple omits an optional field; the other states it at exactly the KMD
@@ -1033,6 +1052,42 @@ class TestEmittedInventory:
         assert inventory["arches"]["gfx942"]["descriptor_count"] == 1
         assert inventory["arches"]["gfx950"]["descriptor_count"] == 1
         assert inventory["total_descriptor_count"] == 1
+
+    def test_inventory_gives_every_member_the_generic_rows(self):
+        """Each member's row holds the generic's descriptors, its own, and the wildcard's."""
+        generic = make_pack(
+            name="generic",
+            arch=["gfx11-generic"],
+            kernels=[make_kernel(name="generic.k", metadata={"block_size": 64})],
+        )
+        explicit = make_pack(
+            name="explicit",
+            arch=["gfx1151"],
+            kernels=[make_kernel(name="explicit.k", metadata={"block_size": 128})],
+        )
+        other = make_pack(
+            name="other",
+            arch=["gfx942"],
+            kernels=[make_kernel(name="other.k", metadata={"block_size": 256})],
+        )
+        everywhere = make_pack(
+            name="everywhere",
+            arch=[],
+            kernels=[make_kernel(name="any.k", metadata={"block_size": 512})],
+        )
+        config = make_minimal_config(packs=[generic, explicit, other, everywhere])
+        documents = build_kdp_documents(config, mint_ids(config))
+        arches = emitted_inventory(config, documents)["arches"]
+
+        names = {a: set(row["descriptor_names"]) for a, row in arches.items()}
+        assert names["gfx1100"] == {"generic.k", "any.k"}
+        assert names["gfx1153"] == {"generic.k", "any.k"}
+        assert names["gfx1151"] == {"generic.k", "explicit.k", "any.k"}
+        assert names["gfx942"] == {"other.k", "any.k"}
+        assert names["gfx11-generic"] == {"generic.k", "any.k"}
+        assert "gfx1154" not in names
+        stems = {config.kdp_stem(p) for p in (generic, everywhere)}
+        assert set(arches["gfx1100"]["pack_names"]) == stems
 
     def test_the_packaged_dialect_reports_the_kind_that_actually_ships(self):
         """hkp_pack lowers ``rocke``/``hip`` to ``kpack`` before the loader reads it, so
@@ -1714,3 +1769,52 @@ class TestProjectedMetadataIsTypeChecked:
         config = load_test_config(config_name)
         documents = build_kdp_documents(config, mint_ids(config))
         assert any(document["kernelDescriptors"] for _pack, document in documents)
+
+
+class TestPackagedHsacoKdp:
+    def test_hsaco_kernel_inheriting_a_generic_pack_arch_conforms_to_the_pack_rule(
+        self,
+    ):
+        from codegen.config_loader import _check_generic_arch
+
+        kernel = make_kernel(
+            name="test.hsaco",
+            kernel_source=KernelSource(
+                kind="hsaco", file="HsacoFixture.co", symbol="HsacoFixtureAdd"
+            ),
+        )
+        config = make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="hsaco",
+            packs=[make_pack(kernels=[kernel], arch=["gfx942", "gfx11-generic"])],
+        )
+        _check_generic_arch(config)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert kdp["kernelDescriptors"][0]["arch"] == ["gfx942", "gfx11-generic"]
+
+    def test_every_hsaco_ukd_carries_exactly_kind_file_symbol(self):
+        """hkp_pack validates a closed field set per kind, so a UKD carrying any other
+        kind's key is refused at pack time."""
+        kernels = [
+            make_kernel(
+                name=f"test.{symbol}",
+                kernel_source=KernelSource(
+                    kind="hsaco", file="HsacoFixture.co", symbol=symbol
+                ),
+                metadata={"block_size": block_size, "dtype": "FLOAT"},
+            )
+            for symbol, block_size in (
+                ("HsacoFixtureAdd", 64),
+                ("HsacoFixtureScale", 128),
+            )
+        ]
+        config = make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="hsaco",
+            packs=[make_pack(kernels=kernels, arch=["gfx942"])],
+        )
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert [k["kernel_source"] for k in kdp["kernelDescriptors"]] == [
+            {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureAdd"},
+            {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureScale"},
+        ]

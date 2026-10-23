@@ -38,7 +38,6 @@ namespace TensileLite
  * \ingroup DataTypes
  */
     using Half = _Float16;
-#define TENSILE_USE_HALF
 } // namespace TensileLite
 
 namespace std

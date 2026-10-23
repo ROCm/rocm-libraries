@@ -233,6 +233,11 @@ inline void sort_keys()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<typename TestFixture>
@@ -323,6 +328,11 @@ inline void sort_keys_empty_data()
             // Output should not have changed
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_input));
         }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -418,6 +428,11 @@ inline void sort_keys_large_segments()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
         }
         ASSERT_TRUE(all_blocks_sorted);
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -564,6 +579,11 @@ inline void sort_keys_unspecified_ranges()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -713,6 +733,11 @@ inline void sort_pairs()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -873,6 +898,11 @@ inline void sort_pairs_unspecified_ranges()
             }
         }
     }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<typename TestFixture>
@@ -996,6 +1026,11 @@ inline void sort_keys_double_buffer()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -1166,6 +1201,11 @@ inline void sort_pairs_double_buffer()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 

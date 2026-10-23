@@ -1,0 +1,274 @@
+# Engine manifest for hipkernel:Gfx950AttentionDense.
+#
+# Everything about the engine that rocKE does not know: identity, KMD schema,
+# metadata mapping, the registry space its kernels are drawn from, and how that
+# space is reduced. The shipped kernel set is configs/gfx950_attention_dense.yaml;
+# tests/test_registry_regeneration.py gates it against this manifest.
+#
+#     python tools/registry_enumerator.py --manifest configs/gfx950_attention_dense.engine.yaml --out <scratch>/config.yaml
+#
+# The generated packs/Gfx950AttentionDenseNative.cpp and
+# tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+engine:
+  name: hipkernel:Gfx950AttentionDense
+  census_name_symbol: GFX950_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - block_m
+  - block_n
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+# Tile metadata, also public engine knobs. A record omitting either field
+# completes to the 256/64 baseline tile through these defaults; with no tile
+# knob set, cold selection prefers the applicable 256/64 candidate.
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+kernel_source_kind: rocke
+workspace_policy: none
+
+pack: gfx950_attention_dense
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx950/attention_dense.py
+builder: build_attention_dense
+kernel_name_template: attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_c{causal}_bm{block_m}_bn{block_n}.gfx950
+
+# The registry space the selection is drawn from (see registry_enumerator.py).
+# `space: slice` is exactly the shipped selection; `space: full` every production spec.
+enumerate:
+  candidates: dispatch.attention:attention_candidates
+  request: dispatch.attention.common:AttentionRequest
+  # Selects the one non-persistent grid candidate.
+  pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_grid}
+  # Request fields every cell shares.
+  fixed: {arch: gfx950, batch: 1, seqlen_q: 512, seqlen_k: 512}
+  # Crossed in order, first group outermost (the catalog order).
+  cells:
+    - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+      values:
+        - [64, 64, 8, 1]
+        - [64, 64, 8, 8]
+        - [64, 64, 10, 10]
+        - [64, 64, 12, 12]
+        - [64, 64, 16, 2]
+        - [64, 64, 16, 16]
+        - [64, 64, 20, 20]
+        - [64, 64, 32, 4]
+        - [64, 64, 32, 8]
+        - [64, 64, 32, 32]
+        - [64, 64, 64, 8]
+        - [64, 64, 128, 128]
+        - [128, 128, 24, 24]
+        - [128, 128, 4, 4]
+        - [128, 128, 8, 1]
+        - [128, 128, 8, 2]
+        - [128, 128, 8, 8]
+        - [128, 128, 9, 9]
+        - [128, 128, 16, 2]
+        - [128, 128, 16, 16]
+        - [128, 128, 28, 4]
+        - [128, 128, 32, 4]
+        - [128, 128, 32, 8]
+        - [128, 128, 32, 32]
+        - [128, 128, 40, 8]
+        - [128, 128, 40, 10]
+        - [128, 128, 40, 40]
+        - [128, 128, 48, 8]
+        - [128, 128, 64, 4]
+        - [128, 128, 64, 8]
+        - [128, 128, 64, 64]
+        - [128, 128, 96, 8]
+        - [128, 128, 128, 8]
+    - fields: [dtype]
+      values: [bf16, fp16]
+    - fields: [mask_type]
+      values: [TOP_LEFT_CAUSAL, NO_MASK]
+  sweep_level: production
+  space: slice
+  # Spec fields the sweep may vary away from the candidate's own default spec.
+  # Every other field must equal that default, or the spec is a different
+  # kernel family and is not part of this catalog.
+  # The catalog is aligned-only, so `ragged` is not free: a ragged spec differs
+  # from the default and is excluded.
+  free_fields: [block_m, block_n]
+  # Fields of the registry spec every generated kernel carries. The registry spec
+  # is wider (the rest sit at their dataclass defaults), and the shipped KDP omits
+  # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
+  # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
+  # diffs the enumeration against the shipped catalog on the shipped fields (g3).
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  # Frozen build cost: a registry that grows past this fails here, not at pack time.
+  max_kernels: 840
+
+# How the variant space is reduced; copied verbatim into the generated config.
+# Feature fields define a cell; performance knobs are the tuning arms, in priority order.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    performance:
+      - {name: block_m, divides: seqlen_q}
+      - {name: block_n, divides: seqlen_kv}
+      - {name: waves_per_eu}
+      - {name: lazy_rescale}
+      - {name: lds_k_group_pad}
+      - {name: lds_v_row_pad}
+      - {name: lds_k_row_pad}
+      - {name: lazy_rescale_threshold}
+      - {name: use_exp2_fast}
+      - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}
+      - {name: partial_vmcnt_prefetch}
+      - {name: pv_priority}
+      - {name: pv_sched_fence, unset_resolves_by: resolved_pv_sched_fence}
+      - {name: pv_sched_group_template, unset_resolves_by: resolved_pv_sched_group_template}
+      - {name: iglp_mode, unset_resolves_by: resolved_iglp_mode}
+      - {name: pv_sched_fence_mask}
+      - {name: pv_sched_group_ds_read}
+      - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
+      - {name: causal_diag_split}
+      - {name: o_store_width}
+    ignored: []
+  aot_budget_per_arch: 1000
+
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+# `${<request field>}` fills a scalar; `value_map` translates a request value to that
+# scalar or to patches; an unlisted value fails the row. A patch is a JSON pointer whose
+# list segments are preferably element `name`s (`/nodes/sdpa_node/...`), which survive a
+# template reordering; an index (`/nodes/0/...`) is still accepted.
+# A tensor's `"strides": "packed"` packs its axes outermost-first in `stride_order` (BSHD here).
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+
+# Launch-surface audit (`tools/launch_surface.py --check <this file>`).
+launch_surface:
+  - name: grid
+    python_source: kernels/gfx950/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch]
+    guard: >
+      gfx950AttentionDenseGeometry() throws HipdnnPluginException for
+      non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
+      Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+
+  - name: block
+    python_source: kernels/gfx950/attention_dense.py:attention_dense_block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp
+    kmd_fields: [block_m]
+    guard: >
+      block_m / GFX950_ROWS_PER_WAVE(32) * GFX950_WAVE_LANES(64) threads:
+      256 for block_m=128, 512 for block_m=256.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+
+  # The tile-legality and static-LDS rules are restated by hand from the rocKE Python.
+  - name: matcher
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
+    guard: >
+      kernelMatches() returns false (no panic) if dtype, head_size,
+      num_query_heads, num_kv_heads, causal or sliding_window disagrees with
+      the graph, the candidate's tile is illegal, or the candidate is ragged
+      (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
+      inputs of a shape-generic kernel and are never compared; the graph's
+      shape enters only through seqlen_q % block_m == 0 and
+      seqlen_kv % block_n == 0 per candidate. score() ranks an applicable
+      256/64 baseline first, then ascending (block_m, block_n).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
+
+  - name: kernargs
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
+    guard: >
+      attentionDenseKernelSignature() always returns the 8-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). Every variant is
+      non-persistent, which enumerate.pin keeps true. use_sinks=False;
+      no sink_ptr slot. Validated at prepare() time by
+      buildIngestorKernelCode(..., expectedSignature).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp

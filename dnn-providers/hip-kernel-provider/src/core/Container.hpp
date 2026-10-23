@@ -59,6 +59,11 @@ private:
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
+    // Declared first so it is released last, after every engine this Container built. A
+    // SharedKpackArchives lease under HIPDNN_ENABLE_KERNEL_INGESTOR, null otherwise; typed
+    // opaquely so this class's layout does not depend on the flag. The last Container
+    // releasing its lease closes every kpack archive the ingestor's loads opened.
+    std::shared_ptr<void> _kpackArchiveLease;
     std::unique_ptr<device::IDevicePropertyProvider> _devicePropertyProvider;
     std::unique_ptr<compilation::IKernelCompiler> _kernelCompiler;
     std::unique_ptr<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>> _engineManager;

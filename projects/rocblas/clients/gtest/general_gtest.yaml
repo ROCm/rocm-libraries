@@ -25,6 +25,11 @@ Tests:
   function: helper_utilities
   precision: *half_bfloat_single_double_complex_real_precisions
 
+- name: get_string
+  category: quick
+  function: get_string
+  precision: *single_precision
+
 - name : check_numerics_vector
   category : quick
   function : check_numerics_vector

@@ -39,8 +39,10 @@ public:
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
+        const auto raggedLayout = reference.raggedIterationInfo();
         if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+           || reference.dims() != implementation.dims()
+           || raggedLayout != implementation.raggedIterationInfo())
         {
             return false;
         }
@@ -49,11 +51,13 @@ public:
         {
             return true;
         }
+        const bool isRagged = raggedLayout.has_value();
 
         std::atomic<double> squareDifference(0.0);
         std::atomic<double> maxRefMagnitude(0.0);
         std::atomic<double> maxImplMagnitude(0.0);
         std::atomic<bool> hasNanOrInf(false);
+        std::atomic<size_t> comparedCount(0);
 
         hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
@@ -62,8 +66,23 @@ public:
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
+            if(isRagged && raggedLayout->isOutOfBlock(indices))
+            {
+                return;
+            }
+
             T refValueT = refView.getHostValue(indices);
             T implValueT = implView.getHostValue(indices);
+
+            // A ragged reference marks the positions it leaves undefined with NaN (RFC 0014).
+            if(isRagged)
+            {
+                if(isnan(refValueT))
+                {
+                    return;
+                }
+                comparedCount.fetch_add(1, std::memory_order_relaxed);
+            }
 
             if(isnan(refValueT) || isinf(refValueT) || isnan(implValueT) || isinf(implValueT))
             {
@@ -113,8 +132,21 @@ public:
             return false;
         }
 
+        if(!isRagged)
+        {
+            return checkRmsError(
+                squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
+        }
+
+        if(comparedCount.load() == 0)
+        {
+            HIPDNN_SDK_LOG_ERROR("No element of the ragged reference was compared: every "
+                                 "in-block reference value is NaN.");
+            return false;
+        }
+
         return checkRmsError(
-            squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
+            squareDifference, maxRefMagnitude, maxImplMagnitude, comparedCount.load());
     }
 
 private:

@@ -20,16 +20,29 @@ This module re-uses every MFMA / async DMA / softmax helper from the
     num_segments, head_size]`` plus ``segm_max[..., num_segments]`` and
     ``segm_expsum[..., num_segments]`` (all fp32).
   - The final ``acc /= L`` and fp16 cast happen in the reduce kernel.
+  - QK computes S^T = K Q^T, so each lane owns one query row: the online
+    softmax keeps one (m, l) per lane, and P stays in registers as the B
+    operand of O^T = V^T P^T (no LDS round trip for P).
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
+from kernels.common._attention_strided_kv import (
+    declare_strided_kv_params,
+    strided_kv_offset,
+    strided_kv_resource,
+)
+
 from rocke.core.ir import (
     BF16,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -40,16 +53,16 @@ from rocke.core.ir import (
     PtrType,
     Type,
     Value,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     mfma_16x16x32_for_dtype as _mfma_16x16x32,
-    warp_xor_reduce_max as _warp_xor_reduce_max,
-    warp_xor_reduce_sum as _warp_xor_reduce_sum,
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
@@ -57,9 +70,16 @@ from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import TensorDescriptor, indirect, unmerge
 
-
 MFMA_M = 16
 MFMA_N = 16
+# Async K/V feed: the segment kernel is one wave64 CTA, and each lane's
+# buffer_load ... lds moves 4 DWORDs (8 halves), so one async call stages
+# 64 * 8 halves. Every call is one outstanding vmcnt event; the gfx950
+# s_waitcnt vmcnt field is 6 bits.
+SEGMENT_THREADS = 64
+KV_HALVES_PER_LANE = 8
+KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
+MAX_VMCNT = (1 << 6) - 1
 
 
 # CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom. This
@@ -115,6 +135,7 @@ class UnifiedAttention3DTiledSpec:
     num_segments: int
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
     # register-pressure-bound; setting this to 2 or 3 tightens the
@@ -124,14 +145,17 @@ class UnifiedAttention3DTiledSpec:
     # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
     # See that spec's docstring for the semantics.
     kv_storage_dtype: Optional[str] = None
-    # ``tile_size_override`` / ``use_invariant_hoist`` / ``use_wide_kv_load``
-    # are accepted for signature parity with the shared dispatch spec builder
-    # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select gfx942
-    # narrow-atom 3D optimizations; the corresponding ``_gfx942_3d_*`` helpers
-    # return None/False on gfx950, so the gfx950 segment kernel does not key on
-    # them.
+    # Multi-page KV tile. ``None`` keeps one KV tile per paged block
+    # (T == block_size). A multiple of ``block_size`` makes each loop
+    # iteration gather ``T // block_size`` blocks, so every iteration moves
+    # more K/V bytes and the loop runs fewer, larger tiles. Unlike gfx942,
+    # where the override must divide ``block_size``, gfx950 only accepts
+    # multiples.
     tile_size_override: Optional[int] = None
+    # Inert on both arches; kept so saved specs that set it still load.
     use_invariant_hoist: bool = False
+    # Inert: selects a gfx942 K/V loader. Accepted for signature parity with
+    # the gfx942 spec.
     use_wide_kv_load: bool = False
     # 64-bit paged-KV addressing. When the paged K/V cache exceeds the ~2 GiB
     # i32 buffer-voffset cap, the per-block byte offset
@@ -143,12 +167,109 @@ class UnifiedAttention3DTiledSpec:
     # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
     # so the default (small-cache) build is byte-identical to before.
     use_i64_kv_addr: bool = False
+    # Direct non-paged [B,H,S,D] addressing; D remains contiguous.
+    kv_layout: str = "paged"
+    # All-decode launch grid: one CTA per sequence along grid x
+    # (``seq_idx = block_id_x``, single query block per sequence) instead of
+    # the prefill upper bound ``total_q // BLOCK_Q + num_seqs`` with a binary
+    # search over ``query_start_len``. Legal only when every sequence has at
+    # most one query token (``UnifiedAttentionProblem.all_decode``); the
+    # dispatcher derives it from the problem (``_use_decode_grid``) and the
+    # launcher sizes grid x to ``num_seqs``. It could later be relaxed to
+    # ``max_seqlen_q <= BLOCK_Q`` (one query block per sequence), which needs
+    # its own checks of the per-row causal diagonal, sliding window and
+    # per-segment KV range.
+    use_decode_grid: bool = False
+    # Cache policy of the async K/V copies, one of ``CACHE_POLICY_NAMES`` (as
+    # attention 2D's ``kv_cache_policy``). The dispatcher sets "stream" (NT)
+    # for all-decode batches, whose K/V bytes are each read once
+    # (``_kv_cache_policy_3d``). The fp8 K/V loader is synchronous and keeps
+    # "all".
+    kv_cache_policy: str = "all"
+    # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
+    # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
+    # and PV reads over the LDS banks. The DMA lanes fetch permuted source
+    # chunks, so the copies stay contiguous and need no padding. Implemented
+    # for fp16/bf16 K/V, which can be extended to fp8 K/V.
+    use_kv_lds_swizzle: bool = False
+    # The wave loads the segment's page-table entries 64 at a time, one per
+    # lane, and each tile reads its page ids from those registers
+    # (v_readlane), so no page-table load sits on the KV loop's critical
+    # path. Paged fp16/bf16 K/V only.
+    use_wave_page_id_load: bool = False
+    # Top-left causal (unshifted diagonal, ``context_len = 0``); see the 2D spec.
+    # At ``q_len == 1`` the single query row attends only key 0 and the cached
+    # context is ignored -- correct by definition, not a bug.
+    causal_top_left: bool = False
+    # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
+    # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
+    right_bound: int = 0
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
+        if self.kv_layout not in ("paged", "strided"):
+            raise ValueError("kv_layout must be 'paged' or 'strided'")
+        if self.kv_layout == "strided" and (
+            self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing"
+            )
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
+            raise ValueError(
+                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                "(their offsets are defined on the causal diagonal)"
+            )
+        if self.kv_layout == "strided" and self.use_additive_bias:
+            raise ValueError("strided KV does not support use_additive_bias")
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
             )
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
+            raise ValueError(
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
+                f"(got {self.kv_cache_policy!r})"
+            )
+        if self.kv_cache_policy != "all" and self.kv_storage_dtype is not None:
+            raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
+        if self.use_kv_lds_swizzle and self.kv_storage_dtype is not None:
+            raise ValueError("use_kv_lds_swizzle needs fp16/bf16 KV")
+        if self.use_wave_page_id_load and (
+            self.kv_layout != "paged" or self.kv_storage_dtype is not None
+        ):
+            raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
+        t = self.tile_size_override
+        if t is not None:
+            if t < self.block_size or t % self.block_size or t > 128:
+                raise ValueError(
+                    "tile_size_override must be a multiple of block_size in "
+                    f"[block_size, 128] (got {t}, block_size={self.block_size})"
+                )
+            # Multi-page tiles rely on the async page-id loader; the fp8 KV
+            # path loads synchronously (load, dequantize, store to LDS), so it
+            # keeps page-sized tiles.
+            if t != self.block_size and self.kv_storage_dtype is not None:
+                raise ValueError("multi-page tiles require fp16/bf16 KV storage")
+            # The loop waits on the async calls of a tile with s_waitcnt
+            # vmcnt, which can count at most MAX_VMCNT outstanding calls.
+            if (t * self.head_size) // KV_HALVES_PER_CALL > MAX_VMCNT:
+                raise ValueError(
+                    f"tile_size_override={t} x head_size={self.head_size} needs "
+                    "more async calls per tile than s_waitcnt can count"
+                )
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -164,7 +285,13 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def tile_size(self) -> int:
+        if self.tile_size_override is not None:
+            return self.tile_size_override
         return self.block_size
+
+    @property
+    def n_blocks_per_tile(self) -> int:
+        return self.tile_size // self.block_size
 
     @property
     def dtype_ir(self) -> Type:
@@ -172,9 +299,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -183,6 +308,7 @@ class UnifiedAttention3DTiledSpec:
             "rocke_uattn3d_tiled",
             f"d{self.head_size}",
             f"b{self.block_size}",
+            f"t{self.tile_size}" if self.n_blocks_per_tile != 1 else "",
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             f"seg{self.num_segments}",
             self.dtype,
@@ -193,6 +319,18 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
+            "dg" if self.use_decode_grid else "",
+            f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
+            "kvswz" if self.use_kv_lds_swizzle else "",
+            "wpid" if self.use_wave_page_id_load else "",
+            "stridedkv" if self.kv_layout == "strided" else "",
+            "tl" if self.causal_top_left else "",
+            (
+                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+                if self.right_bound != 0
+                else ""
+            ),
         )
 
 
@@ -204,8 +342,9 @@ def supports_tiled_3d(
     num_queries_per_kv: int,
     use_alibi: bool,
     use_qq_bias: bool,
-    use_fp8: bool,
-    q_dtype,
+    use_additive_bias: bool = False,
+    use_fp8: bool = False,
+    q_dtype=None,
     kv_storage_dtype: Optional[str] = None,
     arch: str = "gfx950",
 ) -> Tuple[bool, str]:
@@ -296,21 +435,23 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     # 64-bit paged-KV addressing for caches > 2 GiB (see spec docstring).
     I64_KV_ADDR = spec.use_i64_kv_addr
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy)
+    KV_SWZ = spec.use_kv_lds_swizzle
+    KV_CHUNKS_PER_ROW = HD // 8  # 16-byte chunks per K/V LDS row
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
     QK_K_STEP = 32
-    PV_K_STEP = 32 if T % 32 == 0 else 16
     QK_K_ITERS = HD // QK_K_STEP
     QK_N_TILES = T // MFMA_N
-    PV_K_ITERS = T // PV_K_STEP
     PV_N_TILES = HD // MFMA_N
 
-    THREADS = 64
+    THREADS = SEGMENT_THREADS
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -369,27 +510,57 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    if spec.kv_layout == "strided":
+        k_strides = declare_strided_kv_params(b, "k")
+        v_strides = declare_strided_kv_params(b, "v")
 
     q_block_global_idx = b.block_id_x()
     kv_head_idx = b.block_id_y()
     seg_idx = b.block_id_z()
     tid = b.thread_id_x()
 
-    seq_idx = _binary_search_seq_idx_helper(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
-    )
+    if spec.use_decode_grid:
+        # One CTA per sequence along x, one query block each: no search.
+        seq_idx = q_block_global_idx
+    else:
+        seq_idx = _binary_search_seq_idx_helper(
+            b,
+            cu_q,
+            q_block_global_idx,
+            num_seqs_p,
+            block_q=BLOCK_Q,
+            iterations=spec.binary_search_iters,
+        )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
     cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
+    if spec.use_decode_grid:
+        q_block_local_idx = b.const_i32(0)
+    else:
+        q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
+        q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    if spec.causal_top_left:
+        context_len = b.const_i32(0)
+    else:
+        context_len = b.sub(seq_len, cur_batch_q_len)
+
+    # Right bound of the band; identical to the causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+
+    def _upper_ok(col_abs, causal_lim):
+        if RIGHT < 0:
+            return None
+        lim = causal_lim if RIGHT == 0 else b.add(causal_lim, b.const_i32(RIGHT))
+        return b.cmp_le(col_abs, lim)
+
+    def _band_row_mask(row_ok, upper_ok, in_prefix):
+        if upper_ok is None:
+            return b.land(row_ok, in_prefix)
+        return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -476,13 +647,24 @@ def build_unified_attention_3d_tiled(
     # ---------------- LDS layout ----------------
     Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
-    P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
+    # One V slot: V(i) is loaded after QK(i) and consumed by PV(i) in the same
+    # iteration, and the next iteration's leading wait-all retires PV(i) before
+    # V(i+1) is issued, so a second slot would never hold a live tile.
+    V_lds = b.smem_alloc(dtype, [1, T, HD], name_hint="Vlds")
 
-    # CK Tile ``TransposeLDSLayout<M=16, K=PV_K_STEP, B=1>`` lane formulas.
-    # The 3D segment kernel is single-warp, so ``lane == tid``.
-    pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid)
+    # CK Tile ``TransposeLDSLayout<M=16, K=16, B=1>`` lane formulas (the V^T
+    # operand of the PV MFMA). The 3D segment kernel is single-warp, so
+    # ``lane == tid``.
+    pv_tr_reader = TransposeLdsReader(K=16, M=16).bind(b, tid)
     tr_col_lane = pv_tr_reader.col
+
+    def _row_reduce(x: Value, op) -> Value:
+        # Combine x over the 4 lanes {l, l^16, l^32, l^48} that hold the 4
+        # token groups of one query row.
+        sw = b.bitcast(b.ds_swizzle_xor(b.bitcast(x, I32), 16), F32)
+        x = op(x, sw)
+        lo, hi = b.permlane32_swap(b.bitcast(x, I32), b.bitcast(x, I32))
+        return op(b.bitcast(lo, F32), b.bitcast(hi, F32))
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
@@ -526,8 +708,13 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- Per-segment tile range ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    if RIGHT < 0:
+        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
+    else:
+        msp_raw = b.add(
+            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
+        )
+        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     # Segment bounds: [seg_idx * tps, min((seg_idx+1)*tps, num_tiles))
@@ -546,40 +733,39 @@ def build_unified_attention_3d_tiled(
     lane_rg = b.div(tid, b.const_i32(16))
     lane_col = b.mod(tid, b.const_i32(16))
 
+    # The QK MFMA computes S^T = K Q^T: lane l owns query row (BLOCK_M row)
+    # l % 16 and holds tokens 4 * (l // 16) + 0..3 of each 16-token block, so
+    # the online softmax keeps one (m, l) pair per lane.
     if USE_SINKS:
         # Triton's 3D applies sinks only when segm_idx == 0.
         seg0 = b.cmp_eq(seg_idx, b.const_i32(0))
-        m_inits = []
-        for r in range(4):
-            row = _mfma_16x16_c_row(b, tid, r)
-            qh = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
-            qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
-            sink_h = b.global_load(sinks, qh, dtype, align=2)
-            sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
-            sink_with_mask = b.select(qh_in, sink_f, neg_inf)
-            m_inits.append(b.select(seg0, sink_with_mask, neg_inf))
+        qh = b.add(
+            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(lane_col, b.const_i32(NQK))
+        )
+        qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+        sink_h = b.global_load(sinks, qh, dtype, align=2)
+        sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+        sink_with_mask = b.select(qh_in, sink_f, neg_inf)
+        m_init = b.select(seg0, sink_with_mask, neg_inf)
     else:
-        m_inits = [neg_inf, neg_inf, neg_inf, neg_inf]
-    l_inits = [one_f, one_f, one_f, one_f]
+        m_init = neg_inf
 
     acc_zero = b.zero_vec_f32(4)
-    acc_inits = [acc_zero for _ in range(PV_N_TILES)]
 
-    iter_args = []
-    for r in range(4):
-        iter_args.append((f"m{r}", m_inits[r]))
-        iter_args.append((f"l{r}", l_inits[r]))
+    iter_args = [("m", m_init), ("l", one_f)]
     for n in range(PV_N_TILES):
-        iter_args.append((f"acc{n}", acc_inits[n]))
+        iter_args.append((f"acc{n}", acc_zero))
 
     # ---------------- async K/V infra (identical to 2D) ----------------
     big_bytes = b.const_i32(0x7FFF0000)
-    key_rsrc = b.buffer_rsrc(key, big_bytes)
-    value_rsrc = b.buffer_rsrc(value, big_bytes)
+    if spec.kv_layout == "strided":
+        key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
+        value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
+    else:
+        key_rsrc = b.buffer_rsrc(key, big_bytes)
+        value_rsrc = b.buffer_rsrc(value, big_bytes)
 
-    KV_HALVES_PER_CALL = THREADS * 8
+    KV_HALVES_PER_CALL = THREADS * KV_HALVES_PER_LANE
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
@@ -606,72 +792,151 @@ def build_unified_attention_3d_tiled(
     # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
     # half offset, plus the byte-stride 4D base. One ``.offset()`` call
     # produces the final byte address for one async DMA call.
-    seq_base = b.mul(seq_idx, bt_stride_p)
-    paged_kv_desc = TensorDescriptor.naive(
-        "paged_kv_bytes",
-        lengths=[1 << 24, T, NUM_KV, HD],
-        strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
-        coord_names=("physical_block", "token", "kv_head", "dim"),
-    ).transform(
-        indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
-        unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
-    )
+    N_BLOCKS_PER_TILE = spec.n_blocks_per_tile
+    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
+    # fp16/bf16 tiles look up each page id once per tile, as a wave-uniform
+    # value. K and V of a tile share the ids, and the loop fetches the next
+    # tile's ids one iteration ahead (the loop-carried ``pid*`` values), so the
+    # vmcnt wait on a table read doesn't drain the K/V copies already in
+    # flight. The page base goes into soffset; the per-lane part of the address
+    # is loop-invariant. The fp8 sync loader (page-sized tiles only) keeps the
+    # paged-KV descriptor; strided KV has no page table and keeps per-call
+    # strided offsets.
+    PAGE_IDS = not KV_FP8 and spec.kv_layout == "paged"
+    WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
+    if not PAGE_IDS:
+        paged_kv_desc = TensorDescriptor.naive(
+            "paged_kv_bytes",
+            lengths=[1 << 24, T, NUM_KV, HD],
+            strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
+            coord_names=("physical_block", "token", "kv_head", "dim"),
+        ).transform(
+            indirect(
+                "tile_idx", into="physical_block", table=block_tables, base=seq_base
+            ),
+            unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
+        )
+    else:
+        if N_BLOCKS_PER_TILE > 1 or WAVE_PAGE_ID_LOAD:
+            # A sequence's last tile can reach past its last page; the table
+            # entries there are not the sequence's (uninitialized, or the next
+            # row). Those pages reuse the tile's first page id, always a live
+            # page of the sequence; the in_prefix mask discards their tokens.
+            seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
+        tokens_per_call = KV_HALVES_PER_CALL // HD
+        assert (
+            BS % tokens_per_call == 0
+        ), f"page-id loader needs whole calls per page (BS={BS}, HD={HD})"
+        calls_per_block = BS // tokens_per_call
+        lane_tok = b.div(lane_half_base, b.const_i32(HD))
+        lane_dim = b.mod(lane_half_base, b.const_i32(HD))
+        lane_tok_head = b.add(
+            b.mul(lane_tok, b.const_i32(kv_stride_tok_b)),
+            b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
+        )
+        # Per-lane byte offset within a page, keyed by the call's swizzle
+        # phase (always 0 without the swizzle).
+        lane_within_b = {}
+        if KV_SWZ:
+            # A call's LDS rows are ph + lane_tok (mod chunks per row), with
+            # ph = its first row; ph is a multiple of tokens_per_call and
+            # lane_tok < tokens_per_call, so the sum never wraps. The lane
+            # writing LDS chunk c fetches chunk c ^ row.
+            lane_chunk = b.div(lane_dim, b.const_i32(8))
+            for call in range(kv_calls_per_tile):
+                ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW
+                if ph in lane_within_b:
+                    continue
+                src_chunk = b.xor(lane_chunk, b.add(lane_tok, b.const_i32(ph)))
+                lane_within_b[ph] = b.add(
+                    lane_tok_head, b.mul(src_chunk, b.const_i32(8 * KV_BYTES))
+                )
+        else:
+            lane_within_b[0] = b.add(
+                lane_tok_head, b.mul(lane_dim, b.const_i32(KV_BYTES))
+            )
 
-    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
-        buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
-        buf_off_i64 = b.zext(buf_off_i32, I64)
-        K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
+    def _kv_col(row: Value, col: Value) -> Value:
+        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
+        # by the row under the swizzle.
+        if not KV_SWZ:
+            return col
+        chunk = b.xor(
+            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
+        )
+        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
+
+    def _kv_src_linear(linear_half: Value) -> Value:
+        # The async copies write LDS in lane order, so under the swizzle each
+        # lane fetches the element its LDS position holds (_kv_col is its own
+        # inverse).
+        if not KV_SWZ:
+            return linear_half
+        row = b.div(linear_half, b.const_i32(HD))
+        return b.add(
+            b.mul(row, b.const_i32(HD)),
+            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
+        )
+
+    def _tile_page_ids(kv_tile_idx: Value) -> list:
+        # A tile starts below seq_len, so its first page is always live.
+        first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
+        first_pid = b.global_load_i32(block_tables, b.add(seq_base, first_blk))
+        ids = [b.to_sgpr_u32(first_pid)]
+        for j in range(1, N_BLOCKS_PER_TILE):
+            blk = b.add(first_blk, b.const_i32(j))
+            pid = b.masked_global_load(
+                block_tables,
+                b.add(seq_base, blk),
+                b.cmp_lt(blk, seq_pages),
+                first_pid,
+                dtype=I32,
+                align=4,
+            )
+            ids.append(b.to_sgpr_u32(pid))
+        return ids
+
+    def _issue_paged_tile(
+        src: Value, src_rsrc: Value, lds_base: Value, buf_idx: Value, page_ids
+    ) -> None:
+        buf_off_i64 = b.zext(b.mul(buf_idx, b.const_i32(bytes_per_buf)), I64)
+        buf_base = b.smem_ptr_add(lds_base, buf_off_i64)
         for call in range(kv_calls_per_tile):
-            linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            call_rsrc = key_rsrc
+            blk = call // calls_per_block
+            tok0 = (call % calls_per_block) * tokens_per_call
+            ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW if KV_SWZ else 0
+            voff = b.add(lane_within_b[ph], b.const_i32(tok0 * kv_stride_tok_b))
             if I64_KV_ADDR:
-                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                    b,
-                    "physical_block",
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
+                base_i64 = b.mul(
+                    b.zext(page_ids[blk], I64), b.const_i64(kv_stride_blk_b)
                 )
                 call_rsrc = b.buffer_rsrc(
-                    b.global_ptr_add(key, base_i64), kv_block_bytes_c
+                    b.global_ptr_add(src, base_i64), kv_block_bytes_c
                 )
+                soff = zero_soff
             else:
-                voff, _ = paged_kv_desc.offset(
-                    b,
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-            k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(call_rsrc, k_dst, voff, zero_soff, 4)
+                call_rsrc = src_rsrc
+                soff = b.mul(page_ids[blk], b.const_i32(kv_stride_blk_b))
+            dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
+            b.async_buffer_load_lds_addr(
+                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+            )
 
-    def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_strided_tile(
+        src_rsrc: Value, strides, lds_base: Value, kv_tile_idx: Value, buf_idx: Value
+    ) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
-        V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
+        buf_base = b.smem_ptr_add(lds_base, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            call_rsrc = value_rsrc
-            if I64_KV_ADDR:
-                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                    b,
-                    "physical_block",
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-                call_rsrc = b.buffer_rsrc(
-                    b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                )
-            else:
-                voff, _ = paged_kv_desc.offset(
-                    b,
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
-                    kv_head=kv_head_idx,
-                )
-            v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(call_rsrc, v_dst, voff, zero_soff, 4)
+            voff = strided_kv_offset(
+                b, strides, kv_tile_idx, _kv_src_linear(linear_half), seq_len, HD, T
+            )
+            dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
+            b.async_buffer_load_lds_addr(
+                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+            )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
     # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,
@@ -755,68 +1020,136 @@ def build_unified_attention_3d_tiled(
             packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
 
-    def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_k(tile_idx: Value, buf_idx: Value, page_ids=None) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
+        elif spec.kv_layout == "strided":
+            _issue_strided_tile(key_rsrc, k_strides, K_lds_addr, tile_idx, buf_idx)
         else:
-            _issue_k_load(tile_idx, buf_idx)
+            _issue_paged_tile(key, key_rsrc, K_lds_addr, buf_idx, page_ids)
 
-    def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_v(tile_idx: Value, buf_idx: Value, page_ids=None) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
+        elif spec.kv_layout == "strided":
+            _issue_strided_tile(value_rsrc, v_strides, V_lds_addr, tile_idx, buf_idx)
         else:
-            _issue_v_load(tile_idx, buf_idx)
+            _issue_paged_tile(value, value_rsrc, V_lds_addr, buf_idx, page_ids)
 
-    _issue_k(tile_start, b.const_i32(0))
+    first_page_ids = None
+    if WAVE_PAGE_ID_LOAD:
+        # The wave holds a 64-page window of the segment's page table, one id
+        # per lane; a tile never straddles two windows.
+        assert 64 % N_BLOCKS_PER_TILE == 0
+        seg_first_page = b.mul(tile_start, b.const_i32(N_BLOCKS_PER_TILE))
+
+        def _load_page_id_window(rel_page: Value) -> Value:
+            # Lane l: the id of the segment's page rel_page + l (0 past the
+            # sequence's last page: never used, see _window_tile_ids).
+            pg = b.add(b.add(seg_first_page, rel_page), tid)
+            return b.masked_global_load(
+                block_tables,
+                b.add(seq_base, pg),
+                b.cmp_lt(pg, seq_pages),
+                b.const_i32(0),
+                dtype=I32,
+                align=4,
+            )
+
+        def _window_tile_ids(page_id_window: Value, kv_tile_idx: Value) -> list:
+            first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
+            lane0 = b.mod(b.sub(first_blk, seg_first_page), b.const_i32(64))
+            id0 = b.readlane(page_id_window, lane0)
+            ids = [id0]
+            for j in range(1, N_BLOCKS_PER_TILE):
+                idj = b.readlane(page_id_window, b.add(lane0, b.const_i32(j)))
+                live = b.cmp_lt(b.add(first_blk, b.const_i32(j)), seq_pages)
+                ids.append(b.select(live, idj, id0))
+            return ids
+
+        def _refill_page_id_window(page_id_window: Value, kv_tile_idx: Value) -> Value:
+            # The window for the next iteration: if tile kv_tile_idx + 2 starts
+            # a new window, load it now (after this tile's copies, so the
+            # explicit waits still cover V(t)); the loop-top wait completes it
+            # before the next iteration reads it.
+            t2 = b.add(kv_tile_idx, b.const_i32(2))
+            rel2 = b.sub(b.mul(t2, b.const_i32(N_BLOCKS_PER_TILE)), seg_first_page)
+            cross = b.land(
+                b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
+                b.cmp_lt(t2, tile_end),
+            )
+            # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
+            # none): 0 trips keep the window, 1 trip loads the next one. It
+            # compiles to a scalar branch around the load.
+            refill = b.scf_for_iter(
+                b.const_i32(0),
+                b.select(cross, b.const_i32(1), b.const_i32(0)),
+                b.const_i32(1),
+                [("pid_window_r", page_id_window)],
+                iv_name="pid_window_load",
+            )
+            with refill as (_iv, _w):
+                b.scf_yield(_load_page_id_window(rel2))
+            return refill.results[0]
+
+        first_page_id_window = _load_page_id_window(b.const_i32(0))
+        first_page_ids = _window_tile_ids(first_page_id_window, tile_start)
+    elif PAGE_IDS:
+        first_page_ids = _tile_page_ids(tile_start)
+    _issue_k(tile_start, b.const_i32(0), first_page_ids)
 
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
+    if PAGE_IDS:
+        for j, pid in enumerate(first_page_ids):
+            iter_args.append((f"pid{j}", pid))
+    if WAVE_PAGE_ID_LOAD:
+        iter_args.append(("pid_window", first_page_id_window))
 
-    # LICM hoist: per-reg invariants that are constant across all KV tiles.
+    # LICM hoist: per-row invariants that are constant across all KV tiles.
     # qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level constants
     # (qb_start_pos, kv_head_idx, context_len, cur_batch_q_len) and the
-    # per-thread row index — none of which change inside the KV loop.
+    # lane's query row — none of which change inside the KV loop.
     # ALiBi slopes are per query-head: also loop-invariant. Hoisting them here
     # mirrors the 2D kernel's hoist_* block (attention_tiled_2d.py:2851-2898)
     # and avoids re-emitting the global loads and arithmetic every tile.
-    hoist_qp_r = []
-    hoist_qh_r = []
-    hoist_row_ok = []
-    hoist_causal_lim = []
-    for reg in range(4):
-        row = _mfma_16x16_c_row(b, tid, reg)
-        qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-        qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
-        row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-        )
-        causal_lim = b.add(context_len, qp_r)
-        hoist_qp_r.append(qp_r)
-        hoist_qh_r.append(qh_r)
-        hoist_row_ok.append(row_ok)
-        hoist_causal_lim.append(causal_lim)
+    qp_r = b.add(qb_start_pos, b.div(lane_col, b.const_i32(NQK)))
+    qh_r = b.add(
+        b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(lane_col, b.const_i32(NQK))
+    )
+    row_ok = b.land(
+        b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+    )
+    causal_lim = b.add(context_len, qp_r)
 
     if USE_ALIBI:
-        hoist_alibi = []
-        for reg in range(4):
-            qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            slope = b.masked_global_load(
-                alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
-            )
-            hoist_alibi.append(slope)
-    else:
-        hoist_alibi = None
+        qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+        alibi_slope = b.masked_global_load(
+            alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
+        )
+
+    # The QK B operand (Q^T) is read from LDS once; every tile's MFMAs take it
+    # from registers.
+    Q_kits = []
+    for k in range(QK_K_ITERS):
+        q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+        Q_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
 
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
     )
     with kvloop as (kv_tile_iv, carry):
-        m_vals = [carry[2 * r] for r in range(4)]
-        l_vals = [carry[2 * r + 1] for r in range(4)]
-        acc_vals = [carry[8 + n] for n in range(PV_N_TILES)]
-        cur_buf = carry[8 + PV_N_TILES]
+        m_val = carry[0]
+        l_val = carry[1]
+        acc_vals = [carry[2 + n] for n in range(PV_N_TILES)]
+        cur_buf = carry[2 + PV_N_TILES]
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
+        v_buf = b.const_i32(0)
+        cur_page_ids = (
+            [carry[3 + PV_N_TILES + j] for j in range(N_BLOCKS_PER_TILE)]
+            if PAGE_IDS
+            else None
+        )
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
 
         next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -825,42 +1158,51 @@ def build_unified_attention_3d_tiled(
 
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
+        # Page ids of the next tile, for its K copies below.
+        nxt_page_ids = None
+        if WAVE_PAGE_ID_LOAD:
+            # Read from the window in registers: no load in the loop.
+            page_id_window = carry[3 + PV_N_TILES + N_BLOCKS_PER_TILE]
+            nxt_page_ids = _window_tile_ids(page_id_window, safe_next_tile)
+        elif PAGE_IDS:
+            # Loaded here, before this tile's V copies, so the load overlaps
+            # the QK below; the next K copies still wait for it.
+            nxt_page_ids = _tile_page_ids(safe_next_tile)
 
         # QK
-        A_kits = []
-        for k in range(QK_K_ITERS):
-            q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-            A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
         S_n = []
         for n in range(QK_N_TILES):
             acc_v = b.zero_vec_f32(4)
             for k in range(QK_K_ITERS):
                 kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                B_v = b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8)
-                acc_v = _mfma_16x16x32(b, dtype, A_kits[k], B_v, acc_v)
+                K_v = b.smem_load_vN(
+                    K_lds, cur_buf, k_row, _kv_col(k_row, kc_off), dtype=dtype, n=8
+                )
+                acc_v = _mfma_16x16x32(b, dtype, K_v, Q_kits[k], acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, cur_buf)
-        _issue_k(safe_next_tile, nxt_buf)
+        _issue_v(kv_tile_iv, v_buf, cur_page_ids)
+        _issue_k(safe_next_tile, nxt_buf, nxt_page_ids)
+        if WAVE_PAGE_ID_LOAD:
+            nxt_page_id_window = _refill_page_id_window(page_id_window, kv_tile_iv)
 
         # See attention_tiled_2d.py for the rationale on applying ALiBi /
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
         # post-select add for finite biases via IEEE -inf semantics, with
         # better robustness against compiler reordering).
-        alibi_per_row = hoist_alibi  # None when USE_ALIBI is False
         masked = {}
         for reg in range(4):
-            qp_r = hoist_qp_r[reg]
-            row_ok = hoist_row_ok[reg]
-            causal_lim = hoist_causal_lim[reg]
+            # S^T element reg of block n: token 4 * lane_rg + reg of the block.
+            tok_in_blk = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
             for n in range(QK_N_TILES):
                 col_abs = b.add(
-                    b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
+                    b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
+                    tok_in_blk,
                 )
-                causal_ok = b.cmp_le(col_abs, causal_lim)
+                causal_ok = _upper_ok(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                 if SLIDING_WINDOW > 0:
                     dist = b.sub(causal_lim, col_abs)
                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -871,7 +1213,7 @@ def build_unified_attention_3d_tiled(
                 if USE_ALIBI:
                     pos_off = b.sub(col_abs, context_len)
                     pos_f = b.sitofp_f32(pos_off)
-                    add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
+                    add_term = b.fmul(b.fmul(alibi_slope, pos_f), rcp_ln2)
                     s_scaled = b.fadd(s_scaled, add_term)
                 if USE_QQ_BIAS:
                     # See attention_tiled_2d.py for the rationale on row_ok.
@@ -891,35 +1233,41 @@ def build_unified_attention_3d_tiled(
                         align=4,
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
+                if USE_ADDITIVE_BIAS:
+                    # Per-row query head (GQA-correct). Under ``m_ok``, padding
+                    # rows and tail columns (col_abs >= seq_len) load element 0
+                    # instead of an out-of-range index.
+                    s_scaled = add_additive_bias(
+                        b,
+                        s_scaled,
+                        additive_bias,
+                        seq_idx=seq_idx,
+                        q_head=qh_r,
+                        q_row=qp_r,
+                        col=col_abs,
+                        mask=m_ok,
+                        rcp_ln2=rcp_ln2,
+                    )
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
-        m_new = []
-        s_local = {}
-        for reg in range(4):
-            local_max = neg_inf
-            for n in range(QK_N_TILES):
-                v = masked[(n, reg)]
-                s_local[(reg, n)] = v
-                local_max = b.fmax(local_max, v)
-            full_max_raw = _warp_xor_reduce_max(b, local_max)
-            ok = b.fcmp("ogt", full_max_raw, neg_inf)
-            m_new.append(b.select(ok, full_max_raw, zero_f))
+        # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
+        # other 3 lanes.
+        local_max = neg_inf
+        for v in masked.values():
+            local_max = b.fmax(local_max, v)
+        full_max_raw = _row_reduce(local_max, b.fmax)
+        ok = b.fcmp("ogt", full_max_raw, neg_inf)
+        m_new = b.select(ok, full_max_raw, zero_f)
+        p_regs = {}
+        sum_p = zero_f
+        for key, v in masked.items():
+            p = b.exp2_fast(b.fsub(v, m_new))
+            p_regs[key] = p
+            sum_p = b.fadd(sum_p, p)
+        l_local = _row_reduce(sum_p, b.fadd)
 
-        l_local = []
-        for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
-            sum_p = zero_f
-            for n in range(QK_N_TILES):
-                p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
-                col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
-                b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
-                sum_p = b.fadd(sum_p, p)
-            l_local.append(_warp_xor_reduce_sum(b, sum_p))
-
-        alpha_regs = [b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(4)]
-        new_l_vals = [
-            b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r]) for r in range(4)
-        ]
+        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
@@ -928,98 +1276,80 @@ def build_unified_attention_3d_tiled(
             b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
             b.sync()
 
+        # O^T = V^T P^T: A = V^T (head-dim rows n*16 + 0..15 via the transpose
+        # read), B = P^T straight from this lane's registers (its query row,
+        # tokens 4 * lane_rg + 0..3 of each 16-token block). Two blocks share one
+        # 16x16x32 MFMA, which costs the same as one 16x16x16 on gfx950: A and B
+        # list the two blocks' tokens in the same order, which is all the k-sum
+        # needs. An odd last block uses 16x16x16.
         new_acc = []
         for n in range(PV_N_TILES):
-            scaled_comps = []
-            for reg in range(4):
-                e = b.vec_extract(acc_vals[n], reg)
-                scaled_comps.append(b.fmul(e, alpha_regs[reg]))
-            acc_v = b.vec_pack(scaled_comps, F32)
-
+            acc_v = b.vec_pack(
+                [b.fmul(b.vec_extract(acc_vals[n], r), alpha) for r in range(4)], F32
+            )
             n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
-
-            for k in range(PV_K_ITERS):
-                if PV_K_STEP == 32:
-                    p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-                    A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=8)
-                    row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
-                    row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
-                    B_r0 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r0, n_col_base, dtype=dtype
+            for kb in range(0, QK_N_TILES, 2):
+                blocks = range(kb, min(kb + 2, QK_N_TILES))
+                A_parts = []
+                for blk in blocks:
+                    row_lane = pv_tr_reader.row(b, k_offset=blk * 16, read=0)
+                    A_parts.append(
+                        b.ds_read_tr16_b64(
+                            V_lds,
+                            v_buf,
+                            row_lane,
+                            _kv_col(row_lane, n_col_base),
+                            dtype=dtype,
+                        )
                     )
-                    B_r1 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r1, n_col_base, dtype=dtype
-                    )
-                    B_v = b.vec_concat(B_r0, B_r1)
-                    acc_v = _mfma_16x16x32(b, dtype, A_p, B_v, acc_v)
+                B_p = b.vec_pack(
+                    [
+                        b.cast_f32_to(p_regs[(blk, r)], dtype)
+                        for blk in blocks
+                        for r in range(4)
+                    ],
+                    dtype,
+                )
+                if len(A_parts) == 2:
+                    acc_v = _mfma_16x16x32(b, dtype, b.vec_concat(*A_parts), B_p, acc_v)
                 else:
-                    p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
-                    A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=4)
-                    row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
-                    B_v = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_lane, n_col_base, dtype=dtype
-                    )
-                    acc_v = _mfma_16x16x16(b, dtype, A_p, B_v, acc_v)
+                    acc_v = _mfma_16x16x16(b, dtype, A_parts[0], B_p, acc_v)
             new_acc.append(acc_v)
 
-        yields = []
-        for r in range(4):
-            yields.append(m_new[r])
-            yields.append(new_l_vals[r])
+        yields = [m_new, new_l_val]
         for n in range(PV_N_TILES):
             yields.append(new_acc[n])
         yields.append(nxt_buf)
+        if PAGE_IDS:
+            yields.extend(nxt_page_ids)
+        if WAVE_PAGE_ID_LOAD:
+            yields.append(nxt_page_id_window)
         b.scf_yield(*yields)
 
     # ---------------- write segment workspace ----------------
-    final = kvloop.results
-    m_final = [final[2 * r] for r in range(4)]
-    l_final = [final[2 * r + 1] for r in range(4)]
-    acc_final = [final[8 + n] for n in range(PV_N_TILES)]
-
-    # Per-thread: write own (row, col) of acc; only the lane in each
-    # 4-lane row group (lane%4 == 0) writes m and l. The workspace
-    # layouts ``segm_output[token, head, seg, dim]`` and
+    # The workspace layouts ``segm_output[token, head, seg, dim]`` and
     # ``segm_{max,expsum}[token, head, seg]`` are encoded by the
-    # ``seg_acc_desc`` / ``ml_desc`` coordinate transforms defined at
-    # the top of this function.
-    for n in range(PV_N_TILES):
-        for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
-            col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
-            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-            qh_r = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
-            row_ok = b.land(
-                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            )
-            qtoken = b.add(cu_q_start, qp_r)
-            seg_acc_idx, _ = seg_acc_desc.offset(
-                b,
-                token=qtoken,
-                head=qh_r,
-                seg=seg_idx,
-                dim=col,
-            )
-            v_acc = b.vec_extract(acc_final[n], reg)
-            with b.scf_if(row_ok):
-                b.global_store(segm_output_ptr, seg_acc_idx, v_acc, align=4)
+    # ``seg_acc_desc`` / ``ml_desc`` coordinate transforms defined at the top
+    # of this function. O^T tile n: lane l holds head dims
+    # n * 16 + 4 * lane_rg + 0..3 of query row lane_col, stored as one vector;
+    # the lanes with lane_rg == 0 write the row's m and l.
+    final = kvloop.results
+    m_final = final[0]
+    l_final = final[1]
+    acc_final = [final[2 + n] for n in range(PV_N_TILES)]
 
-    lane_writes_ml = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
-    for reg in range(4):
-        row = _mfma_16x16_c_row(b, tid, reg)
-        qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-        qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
-        row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-        )
-        qtoken = b.add(cu_q_start, qp_r)
-        ml_idx, _ = ml_desc.offset(b, token=qtoken, head=qh_r, seg=seg_idx)
-        do_write = b.land(lane_writes_ml, row_ok)
-        with b.scf_if(do_write):
-            b.global_store(segm_max_ptr, ml_idx, m_final[reg], align=4)
-            b.global_store(segm_expsum_ptr, ml_idx, l_final[reg], align=4)
+    qtoken = b.add(cu_q_start, qp_r)
+    with b.scf_if(row_ok):
+        for n in range(PV_N_TILES):
+            d0 = b.add(b.const_i32(n * 16), b.mul(lane_rg, b.const_i32(4)))
+            seg_acc_idx, _ = seg_acc_desc.offset(
+                b, token=qtoken, head=qh_r, seg=seg_idx, dim=d0
+            )
+            b.global_store_vN(segm_output_ptr, seg_acc_idx, acc_final[n], 4, align=16)
+    ml_idx, _ = ml_desc.offset(b, token=qtoken, head=qh_r, seg=seg_idx)
+    with b.scf_if(b.land(b.cmp_eq(lane_rg, b.const_i32(0)), row_ok)):
+        b.global_store(segm_max_ptr, ml_idx, m_final, align=4)
+        b.global_store(segm_expsum_ptr, ml_idx, l_final, align=4)
 
     return b.kernel
 
@@ -1039,6 +1369,10 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
+
+    def __post_init__(self):
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
 
     @property
     def dtype_ir(self) -> Type:
@@ -1187,7 +1521,7 @@ def build_unified_attention_reduce_tiled(
         # NaN-safe factor: when both ms and overall_max are -inf, the
         # difference is NaN; force factor to 0 in that case.
         ms_finite = b.fcmp("ogt", ms, neg_inf)
-        factor_raw = b.exp2(b.fsub(ms, overall_max))
+        factor_raw = b.exp2_fast(b.fsub(ms, overall_max))
         factor = b.select(ms_finite, factor_raw, zero_f)
         local_den = b.fadd(local_den, b.fmul(ls, factor))
         # Stash the factor for this lane's owned segments. Out-of-range
@@ -1236,3 +1570,28 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     return b.kernel
+
+
+def supports_tiled_3d_spec(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_3d``.
+
+    ``supports_tiled_3d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads each of them off the spec and delegates, making the 3D
+    unified builder validatable at pack time.
+    """
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_3d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        arch=arch,
+    )

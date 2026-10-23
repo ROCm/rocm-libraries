@@ -53,6 +53,9 @@
  * auto-allocated in Tensile
  *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
  * non-gfx1250).
+ * @note TimePasses: print a per-pass wall-time report to stderr after the
+ * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
+ * `--time-passes`).
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -80,6 +83,7 @@
     X(DebugPass, std::string)                     \
     X(PassOrderSnapshotJson, std::string)         \
     X(VerifyEach, bool)                           \
+    X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
     X(EnableLoopCarriedTokenDeps, bool)           \
@@ -92,34 +96,48 @@
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
     X(ClusterBarrier, bool)                       \
+    X(ClusterBarrierSplitWaveLoop, bool)          \
     X(StreamKMulticast, bool)                     \
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
+    X(UnrollLoopCopies, int)                      \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
     X(DsReadDrainLatency, int)                    \
     X(TensorLoadWmmaSpace, int)                   \
+    X(WmmaRefillMode, int)                        \
+    X(WmmaBatchSize, int)                         \
+    X(WmmaRefillToCycles, int)                    \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
     X(ArchName, std::string)
 
-// Keep transition disabled by default to preserve legacy full-throttle pacing:
-// entries=0 skips the transition range, and factor=1.0 is the full interval.
-//
-// Scheduling knobs below default to -1 (= unset). Gfx1250Backend resolves unset
-// knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
-// insertion (user value wins; degenerate main-loop IR falls back to today's
-// static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
-    X(DsReadThrottleTransitionFactor, double, 1.0)                    \
-    X(DsReadThrottleTransitionEntries, int, 0)                        \
-    X(DsReadThrottleLatency, int, -1)                                 \
-    X(DsReadPerCap, int, -1)                                          \
-    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
+// WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
+// have fixed defaults and
+// are not resolved by the heuristics. Gfx1250Backend resolves unset
+// knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
+// wins; degenerate main-loop IR falls back to the static Rule3 default). See
+// SchedulingKnobHeuristics.hpp.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
+    X(LockDsReadOrder, bool, true)                                                                 \
+    X(EvenSpreadFillers, bool, true)                                                               \
+    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
+    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
+    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
+    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
+    X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
+    X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
+    X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
+    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
+    X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
+    X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
+    X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
 /**

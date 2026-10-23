@@ -123,8 +123,11 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
-    // Determine data type
-    const DataType dataType = toDataType(config.dtype);
+    // Determine data types. For fp8 the inputs are FP8_E4M3_FNUZ (the gfx942/MI300
+    // hardware fp8 encoding the AITER kernels consume) and the output is BFLOAT16.
+    const bool isFp8 = (config.dtype == config::FP8BF16);
+    const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
+    const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
     // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
@@ -137,13 +140,13 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         .set_intermediate_data_type(DataType::FLOAT);
 
     auto q = std::make_shared<TensorAttributes>();
-    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(dataType);
+    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(inDataType);
 
     auto k = std::make_shared<TensorAttributes>();
-    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(dataType);
+    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(inDataType);
 
     auto v = std::make_shared<TensorAttributes>();
-    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(dataType);
+    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(inDataType);
 
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
@@ -160,6 +163,26 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         attributes.set_attn_scale(testCase.attnScale.value());
     }
 
+    // FP8 inputs require per-tensor (scalar) q/k/v descale tensors.
+    if(isFp8)
+    {
+        const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
+        const auto descaleStrides = generateStrides(descaleDims);
+        // Name each descale so the integration fixture can identify it by name (not by
+        // scalar element count) when choosing per-tensor fill values.
+        const auto makeDescale = [&](const std::string& name) {
+            auto descale = std::make_shared<TensorAttributes>();
+            descale->set_dim(descaleDims)
+                .set_stride(descaleStrides)
+                .set_data_type(DataType::FLOAT)
+                .set_name(name);
+            return descale;
+        };
+        attributes.set_descale_q(makeDescale("descale_q"));
+        attributes.set_descale_k(makeDescale("descale_k"));
+        attributes.set_descale_v(makeDescale("descale_v"));
+    }
+
     // Configure mask type
     auto maskType = static_cast<MaskType>(config.mask);
     switch(maskType)
@@ -172,14 +195,12 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         attributes.set_diagonal_band_left_bound(-1);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-        attributes.set_causal_mask(true);
         break;
 
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         attributes.set_diagonal_band_left_bound(-1);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-        attributes.set_causal_mask_bottom_right(true);
         break;
 
     case MaskType::SLIDING_WINDOW:
@@ -212,7 +233,7 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     auto [o, stats] = graph->sdpa(q, k, v, attributes);
 
     o->set_output(true);
-    o->set_data_type(dataType);
+    o->set_data_type(outDataType);
 
     if(testCase.withStats)
     {

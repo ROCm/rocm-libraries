@@ -13,9 +13,15 @@
 # This is the same C core the OFFLINE provider uses (rocke_lower + recipe VM); the
 # online and offline paths therefore produce byte-identical output.
 import ctypes
+import hashlib
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
 from ctypes import (
     POINTER,
     Structure,
@@ -75,6 +81,7 @@ class _SpecStr(Structure):
 
 
 _lib = None
+_lib_path: str | None = None
 
 
 def _platform_root() -> str:
@@ -84,75 +91,345 @@ def _platform_root() -> str:
     return os.path.normpath(os.path.join(here, "..", "..", "..", ".."))
 
 
+def source_build_id(platform_root: str | Path | None = None) -> str | None:
+    """Return the CMake-compatible ID for the portable-IR native bundle.
+
+    The ID covers repository-owned inputs that determine the shared engine and
+    replay CLI: engine sources/headers, the CLI source, and their CMake recipes.
+    It is a source/build-recipe ID, not a compiler or binary identity. Installed
+    Python packages carry no engine source surface; ``None`` means freshness
+    cannot be established locally.
+    """
+    root = Path(platform_root or _platform_root())
+    bindings = root / "cpp" / "bindings"
+    files = list((root / "cpp").rglob("*.cpp"))
+    files += list((root / "cpp").rglob("*.h"))
+    files += list((root / "cpp").rglob("*.hpp"))
+    files = [path for path in files if bindings not in path.parents]
+    if not files:
+        return None
+    for relative in (
+        "tests/portable_ir/replay_cli.cpp",
+        "CMakeLists.txt",
+        "tests/CMakeLists.txt",
+        "cmake/rocke_build_id.cmake",
+        "cmake/generate_rocke_build_id.cmake",
+    ):
+        path = root / relative
+        if path.is_file():
+            files.append(path)
+    lines = []
+    for path in files:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append(f"{path.relative_to(root).as_posix()}:{digest}")
+    blob = "\n".join(sorted(lines)).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _current_source_build_id() -> str | None:
+    # Keep artifact selection/build boundaries sensitive to edits made by a
+    # long-lived watcher. The loaded-engine hot path does not call this helper.
+    return source_build_id()
+
+
+def provenance_manifest(path: str | Path | None = None) -> tuple[str, str] | None:
+    """Read the expected ``(version, build ID)`` for an installed artifact.
+
+    A source checkout computes its expectation directly. Relocated tests have no
+    native sources, so their build installs this independent manifest beside the
+    prebuilt replay CLI and selects it through ``ROCKE_PROVENANCE_MANIFEST``.
+    """
+    selected = path or os.environ.get("ROCKE_PROVENANCE_MANIFEST")
+    if selected is None:
+        return None
+    manifest = Path(selected)
+    if not manifest.is_file():
+        raise FileNotFoundError(
+            f"portable-IR provenance manifest not found at {str(manifest)!r}"
+        )
+    parts = manifest.read_text().strip().split()
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"invalid portable-IR provenance manifest at {str(manifest)!r}"
+        )
+    return parts[0], parts[1]
+
+
+def _expected_build_id() -> str | None:
+    """Return the checkout or installed-manifest artifact expectation."""
+    source_id = _current_source_build_id()
+    installed = provenance_manifest()
+    if installed is not None and source_id is not None and installed[1] != source_id:
+        raise RuntimeError(
+            "portable-IR provenance manifest does not match the current source: "
+            f"manifest={installed[1]}, source={source_id}"
+        )
+    return source_id or (installed[1] if installed is not None else None)
+
+
+def _shared_library_name() -> str:
+    if sys.platform == "win32":
+        return "rocke.dll"
+    if sys.platform == "darwin":
+        return "librocke.dylib"
+    return "librocke.so"
+
+
+def _executable_name(name: str) -> str:
+    return f"{name}.exe" if sys.platform == "win32" else name
+
+
+def _default_cache_root() -> Path:
+    build_id = _current_source_build_id() or "unknown-source"
+    return Path(tempfile.gettempdir()) / "rocke_online" / build_id
+
+
 def _default_cache_lib() -> str:
-    return os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so")
+    return str(_default_cache_root() / _shared_library_name())
+
+
+def _default_cache_cli() -> str:
+    return str(_default_cache_root() / _executable_name("rocke_portable_ir_replay_cli"))
+
+
+def _complete_marker(path: str | Path) -> Path:
+    return Path(f"{path}.complete")
+
+
+def _published(path: str | Path) -> bool:
+    artifact = Path(path)
+    marker = _complete_marker(artifact)
+    if not artifact.is_file() or not marker.is_file():
+        return False
+    try:
+        return marker.read_text().strip() == (
+            _current_source_build_id() or "unknown-source"
+        )
+    except OSError:
+        return False
+
+
+@contextmanager
+def _cache_lock(root: Path):
+    """Serialize builders with an OS lock released automatically on process exit."""
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".build.lock"
+    lock_file = lock_path.open("a+b")
+    lock_file.seek(0, os.SEEK_END)
+    if lock_file.tell() == 0:
+        lock_file.write(b"0")
+        lock_file.flush()
+    deadline = time.monotonic() + 1200
+    acquired = False
+    try:
+        while not acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"timed out waiting for rocKE cache lock {lock_path}"
+                    )
+                time.sleep(0.1)
+        yield
+    finally:
+        if acquired:
+            if os.name == "nt":
+                import msvcrt
+
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
 
 
 def _default_lib_paths() -> List[str]:
-    paths = []
-    env = os.environ.get("ROCKE_ONLINE_LIB")
-    if env:
-        paths.append(env)
-    paths += [
-        _default_cache_lib(),
-        os.path.join(_platform_root(), "build", "librocke.so"),
+    return [
+        os.path.join(_platform_root(), "build", _shared_library_name()),
     ]
-    return paths
+
+
+def resolve_library_path(path: str | None = None, *, build: bool = True) -> str | None:
+    """Resolve the exact shared engine used by the ctypes replay path.
+
+    An explicit path is a demand and never falls back. Without one, the local
+    cache is keyed by the current portable-IR bundle ID, so changing checkouts
+    cannot silently reuse an older engine. When ``build`` is false, ``None``
+    reports that no matching implicit artifact exists.
+    """
+    explicit = path or os.environ.get("ROCKE_ONLINE_LIB")
+    if explicit:
+        if not os.path.exists(explicit):
+            raise FileNotFoundError(
+                f"librocke not found at {explicit!r} (from "
+                f"{'resolve_library_path(path)' if path else 'ROCKE_ONLINE_LIB'}). "
+                "Refusing to fall back to another library"
+            )
+        return explicit
+    if _current_source_build_id() is None:
+        if not build:
+            return None
+        raise RuntimeError(
+            "cannot discover or build librocke implicitly because this installed "
+            "package has no portable-IR native source tree; set "
+            "ROCKE_ONLINE_LIB explicitly"
+        )
+    cached = _default_cache_lib()
+    if _published(cached):
+        return cached
+    for candidate in _default_lib_paths():
+        if os.path.exists(candidate):
+            return candidate
+    return build_lib() if build else None
+
+
+def _configure_cache_build(root: Path, output: Path) -> Path:
+    build_dir = root / "core"
+    args = [
+        "cmake",
+        "-S",
+        _platform_root(),
+        "-B",
+        str(build_dir),
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DROCKE_BUILD_PYENV=OFF",
+        "-DROCKE_BUILD_SHARED_ENGINE=ON",
+        "-DBUILD_TESTING=ON",
+        f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={output}",
+        f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={output}",
+    ]
+    for config in ("DEBUG", "RELEASE", "RELWITHDEBINFO", "MINSIZEREL"):
+        args += [
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{config}={output}",
+            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_{config}={output}",
+        ]
+    subprocess.run(
+        args,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
+    return build_dir
+
+
+def _build_cached_target(target: str, destination: Path, produced_name: str) -> str:
+    root = destination.parent
+    with _cache_lock(root):
+        if _published(destination):
+            return str(destination)
+        stage = root / f".stage-{os.getpid()}"
+        stage.mkdir(parents=True, exist_ok=True)
+        build_dir = _configure_cache_build(root, stage)
+        try:
+            subprocess.run(
+                [
+                    "cmake",
+                    "--build",
+                    str(build_dir),
+                    "--config",
+                    "Debug",
+                    "--target",
+                    target,
+                    "-j",
+                    str(os.cpu_count() or 8),
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+            )
+            produced = stage / produced_name
+            if not produced.is_file():
+                raise FileNotFoundError(
+                    f"CMake target {target} did not produce {produced}"
+                )
+            os.replace(produced, destination)
+            marker = _complete_marker(destination)
+            marker.write_text(_current_source_build_id() or "unknown-source")
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    return str(destination)
 
 
 def build_lib(out_path: Optional[str] = None) -> str:
-    """Build a shared librocke.so from the C++ engine core (librocke_core.a, via
-    CMake). The portable-IR replay tooling (json/cbor DOM, importer, recipe VM,
-    online wrappers) is C++20 under cpp/portable_ir/ and is part of the core
-    archive, so a single CMake build + whole-archive link produces a complete
-    shared library — no separate tooling compile."""
-    out_path = out_path or _default_cache_lib()
-    coredir = os.path.join(os.path.dirname(out_path), "core")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            _platform_root(),
-            "-B",
-            coredir,
-            "-DCMAKE_BUILD_TYPE=Debug",
-            "-DROCKE_BUILD_PYENV=OFF",
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
+    """Build the portable shared engine through its cross-platform CMake target."""
+    destination = Path(out_path or _default_cache_lib())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    built = _build_cached_target("rocke_shared", destination, _shared_library_name())
+    return built
+
+
+def build_replay_cli(out_path: str | None = None) -> str:
+    """Build the standalone replay CLI in the source-keyed artifact cache."""
+    destination = Path(out_path or _default_cache_cli())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return _build_cached_target(
+        "rocke_portable_ir_replay_cli",
+        destination,
+        _executable_name("rocke_portable_ir_replay_cli"),
     )
-    subprocess.run(
-        [
-            "cmake",
-            "--build",
-            coredir,
-            "--target",
-            "rocke_core",
-            "-j",
-            str(os.cpu_count() or 8),
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
+
+
+def replay_cli_provenance(path: str) -> tuple[str, str]:
+    """Return and validate the standalone replay CLI's version and build ID."""
+    proc = subprocess.run(
+        [path, "--provenance"], capture_output=True, text=True, check=True
     )
-    core = os.path.join(coredir, "librocke_core.a")
-    subprocess.run(
-        [
-            "c++",
-            "-shared",
-            "-fPIC",
-            "-Wl,--whole-archive",
-            core,
-            "-Wl,--no-whole-archive",
-            "-lm",
-            "-o",
-            out_path,
-        ],
-        check=True,
-    )
-    return out_path
+    parts = proc.stdout.strip().split()
+    if len(parts) != 2:
+        raise RuntimeError(f"invalid provenance from replay CLI at {path!r}")
+    version, build_id = parts
+    expected = _expected_build_id()
+    if expected is not None and build_id != expected:
+        raise RuntimeError(
+            "stale/mixed rocKE replay CLI: "
+            f"{path!r} has build-id {build_id}, but the selected environment "
+            f"expects {expected}. Rebuild or reinstall the replay CLI and its "
+            "provenance manifest from the same source snapshot"
+        )
+    return version, build_id
+
+
+def resolve_replay_cli_path(
+    path: str | None = None, *, build: bool = True
+) -> str | None:
+    """Resolve a source-matched standalone replay CLI, building when requested."""
+    explicit = path or os.environ.get("ROCKE_REPLAY_CLI")
+    if explicit:
+        if not os.path.exists(explicit):
+            raise FileNotFoundError(
+                f"replay CLI not found at {explicit!r}; refusing to fall back"
+            )
+        replay_cli_provenance(explicit)
+        return explicit
+    if _current_source_build_id() is None:
+        if not build:
+            return None
+        raise RuntimeError(
+            "cannot discover or build the replay CLI implicitly because this "
+            "installed package has no portable-IR native source tree; set "
+            "ROCKE_REPLAY_CLI explicitly"
+        )
+    cached = _default_cache_cli()
+    if _published(cached):
+        replay_cli_provenance(cached)
+        return cached
+    if not build:
+        return None
+    built = build_replay_cli()
+    replay_cli_provenance(built)
+    return built
 
 
 def _bind(lib: ctypes.CDLL) -> None:
@@ -276,6 +553,8 @@ def _bind(lib: ctypes.CDLL) -> None:
         POINTER(c_uint),
     ]
     lib.rocke_launch_plan_geometry.restype = c_bool
+    lib.rocke_launch_plan_cluster.argtypes = [ctypes.c_void_p, POINTER(_LaunchDims)]
+    lib.rocke_launch_plan_cluster.restype = c_bool
     lib.rocke_launch_plan_num_args.argtypes = [ctypes.c_void_p]
     lib.rocke_launch_plan_num_args.restype = c_int
     lib.rocke_launch_plan_arg.argtypes = [ctypes.c_void_p, c_int]
@@ -294,8 +573,45 @@ def _bind(lib: ctypes.CDLL) -> None:
         fn.restype = c_char_p
 
 
+def library_provenance(path: str) -> tuple[str, str]:
+    """Return ``(engine version, build ID)`` after validating a library."""
+    lib = ctypes.CDLL(path)
+    _check_source_freshness(lib, path)
+    _check_abi(lib, path)
+    for name in ("rocke_engine_version", "rocke_build_id"):
+        fn = getattr(lib, name)
+        fn.argtypes = []
+        fn.restype = c_char_p
+    return (
+        (lib.rocke_engine_version() or b"").decode(),
+        (lib.rocke_build_id() or b"").decode(),
+    )
+
+
+def validate_artifact_bundle(
+    library_path: str, replay_cli_path: str
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    """Validate a library/CLI pair and return their provenance records.
+
+    The common source/build-recipe ID is the compatibility key. Engine versions
+    include a configure date and are descriptive, so independently built
+    artifacts may have different versions while still belonging to one bundle.
+    This comparison also works for source-less installations, where no checkout
+    exists to provide an expected ID.
+    """
+    library = library_provenance(library_path)
+    replay_cli = replay_cli_provenance(replay_cli_path)
+    if library[1] != replay_cli[1]:
+        raise RuntimeError(
+            "portable-IR artifacts are from mixed bundles: "
+            f"library={library[0]}/{library[1]}, "
+            f"CLI={replay_cli[0]}/{replay_cli[1]}"
+        )
+    return library, replay_cli
+
+
 def provenance() -> Tuple[str, str]:
-    """(engine version, build id) of the loaded engine. Debugging aid only."""
+    """Return ``(engine version, build ID)`` for the loaded engine."""
     lib = load()
     return (
         (lib.rocke_engine_version() or b"").decode(),
@@ -337,20 +653,53 @@ def _check_abi(lib: ctypes.CDLL, path: str) -> None:
         )
 
 
+def _check_source_freshness(lib: ctypes.CDLL, path: str) -> None:
+    """Reject an engine that differs from its source or installed manifest."""
+    expected = _expected_build_id()
+    if expected is None:
+        return
+    try:
+        fn = lib.rocke_build_id
+        fn.argtypes = []
+        fn.restype = c_char_p
+        got = (fn() or b"").decode()
+    except AttributeError:
+        got = "<missing>"
+    if got != expected:
+        raise RuntimeError(
+            "stale/mixed rocKE engine: "
+            f"librocke at {path!r} has build-id {got}, but the selected "
+            f"environment expects {expected}. Rebuild or reinstall the library "
+            "and its provenance manifest from the same source snapshot"
+        )
+
+
 def _adopt(lib: ctypes.CDLL, path: str) -> ctypes.CDLL:
-    """Verify the ABI, bind the entry points, and cache the library."""
-    global _lib
+    """Verify source freshness and ABI, then cache the library."""
+    global _lib, _lib_path
+    _check_source_freshness(lib, path)
     _check_abi(lib, path)
     _bind(lib)
     lib.rocke_recipe_abi_level.argtypes = []
     lib.rocke_recipe_abi_level.restype = c_int
     _lib = lib
+    _lib_path = str(Path(path).resolve())
     return lib
 
 
 def load(path: Optional[str] = None) -> ctypes.CDLL:
     global _lib
-    if _lib is not None and path is None:
+    explicit = path or os.environ.get("ROCKE_ONLINE_LIB")
+    if _lib is not None:
+        if explicit and str(Path(explicit).resolve()) != _lib_path:
+            raise RuntimeError(
+                "rocKE engine already loaded from "
+                f"{_lib_path!r}; refusing to switch this process to {explicit!r}"
+            )
+        # _adopt() validated this immutable native image before publishing it to
+        # the process. Re-hashing the complete source tree here would put that
+        # filesystem cost on every online API call without making the already-
+        # loaded image replaceable; source edits require a new process/build.
         return _lib
 
     # A named library is a demand, not a hint. Skipping a missing ROCKE_ONLINE_LIB
@@ -358,23 +707,9 @@ def load(path: Optional[str] = None) -> ctypes.CDLL:
     # compile -- means the caller verifies an engine it did not build, and the
     # substitution is invisible. That is fatal for a byte-identity gate, whose
     # entire claim is about the engine at this commit, so say so instead.
-    explicit = path or os.environ.get("ROCKE_ONLINE_LIB")
-    if explicit:
-        if not os.path.exists(explicit):
-            raise FileNotFoundError(
-                f"librocke not found at {explicit!r} (from "
-                f"{'load(path)' if path else 'ROCKE_ONLINE_LIB'}). Refusing to "
-                f"fall back to another library: build it with `cmake --build "
-                f"<dir> --target rocke_shared` or online.build_lib()"
-            )
-        return _adopt(ctypes.CDLL(explicit), explicit)
-
-    for p in _default_lib_paths():
-        if p and os.path.exists(p):
-            return _adopt(ctypes.CDLL(p), p)
-    # nothing prebuilt -> compile one
-    p = build_lib()
-    return _adopt(ctypes.CDLL(p), p)
+    resolved = resolve_library_path(path)
+    assert resolved is not None
+    return _adopt(ctypes.CDLL(resolved), resolved)
 
 
 def _mk_specs(ints: Optional[Dict[str, int]], strs: Optional[Dict[str, str]]):
@@ -556,6 +891,8 @@ def _read_plan(lib, handle) -> Dict:
         has_geom = lib.rocke_launch_plan_geometry(
             handle, byref(grid), byref(block), byref(lds)
         )
+        cluster = _LaunchDims()
+        has_cluster = lib.rocke_launch_plan_cluster(handle, byref(cluster))
         args = []
         for i in range(lib.rocke_launch_plan_num_args(handle)):
             a = lib.rocke_launch_plan_arg(handle, i).contents
@@ -581,6 +918,7 @@ def _read_plan(lib, handle) -> Dict:
                 if has_geom
                 else None
             ),
+            "cluster": ((cluster.x, cluster.y, cluster.z) if has_cluster else None),
         }
     finally:
         lib.rocke_launch_plan_free(handle)
@@ -594,13 +932,14 @@ def plan_launch(
     ints: Optional[Dict[str, int]] = None,
     strs: Optional[Dict[str, str]] = None,
 ) -> Dict:
-    """How to launch what this recipe builds: name, args, grid/block/LDS.
+    """How to launch what this recipe builds: name, args, grid/block/LDS, cluster.
 
     `key` selects out of a bundle; omit it for a standalone recipe. Returns the
     same shape as src/launch.py::plan, which is what lets a test pin the two
     engines against each other. `geometry` is None when the recipe carries no
     launch block -- see rocke_launch_plan_geometry on why that is reported
-    rather than defaulted."""
+    rather than defaulted. `cluster` is None unless the kernel has a
+    cluster_dims attr (see rocke_launch_plan_cluster)."""
     lib = load()
     buf = (c_ubyte * len(cbor)).from_buffer_copy(cbor)
     ia, ni, sa, ns = _mk_specs(ints, strs)

@@ -1,0 +1,255 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_37f944",
+          "1_16_16_16_16_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_7b765f",
+          "1_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_6f1505",
+          "1_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2968fe",
+          "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_e3cf27",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c5df8a",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_33fa68",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_d730f4",
+          "1_16_3_3_3_bfp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_7896d6",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_68cb1e",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_feb463",
+          "1_16_3_3_3_bfp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_19c0d5",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_1e9c0b",
+          "1_16_3_3_3_fp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_26fe50",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_cdf85b",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0f4496",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_bc6e99",
+          "1_16_3_3_3_fp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_1aa394",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_5baf74",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_4b8f50",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5b0a0e",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5e806f",
+          "1_16_3_3_bfp16_nchw_dil2x2_postpad2x2_prepad2x2_a1bcaa",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_30f10b",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a4427b",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a62ff5",
+          "1_16_3_3_bfp16_nhwc_dil2x2_postpad2x2_prepad2x2_4298e2",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad0x0_prepad0x0_24e40d",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_5154b9",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c50028",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c61350",
+          "1_16_3_3_fp16_nchw_dil2x2_postpad2x2_prepad2x2_319274",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_b454fd",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_156537",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_d41e9b",
+          "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_2d24d5",
+          "2_4_7_7_bfp16_nchw_dil2x2_postpad1x1_prepad1x1_7fca4e",
+          "2_4_7_7_bfp16_nhwc_dil2x2_postpad1x1_prepad1x1",
+          "2_4_7_7_fp16_nhwc_dil2x2_postpad1x1_prepad1x1_47886f",
+          "2_8_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
+          "2_8_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0827b4",
+          "2_8_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_18011a",
+          "2_8_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
+          "2_8_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_f03b93",
+          "2_8_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_069ff5",
+          "2_8_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_854cf1",
+          "8_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_f564c9",
+          "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2ba9c1",
+          "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_69e25f"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c1a710",
+          "1_16_16_16_16_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_2cfbdd",
+          "1_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_8fc8a8",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_0c5561",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_3de4a8",
+          "1_16_3_3_3_fp32_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_7882a5",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_053c0e",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0964b4",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_e2cb87",
+          "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_718a7c",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_517e68",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9d87b2",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9db7fe",
+          "2_4_7_7_fp32_nchw_dil2x2_postpad1x1_prepad1x1",
+          "2_4_7_7_fp32_nhwc_dil2x2_postpad1x1_prepad1x1_215c11",
+          "2_8_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_7d17e5",
+          "2_8_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_f969cb",
+          "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_7a5239",
+          "2_8_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_2925ba",
+          "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_e8f421"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_831598",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_064c42",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_fd0730",
+          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE_DETERMINISTIC": [
+      {
+        "cases": [
+          "1_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_37f944",
+          "1_16_16_16_16_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_7b765f",
+          "1_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_6f1505",
+          "1_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2968fe",
+          "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_e3cf27",
+          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c5df8a",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_33fa68",
+          "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_d730f4",
+          "1_16_3_3_3_bfp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_7896d6",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_68cb1e",
+          "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_feb463",
+          "1_16_3_3_3_bfp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_19c0d5",
+          "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_1e9c0b",
+          "1_16_3_3_3_fp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_26fe50",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_cdf85b",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0f4496",
+          "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_bc6e99",
+          "1_16_3_3_3_fp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_1aa394",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_5baf74",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_4b8f50",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5b0a0e",
+          "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5e806f",
+          "1_16_3_3_bfp16_nchw_dil2x2_postpad2x2_prepad2x2_a1bcaa",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_30f10b",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a4427b",
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a62ff5",
+          "1_16_3_3_bfp16_nhwc_dil2x2_postpad2x2_prepad2x2_4298e2",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad0x0_prepad0x0_24e40d",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_5154b9",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c50028",
+          "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c61350",
+          "1_16_3_3_fp16_nchw_dil2x2_postpad2x2_prepad2x2_319274",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_b454fd",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_156537",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_d41e9b",
+          "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_2d24d5",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_831598",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_064c42",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_fd0730",
+          "2_4_7_7_bfp16_nchw_dil2x2_postpad1x1_prepad1x1_7fca4e",
+          "2_4_7_7_bfp16_nhwc_dil2x2_postpad1x1_prepad1x1",
+          "2_4_7_7_fp16_nhwc_dil2x2_postpad1x1_prepad1x1_47886f",
+          "2_8_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
+          "2_8_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0827b4",
+          "2_8_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_18011a",
+          "2_8_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
+          "2_8_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_f03b93",
+          "2_8_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_069ff5",
+          "2_8_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_854cf1",
+          "8_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_f564c9",
+          "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2ba9c1",
+          "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_69e25f",
+          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c1a710",
+          "1_16_16_16_16_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_2cfbdd",
+          "1_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_8fc8a8",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_0c5561",
+          "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_3de4a8",
+          "1_16_3_3_3_fp32_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_7882a5",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_053c0e",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0964b4",
+          "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_e2cb87",
+          "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_718a7c",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_517e68",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9d87b2",
+          "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9db7fe",
+          "2_4_7_7_fp32_nchw_dil2x2_postpad1x1_prepad1x1",
+          "2_4_7_7_fp32_nhwc_dil2x2_postpad1x1_prepad1x1_215c11",
+          "2_8_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_7d17e5",
+          "2_8_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_f969cb",
+          "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_7a5239",
+          "2_8_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_2925ba",
+          "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_e8f421"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

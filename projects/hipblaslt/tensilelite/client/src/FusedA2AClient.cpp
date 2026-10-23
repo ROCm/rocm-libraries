@@ -510,6 +510,8 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipSetDevice(d));
                 HIP_CHECK_EXC(hipStreamCreate(&streams[d]));
                 adapters[d] = std::make_shared<hip::SolutionAdapter>();
+                // Primary loads can enter recovery before helpers are loaded.
+                adapters[d]->setLazyLoadingContext(hardware->archName(), libraryDirectory);
                 for(auto const& co : codeObjectFiles)
                 {
                     (void)adapters[d]->loadCodeObjectFile(co);
@@ -733,12 +735,13 @@ namespace TensileLite
                     }
                 }
 
+                const uint32_t expected = drainSend ? 0u : (uint32_t)W;
                 for(int d = 0; AM != 0 && d < W; d++)
                 {
                     HIP_CHECK_EXC(hipSetDevice(d));
-                    uint32_t   outbound = 0;
+                    uint32_t   outbound = ~0u;
                     hipError_t oe       = hipSuccess;
-                    for(int spin = 0; spin < kOutboundPolls && outbound != (uint32_t)W; spin++)
+                    for(int spin = 0; spin < kOutboundPolls && outbound != expected; spin++)
                     {
                         oe = hipMemcpy(&outbound,
                                        (const char*)flag[d] + FUSED_A2A_OUTBOUND_OFFSET,
@@ -754,15 +757,18 @@ namespace TensileLite
                                   << d << " (iter " << it << "): " << hipGetErrorString(oe)
                                   << std::endl;
                     }
-                    else if(outbound != (uint32_t)W)
+                    else if(outbound != expected)
                     {
                         std::cerr << "[fused-a2a] OUTBOUND SIGNAL SHORT iter=" << it
                                   << " device=" << d << ": counter at byte "
                                   << FUSED_A2A_OUTBOUND_OFFSET << " of the flag block reads "
                                   << outbound << " after " << kOutboundPolls
-                                  << " polls, expected " << W
-                                  << " -- some queue never carried its completion ATOMIC, so "
-                                     "drainSend would hang on it"
+                                  << " polls, expected " << expected
+                                  << (drainSend ? " -- the kernel polls this counter to W and then"
+                                                  " clears it, so a non-zero value means its"
+                                                  " drainSend segment never ran"
+                                                : " -- some queue never carried its completion"
+                                                  " ATOMIC, so drainSend would hang on it")
                                   << std::endl;
                         sendFail = true;
                         ok       = false;

@@ -1,0 +1,38 @@
+{
+  "claims": {
+    "HIPBLASLT_ENGINE": [
+      {
+        "cases": [
+          "2_3_16_128_fp32_nchw_0f16a4",
+          "3_16_128_bfp16_ncl_1cb7f2",
+          "3_16_128_fp16_ncl_ca2b85"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

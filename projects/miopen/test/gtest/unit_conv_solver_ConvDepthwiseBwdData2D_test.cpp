@@ -25,7 +25,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
     // Cover the stride-1 dgrad instances: 7x7 pad-3 (tiles 7/14/28/56),
-    // 3x3 pad-1 (tiles 7/14/56), 5x5 pad-2 (tiles 7/14/28), group==channels.
+    // 3x3 pad-1 (tiles 7/14/28/56), 5x5 pad-2 (tiles 7/14/28), group==channels.
     return std::vector{
         // clang-format off
         // 7x7 stride-1 pad-3 (convnext depthwise stages)
@@ -42,6 +42,8 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {32, 3, 14, 14}},
                  {datatype, miopenTensorNCHW, {3, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 3}},
+        TestCase{{datatype, miopenTensorNCHW, {32, 2, 28, 28}},
+                 {datatype, miopenTensorNCHW, {2, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         TestCase{{datatype, miopenTensorNCHW, {32, 2, 56, 56}},
                  {datatype, miopenTensorNCHW, {2, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         // 5x5 stride-1 pad-2
@@ -55,11 +57,42 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
     };
 }
 
+auto GetConvWave32OnlyTestCases(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    // 3x3 stride-1 pad-1 tile-112 (efficientnet/mobilenet first depthwise stage). This tile
+    // exists only in the wave32 instance set, so the case is restricted to RDNA. The wave64
+    // factory has no matching instance and the solver would decline the problem there.
+    return std::vector{
+        // clang-format off
+        TestCase{{datatype, miopenTensorNCHW, {32, 2, 112, 112}},
+                 {datatype, miopenTensorNCHW, {2, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
+        // clang-format on
+    };
+}
+
 auto GetTestParams()
 {
-// Reuses the forward CK depthwise kernel: needs 64-lane wavefronts + the CK dynamic library.
+// Reuses the forward CK depthwise kernel and needs the CK dynamic library. Runs on CDNA (64-lane)
+// and RDNA (32-lane) wavefronts; the matching instance set is selected per arch at build time.
 #if MIOPEN_BACKEND_HIP
-    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx125X;
+#else
+    Gpu supportedDevices = Gpu::None;
+#endif
+    auto params = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
+    params.Tunable(5);
+    params.UsesCKDynamicLib();
+    return params;
+}
+
+auto GetWave32TestParams()
+{
+// Same as GetTestParams(), minus the CDNA devices: the cases using these params need an
+// instance that only the wave32 set provides.
+#if MIOPEN_BACKEND_HIP
+    Gpu supportedDevices = Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx125X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
@@ -117,6 +150,22 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvFullTestCases(miopenBFloat16))));
+
+// Wave32-only tests (RDNA). Kept apart from the shared cases above because the wave64
+// factory has no 112x112 instance.
+INSTANTIATE_TEST_SUITE_P(
+    FullWave32,
+    GPU_UnitTestConvSolverConvDepthwiseBwdData2D_FP16,
+    testing::Combine(testing::Values(GetWave32TestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvWave32OnlyTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    FullWave32,
+    GPU_UnitTestConvSolverConvDepthwiseBwdData2D_BFP16,
+    testing::Combine(testing::Values(GetWave32TestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvWave32OnlyTestCases(miopenBFloat16))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,

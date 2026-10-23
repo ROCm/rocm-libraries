@@ -16,7 +16,7 @@
 #include "main_loop.h"
 #include "operand_loader.h"
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <hip/hip_runtime.h>
 
 namespace hipconv::cdna4::direct_wgrad

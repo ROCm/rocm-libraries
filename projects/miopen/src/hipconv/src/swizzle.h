@@ -353,8 +353,9 @@ private:
 // Write bijection: c4 -> (c4 + alpha(x)) % C4 is a permutation of [0, C4)
 // for each x, so offset_uint2 is 1:1 on [0, BLOCK_W) x [0, C4).
 //
-// Used by grouped_4c_wgrad_tf32.h. fp16/bf16 4c wgrad still uses SwizzleT
-// and has the same inherent conflict (out of scope for this fix).
+// Used by grouped_4c_wgrad_tf32.h and by the depthwise wgrad kernels, whose staging
+// rows this halves the bank conflicts of. fp16/bf16 4c wgrad still uses SwizzleT and
+// has the same inherent conflict.
 template <int C_>
 struct SwizzleT_wgrad
 {
@@ -407,7 +408,40 @@ public:
         return (rem - alpha(x) + C4) % C4;
     }
 
+    // uint4 (8-channel / c8) view, named as in SwizzleT so a caller can swap the two.
+    //
+    // A direct-to-LDS staging load places a whole uint4 per lane and inverts the slot it
+    // landed on back to a global address, so it needs the coordinates in uint4 units.
+    // alpha rotates by whole uint4 (it is a multiple of 8 c4 wherever C4 is a power of
+    // two), which is what leaves a uint4's two c4 adjacent and the view well defined.
+    static constexpr int C8 = C / 8;
+
+    static constexpr int offset_uint4(int x, int c8_)
+    {
+        static_assert(C % 8 == 0, "the uint4 view needs C divisible by 8");
+        static_assert(uint4_view_is_exact(), "alpha does not rotate by whole uint4 for this C");
+        return static_cast<unsigned>(offset_uint2(x, 2 * c8_)) / 2;
+    }
+
+    static constexpr int x(int offset_uint4_) { return static_cast<unsigned>(offset_uint4_) / C8; }
+
+    static constexpr int c8(int offset_uint4_)
+    {
+        unsigned offset_uint4 = offset_uint4_;
+        unsigned x_v          = SwizzleT_wgrad::x(offset_uint4);
+        unsigned rem          = offset_uint4 % C8;
+        return (rem - alpha(x_v) / 2 + C8) % C8;
+    }
+
 private:
+    static constexpr bool uint4_view_is_exact()
+    {
+        for(int x_ = 0; x_ < 16; ++x_)
+            if(alpha(x_) % 8 != 0)
+                return false;
+        return true;
+    }
+
     // Compile-time guard: offset_uint2 and the x_uint2()/c4_uint2() inverse must
     // round-trip for every (x, c4) in the tile, so a future edit to the alpha(x)
     // rotation cannot silently desync a kernel's load and global-memory write
@@ -415,13 +449,23 @@ private:
     // all rows.
     static constexpr bool inverses_round_trip()
     {
-        for(int x = 0; x < 16; ++x)
+        for(int x_ = 0; x_ < 16; ++x_)
+        {
             for(int c4_ = 0; c4_ < C4; ++c4_)
             {
-                const int off2 = offset_uint2(x, c4_);
-                if(x_uint2(off2) != x || c4_uint2(off2) != c4_)
+                const int off2 = offset_uint2(x_, c4_);
+                if(x_uint2(off2) != x_ || c4_uint2(off2) != c4_)
                     return false;
             }
+            if constexpr(C % 8 == 0)
+                if(uint4_view_is_exact())
+                    for(int c8_ = 0; c8_ < C8; ++c8_)
+                    {
+                        const int off4 = offset_uint4(x_, c8_);
+                        if(x(off4) != x_ || c8(off4) != c8_)
+                            return false;
+                    }
+        }
         return true;
     }
     static_assert(inverses_round_trip(),

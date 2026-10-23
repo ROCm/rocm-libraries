@@ -62,6 +62,10 @@ struct BluesteinMultiSpecs
     CallbackType            cbtype;
     std::optional<LoadOps>  loadOps;
     std::optional<StoreOps> storeOps;
+    // Whether the launch grid spills into Y, which decides how the
+    // kernel derives its thread index.  Part of the kernel name, since
+    // the two forms compile to different code.
+    bool splitGrid;
 };
 
 std::string bluestein_multi_rtc_kernel_name(const BluesteinMultiSpecs& specs);

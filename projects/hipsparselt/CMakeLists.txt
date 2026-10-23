@@ -47,6 +47,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# Set explicitly rather than relying on hipBLASLt's cache variable, which is only
+# visible when hipBLASLt is pulled in via add_subdirectory(). Without this,
+# binaries built against a staged hipBLASLt package lose $ORIGIN/../llvm/lib and
+# fail to find libomp.so at startup.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
+mark_as_advanced(CMAKE_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+
 # --- Build options and validation ---
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
@@ -165,9 +174,10 @@ if(HIPSPARSELT_ENABLE_HIP)
         message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
         cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
-        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
+        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/tensilelite/cmake")
         block()
             set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
+            set(HIPBLASLT_ENABLE_MXDATAGENERATOR OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
                 set(HIPBLASLT_ENABLE_YAML ON)
@@ -243,7 +253,14 @@ if(HIPSPARSELT_BUILD_TESTING)
 endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+    # The clients link a CPU reference BLAS/LAPACK (xerbla_, dlange_) and need the
+    # Fortran runtime. TheRock's cblas is OpenBLAS and bundles LAPACK already, so
+    # only that configuration can skip this. Keep this selector in sync with
+    # clients/CMakeLists.txt and hipsparselt_link_blas_libraries().
+    #
+    # Do not widen to HIPSPARSELT_ENABLE_CLIENT: it defaults ON and TheRock does
+    # not override it, so fetch_lapack.cmake would FATAL_ERROR there.
+    if(NOT HIPSPARSELT_ENABLE_THEROCK OR HIPSPARSELT_ENABLE_BLIS)
         if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
             set(CMAKE_Fortran_COMPILER "gfortran")
         endif()
@@ -258,10 +275,26 @@ endif()
 
 if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
-        rocm_package_add_dependencies(
-            COMPONENT runtime
-            DEPENDS hipblaslt
-        )
+        set(tensilelite_minimum 1.5.0)
+
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        rocm_package_add_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host >= ${tensilelite_minimum}")
+
+        unset(tensilelite_minimum)
         rocm_package_add_deb_dependencies(
             COMPONENT devel
             DEPENDS hipblaslt-dev
