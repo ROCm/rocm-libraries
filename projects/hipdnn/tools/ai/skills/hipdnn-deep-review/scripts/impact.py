@@ -15,9 +15,11 @@ ran, whatever it found; exit 1 with one line `impact: <reason>` on stderr when i
 
 Views. Each fact is computed at base -> head and, when a target tip differs from base, also at the
 merged tree `git merge-tree --write-tree <tip> <head>` (before = the tip, after = the merge). A
-conflict skips the merged view and says why; the skip is `changed` when the change touches the
-surface or the conflict does. A row that holds only in the merged view is marked
-`merged-only`: that is the race class (a parallel PR landed a copy the diff cannot see).
+conflicted merge is still analysed, except for the conflicted files: rows that read one are dropped
+and one row stands in for them, `changed` when a conflicted file is on the surface or a test. A
+merge that writes no tree skips the merged view as `changed`. A row that holds only in the merged
+view is marked `merged-only`: that is the race class (a parallel PR landed a copy the diff cannot
+see).
 `--round-dir` reads PIN.md (CLONE, BASE, HEAD, TARGET_TIP); a tip equal to BASE gives no merged
 view.
 
@@ -25,19 +27,22 @@ Row status: mismatch (producer and a copy disagree, a removed symbol still has a
 (a contract side changed, or static analysis cannot settle it; a surface file not understood is
 always changed), inert (touched, provably without runtime effect), outside (not on the surface;
 counted, never dropped). Test files and CMake are outside for status but are still searched as
-kernarg copies and as symbol readers. CMake and `requirements*.txt` belong to the BUILD and DEPS
-lanes; the rollup names how many it left to them.
+kernarg copies and as symbol readers. CMake and CI test-category lists belong to the BUILD lane,
+`requirements*.txt` to DEPS; the rollup names how many it left to them. A rocKE C++ engine source
+is `inert` while no provider build file outside rocKE links the engine and the packer pins the
+Python lowering backend; any other non-Python rocKE file is not understood.
 
 Rollup (last line of `report`):
   Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected[; not judged here: ...])
                   | N/A (no surface file[; not judged here: ...])
 
-`report --emit FILE.json` folds in impact_emit.py output (schema 2), which must have been made for
-the same base and head trees: changed params vs a static C++ list is a mismatch; changed IR is
-`changed` for that arch; when every family is equal (nothing changed, nothing failed, nothing not
-inspected) the rows that were `changed` only because a shipped module changed become `inert`, but
-only on modules a family with built variants imports. Static kernarg mismatch rows are never
-downgraded.
+`report --emit FILE.json` folds in impact_emit.py output (schema 3), which must have been made for
+the same base and head trees: changed params vs a static C++ list is a mismatch; changed IR or
+COMGR inputs are `changed` for that arch; when every family is equal (nothing changed, nothing
+failed, nothing not inspected) the rows that were `changed` only because a shipped module changed
+become `inert`, but only on modules a family with built variants imports, and never on code that
+runs after lowering (COMPILE_STEP) or on a DVC pointer. Static kernarg mismatch rows are never
+downgraded. A module that the packer reaches ships on every architecture.
 """
 
 import argparse
@@ -92,6 +97,8 @@ SURFACE_TABLE = (
     *[("carve-out", HKP + f"src/*/*/{d}/*") for d, _ in _CARVE],
     *[("carve-out", HKP + f"config/*{k}*") for _, k in _CARVE],
     *[("carve-out", HKP + f"*{k}*_test_categories*.yaml") for _, k in _CARVE],
+    # CI test-category lists register tests; nothing at run time reads them.
+    ("test-categories", HKP + "*_test_categories*.yaml"),
     ("test", SDK + "tests/*"),
     ("test", HKP + "src/tests/*"),
     ("test", HKP + "src/integration_tests/*"),
@@ -113,12 +120,27 @@ SURFACE_TABLE = (
     ("generator", GEN + "*"),
     ("provider", HKP + "*"),
 )
-OUTSIDE_TAGS = {"carve-out", "test", "cmake", "deps", "other"}
+OUTSIDE_TAGS = {"carve-out", "test", "test-categories", "cmake", "deps", "other"}
 #: Outside tags another deep-review lane judges; the rollup names them so N/A is not read
 #: as "no impact" for these files.
-OWNER_LANES = {"cmake": "BUILD", "deps": "DEPS"}
+OWNER_LANES = {"cmake": "BUILD", "test-categories": "BUILD", "deps": "DEPS"}
 #: Tags whose files are read as copies or readers although they are outside for status.
 SEARCHED_TAGS = {"test"}
+#: rocKE code that runs after lowering (the COMGR step) or at load time: an equal emitted IR
+#: digest says nothing about it, so its rows never fold.
+COMPILE_STEP = (
+    IMPORT_ROOTS[1] + "rocke/helpers/compile.py",
+    IMPORT_ROOTS[1] + "rocke/runtime/",
+)
+#: The rocKE C++ engine (`rocke_core`, the `rocke_engine` binding).
+ROCKE_CPP = HKP + "rocke/platform/cpp/"
+#: The packer module that pins the lowering backend of every packed rocKE kernel.
+PACKER_BACKEND = PACKER + "python/hkp_pack/rocke_compile.py"
+_PYTHON_BACKEND_PIN = re.compile(
+    r"""^_BACKEND\s*=\s*["']python["']\s*(?:#.*)?$""", re.M
+)
+# `rocke_core\w*` also covers the `rocke_core_objects` OBJECT library both engine libraries use.
+_ENGINE_LINK = re.compile(r"\b(?:rocke_core\w*|rocke_shared|rocke_engine|ckc::\w+)\b")
 
 GENERATED = (
     (
@@ -395,7 +417,10 @@ def collect_changes(before: Tree, after: Tree) -> list:
 
 
 def merged_tree(repo, tip: str, head: str):
-    """(tree oid, None) of the clean merge of tip and head, or (None, reason)."""
+    """(tree oid, conflicted paths, None) of the merge of tip and head, or (None, None, reason).
+
+    A conflicted merge still writes a tree, with conflict markers in the conflicted files only;
+    every other path holds its merged content and can be analysed."""
     done = subprocess.run(
         ["git", "-C", str(repo), *GIT_CONFIG, "merge-tree", "--write-tree", "--name-only", tip, head],
         capture_output=True,
@@ -403,18 +428,18 @@ def merged_tree(repo, tip: str, head: str):
     )  # fmt: skip
     lines = done.stdout.decode("utf-8", errors="replace").splitlines()
     if done.returncode == 0 and lines:
-        return lines[0].strip(), None
+        return lines[0].strip(), [], None
     if done.returncode == 1 and lines:
         files = []
         for line in lines[1:]:
             if not line.strip():
                 break
             files.append(line.strip())
-        return None, "merge conflict in " + (
-            ", ".join(files) if files else "unknown files"
-        )
+        if files and re.fullmatch(r"[0-9a-f]{40,64}", lines[0].strip()):
+            return lines[0].strip(), files, None
+        return None, None, "merge conflict in unknown files"
     err = done.stderr.decode("utf-8", errors="replace").strip()
-    return None, f"git merge-tree failed: {err or 'exit ' + str(done.returncode)}"
+    return None, None, f"git merge-tree failed: {err or 'exit ' + str(done.returncode)}"
 
 
 # -- Surface tags and content classes ------------------------------------------------
@@ -1285,16 +1310,31 @@ def eager_nodes(tree):
             stack.extend(ast.iter_child_nodes(node))
 
 
-def import_targets(path: str, tree, known, eager: bool = False) -> list:
+def from_base(path: str, node: ast.ImportFrom):
+    """Module path parts a `from ... import` in `path` names, or None when it is relative in a
+    file outside the import roots."""
+    if not node.level:
+        return node.module.split(".") if node.module else []
+    own = module_name(path)
+    if not own:
+        return None
+    package = own.split(".")
+    if not path.endswith("__init__.py"):
+        package = package[:-1]
+    base = (
+        package[: len(package) - (node.level - 1)] if node.level > 1 else list(package)
+    )
+    return base + (node.module.split(".") if node.module else [])
+
+
+def import_targets(path: str, tree, known, eager: bool = False, reexport=None) -> list:
     """[(target path, line)] for every rocKE module a file imports; `eager` keeps only the
-    imports that run at import time."""
+    imports that run at import time. `reexport(init, name)`, when given, names the module a
+    package `__init__.py` takes `name` from: `from pkg import f` then also targets the module
+    that defines `f`, whose body the importer runs when it calls `f`."""
     targets = []
     if tree is None:
         return targets
-    own = module_name(path)
-    package = own.split(".") if own else []
-    if own and not path.endswith("__init__.py"):
-        package = package[:-1]
     for node in eager_nodes(tree) if eager else ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -1302,24 +1342,27 @@ def import_targets(path: str, tree, known, eager: bool = False) -> list:
                     (resolve_module(alias.name.split("."), known), node.lineno)
                 )
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                if not own:
-                    continue
-                base = (
-                    package[: len(package) - (node.level - 1)]
-                    if node.level > 1
-                    else list(package)
-                )
-                base += node.module.split(".") if node.module else []
-            else:
-                base = node.module.split(".") if node.module else []
+            base = from_base(path, node)
+            if base is None:
+                continue
+            package = resolve_module(base, known)
             for alias in node.names:
                 target = (
                     None
                     if alias.name == "*"
                     else resolve_module(base + [alias.name], known)
                 )
-                targets.append((target or resolve_module(base, known), node.lineno))
+                if (
+                    target is None
+                    and reexport
+                    and alias.name != "*"
+                    and package
+                    and package.endswith("__init__.py")
+                ):
+                    source = reexport(package, alias.name)
+                    if source and source != package:
+                        targets.append((source, node.lineno))
+                targets.append((target or package, node.lineno))
         elif isinstance(node, ast.Call):
             func = node.func
             name = (
@@ -1358,7 +1401,8 @@ class Closure:
     #: rocKE module -> the root that reaches it (a descriptor, packer or tool import, or an
     #: eager `__init__` import chain; every ancestor `__init__.py` of a consumed module is in).
     consumed: dict = field(default_factory=dict)
-    #: module -> archs of the production roots whose ordinary imports reach its body.
+    #: module -> archs of the production roots whose ordinary imports reach its body;
+    #: ALL_ARCHS when a root without an arch (the packer, a tool) reaches it.
     shipped: dict = field(default_factory=dict)
     #: archs whose descriptors sit behind DVC: their kernel modules are roots by directory.
     opaque: set = field(default_factory=set)
@@ -1380,6 +1424,32 @@ def build_closure(tree: Tree) -> Closure:
     known = {p for p in tree.paths if p.endswith(".py") and p.startswith(IMPORT_ROOTS)}
     out = Closure()
     roots = []  # (label, target, arch, production)
+    tree.read(sorted(p for p in known if p.endswith("__init__.py")))
+    memo = {}
+
+    def reexport(init: str, name: str):
+        """The module package `init` binds `name` from, followed through packages; the None
+        placeholder ends a cycle."""
+        if (init, name) not in memo:
+            memo[init, name] = None
+            module = tree.ast(init)
+            found = None
+            for node in module.body if module is not None else ():
+                if found or not isinstance(node, ast.ImportFrom):
+                    continue
+                base = from_base(init, node)
+                for alias in node.names if base is not None else ():
+                    if (alias.asname or alias.name) != name or alias.name == "*":
+                        continue
+                    found = resolve_module(
+                        base + [alias.name], known
+                    ) or resolve_module(base, known)
+                    if found and found.endswith("__init__.py") and found != init:
+                        found = reexport(found, alias.name) or found
+                    break
+            memo[init, name] = found
+        return memo[init, name]
+
     descriptors = sorted(
         p for p in tree.paths if p.startswith(DESC_DIR) and p.endswith(".json")
     )
@@ -1438,7 +1508,9 @@ def build_closure(tree: Tree) -> Closure:
     for path, data in tree.read(importers).items():
         text = decode(data)
         if text and mention.search(text):
-            for target, line in import_targets(path, tree.ast(path), known):
+            for target, line in import_targets(
+                path, tree.ast(path), known, reexport=reexport
+            ):
                 roots.append(
                     (f"{path}:{line}", target, None, path.startswith(PRODUCTION_DIRS))
                 )
@@ -1448,7 +1520,9 @@ def build_closure(tree: Tree) -> Closure:
         tree.read(frontier)
         for path in frontier:
             is_init = path.endswith("__init__.py")
-            imports = import_targets(path, tree.ast(path), known, eager=is_init)
+            imports = import_targets(
+                path, tree.ast(path), known, eager=is_init, reexport=reexport
+            )
             body[path] = [] if is_init else sorted({t for t, _ in imports})
             graph[path] = [(t, line, is_init) for t, line in imports] + [
                 (a, 0, False) for a in ancestor_inits(path, known)
@@ -1482,8 +1556,9 @@ def build_closure(tree: Tree) -> Closure:
                 continue
             seen.add(current)
             archs = out.shipped.setdefault(current, set())
-            if arch:
-                archs.add(arch)
+            # A root without an arch is the packer or one of its tools: it compiles every
+            # packed variant, so what it reaches ships on every architecture.
+            archs.add(arch or ALL_ARCHS)
             stack += body.get(current, [])
     return out
 
@@ -1521,7 +1596,7 @@ class Ctx:
     def __init__(self, before: Tree, after: Tree, label: str):
         self.before, self.after, self.label = before, after, label
         self.changes = {c.path: c for c in collect_changes(before, after)}
-        self._closures, self._surfaces = {}, {}
+        self._closures, self._surfaces, self._engine = {}, {}, None
 
     def closure(self, side) -> Closure:
         if side not in self._closures:
@@ -1546,6 +1621,36 @@ class Ctx:
     def moved(self, path: str) -> bool:
         ch = self.changes.get(path)
         return ch is not None and ch.cls in MOVING
+
+    def engine_unshipped(self):
+        """Why the rocKE C++ engine reaches no shipped kernel on both sides, or None."""
+        if self._engine is None:
+            self._engine = all(
+                cpp_engine_unshipped(t) for t in (self.before, self.after)
+            )
+        if not self._engine:
+            return None
+        return (
+            "rocKE C++ engine source: no provider build file outside rocKE links the engine,"
+            " and the packer pins the Python lowering backend"
+        )
+
+
+def cpp_engine_unshipped(tree: Tree) -> bool:
+    """True when the packer pins the Python lowering backend and no provider CMake file
+    outside rocKE names the C++ engine's targets: then no shipped kernel is built by it.
+    """
+    pin = tree.text(PACKER_BACKEND)
+    if not pin or not _PYTHON_BACKEND_PIN.search(pin):
+        return False
+    cmake = [
+        p for p in tree.under(HKP) if is_cmake(p) and not p.startswith(HKP + "rocke/")
+    ]
+    for data in tree.read(cmake).values():
+        text = decode(data)
+        if text is None or _ENGINE_LINK.search(strip_hash_comments(text)):
+            return False
+    return True
 
 
 def func_note(funcs: list) -> str:
@@ -1599,23 +1704,35 @@ def rocke_status(ctx: Ctx, ch: Change):
     """(status, reason, arch, foldable) of a rocKE file whose code changed."""
     path = ch.path
     if not path.endswith(".py") or not path.startswith(IMPORT_ROOTS):
+        if path.startswith(ROCKE_CPP):
+            why = ctx.engine_unshipped()
+            if why:
+                return "inert", why, None, False
         return (
             "changed",
             "rocKE file that is not an importable Python module: not understood",
             arch_of(path),
             False,
         )
+    # The emitter compares IR text; code after lowering never folds on its evidence.
+    fold = not path.startswith(COMPILE_STEP)
+    step = (
+        ""
+        if fold
+        else "; runs after lowering, so an equal emitted IR does not cover it"
+    )
     side = ctx.closure("before" if ch.head is None else "after")
     before = after = side
     archs = set(side.shipped.get(path, ()))
     if path in side.shipped:
-        arch = ", ".join(sorted(archs)) if archs else None
+        arch = ALL_ARCHS if ALL_ARCHS in archs else ", ".join(sorted(archs))
         return (
             "changed",
             "module body is reachable from a shipped variant; emitted code or params may differ"
-            + (f" ({', '.join(sorted(archs))})" if archs else ""),
+            + (f" ({arch})" if archs else "")
+            + step,
             arch or arch_of(path),
-            True,
+            fold,
         )
     why = after.consumed.get(path) or before.consumed.get(path)
     if why:
@@ -1623,17 +1740,17 @@ def rocke_status(ctx: Ctx, ch: Change):
         if bt is None or at is None:
             return (
                 "changed",
-                f"imported module added, removed or unparsable ({why})",
+                f"imported module added, removed or unparsable ({why}){step}",
                 arch_of(path),
-                True,
+                fold,
             )
         diff = surface_changes(bt, at)
         if diff:
             return (
                 "changed",
-                f"imported by {why}; module surface changed: {'; '.join(diff[:3])}",
+                f"imported by {why}; module surface changed: {'; '.join(diff[:3])}{step}",
                 arch_of(path),
-                True,
+                fold,
             )
         return (
             "inert",
@@ -2692,7 +2809,8 @@ def data_rows(ctx: Ctx) -> list:
                 if old.get(p) != new.get(p)
             )
             rows.append(make_row("data", path, 0, path, "changed",
-                f"catalog content changed, not inspected ({shown})", arch=arch_of(path), foldable="dvc"))  # fmt: skip
+                f"catalog content changed, not inspected ({shown}): the DVC-held file is not read here, "
+                "and a regenerated variant list does not prove its other fields equal", arch=arch_of(path)))  # fmt: skip
         elif (
             ch.tag == "descriptor"
             and ch.cls not in ("docs",)
@@ -2752,6 +2870,8 @@ def merge_views(per_view: list) -> list:
 # -- emit fold ---------------------------------------------------------------------------------------
 
 EMIT_SIZES = {"i8": 1, "i16": 2, "i32": 4, "float": 4, "half": 2, "i64": 8, "double": 8}
+#: The impact_emit.py output this script reads; 3 added `comgr_changed`.
+EMIT_SCHEMA = 3
 
 
 def load_emit(path) -> dict:
@@ -2761,10 +2881,12 @@ def load_emit(path) -> dict:
         raise rl.Fail(f"cannot read emit file {path}: {exc}") from None
     if (
         not isinstance(data, dict)
-        or data.get("schema") != 2
+        or data.get("schema") != EMIT_SCHEMA
         or data.get("tool") != "impact_emit"
     ):
-        raise rl.Fail(f"{path} is not impact_emit schema 2 output")
+        raise rl.Fail(
+            f"{path} is not impact_emit schema {EMIT_SCHEMA} output; rerun impact_emit.py"
+        )
     problem = emit_shape_problem(data)
     if problem:
         raise rl.Fail(f"emit file {path}: {problem}")
@@ -2813,7 +2935,13 @@ def emit_shape_problem(data: dict):
             and count(variants.get("head"))
         ):
             return f"family {n}: `variants` lacks base and head counts"
-        lists = ("only_in_base", "only_in_head", "params_changed", "ir_changed")
+        lists = (
+            "only_in_base",
+            "only_in_head",
+            "params_changed",
+            "ir_changed",
+            "comgr_changed",
+        )
         if not all(strings(fam.get(k)) for k in lists):
             return f"family {n}: {', '.join(lists)} must be lists of names"
         failures, built = fam.get("failures"), fam.get("params")
@@ -2873,7 +3001,13 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
         arch, builder = fam["arch"], fam["builder"]
         quiet = not any(
             fam[k]
-            for k in ("params_changed", "ir_changed", "only_in_base", "only_in_head")
+            for k in (
+                "params_changed",
+                "ir_changed",
+                "comgr_changed",
+                "only_in_base",
+                "only_in_head",
+            )
         )
         failures = fam["failures"]
         if not quiet or any(failures[side] for side in ("base", "head")):
@@ -2934,6 +3068,10 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
         if fam.get("ir_changed"):
             out.append(make_row("kernargs", source, 0, f"emit-ir:{arch}:{builder}", "changed",
                 f"emitted IR of {builder} changed for {len(fam['ir_changed'])} variant(s)", arch=arch))  # fmt: skip
+        if fam["comgr_changed"]:
+            out.append(make_row("kernargs", source, 0, f"emit-comgr:{arch}:{builder}", "changed",
+                f"COMGR inputs of {builder} (ISA, codegen options or fresh-process compile) changed for "
+                f"{len(fam['comgr_changed'])} variant(s): the code object can differ where the IR does not", arch=arch))  # fmt: skip
         failed = {side: v for side, v in failures.items() if v}
         if failed:
             out.append(make_row("kernargs", source, 0, f"emit-fail:{arch}:{builder}", "changed",
@@ -2942,35 +3080,16 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
         out.append(make_row("kernargs", item.get("kdp", ""), 0, f"emit-skip:{item.get('kdp')}:{item.get('side')}",
             "changed", f"not inspected ({item.get('side')}): {item.get('reason')}"))  # fmt: skip
     if equal:
-        dvc_dirs = [
-            str(PurePosixPath(f["kdp"]).parent) + "/"
-            for f in families
-            if f.get("spec_origin") == "registry_enumerator"
-            and f.get("kdp")
-            and f["variants"]["head"] > 0
-        ]
         for row in rows:
             if (
-                row["view"] != ctx.label
-                or row["status"] != "changed"
-                or not row["foldable"]
+                row["view"] == ctx.label
+                and row["status"] == "changed"
+                and row["foldable"]
+                and row["path"] in covered
             ):
-                continue
-            if row["foldable"] == "dvc":
-                pointer_dir = str(PurePosixPath(row["path"]).parent) + "/"
-                if not any(
-                    d.startswith(pointer_dir) or pointer_dir.startswith(d)
-                    for d in dvc_dirs
-                ):
-                    continue
                 row.update(
                     status="inert",
-                    reason="catalog regenerated: every shipped variant equal",
-                )
-            elif row["path"] in covered:
-                row.update(
-                    status="inert",
-                    reason="emitted IR and params equal for every shipped variant",
+                    reason="emitted IR, params and COMGR inputs equal for every shipped variant",
                 )
     for row in out:
         row["view"] = ctx.label
@@ -3106,7 +3225,7 @@ def run(args):
     per_view = [rows]
     if tip_pair:
         tip, tip_tree_id = tip_pair
-        tree_id, why = merged_tree(repo, tip, head)
+        tree_id, conflicts, why = merged_tree(repo, tip, head)
         view = dict(
             label="merged",
             before=tip[:12],
@@ -3116,22 +3235,10 @@ def run(args):
         )
         views.append(view)
         if tree_id is None:
+            # No merged tree at all: the race check is lost for every file of the change.
             view.update(status="skipped", reason=why)
-            # Skipping the merged view loses the race check for every surface file of the
-            # change, wherever the conflict sits; a conflicted test is also a searched copy.
-            matters = any(r["status"] != "outside" for r in rows)
-            if (
-                why.startswith("merge conflict in ")
-                and why != "merge conflict in unknown files"
-            ):
-                matters = matters or any(
-                    tag_of(p.strip()) not in OUTSIDE_TAGS - SEARCHED_TAGS
-                    for p in why[18:].split(",")
-                )
-            else:
-                matters = True
             per_view.append([
-                dict(make_row("views", "(merged view)", 0, "merged", "changed" if matters else "outside",
+                dict(make_row("views", "(merged view)", 0, "merged", "changed",
                     f"merged view skipped: {why}; a race with the target cannot be excluded"),
                     view="merged", merged_only=True)
             ])  # fmt: skip
@@ -3140,6 +3247,22 @@ def run(args):
                 Tree(repo, tip_tree_id), Tree(repo, tree_id), "merged"
             )
             view["files"] = len(mctx.changes)
+            if conflicts:
+                # Conflicted files hold markers: drop every row that reads one, and stand in
+                # for them with one row. A conflicted test is a searched copy, so it counts.
+                bad = set(conflicts)
+                mrows = [r for r in mrows if r["path"] not in bad
+                         and not any(c["path"] in bad for c in r["counterparts"])]  # fmt: skip
+                shown = ", ".join(conflicts)
+                view.update(status="conflicted", reason=f"merge conflict in {shown}")
+                matters = any(
+                    tag_of(p) not in OUTSIDE_TAGS - SEARCHED_TAGS for p in conflicts
+                )
+                mrows.append(
+                    dict(make_row("views", "(merged view)", 0, "merged", "changed" if matters else "outside",
+                        f"merged view conflicts in {shown}: those files are not analysed in it, "
+                        "so a race on them cannot be excluded"), view="merged", merged_only=True)
+                )  # fmt: skip
             per_view.append(mrows)
     if emit is not None:
         per_view[0] = fold_emit(ctx, per_view[0], emit)
