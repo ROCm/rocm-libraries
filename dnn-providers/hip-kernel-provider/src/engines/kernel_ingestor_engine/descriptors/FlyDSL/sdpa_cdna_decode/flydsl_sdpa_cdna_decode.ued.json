@@ -13,10 +13,8 @@
   "knobs": [
     "block_m",
     "waves_per_eu",
-    "has_bias",
     "kv_gpfetch",
     "dv_split",
-    "k_chunk",
-    "has_sink"
+    "k_chunk"
   ]
 }

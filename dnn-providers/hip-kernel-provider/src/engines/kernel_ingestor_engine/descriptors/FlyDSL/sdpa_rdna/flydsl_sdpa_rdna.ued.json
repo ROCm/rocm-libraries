@@ -14,10 +14,6 @@
     "block_m",
     "block_n",
     "dv_split",
-    "has_bias",
-    "head_dim_max",
-    "hd_pair",
-    "bias_q",
-    "has_sink"
+    "hd_pair"
   ]
 }

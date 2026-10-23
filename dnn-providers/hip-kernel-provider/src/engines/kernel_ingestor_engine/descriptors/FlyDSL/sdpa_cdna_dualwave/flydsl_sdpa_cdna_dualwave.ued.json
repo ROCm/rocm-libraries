@@ -12,9 +12,7 @@
   "metadata": "798ed3e1-93e3-5c95-8bab-c8c767225601",
   "knobs": [
     "block_m",
-    "any_diagonal",
     "waves_per_eu",
-    "has_bias",
     "setprio"
   ]
 }

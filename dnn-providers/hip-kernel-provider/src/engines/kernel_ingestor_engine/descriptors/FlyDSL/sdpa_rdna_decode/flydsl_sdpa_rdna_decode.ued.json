@@ -13,10 +13,6 @@
   "knobs": [
     "block_m",
     "block_n",
-    "dv_split",
-    "has_bias",
-    "head_dim_max",
-    "bias_q",
-    "has_sink"
+    "dv_split"
   ]
 }

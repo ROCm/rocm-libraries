@@ -119,8 +119,11 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 #
 # Per op: `N` is RMSNorm's row width; `head_dim`, `head_dim_v` and `causal` are what
 # an SDPA graph asks for, and on CDNA so is the kernel family, which the target arch
-# fixes. The remaining knobs -- block_threads, block_m, block_n -- are launch
-# geometry the tuner may legitimately vary.
+# fixes. `has_bias`, `has_sink` and the bias forms (`bias_f32`, `bias_q`,
+# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
+# tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
+# `kv_align`) say which graphs an object can serve: the matcher gates on them, and
+# autotune compares the objects they distinguish as separate catalog entries.
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -130,8 +133,16 @@ GRAPH_DETERMINED_FIELDS = {
     "reduce_symbol",
     "head_dim",
     "head_dim_v",
+    "head_dim_max",
     "qk_mask",
     "causal",
+    "any_diagonal",
+    "kv_align",
+    "has_bias",
+    "bias_f32",
+    "bias_q",
+    "bias_kstrided",
+    "has_sink",
     "merge_symbol",
     "kernel",
 }
@@ -140,6 +151,25 @@ GRAPH_DETERMINED_FIELDS = {
 # score reads them, and like the graph-determined ones they are no knob for autotune,
 # which benchmarks the objects themselves.
 SELECTION_FIELDS = {"prefer_feature", "prefer_min", "prefer_max"}
+
+# The schedule and launch geometry an object was built with, which never changes what
+# it computes: the only fields an engine exposes as knobs. Every metadata field must be
+# in exactly one of these three sets, so a new field cannot become a knob by default.
+TUNING_FIELDS = {
+    "block_threads",
+    "block_m",
+    "block_n",
+    "row_subtiles",
+    "dv_split",
+    "hd_pair",
+    "k_chunk",
+    "waves_per_eu",
+    "setprio",
+    "kv_gpfetch",
+    "k_prefetch_dist",
+    "v_prefetch_dist",
+    "kv_addr_hoist",
+}
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
@@ -345,11 +375,7 @@ class OpDescriptors:
                 # The UHD that orders the engine's kernel catalog, on every arch.
                 "sort_kernel_catalog": {"default": self.uhd_id},
                 "metadata": self.kmd_id,
-                "knobs": [
-                    f
-                    for f in self.fields
-                    if f not in GRAPH_DETERMINED_FIELDS and f not in SELECTION_FIELDS
-                ],
+                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
             },
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -407,6 +433,22 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
             raise HkpPackError(
                 f"{entry.record['name']} declares knobs {sorted(knobs)} but its "
                 f"siblings declare {sorted(first)}; one op is one schema"
+            )
+    for name in fields:
+        homes = [
+            label
+            for label, group in (
+                ("GRAPH_DETERMINED_FIELDS", GRAPH_DETERMINED_FIELDS),
+                ("SELECTION_FIELDS", SELECTION_FIELDS),
+                ("TUNING_FIELDS", TUNING_FIELDS),
+            )
+            if name in group
+        ]
+        if len(homes) != 1:
+            raise HkpPackError(
+                f"{entries[0].op}: metadata field '{name}' must be in exactly one of "
+                f"GRAPH_DETERMINED_FIELDS, SELECTION_FIELDS and TUNING_FIELDS "
+                f"(found in {homes or 'none'}); only TUNING_FIELDS become knobs"
             )
     return fields
 

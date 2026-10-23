@@ -11,11 +11,6 @@
   },
   "metadata": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
   "knobs": [
-    "head_dim_max",
-    "has_bias",
-    "bias_f32",
-    "bias_kstrided",
-    "has_sink",
     "block_m",
     "block_n",
     "row_subtiles",
