@@ -30,8 +30,8 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
-from Tensile.Toolchain.Component import get_rocm_version
+from .. import __version__
+from ..Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
