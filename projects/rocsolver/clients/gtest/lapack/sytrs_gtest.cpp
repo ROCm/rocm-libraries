@@ -71,6 +71,14 @@ const vector<vector<int>> matrix_sizeB_range = {
     {30, 0},
 };
 
+// for checkin_lapack_pivots tests: random symmetric indefinite matrices, whose factorizations
+// have 1-by-1 and 2-by-2 blocks and interchanges in no particular pattern; nrhs >= n/2 uses the
+// algorithm of xSYTRS2 (each B_range vector is a {nrhs, uplo, 1})
+const vector<vector<int>> pivots_matrix_sizeA_range
+    = {{5, 5, 5}, {12, 12, 15}, {21, 25, 21}, {40, 40, 40}};
+const vector<vector<int>> pivots_matrix_sizeB_range
+    = {{3, 0, 1}, {3, 1, 1}, {13, 0, 1}, {13, 1, 1}, {40, 0, 1}, {40, 1, 1}};
+
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_sizeA_range = {
     {70, 70, 100},
@@ -92,6 +100,8 @@ Arguments sytrs_setup_arguments(sytrs_tuple tup)
     arg.set<rocblas_int>("nrhs", matrix_sizeB[0]);
     arg.set<rocblas_int>("lda", matrix_sizeA[1]);
     arg.set<rocblas_int>("ldb", matrix_sizeA[2]);
+    if(matrix_sizeB.size() > 2 && matrix_sizeB[2] == 1)
+        arg.set<char>("pivots", 'R');
 
     if(matrix_sizeB[1] == 0)
     {
@@ -287,3 +297,13 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYTRS_64,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack_pivots,
+                         SYTRS,
+                         Combine(ValuesIn(pivots_matrix_sizeA_range),
+                                 ValuesIn(pivots_matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack_pivots,
+                         SYTRS_64,
+                         Combine(ValuesIn(pivots_matrix_sizeA_range),
+                                 ValuesIn(pivots_matrix_sizeB_range)));

@@ -155,7 +155,8 @@ void sytrs_initData(const rocblas_handle handle,
                     Th& hA,
                     Ih& hIpiv,
                     Uh& hIpiv_cpu,
-                    Th& hB)
+                    Th& hB,
+                    const char pivots = 'D')
 {
     if(CPU)
     {
@@ -164,6 +165,22 @@ void sytrs_initData(const rocblas_handle handle,
 
         for(I b = 0; b < bc; ++b)
         {
+            // pivots = 'R': a symmetric indefinite matrix with random entries, whose factorization
+            // has 1-by-1 and 2-by-2 blocks and interchanges in no particular pattern
+            if(pivots == 'R')
+            {
+                for(rocblas_int j = 0; j < n; j++)
+                {
+                    for(rocblas_int i = 0; i <= j; i++)
+                    {
+                        T const v = hA[b][i + j * lda] - T(5.5);
+                        hA[b][i + j * lda] = v;
+                        hA[b][j + i * lda] = v;
+                    }
+                }
+                continue;
+            }
+
             for(rocblas_int i = 0; i < n; i++)
             {
                 for(rocblas_int j = 0; j < n; j++)
@@ -232,11 +249,12 @@ void sytrs_getError(const rocblas_handle handle,
                     Uh& hIpiv_cpu,
                     Th& hB,
                     Th& hBRes,
-                    double* max_err)
+                    double* max_err,
+                    const char pivots = 'D')
 {
     // input data initialization
     sytrs_initData<true, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, bc,
-                                  hA, hIpiv, hIpiv_cpu, hB);
+                                  hA, hIpiv, hIpiv_cpu, hB, pivots);
 
     // execute computations
     // GPU lapack
@@ -286,12 +304,13 @@ void sytrs_getPerfData(const rocblas_handle handle,
                        const int hot_calls,
                        const int profile,
                        const bool profile_kernels,
-                       const bool perf)
+                       const bool perf,
+                       const char pivots = 'D')
 {
     if(!perf)
     {
         sytrs_initData<true, false, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -303,13 +322,13 @@ void sytrs_getPerfData(const rocblas_handle handle,
     }
 
     sytrs_initData<true, false, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB,
-                                   bc, hA, hIpiv, hIpiv_cpu, hB);
+                                   bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
         sytrs_initData<false, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
 
         CHECK_ROCBLAS_ERROR(rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs, dA.data(), lda, stA,
                                             dIpiv.data(), stP, dB.data(), ldb, stB, bc));
@@ -333,7 +352,7 @@ void sytrs_getPerfData(const rocblas_handle handle,
     for(int iter = 0; iter < hot_calls; iter++)
     {
         sytrs_initData<false, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
 
         timer.start(stream);
         rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -356,6 +375,7 @@ void testing_sytrs(Arguments& argus)
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
     rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    char pivots = argus.get<char>("pivots", 'D');
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;
@@ -467,14 +487,14 @@ void testing_sytrs(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             sytrs_getError<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error, pivots);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             sytrs_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
-                                          argus.profile_kernels, argus.perf);
+                                          argus.profile_kernels, argus.perf, pivots);
     }
     else
     {
@@ -509,14 +529,14 @@ void testing_sytrs(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             sytrs_getError<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error, pivots);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             sytrs_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
-                                          argus.profile_kernels, argus.perf);
+                                          argus.profile_kernels, argus.perf, pivots);
     }
 
     // validate results for rocsolver-test
