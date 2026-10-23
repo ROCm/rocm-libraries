@@ -58,11 +58,11 @@ enum class MaskType : int
 // The diagonal band an SDPA (forward or backward) attribute set requests, with
 // the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
 //
-// The bounds are in the kernels' FlashAttention convention (window_size_left /
-// window_size_right), not the graph's: leftBound is the number of keys kept
-// before the diagonal, so it is the graph's cuDNN-semantics left_bound minus 1
-// (see resolveDiagonalBand()). rightBound means the same in both conventions.
-// -1 is unbounded.
+// leftBound is in the kernels' (FlashAttention/AITER window_size_left)
+// convention: the number of keys kept left of the diagonal, -1 for unbounded.
+// The graph's left_bound is cuDNN's, which counts the diagonal key too, so
+// resolveDiagonalBand() stores left_bound - 1 (SdpaSemanticsRegister SEM-001).
+// rightBound means the same in both conventions.
 struct DiagonalBand
 {
     int64_t leftBound;
@@ -112,8 +112,8 @@ inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ
 // the diagonal, diagonal included. The returned band holds the FlashAttention
 // window_size_left the kernels take, L - 1 (see DiagonalBand).
 //
-// Setting both booleans, a bound below -1, or left_bound = 0 (which keeps no key at or
-// before the diagonal, and which L - 1 would turn into "unbounded") throws
+// Setting both booleans, a bound below -1, or left_bound = 0 (which would keep no
+// key at or before the diagonal; cuDNN rejects it) throws
 // HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
@@ -145,18 +145,16 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            "SDPA: left_bound must be -1 (unbounded) or >= 1; left_bound = L keeps the L keys "
-            "ending at the diagonal, so 0 keeps no key at or before it");
+            "SDPA: left_bound must be positive or -1 (unbounded); 0 keeps no keys");
     }
-
-    const int64_t windowLeft = left > 0 ? left - 1 : -1;
+    const int64_t kernelLeft = left > 0 ? left - 1 : -1;
 
     if(!causalDeprecated && !bottomRightDeprecated)
     {
-        return {windowLeft, right, attrs.diagonal_alignment()};
+        return {kernelLeft, right, attrs.diagonal_alignment()};
     }
 
-    return {windowLeft,
+    return {kernelLeft,
             right >= 0 ? right : 0,
             bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
 }

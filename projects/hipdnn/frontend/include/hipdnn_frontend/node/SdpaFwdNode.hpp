@@ -35,6 +35,16 @@ public:
                               ErrorCode::INVALID_VALUE,
                               attributes.getUnsupportedReason());
 
+        // cuDNN's left_bound counts the diagonal key, so 0 keeps no keys; -1 is unbounded.
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.left_bound.has_value()
+                && (*attributes.left_bound == 0 || *attributes.left_bound < -1),
+            ErrorCode::INVALID_VALUE,
+            std::string("SdpaFwdNode: left_bound must be positive or -1 (unbounded)"));
+        HIPDNN_RETURN_IF_TRUE(attributes.right_bound.has_value() && *attributes.right_bound < -1,
+                              ErrorCode::INVALID_VALUE,
+                              std::string("SdpaFwdNode: right_bound must be >= -1"));
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();

@@ -13,8 +13,7 @@ Supported, fully composable operation axes:
   - dtype:        bf16, fp16, fp8 (FP8_E4M3 inputs, BF16 output, per-tensor descale)
   - head dim:     hd128, hd192 (via --q-dims / --v-dims)
   - causal mask:  none, top_left, bottom_right
-  - sliding window: --left-bound (cuDNN / graph convention) or --window-left
-                    (FlashAttention convention), and --window-right
+  - sliding window: --window-left / --window-right
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
@@ -77,7 +76,10 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
 #         "float"); it is the MMA operand precision, and a float request on
 #         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
-GENERATOR_VERSION = "1.4.0"
+# 1.5.0 — --window-left is cuDNN's left_bound: it keeps that many keys including the
+#         diagonal (SdpaSemanticsRegister SEM-001); 0 is rejected. Windowed bundles from
+#         earlier versions keep one more key and must be regenerated
+GENERATOR_VERSION = "1.5.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -187,36 +189,13 @@ def physical_seqlens(valid_lens, s_max):
     return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
 
 
-def left_bound_from_window_left(window_left):
-    """Map a FlashAttention-style window_size_left to hipDNN's left_bound.
-
-    hipDNN follows cuDNN: left_bound = L keeps the L keys ending at the diagonal,
-    diagonal included. FlashAttention's window_size_left = W keeps W + 1 keys, so
-    the same window is left_bound = W + 1.
-    """
-    return window_left + 1
-
-
-def window_left_from_left_bound(left_bound):
-    """Map hipDNN's (cuDNN) left_bound to FlashAttention's window_size_left.
-
-    The inverse of left_bound_from_window_left: L keys including the diagonal is
-    L - 1 keys before it. -1 (unbounded) stays -1.
-    """
-    return -1 if left_bound == -1 else left_bound - 1
-
-
 def build_mask(s_q, s_kv, causal, window_left, window_right):
     """Construct a boolean keep-mask [S_q, S_kv] for the given causal/window config.
 
     Returns None when no masking applies (the dense attention case), so callers
     can take the fast PyTorch path. The mask is True where attention is allowed.
-
-    window_left / window_right follow FlashAttention's window_size_left/right:
-    window_left = W keeps the W keys before the diagonal plus the diagonal itself
-    (W + 1 keys). The graph's cuDNN-semantics left_bound for that window is W + 1
-    (see left_bound_from_window_left), so the CPU reference executor reproduces
-    this mask.
+    The bound math matches the CPU reference executor's leftBound/rightBound +
+    topLeftAlignment semantics so golden output is reproducible on the CPU side.
 
     causal:
       - "none":          no causal constraint
@@ -240,8 +219,9 @@ def build_mask(s_q, s_kv, causal, window_left, window_right):
     right_bound = window_right if window_right >= 0 else (0 if has_causal else -1)
 
     mask = torch.ones(s_q, s_kv, dtype=torch.bool)
+    # cuDNN's band: left_bound = L keeps L keys up to and including the diagonal.
     if left_bound >= 0:
-        mask &= (row + offset - col) <= left_bound
+        mask &= (row + offset - col) < left_bound
     if right_bound >= 0:
         mask &= (col - (row + offset)) <= right_bound
     return mask
@@ -430,7 +410,7 @@ def build_graph_json(
         left_bound = -1
         right_bound = 0
     if window_left >= 0:
-        left_bound = left_bound_from_window_left(window_left)
+        left_bound = window_left
     if window_right >= 0:
         right_bound = window_right
 
@@ -665,7 +645,8 @@ def validate_against_aiter(
             dropout_p=0.0,
             softmax_scale=scale,
             is_causal=causal,
-            window_size_left=window_left,
+            # AITER/FA count the keys left of the diagonal: window_size_left = L - 1.
+            window_size_left=window_left - 1 if window_left > 0 else window_left,
             window_size_right=window_right,
             return_softmax_lse=stats,
             return_dropout_randval=False,
@@ -1104,25 +1085,12 @@ def main():
         help="Causal mask type. bottom_right maps to AITER mask=2; top_left is "
         "reference-only (no AITER kernel) (default: none)",
     )
-    # Two names for the same bound, one per convention, so a value is never read in the
-    # wrong one: --left-bound is the graph's (cuDNN) left_bound, --window-left is
-    # FlashAttention's window_size_left (what --validate passes to AITER).
-    left = parser.add_mutually_exclusive_group()
-    left.add_argument(
-        "--left-bound",
-        type=int,
-        default=None,
-        help="Sliding window left bound in the graph's (cuDNN) convention: L keeps the L "
-        "keys ending at the diagonal, diagonal included. Written to the graph unchanged. "
-        "Positive or -1 (unbounded); 0 is rejected, as hipDNN rejects it",
-    )
-    left.add_argument(
+    parser.add_argument(
         "--window-left",
         type=int,
         default=-1,
-        help="Sliding window left size in FlashAttention's window_size_left convention "
-        "(W keeps the W keys before the diagonal plus the diagonal; written to the graph "
-        "as left_bound = W + 1), -1 = unbounded (default: -1)",
+        help="Sliding window left bound (cuDNN left_bound: keeps this many keys including "
+        "the diagonal; must be positive), -1 = unbounded (default: -1)",
     )
     parser.add_argument(
         "--window-right",
@@ -1187,12 +1155,8 @@ def main():
         help=f"Install aiter v{AITER_VERSION} wheel for the detected ROCm version",
     )
     args = parser.parse_args()
-
-    window_left = args.window_left
-    if args.left_bound is not None:
-        if args.left_bound == 0 or args.left_bound < -1:
-            parser.error("--left-bound must be positive or -1 (unbounded)")
-        window_left = window_left_from_left_bound(args.left_bound)
+    if args.window_left == 0:
+        parser.error("--window-left 0 keeps no keys (cuDNN rejects left_bound = 0)")
 
     if args.install_aiter:
         install_aiter()
@@ -1203,7 +1167,7 @@ def main():
         v_dims=args.v_dims,
         dtype=args.dtype,
         causal=args.causal,
-        window_left=window_left,
+        window_left=args.window_left,
         window_right=args.window_right,
         seq_lens_q=args.seq_lens_q,
         seq_lens_kv=args.seq_lens_kv,
