@@ -67,13 +67,14 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
+  VPermB32, VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
   GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB8, GlobalStoreB16, GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16HIB16
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
+from .Common.MxScaleLayout import mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -6349,7 +6350,13 @@ class KernelWriterAssembly(KernelWriter):
       tc             = tP["tensorChar"]
       tile01         = tP["tile01Idx"]
       LdsPad         = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
-      mtAddPad       = kernel["MacroTile%u" % tile01] + LdsPad
+      # 2D MXS LDS is indexed by scale-row, not 1D M/N. MacroTileMXS is still
+      # the 1D tile; use ceil(MT/MXBlockFree) so LSU>1 does not step past the
+      # 2-byte 2D buffer (e.g. MT128x64 WG z=2).
+      mtForLsu       = kernel["MacroTile%u" % tile01]
+      if "MXS" in tc:
+        mtForLsu = mxTdmTileM(kernel["MacroTile%s" % tc], mxFreeTile(kernel, tc))
+      mtAddPad       = mtForLsu + LdsPad
       umlds          = kernel["UnrollMajorLDS%s" % tc]
       lsu            = kernel["LocalSplitU"]
       du             = kernel["_DepthU%s"%tc]
@@ -6364,8 +6371,9 @@ class KernelWriterAssembly(KernelWriter):
       with self.allocTmpSgpr(1, tag="lraFinalOffset_tmpSgprInfo") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
         if umlds == False or isMxSwizzled:
+          mtLabel = tc if "MXS" in tc else str(tile01)
           module.add(SMovB32(dst=sgpr(tmpSgpr), src=mtAddPad*lsuStride, \
-            comment="LSU offset: stride = lsuStride(%u)*(MT%u(%u) + PAD%u(%u))" % (lsuStride,tile01, kernel["MacroTile%u" % tile01], tile01, LdsPad)))
+            comment="LSU offset: stride = lsuStride(%u)*(MT%s(%u) + PAD%s(%u))" % (lsuStride, mtLabel, mtForLsu, mtLabel, LdsPad)))
         else:
           module.add(SMovB32(dst=sgpr(tmpSgpr), src=lsuStride, \
             comment="LSU offset: stride = lsuStride(%u) when umlds==True" % (lsuStride)))
@@ -9352,6 +9360,168 @@ class KernelWriterAssembly(KernelWriter):
     return abStr
 
   ##############################################################################
+  # MXBlock=MI_K splat: keep packed e8 raw in the last VGPR that WMMA reads from
+  # this load group, v_perm that dword to SSSS dests, overwrite raw last.
+  ##############################################################################
+  def _mxSplatInPlace(self, kernel, tc):
+    if "MXS" not in tc:
+      return False
+    if mxFreeTile(kernel, tc) > 1:
+      return False
+    mxTc = tc[3]
+    mxBlock = kernel["ProblemType"].get("MXBlock%s"%mxTc, 0)
+    if not mxBlock:
+      return False
+    return kernel["MatrixInstK"] // mxBlock == 1
+
+  def _iterMfmaIdxAB(self, kernel, tPA, tPB, u=0):
+    # Must match mfmaIter's idxOuter/idxInner walk (including HalfPLRA swap
+    # and numSubTiles split) so last-used is the last MXS VGPR that walk emits.
+    outer = 1
+    loopSwap = False
+    if (kernel["ProblemType"]["DataType"].isComplex() and tPB["tile01Idx"]) or kernel["HalfPLRA"]:
+      outer = 0
+      loopSwap = True
+    inner = 1 - outer
+    idxOuter_start = 0
+    idxInner_start = 0
+    idxOuter_stop = kernel["MIWaveTile"][outer]
+    idxInner_stop = kernel["MIWaveTile"][inner]
+    numSubTiles = kernel["numSubTiles"]
+    if numSubTiles > 1 and not self.states.inTailLoop:
+      outerBy2 = (kernel["MIWaveTile"][outer] // numSubTiles)
+      innerBy2 = (kernel["MIWaveTile"][inner] // numSubTiles)
+      outerMod2 = (kernel["MIWaveTile"][outer] % numSubTiles)
+      innerMod2 = (kernel["MIWaveTile"][inner] % numSubTiles)
+      idxHalfO = u // numSubTiles
+      idxHalfI = u % numSubTiles
+      idxOuter_start = (outerBy2 + outerMod2) * idxHalfO
+      idxInner_start = (innerBy2 + innerMod2) * idxHalfI
+      idxOuter_stop = kernel["MIWaveTile"][outer] - (1 - idxHalfO) * outerBy2
+      idxInner_stop = kernel["MIWaveTile"][inner] - (1 - idxHalfI) * innerBy2
+    for idxOuter in range(idxOuter_start, idxOuter_stop):
+      for idxInner in range(idxInner_start, idxInner_stop):
+        idx0 = idxInner
+        idx1 = idxOuter
+        if loopSwap:
+          idx0, idx1 = idx1, idx0
+        idxA = idx0 if tPB["tile01Idx"] else idx1
+        idxB = idx1 if tPB["tile01Idx"] else idx0
+        yield idxA, idxB
+
+  def _iterMxSplatMapped(self, kernel, tP_MX):
+    tPA = getattr(self, "tPA", None)
+    tPB = getattr(self, "tPB", None)
+    if tPA is None or tPB is None:
+      return
+    numSubTiles = kernel.get("numSubTiles", 1)
+    uVals = range(numSubTiles * numSubTiles) if (numSubTiles > 1 and not self.states.inTailLoop) else [0]
+    tc = tP_MX["tensorChar"]
+    for uu in uVals:
+      for idxA, idxB in self._iterMfmaIdxAB(kernel, tPA, tPB, uu):
+        idx = idxA if tc == "MXSA" else idxB
+        mapped, _ = self.mxsTileSpanScaleSel(kernel, tP_MX, idx)
+        yield mapped
+
+  def mxSplatLastUsedInGroup(self, kernel, tP_MX, valuStart, groupBytes):
+    last = None
+    for mapped in self._iterMxSplatMapped(kernel, tP_MX):
+      if valuStart <= mapped < valuStart + groupBytes:
+        last = mapped
+    if last is None:
+      last = valuStart + groupBytes - 1
+    return last
+
+  def mxSplatLoadDestStart(self, kernel, tP_MX, valuStart, groupBytes, numVgpr):
+    # Wide ds_load_b64/b128 dest must be even / 4-aligned. last-used +7 is
+    # illegal as a b64 dest and would also write +8 (next PLR buffer).
+    lastUsed = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
+    if numVgpr <= 1:
+      return lastUsed
+    destStart = lastUsed - numVgpr + 1
+    destStart -= destStart % numVgpr
+    if destStart < valuStart:
+      destStart = valuStart
+    end = valuStart + groupBytes
+    if destStart + numVgpr > end:
+      destStart = end - numVgpr
+      destStart -= destStart % numVgpr
+      if destStart < valuStart:
+        destStart = valuStart
+    return destStart
+
+  def _mxSplatNoteLoad(self, tc, bufferIdx, iui, valuStart):
+    if not hasattr(self, "_mxSplatGen"):
+      self._mxSplatGen = {}
+    key = (tc, bufferIdx, iui, valuStart)
+    self._mxSplatGen[key] = self._mxSplatGen.get(key, 0) + 1
+
+  def _emitMxSplatBeforeWmma(self, kernel, tP_MX, mappedIdx, innerUnroll, vregSetIdx,
+                             vgprPerInputMX, m, u, iui, imod):
+    tc = tP_MX["tensorChar"]
+    if not self._mxSplatInPlace(kernel, tc):
+      return
+    instruction = tP_MX["localReadInstruction"]
+    groupBytes = int(instruction.blockWidth * 4)
+    if groupBytes <= 0:
+      return
+    valuStart = (mappedIdx // groupBytes) * groupBytes
+    numVgpr = int(ceil(instruction.blockWidth))
+    lastAbs = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
+    destStart = self.mxSplatLoadDestStart(kernel, tP_MX, valuStart, groupBytes, numVgpr)
+    key = (tc, m, iui, valuStart)
+    gen = getattr(self, "_mxSplatGen", {}).get(key, 0)
+    if not hasattr(self, "_mxSplatEmitted"):
+      self._mxSplatEmitted = {}
+      self._mxSplatGenSeen = {}
+    if self._mxSplatGenSeen.get(key) != gen:
+      self._mxSplatEmitted[key] = set()
+      self._mxSplatGenSeen[key] = gen
+    emitted = self._mxSplatEmitted[key]
+    if mappedIdx in emitted:
+      return
+
+    def _perm(destIdx):
+      byteOff = destIdx - valuStart
+      srcIdx = destStart + byteOff // 4
+      srcStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                          vgprPerInputMX, m, u, iui, srcIdx)
+      dstStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                          vgprPerInputMX, m, u, iui, destIdx)
+      imod.add(VPermB32(
+          dst=vgpr(dstStr),
+          src0=vgpr(srcStr),
+          src1=vgpr(srcStr),
+          src2="0x%08x" % (0x01010101 * (byteOff % 4)),
+          comment="splat MX byte %u -> SSSS" % byteOff))
+      emitted.add(destIdx)
+
+    def _pendingInRange(lo, hi, skip=None):
+      pending = []
+      seen = set(emitted)
+      for mapped in self._iterMxSplatMapped(kernel, tP_MX):
+        if lo <= mapped < hi and mapped != skip and mapped not in seen:
+          pending.append(mapped)
+          seen.add(mapped)
+      return pending
+
+    # Overwriting a raw load vgpr kills that dword; extract its other bytes first.
+    if destStart <= mappedIdx < destStart + numVgpr:
+      dword = mappedIdx - destStart
+      lo = valuStart + 4 * dword
+      hi = min(lo + 4, valuStart + groupBytes)
+      for destIdx in _pendingInRange(lo, hi, skip=mappedIdx):
+        _perm(destIdx)
+
+    if mappedIdx != lastAbs:
+      _perm(mappedIdx)
+      return
+    # Killing raw last: extract every other byte this group still needs.
+    for destIdx in _pendingInRange(valuStart, valuStart + groupBytes, skip=lastAbs):
+      _perm(destIdx)
+    _perm(lastAbs)
+
+  ##############################################################################
   # MXS TileSpan scale-select
   #
   # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 loads: within
@@ -9375,13 +9545,22 @@ class KernelWriterAssembly(KernelWriter):
       return idxAB, 0
     component = Component.LocalRead.find(self)
     info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"], self.states.asmCaps)
+    mx2d = mxFreeTile(kernel, tc) > 1
+    vectorWidth = kernel.get("VectorWidth%s"%tc, 1)
     if info is None:
+      # 2D without TileSpan: VW WaveTiles share one SSSS VGPR.
+      if mx2d and vectorWidth > 1:
+        return idxAB // vectorWidth, 0
       return idxAB, 0
     vectorWidth = info["vectorWidth"]
     groupSize   = 2 * vectorWidth
     group       = idxAB // groupSize
     within      = idxAB %  groupSize
     scaleSel    = within // vectorWidth          # 0 = lower half-wave, 1 = partner half-wave
+    if mx2d:
+      # VW dests in a half-wave share the group's single SSSS; scaleSel still
+      # picks the partner scale row from the other half-wave of that VGPR.
+      return group, scaleSel
     regInHalf   = within %  vectorWidth
     # Only the lower half-wave of each group is loaded (LocalRead packs the loaded groups
     # contiguously and drops the partner-half vgprs), so map the logical block to the
@@ -9389,6 +9568,49 @@ class KernelWriterAssembly(KernelWriter):
     # block (scaleSel==1) shares the same loaded register and is selected by matrix_*_scale.
     mappedIdx   = group * vectorWidth + regInHalf
     return mappedIdx, scaleSel
+
+  def _mx2dSplatInPlace(self, kernel, tc):
+    # 2D MXBlockFree: one e8 per VGPR. 1D packed last-used splat stays in
+    # _emitMxSplatBeforeWmma.
+    if "MXS" not in tc:
+      return False
+    if mxFreeTile(kernel, tc) <= 1:
+      return False
+    mxBlock = kernel["ProblemType"].get("MXBlock%s"%tc[3], 0)
+    if not mxBlock:
+      return False
+    return kernel["MatrixInstK"] // mxBlock == 1
+
+  def _mx2dSplatNoteLoad(self, tc, bufferIdx, iui, valuStart):
+    if not hasattr(self, "_mx2dSplatGen"):
+      self._mx2dSplatGen = {}
+    key = (tc, bufferIdx, iui, valuStart)
+    self._mx2dSplatGen[key] = self._mx2dSplatGen.get(key, 0) + 1
+
+  def _emitMx2dSplatBeforeWmma(self, kernel, tP_MX, mappedIdx, innerUnroll, vregSetIdx,
+                               vgprPerInputMX, m, u, iui, imod):
+    tc = tP_MX["tensorChar"]
+    if not self._mx2dSplatInPlace(kernel, tc):
+      return
+    key = (tc, m, iui, mappedIdx)
+    gen = getattr(self, "_mx2dSplatGen", {}).get(key, 0)
+    if not hasattr(self, "_mx2dSplatEmitted"):
+      self._mx2dSplatEmitted = {}
+      self._mx2dSplatGenSeen = {}
+    if self._mx2dSplatGenSeen.get(key) != gen:
+      self._mx2dSplatEmitted[key] = False
+      self._mx2dSplatGenSeen[key] = gen
+    if self._mx2dSplatEmitted[key]:
+      return
+    dstStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                        vgprPerInputMX, m, u, iui, mappedIdx)
+    imod.add(VPermB32(
+        dst=vgpr(dstStr),
+        src0=vgpr(dstStr),
+        src1=vgpr(dstStr),
+        src2="0x00000000",
+        comment="splat MX byte 0 -> SSSS"))
+    self._mx2dSplatEmitted[key] = True
 
   ##############################################################################
   # MAC Iteration
@@ -10471,6 +10693,16 @@ class KernelWriterAssembly(KernelWriter):
                                         a=src0_0, b=src1_1, **acc2_args, neg=neg_flag,\
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+                if kernel["ProblemType"]["MXBlockA"]:
+                  self._emitMxSplatBeforeWmma(kernel, tPA["MX"], mxsaIdx, innerUnroll, vregSetIdx,
+                                              vgprPerInputMXSA, m, u, iui, imod)
+                  self._emitMx2dSplatBeforeWmma(kernel, tPA["MX"], mxsaIdx, innerUnroll, vregSetIdx,
+                                                vgprPerInputMXSA, m, u, iui, imod)
+                if kernel["ProblemType"]["MXBlockB"]:
+                  self._emitMxSplatBeforeWmma(kernel, tPB["MX"], mxsbIdx, innerUnroll, vregSetIdx,
+                                              vgprPerInputMXSB, m, u, iui, imod)
+                  self._emitMx2dSplatBeforeWmma(kernel, tPB["MX"], mxsbIdx, innerUnroll, vregSetIdx,
+                                                vgprPerInputMXSB, m, u, iui, imod)
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
                 imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
@@ -13958,15 +14190,19 @@ class KernelWriterAssembly(KernelWriter):
         inc = int(self.states.lrvwUnrollA * kernel["NumWaveSplitK"] * tP["bpeDS"])
         comment = "(LocalReadVectorWidth*NumWaveSplitK*bpeDS)"
       else:
-        inc = int((kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"])
+        mtForInc = kernel["MacroTile%s" % tP["tensorChar"]]
+        if tc in ("MXSA", "MXSB"):
+          mtForInc = mxTdmTileM(mtForInc, mxFreeTile(kernel, tc))
+        inc = int((mtForInc + LdsPad) * tP["bpeDS"])
         comment = " ((MT+PAD)*bpeDS)"
       if kernel["EnableMatrixInstruction"]:
         if kernel["UnrollMajorLDS%s" % tc]:
           if tc in ("MXSA", "MXSB"):
             # Tail-loop K-step between MFMA-K sub-iterations for MX scales,
             # gated by MXScaleFormat:
-            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): MT * mxUnit * bpeDS,
-            #     scaled by matrixInstK (M-blocks interleaved on K).
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): scaleRows * mxUnit
+            #     * bpeDS, scaled by matrixInstK (M-blocks interleaved on K).
+            #     1D scaleRows=MT; 2D scaleRows=MT/MXBlockFree (TDM k-split).
             #   - NoSwizzle (canonical): mxUnit * bpeDS; mxUnit already encodes
             #     the per-K-scale stride and is not multiplied by matrixInstK.
             subTc = tc[3]
@@ -13974,7 +14210,8 @@ class KernelWriterAssembly(KernelWriter):
             mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
             if isMxSwizzled:
-              inc = kernel["MacroTile%s"%tP["tensorChar"]] * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
+              scaleRows = mxTdmTileM(kernel["MacroTile%s"%tP["tensorChar"]], mxFreeTile(kernel, tc))
+              inc = scaleRows * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
               comment = " (bpeDS)"
               inc *= matrixInstK
             else:
@@ -14035,20 +14272,17 @@ class KernelWriterAssembly(KernelWriter):
           if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            # K-step between MFMA-K sub-iterations for MX scales:
-            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
-            #       MT * mxUnit (M-blocks interleaved on K)
-            #   - NoSwizzle (canonical), LDS layout follows UnrollMajorLDS<tc>:
-            #       UMLDS=1 (K-major LDS):  mxUnit (K-scales contiguous per M)
-            #       UMLDS=0 (M-major LDS):  (MT + LdsPad) * mxUnit (step over M-row, mxUnit K-scales)
+            # K-step between MFMA-K sub-iterations for MX scales.
+            # 1D (MXBlockFree=1): swizzled MT*mxUnit; K-major mxUnit;
+            # M-major (MT+pad)*mxUnit. 2D replaces MT with scale-rows
+            # (MT/MXBlockFree) so kg1 lands on the TDM-packed next byte.
             mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
-            if isMxSwizzled:
-              offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
-            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-              offsetInc = mxUnit
-            else:
-              offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * mxUnit
+            offsetInc = mxLdsKStride(
+                kernel["MacroTile%s"%tP["tensorChar"]], mxFreeTile(kernel, tc), mxUnit,
+                swizzled=isMxSwizzled,
+                unrollMajor=kernel["UnrollMajorLDS%s" % tP["tensorChar"]],
+                ldsPad=LdsPad)
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
@@ -20722,8 +20956,16 @@ class KernelWriterAssembly(KernelWriter):
         compIdComment = f"componentId=WaveIdx ({numComp} components)"
       mod.add(self.tdmEmitWaveCompId(waveOffsetSgprIdx, compShift, waveIdxSgpr,
                                      compIdComment))
-      mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp,
-                                  mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor),
+      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      if ("MXS" in tc):
+        mxTileLds = mxFreeTile(kernel, tc)
+        if mxTileLds > 1:
+          # K-split LDS dest is (MT/MXBlockFree) * (mxDU/numComp). Do not do
+          # (MT/MXBlockFree)//numComp first: MT/128 can be 1, which floors to 0
+          # and both components write the same LDS byte. 0 is still correct
+          # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
+          dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
+      mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
@@ -20750,20 +20992,30 @@ class KernelWriterAssembly(KernelWriter):
       if ("MXS" in tc):
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
+        mxTile = mxFreeTile(kernel, tc)
         dim0 = tmpSgprIdx
         dim1 = sizeRefName(3)
         with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgpr2") as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
           if numMxKGroups < numComp:
-            # M/N-splitting: offset within same k_group along tile dimension
-            if compShift == 1:
-              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
-            else:
-              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
-            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
-            mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
-            mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
+            tileM = mxTdmTileM(mt, mxTile)
+            if tileM >= numComp:
+              # M/N-splitting: offset within same k_group along tile dimension
+              if compShift == 1:
+                mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+                mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+              else:
+                self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
+              mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
+              mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
+              mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
+            # tileM < numComp: do not M-split and do not zero extra comps.
+            # A 0-wide TDM to the same LDS dest can clobber Comp0's scale byte.
+            # All comps issue the same small tile (tile0 keeps the full footprint).
+          if mxTile > 1:
+            # remain M/N in scale-row units: ceil(remain / MXBlockFree)
+            mod.add(SAddU32(sgpr(dim0), sgpr(dim0), mxTile - 1, f"ceil(remain / MXBlockFree({mxTile}))"))
+            mod.add(SLShiftRightB32(sgpr(dim0), hex(int(log2(mxTile))), sgpr(dim0), f"remain scale rows = remain M / MXBlockFree({mxTile})"))
           mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, ceil(log2(mxUnit)), True))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, ceil(log2(duScale*mxUnit)), True))
 #        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
@@ -20811,15 +21063,27 @@ class KernelWriterAssembly(KernelWriter):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
       sizeShifter = 1 if dtype.isFloat4() else 0
       numMxKGroups = sizeTile0 // mxUnit
-      if numMxKGroups >= numComp:
+      mxTile = mxFreeTile(kernel, tc)
+      kSplit = numMxKGroups >= numComp
+      tile0 = mxTdmTile0(sizeTile1, mxUnit, mxTile, numComp, kSplit)
+      if kSplit:
         # K-splitting: enough k_groups to divide among wave components
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
+        mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // numComp // dim1Divisor, self))
       else:
         # M/N-splitting: not enough k_groups, split tile dimension instead
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit // numComp, self, sizeShifter))
+        mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
-      mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
+      if mxTile > 1:
+        # 1D stride0 = Size (K-row pitch). 2D compresses M/N by MXBlockFree, so
+        # the same field is Size/MXBlockFree. Tile0 e8s in a row are packed
+        # (implicit stride 1); write Group1+5 directly so the shift does not
+        # reuse the dim0 tmp SGPR (a constant-1 mov into that SGPR was landing
+        # in the middle of dim0 encoding).
+        mod.addComment0(f"MXS 2D: stride0 = Size/MXBlockFree({mxTile}) (K-row pitch)")
+        mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), int(log2(mxTile)), False))
+      else:
+        mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
     else:
       is6bit = dtype.is6bitFloat()
       if is6bit:
@@ -21897,25 +22161,13 @@ class KernelWriterAssembly(KernelWriter):
   
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     comp = GL2PrefetchLoad.find(self)
-    comp.init(self, kernel, tPA)
-    comp.init(self, kernel, tPB)
-    if kernel["ProblemType"]["MXBlockA"]:
-      comp.init(self, kernel, tPA["MX"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      comp.init(self, kernel, tPB["MX"])
-    if kernel["enableTDMMetadata"]:
-      comp.init(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      comp.init(self, kernel, tp)
   
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
     comp = GL2PrefetchLoad.find(self)
-    tpList = [tPA, tPB]
-    if kernel["ProblemType"]["MXBlockA"]:
-      tpList.append(tPA["MX"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      tpList.append(tPB["MX"])
-    if kernel["enableTDMMetadata"]:
-      tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
 
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:
@@ -21938,28 +22190,16 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.issueLoad(self, kernel, tPA))
-    mod.add(comp.issueLoad(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.issueLoad(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      mod.add(comp.issueLoad(self, kernel, tp))
     return mod
   
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.incrementAddr(self, kernel, tPA))
-    mod.add(comp.incrementAddr(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      mod.add(comp.incrementAddr(self, kernel, tp))
     return mod
   
   def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:

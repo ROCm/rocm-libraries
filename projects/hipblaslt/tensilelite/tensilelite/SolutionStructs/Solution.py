@@ -55,7 +55,9 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+                                       tdmGroupingName, tdmPapRejectReason, \
+                                       tdmWavePartition, tdmWaveSeparated
+from ..Common.MxScaleLayout import mxTdmTileM
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -65,6 +67,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
+from ..Common.MxScaleLayout import mxFreeTile, mxLdsAlign, mxLdsNumBytes
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -245,6 +248,56 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
           f"M-major MX-scale local read for {tc} requires "
           f"VectorWidth{tc} >= MatrixInstK // MXBlock{tc} ({mxUnit}), "
           f"got {vectorWidth}")
+      return False
+
+  return True
+
+
+def _validateMX2DFreeTile(state, printRejectionReason):
+  """Reject 2D MX tiles whose scale rows the TDM / LRA codegen misplaces.
+
+  The 2D scale path loads ``ceil(MT/MXBlockFree)`` scale rows from
+  ``(wg*MT)/MXBlockFree`` and picks a row with ``localM >> log2(MXBlockFree)``.
+  That ignores the WG phase ``(wg*MT) % MXBlockFree``: with MXBlockFree=128,
+  MT=224 and N=512, WG1 starts at N=224 and spans rows 1, 2 and 3, but only
+  two rows are loaded and the local switch lands at N=128 instead of N=32.
+  The phase is always 0 when MT is a multiple of MXBlockFree, and a tile that
+  divides MXBlockFree never crosses a row, so those two shapes are kept.
+
+  The wave-separated TDM M-split gives each of ``numComp`` components
+  ``scaleRows // numComp`` rows; a remainder is never loaded. Fewer rows than
+  components is fine (every component loads the full tile).
+  """
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    if mxTile <= 1:
+      continue
+    mt = state[f"MacroTile{tile01}"]
+    if mt % mxTile != 0 and mxTile % mt != 0:
+      reject(state, printRejectionReason,
+             f"2D MX scale for {tc} requires MacroTile{tile01} ({mt}) to be a multiple "
+             f"or divisor of MXBlockFree{tc} ({mxTile}); an unaligned WG phase reads the wrong scale rows")
+      return False
+
+  waveSeparated = tdmWaveSeparated(state) and not state.get("UseSubtileImpl") \
+      and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]
+  if not waveSeparated:
+    return True
+  for tc, tile01 in (("A", 0), ("B", 1)):
+    mxTile = state["ProblemType"][f"MXBlockFree{tc}"]
+    if mxTile <= 1:
+      continue
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    mxUnit = state["MatrixInstK"] // mxBlock
+    if mxUnit <= 0:
+      continue  # _validateMXLocalReadWidth rejects it
+    numMxKGroups = (state["DepthU"] // mxBlock) // mxUnit
+    numComp, _ = tdmWavePartition(state, f"MXS{tc}")
+    scaleRows = mxTdmTileM(state[f"MacroTile{tile01}"], mxTile)
+    if numMxKGroups < numComp and scaleRows >= numComp and scaleRows % numComp != 0:
+      reject(state, printRejectionReason,
+             f"2D MX TDM M-split for {tc} requires scale rows ({scaleRows}) to be a multiple "
+             f"of TDM components ({numComp}); the remainder rows are never loaded")
       return False
 
   return True
@@ -3443,6 +3496,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
         return
+    if not _validateMX2DFreeTile(state, printRejectionReason):
+      return
 
     # Check PAP after TDMFuse-specific errors.
     if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
@@ -3714,6 +3769,14 @@ class Solution(collections.abc.Mapping):
 
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+
+    # A 2D scaling tile divides the free dimension of the scale tensor, so a
+    # partial last tile would need a scale covering fewer than MXBlockFree
+    # rows/columns; require the free dimension to be tile-aligned instead.
+    # Free0 is M (A's free index), Free1 is N, as in the 6-bit branch above.
+    # Both extents default to 1, making this a no-op for 1xMXBlock scaling.
+    state["AssertFree0ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeA"], state["AssertFree0ElementMultiple"])
+    state["AssertFree1ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeB"], state["AssertFree1ElementMultiple"])
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
@@ -4417,13 +4480,25 @@ class Solution(collections.abc.Mapping):
         ldsAlign = int(64 / state["ProblemType"]["MacDataType%s"%tc].numRegisters())
         ldsAlign = 64 if state["ProblemType"]["MacDataType%s"%tc].is6bitFloat() else ldsAlign
 
-        if state["UnrollMajorLDS%s"%mxTc]:
+        if "MXS" in mxTc:
+          mxTile = mxFreeTile(state, mxTc)
+          ldsAlign = mxLdsAlign(mxTile, ldsAlign)
+          ldsNumBytes = mxLdsNumBytes(
+            state["MacroTile%s"%mxTc],
+            state["DepthU"],
+            state["ProblemType"]["MXBlock%s"%tc],
+            mxTile=mxTile,
+            ldsPad=ldsPad,
+            unrollMajor=state["UnrollMajorLDS%s"%mxTc],
+            padInterval=LdsBlockSizePerPad,
+          )
+        elif state["UnrollMajorLDS%s"%mxTc]:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] + ldsPad) * state["MacroTile%s"%mxTc] * bpe)
         else:
           ldsNumBytes = int(state["_DepthU%s"%mxTc] * (state["MacroTile%s"%mxTc] + ldsPad) * bpe)
         padInterval = LdsBlockSizePerPad
 
-        if padInterval != 0:
+        if "MXS" not in mxTc and padInterval != 0:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] * state["MacroTile%s"%mxTc] * bpe) / padInterval * (padInterval + ldsPad * bpe))
         ldsNumBytesAligned = roundUpToNearestMultiple(ldsNumBytes, ldsAlign)
 
