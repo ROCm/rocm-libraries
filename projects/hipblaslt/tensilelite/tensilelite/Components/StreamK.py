@@ -24,7 +24,7 @@ from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticA
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SAndSaveExecB32, SAndSaveExecB64, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SSubBU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -1877,12 +1877,24 @@ class StreamK(TileProcessingStrategy):
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
         module.add(self.shiftSrd(writer, tmpSgprBuffer))
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
-        module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
-                                  mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        # Release the flag store: drain the store and (on dev-scope arches) global_wb
-        # the flag word to the L2-coherent point so a peer's acquire can observe it.
-        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
-        module.add(memOrder.releaseFence(writer))
+        laneCount = writer.states.laneSGPRCount
+        with writer.allocTmpSgpr(laneCount, alignment=laneCount,
+                                tag="StreamK_flagStoreExec") as execRegs:
+            mask = execRegs.idx
+            # Do not rely on duplicate lane writes becoming visible as one publication.
+            # EXEC & -EXEC selects the first active lane and keeps an empty EXEC empty.
+            module.add(SSubU32(dst=sgpr(mask), src0=0, src1="exec_lo"))
+            if laneCount == 2:
+                module.add(SSubBU32(dst=sgpr(mask+1), src0=0, src1="exec_hi"))
+            andSaveExec = SAndSaveExecB64 if laneCount == 2 else SAndSaveExecB32
+            # AND_SAVEEXEC reads the mask before saving EXEC in the same registers.
+            module.add(andSaveExec(dst=sgpr(mask, laneCount), src=sgpr(mask, laneCount)))
+            module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
+                                      mubuf=memOrder.flagBufferMubuf(), comment=comment))
+            # Complete the flag store before restoring EXEC, including replay.
+            module.add(memOrder.releaseFence(writer))
+            movExec = SMovB64 if laneCount == 2 else SMovB32
+            module.add(movExec(dst=EXEC(), src=sgpr(mask, laneCount)))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
