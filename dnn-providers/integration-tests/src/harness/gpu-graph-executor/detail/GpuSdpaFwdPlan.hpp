@@ -80,7 +80,9 @@ struct GpuSdpaFwdParams
         int64_t rightBound,
         bool topLeftAlignment,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -97,6 +99,14 @@ struct GpuSdpaFwdParams
                         ? std::make_optional(
                               hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , seqLenQTensor(seqLenQAttributes != nullptr
+                            ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                  *seqLenQAttributes))
+                            : std::nullopt)
+        , seqLenKvTensor(seqLenKvAttributes != nullptr
+                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                   *seqLenKvAttributes))
+                             : std::nullopt)
     {
     }
 
@@ -112,6 +122,9 @@ struct GpuSdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    // Padding lengths (INT32, one per batch); applicability guarantees both or neither.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
 };
 
 template <typename QDataType,
@@ -160,6 +173,18 @@ public:
                 variantPack.at(_params.lseTensor->uid), squeezedDims, squeezedStrides);
         }
 
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenQTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenKvTensor;
+        if(_params.seqLenQTensor.has_value() && _params.seqLenKvTensor.has_value())
+        {
+            seqLenQTensor.emplace(variantPack.at(_params.seqLenQTensor->uid),
+                                  _params.seqLenQTensor->dims,
+                                  _params.seqLenQTensor->strides);
+            seqLenKvTensor.emplace(variantPack.at(_params.seqLenKvTensor->uid),
+                                   _params.seqLenKvTensor->dims,
+                                   _params.seqLenKvTensor->strides);
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -178,7 +203,9 @@ public:
                 _params.rightBound,
                 _params.topLeftAlignment,
                 lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>());
+                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
+                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr);
     }
 
 private:
@@ -247,14 +274,13 @@ public:
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
+        if(nodeAttributes->alibi_mask())
         {
             return false;
         }
 
-        // Unsupported: variable sequence lengths
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
+        // Padding: both seq_len tensors (INT32, one value per batch) or neither, as on the CPU.
+        if(!isSupportedSdpaPadding(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -379,7 +405,13 @@ public:
                              band.rightBound,
                              band.topLeftAlignment,
                              attnMaskPtr,
-                             lsePtr));
+                             lsePtr,
+                             nodeAttributes->seq_len_q_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
+                                 : nullptr,
+                             nodeAttributes->seq_len_kv_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
+                                 : nullptr));
     }
 };
 

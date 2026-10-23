@@ -59,7 +59,11 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        int64_t leftBound,
                                        int64_t rightBound,
                                        bool topLeftAlignment,
-                                       const std::vector<std::string>& defines)
+                                       const std::vector<std::string>& defines,
+                                       const int32_t* seqLenQPtr,
+                                       const int32_t* seqLenKvPtr,
+                                       int64_t seqLenQStride,
+                                       int64_t seqLenKvStride)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -94,6 +98,10 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.leftBound = static_cast<long long>(leftBound);
     args.rightBound = static_cast<long long>(rightBound);
     args.topLeftAlignment = topLeftAlignment ? 1 : 0;
+    args.seqLenQ = seqLenQPtr;
+    args.seqLenKv = seqLenKvPtr;
+    args.seqLenQStride = static_cast<long long>(seqLenQStride);
+    args.seqLenKvStride = static_cast<long long>(seqLenKvStride);
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));

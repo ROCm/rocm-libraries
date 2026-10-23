@@ -89,8 +89,8 @@ batch when `seq_len_q/kv` are set).
   `seq_len_q[b]` give O = 0 and Stats = -inf (9.14+; 0 before), and bottom-right alignment uses the per-batch
   offset `seq_len_kv[b] - seq_len_q[b]` (`test/python/sdpa/fp16_ref.py`).
 - **hipDNN today:** existing graphs (the golden generator and the checked-in `*_group` bundles) send both seq_len
-  tensors with `padding_mask = false`. The CPU references treat both tensors present as padding whatever the flag
-  says, and decline `padding_mask = true` without them or only one tensor (`PlanUtils.hpp`
+  tensors with `padding_mask = false`. The CPU references and the dense GPU forward reference treat both tensors
+  present as padding whatever the flag says, and decline `padding_mask = true` without them or only one tensor (`PlanUtils.hpp`
   `isSupportedSdpaPadding`). Seq_len tensors are INT32 with one value per batch.
 - **PyTorch / vLLM:** varlen and padded batches are expressed by lengths (`cu_seqlens`, `seq_lens`); the adapter
   produces seq_len tensors, so the flag question does not reach them.
