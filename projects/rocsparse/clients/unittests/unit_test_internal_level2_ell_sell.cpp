@@ -887,7 +887,7 @@ TEST_F(SellMv, none_small_slice)
     build_banded_sell(m, slice, 2, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
-    std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
+    std::vector<float> hy0(static_cast<size_t>(m), 7.0f);
     const float        alpha = 2.0f, beta = 0.0f;
 
     std::vector<float> expected = host_sellmv(
@@ -920,7 +920,7 @@ TEST_F(SellMv, transpose_small_slice_partial_last_slice)
     build_banded_sell(m, slice, 2, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(m);
-    std::vector<float> hy0(static_cast<size_t>(n), 0.0f);
+    std::vector<float> hy0(static_cast<size_t>(n), 7.0f);
     const float        alpha = 1.0f, beta = 0.0f;
 
     std::vector<float> expected = host_sellmv(
@@ -1017,7 +1017,7 @@ TEST_F(SellMv, slice_size_one_csr_fallback)
     build_bidiagonal_sell_csr_exact(m, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
-    std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
+    std::vector<float> hy0(static_cast<size_t>(m), 7.0f);
     const float        alpha = 1.0f, beta = 0.0f;
 
     std::vector<float> expected = host_sellmv(
@@ -1073,4 +1073,19 @@ TEST_F(SellMv, none_small_slice_nonzero_beta)
                                              beta,
                                              hy0,
                                              expected));
+}
+
+// Transpose with beta != 0 and n > m. The bidiagonal columns stop at m - 1, so
+// y[m..n-1] only see the beta scaling, which has to cover all n entries of y.
+TEST_F(SellMv, transpose_nonzero_beta_wide)
+{
+    const int64_t      m = 40, n = 72;
+    std::vector<float> hy0(static_cast<size_t>(n));
+    for(int64_t i = 0; i < n; ++i)
+    {
+        hy0[static_cast<size_t>(i)] = static_cast<float>(i + 1);
+    }
+
+    ASSERT_NO_FATAL_FAILURE(
+        check_banded_sellmv(handle, rocsparse_operation_transpose, m, n, 32, 2, 2.0f, 3.0f, hy0));
 }
