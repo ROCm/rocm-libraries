@@ -19,14 +19,14 @@ import pytest
 
 from rocisa.code import Module
 
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     TileInfo, AB_GEOMETRY_MAP, abB4Tlu1Name,
 )
-from Tensile.Components.Subtile.SubtileTLUSwizzle import (
+from tensilelite.Components.Subtile.SubtileTLUSwizzle import (
     selectTLUSwizzle, selectTLUColScatter,
 )
-from Tensile.Components.Subtile import SubtileGREmit as GR
-from Tensile.Components.Subtile import SubtileLREmit as LR
+from tensilelite.Components.Subtile import SubtileGREmit as GR
+from tensilelite.Components.Subtile import SubtileLREmit as LR
 
 pytestmark = pytest.mark.unit
 
