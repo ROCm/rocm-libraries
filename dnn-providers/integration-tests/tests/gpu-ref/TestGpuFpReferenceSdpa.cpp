@@ -1973,3 +1973,115 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const ::testing::TestParamInfo<int64_t>& info) {
                              return "BlockSize" + std::to_string(info.param);
                          });
+
+// ============================================================================
+// Attention sink: GPU reference vs CPU reference, with GQA, padding, and a row
+// whose keys are all masked by the bias (O = 0, LSE = sink).
+// ============================================================================
+
+TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 6;
+    constexpr int64_t SKV = 9;
+    constexpr int64_t D = 16;
+    const float negInf = -std::numeric_limits<float>::infinity();
+
+    Tensor<float> q({BATCH, H, SQ, D});
+    Tensor<float> k({BATCH, HKV, SKV, D});
+    Tensor<float> v({BATCH, HKV, SKV, D});
+    Tensor<float> bias({SQ, SKV});
+    Tensor<float> sink({1, H, 1, 1});
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    q.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
+    v.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 1);
+    bias.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 2);
+    sink.fillWithRandomValues(-2.0f, 2.0f, SEED_K + 3);
+    for(int64_t j = 0; j < SKV; ++j)
+    {
+        bias.setHostValue(negInf, 1, j); // query row 1 has no live key
+    }
+    seqLenQ.setHostValue(6, 0, 0, 0, 0);
+    seqLenQ.setHostValue(4, 1, 0, 0, 0);
+    seqLenKv.setHostValue(9, 0, 0, 0, 0);
+    seqLenKv.setHostValue(5, 1, 0, 0, 0);
+    for(auto* t : {&q, &k, &v, &bias, &sink})
+    {
+        t->memory().hostData();
+    }
+    seqLenQ.memory().hostData();
+    seqLenKv.memory().hostData();
+
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    Tensor<float> lseCpu({BATCH, H, SQ, 1});
+    Tensor<float> lseGpu({BATCH, H, SQ});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oCpu,
+                                0.25f,
+                                static_cast<const TensorBase<float>*>(&bias),
+                                -1,
+                                -1,
+                                true,
+                                &lseCpu,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv,
+                                &sink);
+    GpuFpReferenceSdpa::fprop(q,
+                              k,
+                              v,
+                              oGpu,
+                              0.25f,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              -1,
+                              true,
+                              &lseGpu,
+                              SdpaSoftmaxProbabilityMode::FLOAT,
+                              &seqLenQ,
+                              &seqLenKv,
+                              nullptr,
+                              nullptr,
+                              0,
+                              &sink);
+
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                const float cpu = lseCpuView.getHostValue(std::vector<int64_t>{b, h, s, 0});
+                const float gpu = lseGpuView.getHostValue(std::vector<int64_t>{b, h, s});
+                if(std::isinf(cpu))
+                {
+                    EXPECT_EQ(gpu, cpu) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                else
+                {
+                    EXPECT_NEAR(gpu, cpu, gpuRefFwdTolerance<float>())
+                        << "b=" << b << " h=" << h << " s=" << s;
+                }
+            }
+            // The fully masked row keeps LSE = sink on both references.
+            EXPECT_NEAR(lseGpuView.getHostValue(std::vector<int64_t>{b, h, 1}),
+                        sink.getHostValue(0, h, 0, 0),
+                        gpuRefFwdTolerance<float>());
+        }
+    }
+}
