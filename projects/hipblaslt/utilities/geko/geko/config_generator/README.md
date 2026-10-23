@@ -88,7 +88,6 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). Subtile uses UseSubtileImpl=1 variants with MI16x16-base only, persistent StreamK, CMS off (gfx950 only). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
 | `MACROTILE_OPT` | Origami macro-tile tuning. Works with the Ductile backend, or with `backend: tensile` when `SIZE_OPTION: 0` (explicit `Sizes:` list); the tensile path emits `Backend: Tensile` and Tensile enumerates the pinned fork space exhaustively. |
 | `MT_DU` | Fixed `[MT0, MT1, DU]` when `MACROTILE_OPT` |
-| `USE_HEURISTICS` | Refined heuristic param lists per size |
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |

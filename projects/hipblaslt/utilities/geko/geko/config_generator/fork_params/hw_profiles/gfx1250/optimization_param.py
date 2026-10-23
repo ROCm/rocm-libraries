@@ -141,10 +141,8 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        # MI455X latest reco: pin to 1 (paired with LSI=1).
-        # SIMD pair 1 reads B vIdx rotated by half so both ports always hit
-        # different segments. Requires even MIWT1/VWB — codegen enforces.
-        return self._make_param("LDSSegmentBRotate", [1])
+        # AIHPBLAS-5252: force LDSSegmentBRotate to 0.
+        return self._make_param("LDSSegmentBRotate", [0])
 
     @param
     def schedule_iter_alg(self, ctx: SizeContext) -> ForkParameter:
@@ -944,9 +942,8 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
-        # MI455X latest reco: pin to 1 (paired with LSI=1).
-        # Requires even MIWT1/VWB — codegen enforces.
-        return self._make_param("LDSSegmentBRotate", [1])
+        # AIHPBLAS-5252: force LDSSegmentBRotate to 0.
+        return self._make_param("LDSSegmentBRotate", [0])
 
     # TDMPlusLdsBuf: DO NOT ENABLE (MI455X Sep-7 warning — cross-wave RAW race).
     # Tensile unconditionally forces to 0 (Solution.py L6246). Omitted.

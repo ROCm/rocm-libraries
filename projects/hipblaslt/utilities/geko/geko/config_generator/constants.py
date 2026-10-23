@@ -520,7 +520,6 @@ _CONFIG_OPTIONAL_COMMON = {
     "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
-    "USE_HEURISTICS": False,
     "SIZE_OPTION": 0,
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,

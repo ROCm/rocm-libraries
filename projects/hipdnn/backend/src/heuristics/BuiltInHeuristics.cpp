@@ -18,6 +18,7 @@
 #include "plugin/HeuristicPluginManager.hpp"
 
 #include "config/ConfigBuiltIn.hpp"
+#include "prediction/PredictionBuiltIn.hpp"
 #include "static_ordering/StaticOrderingBuiltIn.hpp"
 
 namespace hipdnn_backend::plugin
@@ -32,6 +33,12 @@ void HeuristicPluginManager::registerBuiltIns()
     registerPlugin(HeuristicPlugin::createBuiltIn(
         hipdnn_backend::heuristics::static_ordering::populateFunctionTable(),
         "built-in:SelectionHeuristic::StaticOrdering"));
+
+    // ModeA/ModeB (RFC 0019 prediction policies) share one function table, so one
+    // registration exposes both policy IDs.
+    registerPlugin(HeuristicPlugin::createBuiltIn(
+        hipdnn_backend::heuristics::prediction::populateFunctionTable(),
+        "built-in:SelectionHeuristic::ModeA+ModeB"));
 }
 
 } // namespace hipdnn_backend::plugin
