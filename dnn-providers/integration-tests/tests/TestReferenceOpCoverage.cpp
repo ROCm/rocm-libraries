@@ -8,15 +8,21 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
 #include "ReferenceGraphFixtures.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
+using hipdnn_integration_tests::bundle::deriveTestName;
+using hipdnn_integration_tests::bundle::discoverBundles;
 using hipdnn_integration_tests::bundle::findKnownReferenceGap;
 using hipdnn_integration_tests::bundle::formatUncoveredOps;
 using hipdnn_integration_tests::bundle::graphNodeTypes;
@@ -166,14 +172,39 @@ TEST(TestReferenceOpCoverage, Fp8BatchGapsAreNotListedForCpu)
     }
 }
 
-TEST(TestReferenceOpCoverage, RaggedGapsAreListedForBothReferences)
+// Both references run the ragged bundles (CPU SdpaRaggedFwdPlan, GPU GpuSdpaRaggedFwdPlan), so
+// neither may list them: a gap entry would stop validating them against golden data. The ids
+// come from discovering the bundles the build copies next to the test binary, so the expected
+// list must name exactly the registered ragged bundles.
+TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
 {
-    for(const char* bundleId : {"quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small"})
+    const auto dataDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                         / "../lib/integration-test-bundles";
+    const auto raggedDir = dataDir / "quick" / "SdpaFwd" / "bshd";
+    ASSERT_TRUE(std::filesystem::is_directory(raggedDir))
+        << "Ragged bundle directory not found: " << raggedDir;
+
+    // Discovery is scoped to the ragged subtree, so names are derived again against the data
+    // root, the way registration names them.
+    std::set<std::string> discovered;
+    for(const auto& bundle : discoverBundles(raggedDir))
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        const auto name = deriveTestName(bundle.jsonPath, dataDir);
+        discovered.insert(name.suiteName + "." + name.testName);
+    }
+
+    const std::set<std::string> expected = {
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+    };
+    EXPECT_EQ(discovered, expected);
+
+    for(const auto& bundleId : discovered)
+    {
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
     }
 }
 

@@ -44,7 +44,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | Reduction | FP16, BFP16, FP32 | All | CPU Reference | Ragged tensors rejected; see [Reduction Modes](#reduction-modes) |
 | Resample Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | MAXPOOL / AVGPOOL modes only; optional INT32 index output |
 | Resample Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Same modes as forward; MAXPOOL requires the INT32 index tensor |
-| SDPA Forward | FP16, BFP16, FP32, FP8 E4M3 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 E4M3 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
@@ -95,7 +96,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | Reduction | `ReductionPlanBuilder` | `ReductionSignatureKey` | Reduction over the dimensions where the output size is 1 |
 | Resample Forward | `ResampleFwdPlanBuilder` | `ResampleFwdSignatureKey` | Pooling-style resampling |
 | Resample Backward | `ResampleBwdPlanBuilder` | `ResampleBwdSignatureKey` | Resampling gradient |
-| SDPA Forward | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (dense) | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (ragged) | `SdpaRaggedFwdPlanBuilder` | `SdpaRaggedFwdSignatureKey` | Packed (RFC-0014 ragged) attention forward pass |
 | SDPA Backward | `SdpaBwdPlanBuilder` | `SdpaBwdSignatureKey` | Scaled dot-product attention gradients |
 
 ### Block-Scale Quantization Operations
@@ -126,25 +128,33 @@ dimension must be reduced.
 
 ### SDPA Restrictions
 
-| Feature | SDPA Forward | SDPA Backward |
-|---------|--------------|---------------|
-| Log-sum-exp `stats` output | Supported | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported (same rules) |
-| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Supported |
-| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same |
-| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Not supported (the backward node has no `rng_dump`) |
-| ALiBi | Not supported | Not supported |
-| `padding_mask` without both seq_len tensors | Not supported | Not supported |
-| Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
-| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | - |
-| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | - |
-| Block-sparse attention | Not supported | - |
-| Softmax max / sum-exp stats outputs | Not supported | - |
-| Ragged tensors | - | Rejected |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |
+| Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
+|---------|--------------------|---------------------|---------------|
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. | Required input |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Not supported; lengths come from `ragged_offset` alone | Supported (same rules as dense forward) |
+| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same | Same |
+| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Not supported | Supported |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Not supported | Not supported (the backward node has no `rng_dump`) |
+| ALiBi | Not supported | Not supported | Not supported |
+| `padding_mask` without both seq_len tensors | Not supported | Not supported | Not supported |
+| Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
+| Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | Not supported | - |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported | - |
+| Block-sparse attention | Not supported | Not supported | - |
+| Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
+| Ragged tensors | Rejected | Required on every Q/K/V/O | Rejected |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
 
 "Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
-FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output.
+Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output; ragged
+FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
+
+The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical
+`[B, H, S, D]` dims with token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every
+primary. A node is keyed as ragged when any of its Q/K/V/O tensors has a `ragged_offset`. The ragged
+plan needs all four to be ragged, and the dense plan rejects any ragged tensor. So a partly ragged
+node is declined.
 
 The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
 FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).
