@@ -399,6 +399,53 @@ int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap)
         op->name, role, results ? op->results[0]->type : op->operands[3]->type, err, err_cap);
 }
 
+/* Python core/ir.py::_global_ptr_offset_error; the texts are the Python engine's. */
+const char* rocke_i_global_ptr_offset_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* byte_off_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap)
+{
+    if(ptr_type->kind != ROCKE_TYPE_PTR || !ptr_type->space
+       || strcmp(ptr_type->space, "global") != 0)
+    {
+        snprintf(
+            buf, cap, "global_ptr_offset ptr must be a global pointer, got %s", ptr_type->name);
+        return buf;
+    }
+    if(!rocke_type_eq(byte_off_type, rocke_i64()))
+    {
+        snprintf(buf,
+                 cap,
+                 "global_ptr_offset byte_off must be i64, got %s; widen it with sext (a signed "
+                 "offset) or zext (an unsigned one)",
+                 byte_off_type->name);
+        return buf;
+    }
+    if(result_type && !rocke_type_eq(result_type, ptr_type))
+    {
+        snprintf(buf,
+                 cap,
+                 "global_ptr_offset result must have the pointer's type %s, got %s",
+                 ptr_type->name,
+                 result_type->name);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_global_ptr_offset_op_error. */
+const char* rocke_i_global_ptr_offset_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 2 || op->num_results != 1)
+    {
+        snprintf(buf, cap, "global_ptr_offset expects two operands and one result");
+        return buf;
+    }
+    return rocke_i_global_ptr_offset_error(
+        op->operands[0]->type, op->operands[1]->type, op->results[0]->type, buf, cap);
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -996,7 +1043,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* arith.fdot2 */
     "arith.fdot2",
     /* tile.* dtype-generic buffer store */
-    "tile.buffer_store_vN"};
+    "tile.buffer_store_vN",
+
+    /* tile.* global pointer offset without inbounds */
+    "tile.global_ptr_offset"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1283,7 +1333,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.fdot2 */
     /* arith.fdot2                */ false,
     /* tile.* dtype-generic buffer store (effectful) */
-    /* buffer_store_vN            */ false};
+    /* buffer_store_vN            */ false,
+
+    /* tile.* global pointer offset without inbounds (address arithmetic) */
+    /* global_ptr_offset          */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

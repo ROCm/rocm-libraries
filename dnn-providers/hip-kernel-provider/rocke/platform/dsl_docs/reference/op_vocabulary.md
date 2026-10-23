@@ -106,6 +106,20 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
+### Global pointers
+
+| Op name                  | Builder             | LLVM emission                                        | HIP emission |
+|--------------------------|---------------------|------------------------------------------------------|--------------|
+| `tile.global_ptr_add`    | `global_ptr_add`    | `getelementptr inbounds i8, ptr addrspace(1)`        | `(const char*)p + (int64_t)off` |
+| `tile.global_ptr_offset` | `global_ptr_offset` | `getelementptr i8, ptr addrspace(1)` (no `inbounds`) | `(T*)((uintptr_t)p + (uint64_t)off)` |
+| `tile.global_ptr_to_i64` | `global_ptr_to_i64` | `ptrtoint ptr addrspace(1) ... to i64`               | `(int64_t)(uintptr_t)p` |
+
+`global_ptr_add` promises the compiler that the result stays inside the allocation `p` points into;
+`global_ptr_offset` does not, so its result may point outside it (before it, with a negative offset)
+-- for an address that is only compared, converted to an integer, or given to a buffer descriptor
+that range-checks every access. Its offset is i64 and is never widened implicitly; widen an i32 with
+`sext` or `zext`. The HIP result keeps `p`'s element type `T`, so indexing it counts elements.
+
 ### LDS
 
 | Op name                | Builder                  | LLVM emission                                  |

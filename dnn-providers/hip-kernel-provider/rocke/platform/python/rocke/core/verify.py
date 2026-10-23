@@ -41,6 +41,7 @@ from .ir import (
     _assume_range_errors,
     _buffer_op_bytes,
     _if_else_branch_yield,
+    _global_ptr_offset_op_error,
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
@@ -467,6 +468,10 @@ class _Verifier:
                 _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
             )
             self._check_sync_attrs(op, orderings)
+        elif name == "tile.global_ptr_offset":
+            error = _global_ptr_offset_op_error(op)
+            if error:
+                self.err(error, op)
 
     def _check_sync_attrs(self, op: Op, orderings) -> None:
         """Scope / ordering values of a fence or flag op (presence is checked

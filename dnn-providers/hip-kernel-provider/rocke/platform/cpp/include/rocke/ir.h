@@ -475,6 +475,10 @@ typedef enum rocke_opcode
      * so no existing index shifts. */
     ROCKE_OP_TILE_BUFFER_STORE_VN,
 
+    /* Global pointer offset without inbounds (Python
+     * IRBuilder.global_ptr_offset). Appended so no existing index shifts. */
+    ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1491,6 +1495,10 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* `ptr` moved by the i64 `byte_off` bytes, without inbounds: the result may
+ * point outside the allocation (Python IRBuilder.global_ptr_offset). */
+rocke_value_t*
+    rocke_b_global_ptr_offset(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
 /* 64-bit address of a global pointer (``ptrtoint``). */
 rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*

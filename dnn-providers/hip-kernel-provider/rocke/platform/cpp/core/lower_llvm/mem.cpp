@@ -946,6 +946,25 @@ static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    off64);
 }
 
+/* Python _op_tile_global_ptr_offset: no inbounds, the result may point outside
+ * the allocation. */
+static void op_tile_global_ptr_offset(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_ll_live(L))
+        return;
+    if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr i8, ptr addrspace(1) %s, i64 %s",
+                   ll_res(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
 static void op_tile_global_ptr_to_i64(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr;
@@ -2003,6 +2022,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, op_tile_global_ptr_offset);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_RSRC, op_tile_buffer_rsrc);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
