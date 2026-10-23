@@ -934,14 +934,21 @@ namespace
             EXPECT_THROW(readSolution(), std::runtime_error);
         }
         internalArgs["version"] = object(3);
-        auto decoded = readSolution();
-        EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
-        EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
-        EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
-        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
-        size = output(decoded->sizeMapping);
-        EXPECT_EQ(size.count("streamKClusterMulticast"), 0u);
-        EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+        for(int parallel : {-1, 0, 1}) // Missing, false, true capability metadata.
+        {
+            if(parallel < 0) internalArgs.erase("streamKClusterParallel");
+            else internalArgs["streamKClusterParallel"] = object(parallel == 1);
+            auto decoded = readSolution();
+            EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
+            EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
+            EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
+            EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
+            EXPECT_EQ(decoded->internalArgsSupport.streamKClusterParallel, parallel == 1);
+            EXPECT_EQ(output(decoded->internalArgsSupport).at("streamKClusterParallel").as<bool>(), parallel == 1);
+            size = output(decoded->sizeMapping);
+            EXPECT_EQ(size.count("streamKClusterMulticast"), 0u);
+            EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+        }
 
         for(bool obsoleteFlag : {false, true})
         for(int layout : {0, 2})

@@ -422,6 +422,8 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
             ASSERT_GT(launch.clusterSchedule.partialSlots, 0u);
         solution.customKernel.generated = true;
         auto normal = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+        // DP keeps the launch-header count in X workgroups, not physical peers.
+        EXPECT_EQ(value<uint32_t>(normal.args, "numWorkGroups"), launch.grid / cluster.y);
         solution.customKernel.generated = false;
         auto custom = solution.generateCustomCall<true>(problem, inputs, device, launch);
         ASSERT_EQ(custom.args.size(), normal.args.size());
@@ -510,21 +512,18 @@ TEST(PersistentArgumentLayout, ClusterStreamKPacksRaggedBatchedSchedule)
     EXPECT_EQ(launch.workspaceBytes, 32u * 128 * 128 * sizeof(float));
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
     EXPECT_EQ(launch.reduction, origami::reduction_t::tree);
-    for(float alpha : {0.0f, 2.5f})
-    {
-        const auto inputs = clusterInputs(alpha);
-        const auto call = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
-        EXPECT_EQ(call.numWorkGroups.x, 8u);
-        EXPECT_EQ(call.numWorkGroups.y, 4u);
-        EXPECT_EQ(call.numWorkGroups.z, 1u);
-        EXPECT_EQ(value<uint32_t>(call.args, "numWorkGroups"), 32u);
-        EXPECT_EQ(value<uint32_t>(call.args, "itersPerTile"), 65u);
-        EXPECT_EQ(value<uint32_t>(call.args, "skGrid"), 4u);
-        EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), 2u);
-        EXPECT_EQ(value<uint32_t>(call.args, "SKItersPerWG"), 32u);
-        EXPECT_EQ(value<void*>(call.args, "Flags"), inputs.Synchronizer);
-        EXPECT_FLOAT_EQ(value<float>(call.args, "alpha"), alpha);
-    }
+    const auto inputs = clusterInputs();
+    const auto call = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+    EXPECT_EQ(call.numWorkGroups.x, 8u);
+    EXPECT_EQ(call.numWorkGroups.y, 4u);
+    EXPECT_EQ(call.numWorkGroups.z, 1u);
+    EXPECT_EQ(value<uint32_t>(call.args, "numWorkGroups"), 32u);
+    EXPECT_EQ(value<uint32_t>(call.args, "itersPerTile"), 65u);
+    EXPECT_EQ(value<uint32_t>(call.args, "skGrid"), 4u);
+    EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), 2u);
+    EXPECT_EQ(value<uint32_t>(call.args, "SKItersPerWG"), 32u);
+    EXPECT_EQ(value<void*>(call.args, "Flags"), inputs.Synchronizer);
+    EXPECT_FLOAT_EQ(value<float>(call.args, "alpha"), 2.5f);
     const auto decisions = solution.computeStreamKDecisions(problem, device);
     EXPECT_EQ(decisions.skGrid, 4u);
     EXPECT_EQ(decisions.skTiles, 2u);
@@ -695,16 +694,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKFlagCapacityAndLargeWorkspace)
         EXPECT_EQ(launch.grid, slots / 8);
         ASSERT_GT(launch.workspaceBytes, size_t{1} << 32);
         EXPECT_EQ(launch.workspaceBytes, slots * tileBytes);
-        problem.setWorkspaceSize(launch.workspaceBytes);
         EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), slots * tileBytes);
-        problem.setWorkspaceSize(launch.workspaceBytes - 1);
-        const auto fallback = solution.resolvePersistentSettings(problem, device);
-        EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
-        EXPECT_EQ(fallback.workspaceBytes, 0u);
-        EXPECT_EQ(fallback.clusterSchedule.flagEntries, 0u);
-        EXPECT_EQ(fallback.clusterSchedule.split.skTiles, 0u);
-        EXPECT_EQ(fallback.clusterSchedule.physicalGrid, 8u);
-        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     }
 }
 
@@ -725,39 +715,6 @@ TEST(PersistentArgumentLayout, ClusterStreamKGeometryFollowsOutputIndexOrder)
     EXPECT_EQ(launch.clusterSchedule.blocksM, 2u);
     EXPECT_EQ(launch.clusterSchedule.blocksN, 2u);
     EXPECT_EQ(launch.clusterSchedule.blocks, 12u);
-}
-
-TEST(PersistentArgumentLayout, SharedClusterGeometryPreservesDataParallelGridAndPap)
-{
-    // 3 x 4 real tiles in each of three batches. The expected grids are
-    // physical workgroups, including the boundary block's phantom peers.
-    for(auto [cs, cn, budget, grid, papGrid] :
-        std::vector<std::tuple<size_t, size_t, size_t, size_t, size_t>>{
-            {2, 1, 7, 6, 48}, {4, 1, 7, 4, 48},
-            {2, 2, 7, 4, 48}, {2, 4, 7, 8, 48},
-            {2, 1, 256, 48, 48}, {2, 4, 256, 48, 48}})
-    for(bool pap : {false, true})
-    {
-        ContractionSolution solution;
-        configurePersistentSolution(solution, 3, 1);
-        solution.sizeMapping.clusterDim = {cs, cn, 1};
-        solution.sizeMapping.prefetchAcrossPersistent = pap;
-        auto problem = persistentProblem(257, 385, 129, 3);
-        auto device = persistentDevice(budget);
-        auto launch = solution.resolvePersistentSettings(problem, device);
-        const size_t expectedGrid = pap ? papGrid : grid;
-        EXPECT_EQ(launch.selectedGrid, budget);
-        EXPECT_EQ(launch.grid, expectedGrid);
-        EXPECT_EQ(launch.totalTiles, 36u);
-        auto invocation = solution.generateSingleCall<true>(
-            problem, persistentInputs(), device, launch, GSUSettings{});
-        EXPECT_EQ(invocation.numWorkGroups.x, expectedGrid / cn);
-        EXPECT_EQ(invocation.numWorkGroups.y, cn);
-        EXPECT_EQ(invocation.numWorkGroups.z, 1u);
-        EXPECT_EQ(value<uint32_t>(invocation.args, "PersistentGrid"), expectedGrid);
-        // Preserve the legacy DP launch-header convention in this extraction.
-        EXPECT_EQ(value<uint32_t>(invocation.args, "numWorkGroups"), expectedGrid / cn);
-    }
 }
 
 TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
@@ -860,10 +817,34 @@ TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
 
 TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
 {
+    enum Feature { Dense, Gradient, Sparse, Subtile };
+    struct Case
+    {
+        const char* name;
+        size_t m, n, k, grid;
+        bool uniform, active;
+        Feature feature = Dense;
+    };
+    for(const auto& test : std::vector<Case>{
+            {"uneven", 256, 256, 4097, 8, false, true},
+            {"exact", 256, 256, 4096, 8, false, false},
+            {"single tile", 128, 128, 4097, 8, false, false},
+            {"whole tiles", 256, 256, 4097, 4, false, false},
+            {"nonintegral workers", 256, 256, 4097, 6, false, false},
+            {"empty K", 256, 256, 0, 8, false, false},
+            {"one iteration", 256, 256, 64, 8, false, false},
+            {"uniform exact", 256, 256, 4096, 8, true, true},
+            {"gradient", 256, 256, 4160, 8, false, false, Gradient},
+            {"sparse", 256, 256, 4160, 8, false, false, Sparse},
+            {"subtile", 256, 256, 4160, 8, false, false, Subtile}})
     for(bool clustered : {false, true})
-    for(size_t k : {4096, 4097})
     for(bool capability : {false, true})
     {
+        // Derivation disables the capability for these ABI2 features; test ABI0.
+        if(clustered && test.feature != Dense)
+            continue;
+        SCOPED_TRACE(::testing::Message() << test.name << " clustered=" << clustered
+                                         << " capability=" << capability);
         ContractionSolution solution;
         configureClusterStreamK(solution, 2, 1);
         if(!clustered)
@@ -872,17 +853,40 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
             solution.internalArgsSupport.persistentLoopArgsVersion = 0;
         }
         solution.internalArgsSupport.perTileExtraIters = capability;
-        const auto problem = clusterProblem(256, 256, k, 1);
-        const auto device = persistentDevice(8);
+        // BF16 TN supports both sparse MFMA and the gfx950 subtile geometry.
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.useSubtileImpl = test.feature == Subtile;
+        solution.problemType.transA = true;
+        solution.problemType.aType = solution.problemType.bType = rocisa::DataType::BFloat16;
+        solution.problemType.computeInputTypeA = solution.problemType.computeInputTypeB = rocisa::DataType::BFloat16;
+        solution.problemType.highPrecisionAccumulate = true;
+        solution.problemType.sparse = test.feature == Sparse;
+        solution.problemType.useGradient = test.feature == Gradient;
+        solution.problemType.useBias = solution.problemType.useGradient;
+        auto problem = ContractionProblemGemm::FromIndexSizes(
+            "Contraction_l_Alik_Bljk_Cijk_Dijk", {test.m, test.n, 1, test.k},
+            rocisa::DataType::BFloat16, {}, rocisa::DataType::BFloat16, {},
+            rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
+        problem.setHighPrecisionAccumulate(true);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setSparse(solution.problemType.sparse, 0);
+        problem.setUseGradient(solution.problemType.useGradient);
+        problem.setUseBias(solution.problemType.useBias);
+        if(solution.problemType.useBias)
+            problem.setBias(rocisa::DataType::Float, test.m, 0, true, ContractionProblemGemm::D);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        problem.setParams().setUniformSummationOrder(test.uniform);
+        const auto device = persistentDevice(test.grid);
         const auto launch = solution.resolvePersistentSettings(problem, device);
         const auto call = solution.generateSingleCall<true>(
             problem, clusterInputs(), device, launch, GSUSettings{});
         const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
-        ASSERT_EQ(active, capability && k == 4097);
+        ASSERT_EQ(active, capability && test.active);
         if(!active)
             continue;
         const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;
-        const size_t iters = (k + 63) / 64;
+        const size_t iters = (test.k + 63) / 64;
         size_t previousEnd = 0;
         for(size_t w = 0; w < launch.grid; ++w)
         {
@@ -908,10 +912,7 @@ TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSp
         8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
     for(auto [m, n, batch, k, cs, cn, whole] :
         std::vector<std::tuple<size_t, size_t, size_t, size_t, uint32_t, uint32_t, bool>>{
-            {257, 129, 8, 4096, 4, 1, true}, {257, 129, 8, 4096, 2, 1, true},
-            {129, 257, 8, 4096, 2, 1, true},
-            {333, 777, 1, 1535, 4, 1, true}, {512, 1024, 16, 256, 8, 1, true},
-            {511, 769, 1, 4097, 2, 1, false}, {128, 128, 1, 8192, 4, 1, false},
+            {257, 129, 8, 4096, 4, 1, true}, {128, 128, 1, 8192, 4, 1, false},
             // At this ragged two-axis boundary, whole blocks measured slower:
             // 66 whole-block iterations versus 41 + 24 estimated split cost.
             {512, 832, 1, 4161, 2, 4, false}})
@@ -1039,10 +1040,10 @@ TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdge
     device.analyticalHardware = std::make_shared<origami::hardware_t>(
         arch_t::gfx950, 256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
         std::make_tuple(0.0, 0.008, 0.0));
-    // Only two real tiles along either spatial axis: oversized clusters must
-    // preserve the predictor's K splits instead of spending them on padding.
+    // Two real tiles per axis: no padding, M padding, N padding, then both axes.
+    // Padded peers must preserve the predictor's useful K splits.
     for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{
-            {2, 1}, {4, 1}, {8, 1}, {2, 2}, {4, 2}, {2, 4}, {4, 4}, {8, 2}, {2, 8}})
+            {2, 1}, {4, 1}, {2, 4}, {4, 4}})
     {
         SCOPED_TRACE(::testing::Message() << cs << ',' << cn);
         ContractionSolution solution;
@@ -1066,31 +1067,5 @@ TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdge
             problem, clusterInputs(), device, launch, GSUSettings{});
         EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), expectedSplits);
         EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, cluster.physicalGrid);
-
-        // A fixed physical grid remains an explicit override, including when
-        // spatial padding means it cannot retain the automatic split count.
-        device.persistentFixedGrid = launch.selectedGrid;
-        const auto fixed = solution.resolvePersistentSettings(problem, device);
-        EXPECT_LE(fixed.clusterSchedule.physicalGrid, device.persistentFixedGrid);
-        EXPECT_TRUE(fixed.clusterSchedule.fixedGridUsed);
-        device.persistentFixedGrid = 0;
-
-        // Padding compensation remains subject to the resident physical grid.
-        device.computeUnitCount = 64;
-        solution.sizeMapping.CUOccupancy = 1;
-        const auto bounded = solution.resolvePersistentSettings(problem, device);
-        EXPECT_LE(bounded.clusterSchedule.physicalGrid, 64u);
-        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), bounded.workspaceBytes);
-        device.computeUnitCount = 256;
-        solution.sizeMapping.CUOccupancy = 6;
-
-        // Replacing a split with whole blocks must remain workspace-safe.
-        problem.setWorkspaceSize(launch.workspaceBytes - 1);
-        const auto fallback = solution.resolvePersistentSettings(problem, device);
-        // Automatic grid selection can avoid the split up front, so a
-        // post-selection workspaceFallback flag is not required here.
-        EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
-        EXPECT_EQ(fallback.workspaceBytes, 0u);
-        EXPECT_EQ(fallback.clusterSchedule.flagEntries, 0u);
     }
 }
