@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed `rocsparse_Xcsrsm_solve`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) returning wrong results for complex types when `trans_B` is `rocsparse_operation_conjugate_transpose` and there is a single right-hand side.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
