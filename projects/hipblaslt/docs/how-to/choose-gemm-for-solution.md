@@ -20,11 +20,11 @@ print(problem.m, problem.n, problem.k)
 ```
 
 Keep `library` and reuse it for subsequent indices. `library.indices` lists the
-loaded indices, including features not implemented yet, such as Stream-K
-scheduling and block-scaled MXFP4 inputs. Repeating a choice with the same
+loaded indices, including features not implemented yet, such as grouped GEMM
+and required gradient operations. Repeating a choice with the same
 arguments returns an equal problem description, without more file reads or GPU
-work. `reduction_blocks` is the number of complete K blocks per workgroup;
-changing it changes the chosen K size.
+work. `reduction_blocks` controls the number of complete K blocks;
+changing it changes the chosen K size as described below.
 
 If the indices are already known, load them together:
 
@@ -33,7 +33,7 @@ library = load_library_metadata(
     "/path/to/library", target="gfx950", solution_indices=[17, 23]
 )
 first = library.choose_single_problem(17)
-# Give each workgroup 12 complete blocks along K, instead of the default 8.
+# Increase the amount of reduction work from the default 8 blocks.
 second = library.choose_single_problem(23, reduction_blocks=12)
 ```
 
@@ -51,20 +51,52 @@ result matrix, with these dimensions:
 | Solution metadata | `sizeMapping.macroTile[0:2]` | M and N, the output tile's rows and columns |
 | Solution metadata | `sizeMapping.depthU` | Number of K elements in one reduction block |
 | Solution metadata | `sizeMapping.globalSplitU` | Fixed number of workgroups sharing the K reduction |
-| Caller argument, default 8 | `reduction_blocks` | Complete reduction blocks per workgroup |
+| Caller argument, default 8 | `reduction_blocks` | Complete reduction blocks per fixed split, or per output tile with persistent scheduling |
 
-K is `reduction_blocks * depthU * globalSplitU`. For a 128-by-96 output tile,
+For ordinary fixed-split solutions, K is `reduction_blocks * depthU * globalSplitU`. For a 128-by-96 output tile,
 `depthU=32` and split factor 4, the default problem is **M=128, N=96, K=1024**.
 Four workgroups share the output tile, each processing eight blocks of 32
 reduction elements. These include prefetch and final stages; eight blocks does
 not necessarily mean eight steady-state loop backedges.
 
+For Stream-K and persistent DataParallel solutions, K is
+`reduction_blocks * depthU`. Their `globalSplitU` does not multiply the workload
+and can be zero. The native runtime determines the persistent grid and assigns
+the reduction work. For the same tile and `depthU=32`, the default is
+**M=128, N=96, K=256**. Canonical scheduling fields and their legacy StreamK
+equivalents are normalized and validated before construction.
+
+This small shape runs the original indexed kernel. It does not guarantee that
+every Stream-K work-distribution or cross-workgroup reduction path executes;
+that needs additional shapes and runtime settings.
+
 Storage and compute types, transposes and conjugation come from the solution.
 The chosen problem uses one batch, alpha 1, beta 0 and no bias, activation or
-optional scales. Storage is packed column-major: element `(row, col)` has offset
+optional scales. Required MX operand scales are preserved. Storage is packed column-major: element `(row, col)` has offset
 `row + col * leading_dimension`. Each leading dimension is the stored row
 count; transposing A or B changes that count. C and D are M-by-N and have no
 transpose operation in the hipBLASLt matmul descriptor.
+
+### MX block-scaled operands
+
+Each operand retains its `mxBlockA/B` block size and `mxTypeA/B` scale datatype.
+The descriptor also retains `mxScaleFormat`: 0 for ordinary scales, 1 for
+gfx950 host-preswizzled scales, and 2 for gfx1250 TDM scales. A zero block size
+means the operand is unscaled. These scales are part of the multiplication,
+so they cannot be disabled like an optional epilogue.
+
+The bench adapter uses the native client's scale-buffer allocation, MX input
+generation and reference calculation. For gfx950 MXFP4/MXFP8 solutions with
+32-element E8 blocks and format 1, it emits `scaleA: 1001` and `scaleB: 1001`,
+preserving the required TN orientation. These numbers are client scaling modes,
+not public hipBLASLt API enum values. Ordinary block scales use client modes
+3 through 8 according to their block size and scale type; gfx1250 scale layout
+preparation is handled by the client.
+
+MX inputs use bounded `hpl` initialization to avoid FP16 output overflow in
+long reductions. Other inputs keep `rand_int`. Numerical assertions and
+allclose checks remain enabled. The client must be built with
+`HIPBLASLT_ENABLE_MXDATAGENERATOR=ON`.
 
 ## What selective loading saves
 
@@ -220,9 +252,8 @@ else:
     print("Every loaded index produced a problem")
 ```
 
-A Stream-K entry reports `tileProcessingStrategy=StreamK`; block-scaled MXFP4
-inputs report `mxBlockA` and/or `mxBlockB`. Other current exclusions include
-automatic split-K, grouped or sparse GEMM, required output operations, unusual
+Current exclusions include automatic split-K, grouped or sparse GEMM,
+required output operations, unusual
 layouts and contractions, and different C/D storage types. Record the reason
 and continue a sweep if desired. Catch only `UnsupportedSolution`; malformed
 metadata and unexpected errors must remain visible.
