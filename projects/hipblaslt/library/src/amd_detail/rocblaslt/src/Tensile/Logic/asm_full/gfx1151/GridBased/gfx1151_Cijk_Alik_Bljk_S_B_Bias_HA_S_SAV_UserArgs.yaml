@@ -4394,7 +4394,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -4641,7 +4641,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -7354,7 +7354,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -10805,7 +10805,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -11545,7 +11545,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -12531,7 +12531,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -20337,7 +20337,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -20830,7 +20830,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -31419,7 +31419,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -56308,7 +56308,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -56555,7 +56555,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -57788,7 +57788,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -61981,7 +61981,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -62228,7 +62228,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -62475,7 +62475,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -62722,7 +62722,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -62969,7 +62969,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -63216,7 +63216,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -63710,7 +63710,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -64204,7 +64204,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -64697,7 +64697,7 @@
     MathClocksUnrolledLoop: 0
     MatrixInstruction: []
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 64
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1

@@ -36,12 +36,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Tensile.Common.GlobalParameters import (
+from tensilelite.Common.GlobalParameters import (
     assignGlobalParameters,
     restoreDefaultGlobalParameters,
 )
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile import LibraryIO
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite import LibraryIO
 
 CONFIG_ROOT = Path(__file__).resolve().parent.parent / "common"
 
@@ -105,7 +105,7 @@ def test_mutated_global_parameter_raises(tmp_path):
 def test_validator_ordering_global_fires_first(tmp_path):
     """A YAML with a bad GlobalParameter AND a bad ProblemType surfaces
     the GlobalParameters error first because that validator runs first
-    on the Tensile.Tensile() entry path.
+    on the tensilelite.Tensile() entry path.
 
     We exercise the ordering by invoking the two validators in the same
     order Tensile() does and observing which raises. The bad ProblemType

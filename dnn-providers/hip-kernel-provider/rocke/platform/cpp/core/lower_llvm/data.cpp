@@ -158,9 +158,14 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"minnum.f32", "declare float @llvm.minnum.f32(float, float)"},
     {"minnum.f16", "declare half @llvm.minnum.f16(half, half)"},
     {"minnum.bf16", "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)"},
+    {"fabs.f64", "declare double @llvm.fabs.f64(double)"},
     {"fabs.f32", "declare float @llvm.fabs.f32(float)"},
     {"fabs.f16", "declare half @llvm.fabs.f16(half)"},
     {"fabs.bf16", "declare bfloat @llvm.fabs.bf16(bfloat)"},
+    {"amdgcn.fdot2.f16",
+     "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"},
+    {"amdgcn.fdot2.bf16",
+     "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"},
     {"fmuladd.f32", "declare float @llvm.fmuladd.f32(float, float, float)"},
     {"fmuladd.f16", "declare half @llvm.fmuladd.f16(half, half, half)"},
     {"fmuladd.bf16", "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)"},
@@ -261,6 +266,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.4x4x4f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16(<4 x half>, <4 x half>, <4 x float>, i32 "
      "immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.4x4x4bf16.1k",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>, <4 x i16>, <4 x float>, "
+     "i32 immarg, i32 immarg, i32 immarg)"},
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(<2 x i32>, <2 x i32>, <4 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
@@ -342,6 +350,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"rint.f32", "declare float @llvm.rint.f32(float)"},
     {"smax.i32", "declare i32 @llvm.smax.i32(i32, i32)"},
     {"smin.i32", "declare i32 @llvm.smin.i32(i32, i32)"},
+    /* Unsigned u8 maximum / minimum (u8 renders as i8). */
+    {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
+    {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
