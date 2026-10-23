@@ -7,6 +7,7 @@
           "1_4_64_64_fp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
           "1_8_1024_128_fp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
           "1_8_16384_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left",
+          "2_16_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
           "2_1_1024_64_bfp16_nchw_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
           "2_4_1024_256_fp16_nhwc_attn_scale_value0p0625_nocausal_mask_diagonal_alignmentbottom_right",
           "2_4_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",

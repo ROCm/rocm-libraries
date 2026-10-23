@@ -4154,6 +4154,91 @@
         "seed": 42,
         "generator": "import_graph.py"
       }
+    },
+    {
+      "id": "2_16_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              4096,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              4096,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__causal_mask": false,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b2_hq16_kv16_sq1_skv4096_d128_bf16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
     }
   ]
 }
