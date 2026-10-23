@@ -7,179 +7,164 @@
 
 // Regression test for the multi-stream Stream-K deadlock (ROCM-29670).
 //
-// Stream-K's remainder path synchronises workgroups through a region of
-// handle->Synchronizer. That region used to be shared by every stream on a
-// handle, so two Stream-K kernels running concurrently could clear a flag the
-// other was still spinning on and the waiting workgroup would spin forever.
-// The fix moves those flags to handle->StreamKFlags and gives each stream its
-// own block.
+// Stream-K's remainder path synchronises workgroups through a flag region. That
+// region used to be shared by every stream on a handle, so two Stream-K kernels
+// running concurrently could clear a flag the other was still spinning on and
+// the waiting workgroup would spin forever. Each stream now gets its own block
+// of handle->StreamKFlags.
 //
 // The test fans the same GEMM out over many streams and joins them back, which
-// is what raises the concurrency enough to hit the hazard. Against an
-// unpatched library on gfx950 the queue stops draining on the first iteration.
+// raises the concurrency enough to hit the hazard: against a library without
+// the fix, gfx950 stops draining on the first iteration.
 //
-// Four things are deliberate here:
+// Progress is polled with hipStreamQuery against a stall budget rather than a
+// blocking wait, so a deadlock fails the case with a message instead of hanging
+// the job. The budget is re-armed every iteration and only starts once the
+// iteration is fully enqueued, so it measures the queue failing to drain, not a
+// slow device or slow host-side work such as a first code object load. Once it
+// does expire the process exits without unwinding, because the queue is wedged
+// and hipFree and hipStreamDestroy would block too.
 //
-//   * Progress is checked with hipStreamQuery against a stall budget rather
-//     than hipStreamSynchronize. Once the deadlock happens the queue never
-//     drains, so a blocking wait would turn a failure into a CI timeout with
-//     no message. Polling lets the test say what went wrong.
-//
-//   * That budget is re-armed every iteration and measures a single iteration
-//     failing to drain, not the runtime of the whole loop. A slow device takes
-//     many budgets in a row and is never accused of deadlocking. Getting this
-//     wrong is not harmless: the first version armed one budget for all 500
-//     iterations, and on a 12-CU APU progressing normally at ~0.9 s an
-//     iteration it fired mid-run and killed the process with 33 streams of
-//     live work, which cost the machine a GPU reset (ROCM-30855).
-//
-//   * The budget only starts once the iteration is fully enqueued. The first
-//     matmul on a solution loads its code object on the host, which can take
-//     minutes (HotSwap translation on gfx1250 A0 parts does), and none of that
-//     is the queue failing to drain.
-//
-//   * Once the budget really does expire the process exits immediately instead
-//     of unwinding, because the queue is wedged and hipFree and
-//     hipStreamDestroy would block too.
-//
-// The case skips on any device with fewer CUs than the grid it has to force,
-// since the hazard is unreachable there and a pass would be meaningless.
+// The case skips unless the library's own launch summary shows the GEMM taking
+// the flag-synchronised remainder path, since a pass would be meaningless
+// otherwise.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include "streamk_test_util.hpp"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
+#include <sstream>
+#include <string>
 #include <vector>
+
+// Re-reads TENSILE_DB inside libhipblaslt.so; see streamk5_test.cpp.
+extern "C" void hipblaslt_debug_reload();
 
 namespace
 {
-    // Shape the customer workload deadlocked on, and the one the heuristic
-    // picks a Stream-K solution for on gfx950.
+    using namespace streamk_test;
+
+    // Shape the customer workload deadlocked on.
     constexpr int64_t kM = 1024;
     constexpr int64_t kN = 7168;
     constexpr int64_t kK = 4096;
 
-    // The hazard only exists on the Stream-K remainder path, reached when the
-    // tile count does not divide evenly by the grid. This has to be forced:
-    // left alone the heuristic sizes both grid and tiles at 256 for this
-    // shape, and a test on the even path passes against a broken library.
-    //
-    // getSKGrid folds smCountTarget into its CU budget, so a 96-CU target
-    // gives grid 96 against 180 tiles, leaving a remainder of 84. Checked on
-    // gfx950 with TENSILE_DB=0xFFFF; 64 and 128 both come back evenly divided
-    // and are not usable here. This is the supported API spelling of
-    // TENSILE_STREAMK_MAX_CUS: those environment variables are cached in
-    // function-local statics on first read, so a test binary cannot set them
-    // reliably once anything else has touched the library.
+    // The hazard needs a grid that does not divide the tile count. The CU
+    // budget nudges the heuristic toward one for this shape, but it is only a
+    // hint, so whether a device actually gets there is read back from the
+    // launch. The API attribute is used because the TENSILE_PERSISTENT_*
+    // variables are cached on first read.
     constexpr int32_t kSmCountTarget = 96;
 
     constexpr int kStreams    = 32;
     constexpr int kIterations = 500;
 
-    // Only the ceiling offered to the heuristic. What actually gets allocated
-    // per stream is the workspace the chosen solution reports needing.
-    constexpr size_t kWsBudgetBytes = 128ull << 20;
-
     // How long the queue may go without draining a single iteration, counted
     // from when that iteration is fully enqueued, before the run is called
-    // deadlocked. This is a no-progress budget, not a budget for
-    // the whole loop: a slow device just takes many of these in a row and is
-    // never killed for being slow. An earlier version armed one absolute
-    // deadline for all iterations, which fired on a 12-CU APU that was
-    // progressing normally at ~0.9 s an iteration (ROCM-30855).
+    // deadlocked. A slow device takes many of these in a row and is never
+    // killed for being slow.
     constexpr int kStallSeconds = 60;
 
-    bool gpuAvailable()
+    constexpr char kLaunchSummaryBit[]    = "0x200000";
+    constexpr char kLaunchSummaryMarker[] = "TensileLite::StreamK LAUNCH SUMMARY";
+
+    void setEnv(const char* name, const char* value)
     {
-        int deviceCount = 0;
-        return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        setenv(name, value, 1);
+#endif
     }
 
-    // Frees whatever was allocated. Only safe while the queue still drains.
-    struct Resources
+    void unsetEnv(const char* name)
     {
-        hipblasLtHandle_t           handle = nullptr;
-        hipblasLtMatmulDesc_t       desc   = nullptr;
-        hipblasLtMatrixLayout_t     layA = nullptr, layB = nullptr, layD = nullptr;
-        hipblasLtMatmulPreference_t pref = nullptr;
-        void *                      dA = nullptr, *dB = nullptr;
-        std::vector<void*>          dD, dWs;
-        std::vector<hipStream_t>    streams;
+#ifdef _WIN32
+        _putenv_s(name, "");
+#else
+        unsetenv(name);
+#endif
+    }
 
-        ~Resources()
+    // Turns on the Stream-K launch summary and captures std::cerr for its
+    // lifetime, restoring both on the way out.
+    class LaunchSummaryCapture
+    {
+    public:
+        LaunchSummaryCapture()
+            : m_hadPrior(std::getenv("TENSILE_DB") != nullptr)
+            , m_prior(m_hadPrior ? std::getenv("TENSILE_DB") : "")
+            , m_savedCerr(std::cerr.rdbuf(m_captured.rdbuf()))
         {
-            for(auto s : streams)
-                if(s)
-                    static_cast<void>(hipStreamDestroy(s));
-            for(auto p : dD)
-                static_cast<void>(hipFree(p));
-            for(auto p : dWs)
-                static_cast<void>(hipFree(p));
-            static_cast<void>(hipFree(dA));
-            static_cast<void>(hipFree(dB));
-            if(pref)
-                hipblasLtMatmulPreferenceDestroy(pref);
-            if(layA)
-                hipblasLtMatrixLayoutDestroy(layA);
-            if(layB)
-                hipblasLtMatrixLayoutDestroy(layB);
-            if(layD)
-                hipblasLtMatrixLayoutDestroy(layD);
-            if(desc)
-                hipblasLtMatmulDescDestroy(desc);
-            if(handle)
-                hipblasLtDestroy(handle);
+            setEnv("TENSILE_DB", kLaunchSummaryBit);
+            hipblaslt_debug_reload();
         }
+
+        ~LaunchSummaryCapture()
+        {
+            if(m_hadPrior)
+                setEnv("TENSILE_DB", m_prior.c_str());
+            else
+                unsetEnv("TENSILE_DB");
+            hipblaslt_debug_reload();
+            std::cerr.rdbuf(m_savedCerr);
+        }
+
+        LaunchSummaryCapture(const LaunchSummaryCapture&)            = delete;
+        LaunchSummaryCapture& operator=(const LaunchSummaryCapture&) = delete;
+
+        // The first summary printed so far, or empty if there is none.
+        std::string summary() const
+        {
+            const std::string out = m_captured.str();
+            const auto        at  = out.find(kLaunchSummaryMarker);
+            return at == std::string::npos ? std::string() : out.substr(at);
+        }
+
+    private:
+        bool               m_hadPrior;
+        std::string        m_prior;
+        std::ostringstream m_captured;
+        std::streambuf*    m_savedCerr;
     };
+
+    // Value of a "key = value" line in a launch summary, or empty.
+    std::string summaryField(const std::string& summary, const std::string& key)
+    {
+        std::istringstream in(summary);
+        for(std::string line; std::getline(in, line);)
+        {
+            const auto eq = line.find(" = ");
+            if(eq == std::string::npos)
+                continue;
+            const auto first = line.find_first_not_of(' ');
+            const auto last  = line.find_last_not_of(' ', eq);
+            if(first <= last && line.compare(first, last - first + 1, key) == 0)
+                return line.substr(eq + 3);
+        }
+        return {};
+    }
 
     TEST(StreamKMultiStream, ConcurrentStreamsDoNotDeadlock)
     {
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
 
-        // The hazard is only reachable if the grid can actually be sized at
-        // kSmCountTarget against a larger tile count. A device with fewer CUs
-        // than that cannot get there, so the case would run the full 32-stream
-        // stress and pass without exercising the remainder path at all, which
-        // is worse than not running: it reports a green result for a library
-        // that was never tested. Skip instead, and say why.
-        hipDeviceProp_t props{};
-        int             device = 0;
-        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
-        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
-        if(props.multiProcessorCount < kSmCountTarget)
-            GTEST_SKIP() << "Device has " << props.multiProcessorCount << " CUs, fewer than the "
-                         << kSmCountTarget
-                         << "-CU grid this case needs to reach the Stream-K remainder path";
-
         Resources r;
-        ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layA, HIP_R_16BF, kM, kK, kM),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layB, HIP_R_16BF, kK, kN, kK),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layD, HIP_R_16BF, kM, kN, kM),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
-                  HIPBLAS_STATUS_SUCCESS);
-        const hipblasOperation_t opN = HIPBLAS_OP_N;
-        hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
-        hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
+        createProblem(r, kM, kN, kK);
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(r.desc,
                                                   HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
                                                   &kSmCountTarget,
                                                   sizeof(kSmCountTarget)),
                   HIPBLAS_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&r.pref), HIPBLAS_STATUS_SUCCESS);
-        const uint64_t wsBudget = kWsBudgetBytes;
-        hipblasLtMatmulPreferenceSetAttribute(
-            r.pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBudget, sizeof(wsBudget));
 
         hipblasLtMatmulHeuristicResult_t heuristic{};
         int                              returned = 0;
@@ -199,8 +184,8 @@ namespace
 
         // A and B are read-only, so every stream can share them. Only D and
         // the workspace have to be private, and the workspace is sized from
-        // what the chosen solution actually asks for rather than the budget
-        // above, which keeps 32 streams inside a gigabyte.
+        // what the chosen solution actually asks for rather than the budget,
+        // which keeps 32 streams inside a gigabyte.
         const size_t bytesA  = static_cast<size_t>(kM * kK) * sizeof(uint16_t);
         const size_t bytesB  = static_cast<size_t>(kK * kN) * sizeof(uint16_t);
         const size_t bytesD  = static_cast<size_t>(kM * kN) * sizeof(uint16_t);
@@ -232,6 +217,61 @@ namespace
         }
 
         const float alpha = 1.0f, beta = 0.0f;
+
+        // One GEMM on its own first, to read what the library actually
+        // launches. Alone on one stream the hazard cannot occur, so it is
+        // waited on without a budget; it is also the first launch of this
+        // solution, whose code object load can take minutes on some platforms.
+        std::string summary;
+        {
+            LaunchSummaryCapture capture;
+            ASSERT_EQ(hipblasLtMatmul(r.handle,
+                                      r.desc,
+                                      &alpha,
+                                      r.dA,
+                                      r.layA,
+                                      r.dB,
+                                      r.layB,
+                                      &beta,
+                                      r.dD[0],
+                                      r.layD,
+                                      r.dD[0],
+                                      r.layD,
+                                      &heuristic.algo,
+                                      r.dWs[0],
+                                      bytesWs,
+                                      r.streams[0]),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipStreamSynchronize(r.streams[0]), hipSuccess);
+            summary = capture.summary();
+        }
+        if(summary.empty())
+            GTEST_SKIP()
+                << "The chosen solution is not Stream-K, so the remainder path is not reached";
+
+        // The flags are only read by a static Stream-K launch with tree
+        // reduction whose grid does not divide the tile count, which is what
+        // leaves partial tiles to fix up. SM_COUNT_TARGET is only a hint, so
+        // the heuristic is free to pick a grid that divides evenly.
+        const bool streamK = summary.find("TileProcessingStrategy=StreamK") != std::string::npos;
+        const bool staticGrid
+            = summary.find("EffectiveWorkAssignment=StaticGrid") != std::string::npos;
+        const std::string reduction = summaryField(summary, "reduction");
+        const std::string dpOnly    = summaryField(summary, "dpOnly");
+        const std::string gridText  = summaryField(summary, "final");
+        const std::string tilesText = summaryField(summary, "tiles");
+        const size_t      grid      = std::strtoull(gridText.c_str(), nullptr, 10);
+        const size_t      tiles     = std::strtoull(tilesText.c_str(), nullptr, 10);
+        if(!streamK || !staticGrid || reduction != "tree" || dpOnly != "no" || grid == 0
+           || tiles % grid == 0)
+            GTEST_SKIP() << "The Stream-K launch does not reach the remainder path (Stream-K: "
+                         << (streamK ? "yes" : "no")
+                         << ", static grid: " << (staticGrid ? "yes" : "no")
+                         << ", reduction: " << reduction << ", dpOnly: " << dpOnly
+                         << ", grid: " << gridText << ", tiles: " << tilesText
+                         << "). Setting TENSILE_PERSISTENT_FIXED_GRID before the process "
+                            "starts, to a grid that does not divide the tile count, forces it.";
+
         hipStream_t main = nullptr;
         ASSERT_EQ(hipStreamCreate(&main), hipSuccess);
         r.streams.push_back(main);
@@ -275,14 +315,9 @@ namespace
             for(auto e : joins)
                 ASSERT_EQ(hipStreamWaitEvent(main, e, 0), hipSuccess);
 
-            // Re-armed every iteration, and only after everything is enqueued,
-            // so the budget is "this iteration never drained" rather than "the
-            // whole loop took too long" or "the host took long to enqueue".
             const auto stallAt
                 = std::chrono::steady_clock::now() + std::chrono::seconds(kStallSeconds);
 
-            // Poll rather than block: a deadlocked queue never drains, and a
-            // blocking wait here would hang the job instead of failing it.
             while(hipStreamQuery(main) == hipErrorNotReady)
             {
                 if(std::chrono::steady_clock::now() > stallAt)
@@ -337,25 +372,9 @@ namespace
         constexpr int64_t m = 1024, n = 1024, k = 1024;
 
         Resources r;
-        ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layA, HIP_R_16BF, m, k, m),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layB, HIP_R_16BF, k, n, k),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layD, HIP_R_16BF, m, n, m),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
-                  HIPBLAS_STATUS_SUCCESS);
-        const hipblasOperation_t opN = HIPBLAS_OP_N;
-        hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
-        hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
-
-        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&r.pref), HIPBLAS_STATUS_SUCCESS);
-        const uint64_t wsBudget = kWsBudgetBytes;
-        hipblasLtMatmulPreferenceSetAttribute(
-            r.pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBudget, sizeof(wsBudget));
+        createProblem(r, m, n, k);
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
 
         hipblasLtMatmulHeuristicResult_t heuristic{};
         int                              returned = 0;
