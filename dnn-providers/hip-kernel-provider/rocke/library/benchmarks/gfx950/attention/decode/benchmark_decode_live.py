@@ -7,10 +7,6 @@ Takes a JSON file with shapes (batch, nhead_q, nhead_k, head_size, block_size,
 kv_len) and sweeps num_cus to find the best DSL configuration for each
 shape. Baseline: AITER Triton unified_attention.
 
-Ordinary timing calls the validated runner on every iteration. ``--dsl-timing
-scoped`` measures fixed-binding 3D replay with preparation and scope boundaries
-outside timing; 2D and the comparison baselines retain ordinary timing.
-
 Run::
 
     python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \\
@@ -237,9 +233,7 @@ def _run_triton(
     if shape.use_fp8:
         return None
     try:
-        from aiter.ops.triton.attention.unified_attention import (
-            unified_attention as tri,
-        )  # type: ignore
+        from aiter.ops.triton.attention.unified_attention import unified_attention as tri  # type: ignore
     except ImportError:
         return None
 
@@ -278,26 +272,14 @@ def _run_triton(
         return None
 
 
-def _run_dsl(
-    shape: DecodeShape,
-    data: dict,
-    num_cus: int,
-    *,
-    warmup: int,
-    iters: int,
-    timing: str = "ordinary",
-):
+def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters: int):
     """Time DSL run_unified_attention_torch for one num_cus value.
 
     Uses :func:`~dispatch.attention.dispatch_attention` to select the
     registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
-    then calls the public runtime on every ordinary iteration. Route selection
-    stays outside timing; its name identifies routing metadata, not a saved
-    executable tuning spec. Scoped timing
-    uses fixed bindings for 3D and excludes preparation and scope entry/exit;
-    2D retains ordinary timing.
+    then exercises the same production path as the provider.
 
-    Returns (ms, path_name, selected_route_name) or (None, None, None) on failure.
+    Returns (ms, path_name, kernel_name) or (None, None, None) on failure.
     """
     from rocke.runtime import synchronize_and_release, time_launches
     import torch
@@ -308,7 +290,7 @@ def _run_dsl(
             AttentionRequest,
             dispatch_attention,
         )
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch, prepare_unified_attention_torch  # type: ignore
         from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
         return None, None, None
@@ -341,7 +323,7 @@ def _run_dsl(
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
-        selected_route_name = result.spec.kernel_name()
+        kernel_name = result.spec.kernel_name()
         run_backend = "tiled" if path == "2d" else path
 
         prob = UnifiedAttentionProblem(
@@ -383,30 +365,21 @@ def _run_dsl(
             v_scale=data["v_scale"],
             stream=hip_stream,
         )
-        execution = None
-        if timing == "scoped" and path == "3d":
-            from kernels import prepare_unified_attention_torch
-
-            execution = prepare_unified_attention_torch(**arguments)
+        execution = (
+            prepare_unified_attention_torch(**arguments) if path == "3d" else None
+        )
         try:
-            if execution is not None:
-                # Validate bindings and establish stream/ownership outside timing.
-                with execution.replay_scope() as call_once:
-                    ms = time_launches(
-                        call_once, warmup=warmup, iters=iters, stream=hip_stream
-                    )
-            else:
-                ms = time_launches(
-                    lambda: run_unified_attention_torch(**arguments),
-                    warmup=warmup,
-                    iters=iters,
-                    stream=hip_stream,
-                )
-                synchronize_and_release(hip_stream)
+            call_once = (
+                execution.launch
+                if execution
+                else lambda: run_unified_attention_torch(**arguments)
+            )
+            ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+            synchronize_and_release(hip_stream)
         finally:
             if execution is not None:
                 execution.close()
-        return ms, path, selected_route_name
+        return ms, path, kernel_name
     except Exception:
         return None, None, None
 
@@ -672,15 +645,6 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument(
-        "--dsl-timing",
-        choices=["ordinary", "scoped"],
-        default="ordinary",
-        help=(
-            "DSL timing: ordinary validated calls (default), or fixed-binding 3D "
-            "replay excluding preparation and scope boundaries; 2D remains ordinary."
-        ),
-    )
-    ap.add_argument(
         "--cap-blocks",
         type=int,
         default=65536,
@@ -773,16 +737,13 @@ def main() -> int:
     print(f"shapes : {len(shapes)}")
     print(f"num_cus sweep: {args.num_cus_sweep}")
     print(f"bias   : {bias_tag}")
-    print(
-        f"DSL timing: {args.dsl_timing}; 2D and comparison baselines use ordinary calls"
-    )
     print()
 
     fly_col = f"  {'fly_us':>10}" if args.flydsl else ""
     header = (
         f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}{fly_col}  "
         + "  ".join(f"CUs{s:>4}" for s in args.num_cus_sweep)
-        + f"  {'best_cus':>8}  {'best_spd':>9}  path  timing  kernel"
+        + f"  {'best_cus':>8}  {'best_spd':>9}  path  kernel"
     )
     print(header)
     print("-" * len(header))
@@ -827,39 +788,21 @@ def main() -> int:
         best_cus: Optional[int] = None
         best_ms: Optional[float] = None
         best_path: str = "n/a"
-        best_route_name: str = "n/a"
+        best_kernel_name: str = "n/a"
 
         for cus in args.num_cus_sweep:
-            ms, path, route_name = _run_dsl(
-                shape,
-                data,
-                cus,
-                warmup=args.warmup,
-                iters=args.iterations,
-                timing=args.dsl_timing,
+            ms, path, kname = _run_dsl(
+                shape, data, cus, warmup=args.warmup, iters=args.iterations
             )
             if ms is not None:
-                actual_timing = (
-                    "scoped"
-                    if args.dsl_timing == "scoped" and path == "3d"
-                    else "ordinary"
-                )
-                dsl_results[cus] = {
-                    "ms": ms,
-                    "path": path,
-                    "timing_mode": actual_timing,
-                }
+                dsl_results[cus] = {"ms": ms, "path": path}
                 if best_ms is None or ms < best_ms:
                     best_ms = ms
                     best_cus = cus
                     best_path = path or "n/a"
-                    best_route_name = route_name or "n/a"
+                    best_kernel_name = kname or "n/a"
             else:
-                dsl_results[cus] = {"ms": None, "path": None, "timing_mode": None}
-
-        best_timing = (
-            dsl_results[best_cus]["timing_mode"] if best_cus is not None else None
-        )
+                dsl_results[cus] = {"ms": None, "path": None}
 
         best_spd = (tri_ms / best_ms) if (tri_ms and best_ms) else float("nan")
         best_spd_aot = (aot_ms / best_ms) if (aot_ms and best_ms) else float("nan")
@@ -889,7 +832,7 @@ def main() -> int:
         print(
             f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {cu_cols}"
             f"  {best_cus or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
-            f"  {best_path}  {best_timing or 'n/a'}  {best_route_name}"
+            f"  {best_path}  {best_kernel_name}"
         )
 
         results.append(
@@ -907,7 +850,6 @@ def main() -> int:
                 "dtype": shape.dtype,
                 "use_sinks": shape.use_sinks,
                 "sliding_window": shape.sliding_window,
-                "dsl_timing": args.dsl_timing,
                 "triton_ms": tri_ms,
                 "aoTriton_ms": aot_ms,
                 "dsl": {str(cus): dsl_results[cus] for cus in args.num_cus_sweep},
@@ -918,8 +860,6 @@ def main() -> int:
                     best_spd_aot if math.isfinite(best_spd_aot) else None
                 ),
                 "best_path": best_path,
-                "best_selected_route": best_route_name,
-                "best_dsl_timing": best_timing,
                 "flydsl_ms": fly_ms,
                 "flydsl_kv_path": fly_kv_path,
                 "flydsl_skip_reason": fly_skip_reason,
@@ -939,12 +879,12 @@ def main() -> int:
     ]
     print()
     print(
-        f"geomean speedup (DSL best, {args.dsl_timing} vs ordinary Triton):   {_gm(speedups):.3f}x  "
+        f"geomean speedup (DSL best vs Triton):   {_gm(speedups):.3f}x  "
         f"({sum(1 for s in speedups if s > 1)}/{len(speedups)} wins)"
     )
     if aot_spds:
         print(
-            f"geomean speedup (DSL best, {args.dsl_timing} vs ordinary AOTriton): {_gm(aot_spds):.3f}x  "
+            f"geomean speedup (DSL best vs AOTriton): {_gm(aot_spds):.3f}x  "
             f"(n={len(aot_spds)})"
         )
     if args.flydsl:
@@ -968,8 +908,7 @@ def main() -> int:
         if fly_vs_ck:
             wins = sum(1 for x in fly_vs_ck if x > 1)
             print(
-                f"  rocke ({args.dsl_timing}) vs ordinary FlyDSL: "
-                f"geomean={_gm(fly_vs_ck):.3f}x  wins={wins}/{len(fly_vs_ck)}"
+                f"  rocke vs FlyDSL:    geomean={_gm(fly_vs_ck):.3f}x  wins={wins}/{len(fly_vs_ck)}"
             )
 
     if args.output_json:

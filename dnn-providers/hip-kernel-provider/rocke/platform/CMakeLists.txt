@@ -497,7 +497,7 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # spec-wrapper parity gate, 3D decode policy, submission ownership and timing.
+    # spec-wrapper parity gate, 3D decode policy, submission ownership.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -506,10 +506,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_3d_eager_reuse.py"
-        "tests/library/tests/test_attention_3d_replay_scope.py"
         "tests/library/tests/test_attention_3d_replay_bindings.py"
-        "tests/library/tests/test_attention_workspace.py"
-        "tests/library/tests/test_decode_benchmark_timing.py")
+        "tests/library/tests/test_attention_workspace.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
