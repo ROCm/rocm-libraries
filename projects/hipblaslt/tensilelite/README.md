@@ -1,7 +1,7 @@
 # Tensilelite
 
 For race-detection workloads, [choose one GEMM from a solution index](../docs/how-to/choose-gemm-for-solution.md)
-constructs one full-tile problem per ordinary fixed-split solution index.
+constructs one full-tile problem for a selected solution.
 
 ## Building and Running Tests
 
