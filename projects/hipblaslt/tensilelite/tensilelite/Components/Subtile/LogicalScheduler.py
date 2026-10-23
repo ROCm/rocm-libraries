@@ -46,6 +46,7 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
 
 from ...Common.GlobalParameters import globalParameters
 from ...Common import isMxf4SubtilePath, plsinBlockSchedTile
+from ...Common.RegisterLease import DeadRegisterLease
 
 
 # ds_load_b128 reads 4 contiguous VGPRs.
@@ -4576,11 +4577,15 @@ class LogicalScheduler:
         return {t: set(range(peaks.get(t, 0))) - live.get(t, set())
                 for t in self.tensors}
 
-    def _operandLendVgprs(self, tile_ids_by_tensor: Optional[Dict[str, set]] = None):
-        """``(base, size)`` for allocated A/B/SA/SB tiles.
+    def _operandLendVgprs(self, tile_ids_by_tensor: Optional[Dict[str, set]] = None) -> DeadRegisterLease:
+        """A :class:`DeadRegisterLease` over the dead A/B/SA/SB operand tile windows.
 
         ``tile_ids_by_tensor=None`` lends every allocated operand tile (full
         Lend). Otherwise only the requested ids (last-K Weave holes).
+
+        The lease iterates as ``(base, size)`` (batch-sizing consumers are unchanged) and
+        validates at construction that the lent windows do not overlap -- a lent window that
+        aliased another would corrupt the fused store silently.
         """
         tiles_by = {
             "A":  getattr(self, "vgprTilesA", []),
@@ -4596,7 +4601,7 @@ class LogicalScheduler:
                     continue
                 if getattr(tile.regList, "is_vgpr", False) and tile.regList.indices:
                     lend.append((tile.regList.indices[0], len(tile.regList.indices)))
-        return lend
+        return DeadRegisterLease(lend)
 
     def _selectPlsinFusedStorePolicy(self, kernel, unroll_iter: int = 0):
         """Return ``(weaveGroups, lendTiles)`` for the fused NLL store.
