@@ -12,17 +12,61 @@ Documentation for rocSPARSE is available at
 * Added the batch support for `rocsparse_sptrsm`.
 * Added the `rocsparse_dnmat_transpose` generic routine for dense matrix transposing.
 * Added the `rocsparse_dnmat_copy_data` generic routine for dense matrix data copying.
+* Generated Fortran bindings, as a single `rocsparse` module: `use rocsparse`, link
+  `roc::rocsparse_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows),
+  `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default; `none` or
+  `assumed-rank`). Found with `find_package(rocsparse-fortran)`; the archive and `.mod` files
+  install per compiler under `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+  Nothing Fortran is built under `BUILD_ROCSPARSE_ILP64`, which widens `rocsparse_int` to
+  `int64_t` while the generated module binds it as `integer(c_int)`.
+  The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
+  you call.
 
 ### Optimized
 * Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.
 
 ### Changed
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+* `rocsparse_enums` is merged into `rocsparse`: the generated binding defines only `rocsparse`,
+  with the enum constants folded in. `use rocsparse` is unchanged; drop any `use rocsparse_enums`.
+* The binding ships as a compiled archive and `.mod` set, not `.f90` sources to compile yourself:
+  link `roc::rocsparse_fortran` instead of adding them to your build.
+* The generated interfaces follow the C headers exactly, so these calls no longer compile, or no
+  longer mean what they did:
+  * `rocsparse_csrsort` and `rocsparse_cscsort` take nine arguments, not eight: the hand-written
+    interfaces omitted `descr`, which the C routines declare fifth, between `nnz` and
+    `csr_row_ptr` / `csc_col_ptr`.
+  * The four `rocsparse_Xcsr2csr_compress` routines take `csr_row_ptr_A` before `csr_col_ind_A`,
+    and `csr_row_ptr_C` before `csr_col_ind_C`, as the C routines declare them. The hand-written
+    interfaces had each pair reversed, and both members are `type(c_ptr)`, so an existing call
+    still compiles and now passes the row pointer where the column indices are read.
+  * The 69 `*_buffer_size` routines the hand-written binding exposed take `buffer_size` as an
+    `integer(c_size_t)` by reference, not a `type(c_ptr)` by value: drop the `c_loc()` and pass the
+    variable itself. The four `rocsparse_Xgebsr2gebsc_buffer_size` routines name it
+    `p_buffer_size`.
+  * `rocsparse_zcsrsv_solve`: `alpha` is a `type(c_ptr)` by value, agreeing with the `s`, `d` and
+    `c` forms, where it was a `complex(c_double_complex)` by reference.
+  * `rocsparse_zdoti`: the result argument is `myResult`, a `type(c_ptr)` by value, agreeing with
+    the other `doti` and `dotci` forms, where it was `result`, a `complex(c_double_complex)`.
+  * `rocsparse_dprune_csr2csr_by_percentage`: `percentage` is `real(c_double)`, not `real(c_float)`.
+  * `rocsparse_handle_create`: `p_error` is an optional `type(c_ptr)` by reference, not by value:
+    omit it where you passed `c_null_ptr`, which now hands over the address of a null pointer.
+  * `rocsparse_get_git_rev`: `rev` is a `type(c_ptr)` by value rather than a `character(c_char)`
+    assumed-size array, so pass `c_loc(buffer)`.
+  * Keyword-argument callers only, where a dummy collided with a Fortran keyword or took the
+    header's name: `info` is `myInfo`, `result` is `myResult`, `mat_type` is `myType`; `bsr_dim`
+    is `block_dim` in `rocsparse_Xbsrmv` and the `Xbsrsv_*` routines, `buffer_size` is
+    `p_buffer_size` in `rocsparse_Xgebsr2gebsc_buffer_size`, `bsr_nnz` is `bsr_nnz_devhost` in
+    `rocsparse_csr2gebsr_nnz`, and `policy` is `solve` in `rocsparse_Xcsrsm_analysis`.
 
 ### Optimized
 * Improved the performance of the sparse triangular solves and the incomplete factorizations on gfx942 and gfx950. The kernels no longer write back and invalidate the L2 cache for every solved or factorized row. The row results and their completion flags are now exchanged with device-scope atomic stores and loads instead. This affects `rocsparse_spsv` and `rocsparse_sptrsv` (CSR, CSC, COO, and ELL formats), `rocsparse_spsm` and `rocsparse_sptrsm` (CSR, CSC, and COO formats), `rocsparse_Xcsrsv_solve`, `rocsparse_Xcsrsm_solve`, `rocsparse_Xcsrilu0`, `rocsparse_Xcsric0`, `rocsparse_spilu0`, `rocsparse_spic0`, and `rocsparse_spildlt0`. It also affects `rocsparse_Xbsrsv_solve` with block sizes up to 32, `rocsparse_Xbsrilu0` with block sizes up to 8, and `rocsparse_Xbsric0` with block sizes up to 16 and at most 128 blocks per block row. Larger block sizes and `rocsparse_Xbsrsm_solve` keep the previous synchronization, because their kernels reread row results too often for device-scope atomics to pay off.
 * Improved the performance of the analysis of the CSR, CSC, COO, and BSR triangular solves and incomplete factorizations on gfx942 and gfx950. This affects the analysis stage of `rocsparse_spsv`, `rocsparse_sptrsv`, `rocsparse_spsm`, and `rocsparse_sptrsm`, and `rocsparse_Xcsrsv_analysis`, `rocsparse_Xcsrsm_analysis`, `rocsparse_Xbsrsv_analysis`, `rocsparse_Xbsrsm_analysis`, `rocsparse_Xcsrilu0_analysis`, `rocsparse_Xcsric0_analysis`, `rocsparse_Xbsrilu0_analysis`, `rocsparse_Xbsric0_analysis`, and the analysis stage of `rocsparse_spilu0`, `rocsparse_spic0`, and `rocsparse_spildlt0`. Each row previously updated the maximum row length with its own device-scope atomic on a single address, which serializes on these architectures. On gfx942 and gfx950, each row now updates a per-workgroup maximum with a shared-memory atomic, and the last row of the workgroup to finish issues a single device-scope atomic.
 * Optimized `rocsparse_spgemm` (CSR and BSR), `rocsparse_csrgemm_nnz`, `rocsparse_Xcsrgemm`, `rocsparse_csrgemm_symbolic`, `rocsparse_Xcsrgemm_numeric`, `rocsparse_bsrgemm_nnzb`, and `rocsparse_Xbsrgemm` for rows of `C` whose hash table does not fit in shared memory. For BSR matrices with a block dimension greater than 1, only `rocsparse_bsrgemm_nnzb` is affected.
+
+### Removed
+* The hand-written `library/src/rocsparse.f90` and `library/src/rocsparse_enums.f90`, no longer
+  installed into `include/rocsparse`.
 
 ### Resolved issues
 * Fixed an out-of-bounds write in `rocsparse_coosort_by_row` and `rocsparse_coosort_by_column` when every row (or column) contains a single non-zero entry. The temporary workspace for the segment computation was one index too small, which could corrupt the segment offsets and produce incorrectly sorted results.
