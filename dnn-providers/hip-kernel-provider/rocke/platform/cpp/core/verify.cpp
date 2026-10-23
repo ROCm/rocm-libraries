@@ -714,6 +714,14 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "%s", error);
         }
     }
+    else if(o == ROCKE_OP_TILE_TRAP)
+    {
+        char err[64];
+        if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
 }
 
 /* ---- scf.for ---- */

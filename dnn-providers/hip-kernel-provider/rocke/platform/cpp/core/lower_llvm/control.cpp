@@ -1530,6 +1530,23 @@ static void _op_tile_s_setprio(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.setprio(i16 %lld)", (long long)level);
 }
 
+/* Python _op_tile_trap. */
+static void _op_tile_trap(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[64];
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    rocke_ll_need(L, "trap");
+    rocke_ll_emitf(L, "  call void @llvm.trap()");
+}
+
 /* ======================================================================== */
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
@@ -2483,6 +2500,7 @@ void rocke_ll_register_vector(void)
                          _op_gpu_cluster_workgroup_max_flat_id);
     rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_BARRIER, _op_tile_cluster_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
+    rocke_ll_set_handler(ROCKE_OP_TILE_TRAP, _op_tile_trap);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);

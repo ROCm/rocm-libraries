@@ -965,6 +965,20 @@ def _global_ptr_to_i64_op_error(op: "Op") -> Optional[str]:
     return _global_ptr_to_i64_error(op.operands[0].type, op.results[0].type)
 
 
+def _trap_op_error(op: "Op") -> Optional[str]:
+    """The error for a built ``tile.trap`` op that is not bare, or None.
+
+    A trap takes no operands, defines no results and holds no regions; the
+    lowerings emit only the trap call, so a result would reach its uses
+    undefined. Serialized IR reaches the verifier and the lowerings without
+    passing the builder, so they all use this rule, and the C++ engine
+    (``rocke_i_trap_op_error``) reports the same text.
+    """
+    if op.operands or op.results or op.regions:
+        return "trap takes no operands, results or regions"
+    return None
+
+
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
@@ -5507,6 +5521,20 @@ class IRBuilder:
         if level < 0 or level > 3:
             raise ValueError("s_setprio level must be in 0..3")
         self._op("tile.s_setprio", attrs={"level": int(level)})
+
+    def trap(self) -> None:
+        """Abort the kernel: ``call void @llvm.trap()`` (HIP
+        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+
+        A taken trap ends the kernel with a hardware exception. What the host
+        sees depends on the HIP runtime: the launch reports an error, or the
+        runtime aborts the process. Either way the process cannot use the GPU
+        afterwards. So a trap is the last resort, for a condition the host
+        checks before the launch and that must still never reach a memory
+        access on the device. Put it under a branch on that condition
+        (``scf_if``).
+        """
+        self._op("tile.trap")
 
     # ----- buffer resources + async DRAM->LDS -----
 

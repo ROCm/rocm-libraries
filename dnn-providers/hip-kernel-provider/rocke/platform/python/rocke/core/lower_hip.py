@@ -43,6 +43,7 @@ from .ir import (
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
@@ -1468,6 +1469,12 @@ class _Lowerer:
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_sched_barrier({int(op.attrs.get('mask', 0))});")
+
+    def _op_tile_trap(self, op: Op) -> None:
+        error = _trap_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._emit("__builtin_trap();")
 
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])

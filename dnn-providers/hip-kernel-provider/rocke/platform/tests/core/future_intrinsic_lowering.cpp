@@ -2773,6 +2773,50 @@ void case_global_ptr_offset()
         fail("tile.global_ptr_offset must be pure", __LINE__);
 }
 
+/* trap: the C++ builder's op lowers to a call of llvm.trap, declared once, and
+ * to __builtin_trap() in HIP source; it is effectful, so nothing removes it;
+ * the verifier refuses a raw trap with a result. */
+void build_trap(rocke_ir_builder_t* b)
+{
+    rocke_b_trap(b);
+}
+
+void case_trap()
+{
+    const std::string ir = lower_one("trap", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(ir, "  call void @llvm.trap()\n", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.trap()\n", 1);
+
+    const std::string hip = lower_one_hip("trap_hip", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(hip, "__builtin_trap();", 1);
+
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_TRAP))
+        fail("tile.trap must not be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_TILE_TRAP)) != "tile.trap")
+        fail("ROCKE_OP_TILE_TRAP must be named tile.trap", __LINE__);
+
+    /* A raw trap with a result, past the builder: the verifier refuses it. */
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "trap_raw");
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_b_op(
+        &b, ROCKE_OP_TILE_TRAP, nullptr, 0, result_types, 1, nullptr, nullptr, 0, "t", nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("trap takes no operands, results or regions") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a trap with a result", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
 void case_gfx1250_tdm_gated()
 {
     const struct
@@ -4010,6 +4054,7 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
     {"global_ptr_offset", case_global_ptr_offset},
+    {"trap", case_trap},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},

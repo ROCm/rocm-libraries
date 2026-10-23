@@ -55,6 +55,7 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _trap_op_error,
 )
 
 ERROR = "error"
@@ -476,6 +477,10 @@ class _Verifier:
                 self.err(error, op)
         elif name == "tile.global_ptr_to_i64":
             error = _global_ptr_to_i64_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.trap":
+            error = _trap_op_error(op)
             if error:
                 self.err(error, op)
 

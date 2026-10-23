@@ -489,6 +489,17 @@ const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, 
     return rocke_i_global_ptr_to_i64_error(op->operands[0]->type, op->results[0]->type, buf, cap);
 }
 
+/* Python core/ir.py::_trap_op_error; the text is the Python engine's. */
+const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "trap takes no operands, results or regions");
+        return buf;
+    }
+    return NULL;
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -1137,7 +1148,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_store_vN",
 
     /* tile.* global pointer offset without inbounds */
-    "tile.global_ptr_offset"};
+    "tile.global_ptr_offset",
+
+    /* tile.* kernel abort */
+    "tile.trap"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1428,7 +1442,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_store_vN            */ false,
 
     /* tile.* global pointer offset without inbounds (address arithmetic) */
-    /* global_ptr_offset          */ true};
+    /* global_ptr_offset          */ true,
+
+    /* tile.* kernel abort (effectful) */
+    /* trap                       */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
