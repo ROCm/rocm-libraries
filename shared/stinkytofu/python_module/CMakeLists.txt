@@ -130,6 +130,21 @@ configure_file(
     COPYONLY
 )
 configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/cli.py"
+    "${CMAKE_BINARY_DIR}/lib/stinkytofu/cli.py"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/__main__.py"
+    "${CMAKE_BINARY_DIR}/lib/stinkytofu/__main__.py"
+    COPYONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/bin/stinkytofu"
+    "${CMAKE_BINARY_DIR}/bin/stinkytofu"
+    COPYONLY
+)
+configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/stinkytofu/_build_info.py.in"
     "${CMAKE_BINARY_DIR}/lib/stinkytofu/_build_info.py"
     @ONLY
@@ -178,8 +193,12 @@ install(FILES $<TARGET_FILE:stinkytofu>
 )
 
 # Install Python wrapper (__init__.py)
-install(FILES stinkytofu/__init__.py
+install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/__main__.py
     DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
+    COMPONENT python_bindings
+)
+install(PROGRAMS bin/stinkytofu
+    DESTINATION bin
     COMPONENT python_bindings
 )
 
@@ -189,7 +208,7 @@ install(FILES stinkytofu/__init__.py
 if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
     install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
-    install(FILES stinkytofu/__init__.py DESTINATION stinkytofu)
+    install(FILES stinkytofu/__init__.py stinkytofu/cli.py stinkytofu/__main__.py DESTINATION stinkytofu)
     install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc" DESTINATION stinkytofu)
 endif()
 
