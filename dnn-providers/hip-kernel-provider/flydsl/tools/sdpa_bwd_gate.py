@@ -29,7 +29,7 @@ one that is not the reduce).
   ``verdict`` is ``red`` iff a finding sits on a register restored from a spill slot
   (the ``rmRedundantSpills`` signature) and ``--spec`` is not in ``rmir_known.csv``,
   ``known`` when it is, else ``ok``. Findings on other registers are counted in
-  ``other_findings`` (T4: an undefined descriptor lane of the merged objects).
+  ``other_findings`` (an undefined descriptor lane of the merged objects).
 
 The exit status is nonzero only when a gate could not run (a greedy dump with no dump
 in it, a target other than gfx950, an object with other kernels than declared, a pin that
@@ -104,7 +104,7 @@ def pin_gate(
     merged_pin: dict,
     reduce_pin: dict,
 ) -> dict:
-    """The D6 verdict of a two-kernel object.
+    """The per-kernel verdict of a two-kernel object.
 
     @p kernels maps each symbol to ``function_sha256`` and ``resources``; @p merged_pin carries
     ``hash``, ``function_sha256`` and ``resources`` of the merged pin, @p reduce_pin ``hash`` and

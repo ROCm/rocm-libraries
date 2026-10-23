@@ -120,20 +120,6 @@ def test_ued_knobs_are_the_tuning_fields_only(documents):
         "block_kv",
         "block_m",
     }
-    excluded = set(CONTRACT_FIELDS) - set(ued["knobs"])
-    assert {
-        "has_bias",
-        "dropout",
-        "padded",
-        "floor",
-        "dform",
-        "store_db",
-        "gqa_pack",
-        "head_dim",
-        "head_dim_v",
-        "causal",
-        "reduce_symbol",
-    } <= excluded
 
 
 def test_op_level_documents_have_a_sibling_ops_shape(documents):

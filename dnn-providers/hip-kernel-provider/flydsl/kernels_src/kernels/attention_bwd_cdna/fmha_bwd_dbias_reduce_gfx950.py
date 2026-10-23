@@ -33,7 +33,6 @@ entirely inside the row: those threads take the element-wise path (2-byte loads 
 thread from the launch values; both produce the same sums.
 """
 
-import os
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx

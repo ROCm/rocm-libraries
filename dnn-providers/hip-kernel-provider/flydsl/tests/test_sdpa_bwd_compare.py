@@ -184,7 +184,10 @@ def test_a_dq_causal_dual_object_outside_the_flaky_list_is_known_t2(
     status, lines = _run(argv, capsys)
     assert status == 0
     (line,) = [l for l in lines if "dq tile=64 cls=causal" in l]
-    assert line.startswith("known T2 (dq-causal family)") and "flaky=no" in line
+    assert (
+        line.startswith("known nondeterministic (dq-causal family)")
+        and "flaky=no" in line
+    )
     assert "RED" not in "\n".join(lines)
 
 

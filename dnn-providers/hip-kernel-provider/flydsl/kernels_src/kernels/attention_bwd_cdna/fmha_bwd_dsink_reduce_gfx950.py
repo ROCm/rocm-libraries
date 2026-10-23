@@ -18,8 +18,6 @@ sequential sum. Grid = (num_head_q, 1, 1); the 64 lanes of the block run the sam
     batch_size, seqinfo_q0, seqinfo_q1, varlen_bits, num_seqlens, max_seqlen_q, num_head_q
 """
 
-import os
-
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 
 import flydsl.compiler as flyc

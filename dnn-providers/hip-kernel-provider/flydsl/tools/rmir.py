@@ -1,18 +1,18 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""R-MIR gate: scan the SGPR greedy-allocation MIR of a build for the `InlineSpiller::rmRedundantSpills` bug (tracked issue T1).
+"""R-MIR gate: scan the SGPR greedy-allocation MIR of a build for the `InlineSpiller::rmRedundantSpills` bug (a tracked LLVM issue).
 
     rmir.py --mir FILE           scan one printed MIR dump
 
 Rule: after SGPR greedy RA, every virtual-SGPR lane read must have a definition on all paths, tracked through SI_SPILL_S*
-SAVE/RESTORE per stack slot. A finding on a register that is the target of an SI_SPILL_S*_RESTORE is the T1 signature
-(the spill findings, the gate value). Findings on other registers do not fail the gate (T4: merged-kernel undefined
+SAVE/RESTORE per stack slot. A finding on a register that is the target of an SI_SPILL_S*_RESTORE is the bug's signature
+(the spill findings, the gate value). Findings on other registers do not fail the gate (merged-kernel undefined
 descriptor lanes, a different mechanism present before register allocation).
 
 `split_dumps` and `scan_text` take the text LLVM printed under `print-after=greedy`; `sdpa_bwd_gate.py` drives them.
 
-Source: the sweep's `tools/rmir.py` at S0 (sweep commit e196d0d), without its `build_and_scan` (the generators dump and scan in
+Source: the sweep's `tools/rmir.py` at the sweep snapshot (sweep commit e196d0d), without its `build_and_scan` (the generators dump and scan in
 their own compile). The lane scanner `mirlanescan2` (`parse`, `ops`, `scan`) is copied verbatim.
 """
 

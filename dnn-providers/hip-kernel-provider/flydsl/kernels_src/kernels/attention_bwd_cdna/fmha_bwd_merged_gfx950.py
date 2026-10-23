@@ -30,7 +30,8 @@ ABI: the dK/dV launch's argument list with O added (pointer + three strides) and
 carries two kernel symbols: the merged kernel and the reduce (`fmha_bwd_dbias_reduce_gfx950_kernel_1`). The launcher's arguments gain the reduce
 launch's (`DBias`, `reduce_batch`, `reduce_head`, `stride_ws_*`, `stride_out_*`; its `DB` is the merged kernel's `DB`); they serve compilation only, since
 each kernel's kernarg is packed from its own declaration. The reduce launch resets the merged module's fast-math compile hints: the reduce sums
-in IEEE fp32 (its standalone build has no hints), so the merged kernel's `fast_fp_math` must not reach it.
+in IEEE fp32 (its standalone build has no hints), so the merged kernel's `fast_fp_math` must not reach it. The reset changes the trace-time fast-math flags
+only: the module-wide target flags and the merged kernel's LLVM options still apply to the reduce kernel.
 Causal / window: each role runs its split causal body (window and bottom-right resolution are runtime wire values, as in the split kernels).
 `gqa_pack` (dK/dV knob, 16-row family; causal, window and dropout included): the dK/dV role walks the packed (group, q) row axis; its in-kernel Delta reads O at
 the packed row's (head, q) address.
@@ -421,8 +422,8 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         or kt.ENABLE_DROPOUT != qt.ENABLE_DROPOUT
     ):
         raise ValueError("the roles must agree on dtype, bias and dropout")
-    if dbias_reduce and not kt.BIAS_TYPE:
-        raise ValueError("dbias_reduce: a bias build only")
+    if dbias_reduce and not (kt.BIAS_TYPE and qt.STORE_DB):
+        raise ValueError("dbias_reduce: a bias build whose dQ role stores dB only")
     BLOCK_SIZE = kt.BLOCK_SIZE
     WPE = min(kt.WAVES_PER_EU, qt.WAVES_PER_EU)
     BUILD_SM_SCALE = dk_meta.sm_scale

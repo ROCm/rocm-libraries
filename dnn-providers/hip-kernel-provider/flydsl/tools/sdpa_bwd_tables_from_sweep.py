@@ -3,9 +3,9 @@
 
 """Derive the SDPA backward instance tables and reference data from a sweep snapshot.
 
-    python tools/sdpa_bwd_tables_from_sweep.py <S0 dir>
+    python tools/sdpa_bwd_tables_from_sweep.py <sweep dir>
 
-``<S0 dir>`` is the sweep snapshot (``SNAPSHOT.md``, ``objects-k3/*/payload/manifest.csv``,
+``<sweep dir>`` is the sweep snapshot (``SNAPSHOT.md``, ``objects-k3/*/payload/manifest.csv``,
 ``objects-t1/``, ``external/``). Nothing else is read: no git and no live sweep tree.
 Three outputs, each rewritten whole, so the tool is idempotent:
 
@@ -152,7 +152,7 @@ def render_tables(pins: dict[str, dict], s0_commit: str) -> str:
         by_kind[spec.kernel].append(spec)
     lines = [
         BEGIN,
-        f"# Source: sweep snapshot S0, sweep commit {s0_commit} (tools/sdpa_bwd_tables_from_sweep.py).",
+        f"# Source: sweep snapshot, sweep commit {s0_commit} (tools/sdpa_bwd_tables_from_sweep.py).",
         "# fmt: off",
         "SDPA_BWD_TABLES = {",
     ]
