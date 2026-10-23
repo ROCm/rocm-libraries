@@ -64,13 +64,16 @@ inline Expected<std::pair<ptrdiff_t, ptrdiff_t>, LayoutError> getElementBounds(
 }  // namespace detail
 
 // Maps logical coordinates to element offsets using a shape, strides and a
-// starting offset. Offsets count elements.
+// starting offset. Offsets count elements. Strides may be negative or zero, so
+// offsets can be negative and distinct coordinates can share one; Layout does
+// not know the extent of the underlying storage.
 class Layout {
    public:
     Layout() = default;
     Layout(const Layout&) = default;
     Layout& operator=(const Layout&) = default;
 
+    // Moving leaves the source as a scalar with zero offset.
     Layout(Layout&& other) noexcept
         : m_shape(std::move(other.m_shape)),
           m_strides(std::move(other.m_strides)),
@@ -88,7 +91,7 @@ class Layout {
         return *this;
     }
 
-    // Requires one stride per shape dimension.
+    // Throws unless there is one stride per shape dimension.
     Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
         if (m_shape.rank() != m_strides.size())
@@ -104,8 +107,10 @@ class Layout {
         : Layout(std::move(shape), std::vector<ptrdiff_t>(strides.begin(), strides.end()), offset) {
     }
 
-    // Order lists axes from slowest to fastest, as in Shape::linearIndex.
-    // Validation failures are returned; allocating the owned metadata can throw.
+    // The result has zero offset. Order lists axes from slowest to fastest, as in
+    // Shape::linearIndex, so its last axis has unit stride. Invalid orders and
+    // extents or strides that do not fit ptrdiff_t are returned as errors;
+    // allocation can still throw.
     static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(
         const Shape& shape, std::span<const size_t> order) {
         using namespace detail;
@@ -113,7 +118,7 @@ class Layout {
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank(), -1);
-        // Mark axes in the output vector before replacing the marks with strides.
+        // Use strides to find missing or repeated axes; -1 marks an axis not yet seen.
         for (size_t axis : order) {
             if (axis >= shape.rank() || strides[axis] != -1)
                 return Unexpected(LayoutError::InvalidOrder);
@@ -141,6 +146,7 @@ class Layout {
         return getContiguousLayout(shape, order);
     }
 
+    // Throwing forms of getContiguousLayout.
     static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
         auto result = getContiguousLayout(shape, order);
         if (!result) throw std::runtime_error(std::string(message(result.error())));
@@ -185,10 +191,9 @@ class Layout {
         return m_offset;
     }
 
-    // offset + sum(indices[d] * strides[d]). Coordinate rank/range and each
-    // multiplication/addition are checked, including intermediate overflow.
-    // Failures retain numeric context without allocating or formatting a message.
-    // Negative results and overlapping mappings are permitted without storage.
+    // Returns offset + sum(indices[d] * strides[d]). Fails if indices has the wrong
+    // rank or a coordinate is out of range, or if any partial product or sum does
+    // not fit ptrdiff_t, even when a later term would bring it back in range.
     detail::Expected<ptrdiff_t, detail::LayoutFailure> elementOffset(
         std::span<const size_t> indices) const noexcept {
         return detail::LayoutOffset::getElementOffset(m_shape.dimensions(), m_strides, m_offset,
