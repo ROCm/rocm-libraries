@@ -6333,9 +6333,8 @@ def build_unified_attention_2d(
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-        physical = b.global_load_i32(
-            block_tables, b.add(b.mul(seq_idx, bt_stride), block_idx)
+        physical, token_in_block = _physical_block_and_token(
+            b, p, block_tables, bt_stride, seq_idx, kpos
         )
 
         # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
