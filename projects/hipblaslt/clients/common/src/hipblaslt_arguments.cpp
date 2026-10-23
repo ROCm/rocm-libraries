@@ -25,9 +25,9 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
-#include "benchmark_stats.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <iomanip>
 #include <istream>
 #include <ostream>
@@ -138,6 +138,7 @@ void Arguments::init()
     bias_vector       = false;
     scaleA            = hipblaslt_scaling_format::none;
     scaleB            = hipblaslt_scaling_format::none;
+    int4_encoding     = 0; // HIPBLASLT_INT4_ENCODING_SIGNED_EXT
     scaleC            = false;
     scaleD            = false;
     scaleE            = false;

@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlan.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 
@@ -174,6 +175,7 @@ protected:
         {
             GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
         }
+        SKIP_IF_WORKAROUND_ISSUE_13715();
         ASSERT_EQ(hipblasLtCreate(&_handle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
     }
 

@@ -136,8 +136,72 @@ bool rocke_i_is_vector(const rocke_type_t* t, const char* elem_name, int count);
  * `v.type.elem if isinstance(...,VectorType) else v.type`). */
 const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 
+/* Whether `t`'s elements are packed-only (i4, u4): `t` is such a scalar, a vector
+ * of one or an LDS tile of one. The twin of core/ir.py::is_packed_only. NULL is
+ * not. */
+bool rocke_i_is_packed_only(const rocke_type_t* t);
+
+/* Throw ckc::TypeError when rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
+ * which states the rule and the message. rocke_i_op calls it for every result
+ * and rocke_b_param for every parameter, so no builder makes such a value.
+ * NULL-safe. */
+void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
+
+/* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
+ * `op_name` treats its operands as signed; `instead` names the unsigned op to
+ * use, or is NULL when there is none. The twin of core/ir.py::_refuse_unsigned,
+ * with the same message. NULL-safe. */
+void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const char* instead);
+
+/* rocke_i_refuse_unsigned for every operand of `op`, a signed op, under the
+ * op's dotted name. The builders refuse such an op when it is built; the
+ * lowerings call this for IR that did not come through them (hand-assembled
+ * or deserialized), so no signed op lowers on unsigned data. The twin of
+ * core/ir.py::_refuse_unsigned_operands. */
+void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead);
+
+/* Throw ckc::TypeError unless the source of `op`, a u8 -> float conversion, is
+ * a u8 scalar. rocke_b_uitofp_f32 checks its input when the op is built; the
+ * lowerings call this for IR that did not come through it (hand-assembled or
+ * deserialized), because they would read any other source differently: LLVM's
+ * uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0. The twin
+ * of core/ir.py::_refuse_non_u8_source, with the same message. */
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
+
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
+
+/* VectorType(elem, count) allocated in `arena`, for callers that hold an arena
+ * but no builder (the lowerers). `elem` must be non-NULL; NULL on OOM. The
+ * name is the one rocke_vector_type gives the same type. */
+const rocke_type_t*
+    rocke_i_vector_type_in_arena(rocke_arena_t* arena, const rocke_type_t* elem, int count);
+
+/* The logical IR type of `dtype` (any accepted spelling), as
+ * rocke_dtype_to_ir_type returns it (Python core/ir.py::dtype_to_ir_type).
+ * Throws ckc::ValueError "unknown dtype '<dtype>'" for an unknown name and
+ * "no logical IR type for dtype '<canonical name>'" for an encoding with no
+ * IR type. */
+const rocke_type_t* rocke_require_ir_type(const char* dtype);
+
+/* The number of bits a value of type `t` occupies (Python core/ir.py::type_bits):
+ * a scalar's format width, a vector's element width times its count, a
+ * pointer's address-space width. Throws ckc::TypeError for an LDS allocation
+ * (memory, not a value) and ckc::ValueError "unknown dtype '<name>'" for a
+ * scalar with no format. */
+int rocke_i_type_bits(const rocke_type_t* t);
+
+/* Refuse a bitcast of a `source` value to `target` unless both are values of
+ * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
+ * the builder ("bitcast", "vec_bitcast") and `hint` says what to do instead of
+ * changing the width. Throws ckc::TypeError when either type is a pointer
+ * (LLVM does not bitcast pointers) or an LDS allocation, and ckc::ValueError
+ * naming both types and widths when the widths differ. Builders call it before
+ * creating the op, so a refused cast leaves the kernel unchanged. */
+void rocke_i_check_bitcast_width(const char* verb,
+                                 const rocke_type_t* source,
+                                 const rocke_type_t* target,
+                                 const char* hint);
 
 /* ------------------------------------------------------------- attr helpers */
 
@@ -149,6 +213,32 @@ rocke_attr_map_t rocke_i_attrs(rocke_ir_builder_t* b);
 /* Deep-copy an attr map into the arena (for rocke_b_op which takes a borrowed
  * attrs pointer; Op.attrs is dict(attrs or {}) in Python). */
 void rocke_i_attrs_copy(rocke_ir_builder_t* b, rocke_attr_map_t* dst, const rocke_attr_map_t* src);
+
+/* Mirrors ir._int_add_wrap_error: the error for arith.add's "wrap" attr on
+ * operands of type `operand_type`, or NULL when it is absent (meaning nsw) or
+ * valid; "nuw" takes i32 or i64 operands. A formatted message is written into
+ * `buf`, which the result then points to. */
+const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._int_cmp_pred_error: the same for arith.cmp's "pred" attr
+ * (absent means lt; "ult" takes i32 or i64 operands). */
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
+/* ------------------------------------------------------------- DPP helpers */
+
+/* DPP control word that lowers tile.dpp_xor with `xor_mask` (Python
+ * rocke.core.ir.dpp_xor_ctrl). has_row_xmask (rocke_arch_has_dpp_row_xmask):
+ * 0x160 | mask for any mask 1..15. Otherwise (gfx9 CDNA) 1/2/3 -> quad_perm
+ * 0xB1/0x4E/0x1B, 7 -> row_half_mirror 0x141, 8 -> row_ror:8 0x128,
+ * 15 -> row_mirror 0x140. Returns -1 for a mask outside 1..15 or with no
+ * encoding on the target; the lowerers turn that into ROCKE_ERR_VALUE. */
+int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
 
 #ifdef __cplusplus
 }

@@ -43,7 +43,7 @@ if _CODEGEN_DIR not in sys.path:
 # Module under test
 # ---------------------------------------------------------------------------
 import importlib
-M = importlib.import_module("Tensile.BenchmarkProblems")
+M = importlib.import_module("tensilelite.BenchmarkProblems")
 
 # ---------------------------------------------------------------------------
 # PRONG A helpers — build valid inputs for _generate_single_solution in-process
@@ -56,13 +56,13 @@ def _make_toolchain(arch="gfx942"):
 
 
 def _make_debug_config():
-    from Tensile.Common.Types import makeDebugConfig
+    from tensilelite.Common.Types import makeDebugConfig
     return makeDebugConfig({})
 
 
 def _make_problem_type(arch="gfx942"):
     """Build a ProblemType (BBS NT shape, Batched=True) valid for MFMA on gfx942."""
-    from Tensile.SolutionStructs.Problem import ProblemType
+    from tensilelite.SolutionStructs.Problem import ProblemType
     from config_harness import _toolchain_for, _isolated_globals_with_isa
 
     _, iim = _toolchain_for(arch)
@@ -230,7 +230,7 @@ class TestGenerateCustomKernelSolutions:
         stub = _StubSol()
         if mismatch_transpose:
             # Build a ProblemType with a different TransposeA so comparison fails.
-            from Tensile.SolutionStructs.Problem import ProblemType as PT_cls
+            from tensilelite.SolutionStructs.Problem import ProblemType as PT_cls
             from config_harness import _isolated_globals_with_isa, _toolchain_for
             _, iim = _toolchain_for("gfx942")
             pt_config = {

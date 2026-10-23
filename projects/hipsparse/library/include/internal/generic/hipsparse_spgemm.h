@@ -276,7 +276,6 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spgemm_copy_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / C' / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F

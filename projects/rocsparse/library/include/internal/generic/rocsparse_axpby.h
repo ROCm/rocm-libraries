@@ -60,7 +60,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="axpby_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -70,7 +69,6 @@ extern "C" {
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="axpby_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y                     <th>compute_type
 *  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r

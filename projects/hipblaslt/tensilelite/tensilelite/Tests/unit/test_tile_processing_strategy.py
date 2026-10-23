@@ -9,10 +9,10 @@ import pytest
 from rocisa.container import sgpr, vgpr
 from rocisa.instruction import VMovB32
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.PersistentLoop import PersistentLoopOff
-from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
-from Tensile.Components.TileProcessingStrategy import DataParallel, TileProcessingStrategy
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.PersistentLoop import PersistentLoopOff
+from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from tensilelite.Components.TileProcessingStrategy import DataParallel, TileProcessingStrategy
 
 pytestmark = pytest.mark.unit
 

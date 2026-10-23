@@ -134,7 +134,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                          {
                              return hipdnn_plugin_sdk::ingestor::
                                  makeEngine<Handle, Settings, Context>(
-                                     set.engine,
+                                     set,
                                      std::move(stateManager),
                                      kernel_ingestor_engine::deviceResolver());
                          }

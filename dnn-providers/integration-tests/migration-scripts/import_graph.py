@@ -18,16 +18,36 @@ Dup policy: default is skip-and-report (idempotent, safe to re-run).
   --force   appends even if an exact dup exists.
   --strict  turns an exact dup into a non-zero exit (for CI gates).
 
+Metadata: the ``<stem>.meta.json`` sidecar that ``--capture-bundles`` writes
+beside each graph is the metadata base, exactly as in ``place_bundles.py``, so
+the captured seed and input fill specs carry over with no flags. ``--meta`` and
+``--seed`` override it, with a warning naming both values whenever an override
+contradicts the sidecar or the ``reference_source`` derived from it; ``--strict``
+turns that warning into a non-zero exit. ``--meta`` values for the non-string
+keys (``seed``, ``format_version``, ``minimum_vram_mb``, ``inputs``) parse as
+JSON, so ``seed=42`` is the number 42; every other key is stored as the string
+given. A sidecar that exists but is unusable (unreadable, not an object, an
+``inputs`` key that is not a UID, an ``operation`` that is not a non-empty
+string) is refused with a non-zero exit, with or without ``--strict``: without
+it the case would land in ``quick/`` with no ``reference_source``.
+
+Tier: unless ``--tier`` is given, the tier comes from the sidecar's suite
+prefix via ``TIER_MAP`` (``Full/...`` -> ``full/``), as in ``place_bundles.py``;
+with no sidecar, or one with no ``operation``, it defaults to ``quick``. A
+``--tier`` that contradicts the sidecar warns like any other override.
+
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
-        [--tier quick] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
+        [--tier TIER] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
 """
 
 import argparse
 import copy
 import json
+import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -39,14 +59,20 @@ from bundle_utils import (
     assign_case_ids,
     canon,
     canonical_uid_map_by_name,
+    capture_reference_source,
+    capture_suite_case,
     derive_operation,
     expand,
     infer_layout,
+    inputs_error,
+    next_free_topology_dir,
+    read_capture_sidecar,
     remap_graph,
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
+    tier_for_suite,
 )
 
 
@@ -234,8 +260,94 @@ def _extract_values(graph: dict, template: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Capture sidecar
+# --------------------------------------------------------------------------
+
+
+def _read_sidecar(graph_path: Path):
+    """:func:`read_capture_sidecar`, plus the check that its suite is usable.
+
+    import_graph is handed one graph with no capture root, so the sidecar's
+    ``operation`` is the only record of the suite, and with it the tier. An
+    ``operation`` that is present but not a non-empty string makes the sidecar
+    unusable. An absent one is a hand-written sidecar with no suite.
+    """
+    path, meta, err = read_capture_sidecar(graph_path)
+    if meta is not None and "operation" in meta:
+        suite = meta["operation"]
+        if not isinstance(suite, str) or not suite:
+            return path, None, f"operation: expected a non-empty string, got {suite!r}"
+    return path, meta, err
+
+
+# --meta keys whose values are not strings in BundleMetadata. Only these parse
+# as JSON; every other key is a string field and is stored as given.
+_TYPED_META_KEYS = ("seed", "format_version", "minimum_vram_mb", "inputs")
+
+
+def _reject_constant(name):
+    raise ValueError(f"{name} is not allowed")
+
+
+def _finite_float(text):
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"{text} is out of range")
+    return value
+
+
+def _parse_meta_value(k: str, v: str):
+    """A ``--meta`` value: JSON for the typed keys, else the string as given.
+
+    A typed key parses so ``--meta seed=42`` stores the number 42, not ``"42"``
+    (a false conflict with a captured 42, and a seed that never dedups). Any
+    other key stays a string, so ``notes=123`` is ``"123"``, which the bundle
+    loader reads. NaN and Infinity raise ValueError: json.dump would write them
+    bare, and nlohmann would then reject the whole sweep.json.
+    """
+    if k not in _TYPED_META_KEYS:
+        return v
+    return json.loads(v, parse_constant=_reject_constant, parse_float=_finite_float)
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
+
+_SWEEP_SUPPORT_FILE = "support.json"
+
+
+def _canonical_support_json() -> str:
+    """Canonical bytes for an empty support-claim sidecar (LF line endings)."""
+    return json.dumps({"claims": {}, "version": 1}, indent=2, sort_keys=True) + "\n"
+
+
+def _ensure_support_json(sweep_dir: Path, dry_run: bool) -> bool:
+    """Create an empty canonical support.json next to a sweep if one is missing.
+
+    Never touches an existing support.json. Returns whether one was (or,
+    under --dry-run, would be) created.
+    """
+    support_path = sweep_dir / _SWEEP_SUPPORT_FILE
+    if support_path.exists():
+        return False
+    if not dry_run:
+        with open(support_path, "w", newline="\n") as f:
+            f.write(_canonical_support_json())
+    return True
+
+
+def _sanitize_gtest(s: str) -> str:
+    """Mirror BundleDiscovery.hpp's sanitizeForGtest: non [A-Za-z0-9_] -> '_'."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", s)
+
+
+def _gtest_name(sweep_dir: Path, bundle_dir: Path, case_id: str) -> str:
+    """The full GTest name the harness registers for a case in this sweep dir."""
+    suite = "_".join(
+        _sanitize_gtest(part) for part in sweep_dir.relative_to(bundle_dir).parts
+    )
+    return f"{suite}.{_sanitize_gtest(case_id)}"
 
 
 def main() -> int:
@@ -248,20 +360,36 @@ def main() -> int:
     ap.add_argument(
         "--bundle-dir", type=Path, required=True, help="root of the bundle tree"
     )
-    ap.add_argument("--tier", default="quick", help="tier folder (default: quick)")
+    ap.add_argument(
+        "--tier",
+        default=None,
+        help="tier folder (default: from the sidecar's suite prefix, else quick)."
+        " Contradicting the sidecar warns; errors under --strict",
+    )
     ap.add_argument(
         "--meta",
         action="append",
         default=[],
-        help="key=value metadata pairs (repeatable)",
+        help="key=value metadata pairs (repeatable). For graphs without a sidecar,"
+        " or a deliberate override of it (warns; errors under --strict)."
+        " seed, format_version, minimum_vram_mb and inputs parse as JSON"
+        " (seed=42 is a number); other keys are stored as strings",
     )
-    ap.add_argument("--seed", type=int, default=None, help="global seed for metadata")
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="global seed for metadata. For graphs without a sidecar, or a"
+        " deliberate override of its seed (warns; errors under --strict)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="report without writing")
     ap.add_argument(
         "--force", action="store_true", help="append even if exact dup exists"
     )
     ap.add_argument(
-        "--strict", action="store_true", help="exit non-zero on exact dup (CI mode)"
+        "--strict",
+        action="store_true",
+        help="exit non-zero on exact dup or sidecar override (CI mode)",
     )
     args = ap.parse_args()
 
@@ -272,22 +400,74 @@ def main() -> int:
         print(f"import_graph: cannot read {args.graph}: {e}", file=sys.stderr)
         return 1
 
-    meta = {"format_version": 1}
+    # The capture sidecar is the metadata base, built the way place_bundles
+    # builds it, so both hops record the same seed and inputs for one capture.
+    sidecar_path, sidecar, sidecar_err = _read_sidecar(args.graph)
+    if sidecar_err is not None:
+        # Refused, not skipped: without the sidecar there is no suite, so the
+        # case would land in quick/ with no reference_source.
+        print(f"  ERROR: bad sidecar {sidecar_path}: {sidecar_err}", file=sys.stderr)
+        return 1
+    # What the capture recorded, including the reference_source derived from
+    # it: overrides are checked against this, not just the raw sidecar keys.
+    captured = dict(sidecar) if sidecar is not None else {}
+    suite = captured.get("operation")
+    found = capture_suite_case(args.graph, suite=suite)
+    if found is not None:
+        captured["reference_source"] = capture_reference_source(*found)
+    meta = dict(captured)
+    meta.setdefault("format_version", 1)
+    captured_tier = tier_for_suite(suite) if suite is not None else None
+    if args.tier is None:
+        args.tier = captured_tier or "quick"
+
+    # Explicit CLI values win. Overriding a value the capture recorded is
+    # allowed but never silent: the sidecar is what the C++ test actually ran.
+    overrides = []
     for kv in args.meta:
         if "=" in kv:
             k, v = kv.split("=", 1)
+            try:
+                v = _parse_meta_value(k, v)
+            except ValueError as e:
+                print(f"import_graph: --meta {k}: {e}", file=sys.stderr)
+                return 1
             if k == "inputs":
-                try:
-                    v = json.loads(v)
-                except (json.JSONDecodeError, TypeError) as e:
-                    print(
-                        f"import_graph: --meta inputs must be a JSON object: {e}",
-                        file=sys.stderr,
-                    )
+                err = inputs_error(v)
+                if err is not None:
+                    print(f"import_graph: --meta {err}", file=sys.stderr)
                     return 1
+            overrides.append((f"--meta {k}", k, v))
             meta[k] = v
     if args.seed is not None:
+        overrides.append(("--seed", "seed", args.seed))
         meta["seed"] = args.seed
+    meta.setdefault("generator", "import_graph.py")
+    if not str(meta.get("reference_source", "")).strip():
+        print(
+            "import_graph: warning: no reference_source in metadata;"
+            " pass --meta reference_source=... to record where this graph came from",
+            file=sys.stderr,
+        )
+
+    conflicts = [
+        (flag, captured[k], v)
+        for flag, k, v in overrides
+        if k in captured and canon(captured[k]) != canon(v)
+    ]
+    # The tier is not metadata, but it picks the CI lane: --tier quick on a
+    # Full/ capture would silently move the case to the smoke lane.
+    if captured_tier is not None and args.tier != captured_tier:
+        conflicts.append(("--tier", captured_tier, args.tier))
+    for flag, was, supplied in conflicts:
+        level = "ERROR" if args.strict else "WARN"
+        print(
+            f"  {level}: {flag} {canon(supplied)} overrides captured"
+            f" {canon(was)} from {sidecar_path}",
+            file=sys.stderr,
+        )
+    if conflicts and args.strict:
+        return 1
 
     # Canonicalize UIDs by tensor name so an imported graph lines up with sweeps
     # built by place_bundles (which does the same). The C++ builder auto-assigns
@@ -313,9 +493,10 @@ def main() -> int:
             expanded = expand(template, case.get("values", {}))
             if canon(expanded) == graph_json:
                 existing_meta = case.get("metadata", {})
-                seed_match = meta.get("seed") is None or existing_meta.get(
-                    "seed"
-                ) == meta.get("seed")
+                # An unknown seed is not a wildcard: the case would run with the
+                # default seed, which differs from an existing case's explicit
+                # one. Two absent seeds do match (both fall back to the default).
+                seed_match = existing_meta.get("seed") == meta.get("seed")
                 inputs_match = canon(meta.get("inputs", {})) == canon(
                     existing_meta.get("inputs", {})
                 )
@@ -357,15 +538,27 @@ def main() -> int:
             )
             return 1
 
+        # existing_cases keep every original key (e.g. golden, tensor_patches);
+        # only their id is (re)assigned above, and any other top-level sweep
+        # key already survives untouched since only sweep["cases"] is
+        # replaced below.
+        sweep["cases"] = existing_cases + [new_case]
+        support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
         if not args.dry_run:
-            sweep["cases"] = [
-                {"id": c["id"], "values": c["values"], "metadata": c["metadata"]}
-                for c in all_cases
-            ]
-            with open(sweep_path, "w") as f:
+            with open(sweep_path, "w", newline="\n") as f:
                 json.dump(sweep, f, indent=2)
                 f.write("\n")
         print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
+        print(
+            "  gtest name: "
+            f"{_gtest_name(sweep_path.parent, args.bundle_dir, new_case['id'])}",
+            file=sys.stderr,
+        )
+        if support_created:
+            print(
+                f"  created empty support.json in {sweep_path.parent}",
+                file=sys.stderr,
+            )
         return 0
 
     # --- No structural match: create new template+sweep ---
@@ -388,21 +581,36 @@ def main() -> int:
     tmap = tensors_by_uid(graph)
     first = tmap[min(tmap)] if tmap else {}
     layout = infer_layout(first.get("dims"), first.get("strides")) or "Default"
-    topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
+    preferred_topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
 
-    out_dir = args.bundle_dir / args.tier / op / topo_name
-    case_entry = {"id": "case", "values": values, "metadata": meta}
+    op_dir = args.bundle_dir / args.tier / op
+    topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
+    out_dir = op_dir / topo_name
+
+    case_entry = {"id": None, "values": values, "metadata": meta}
+    assign_case_ids([case_entry])
     sweep_out = {"version": 1, "cases": [case_entry]}
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
-        with open(out_dir / "graph.template.json", "w") as f:
+    support_created = _ensure_support_json(out_dir, args.dry_run)
+    if not args.dry_run:
+        with open(out_dir / "graph.template.json", "w", newline="\n") as f:
             json.dump(template, f, indent=2)
             f.write("\n")
-        with open(out_dir / "sweep.json", "w") as f:
+        with open(out_dir / "sweep.json", "w", newline="\n") as f:
             json.dump(sweep_out, f, indent=2)
             f.write("\n")
-    print(f"  created new bundle: {out_dir}", file=sys.stderr)
+    print(
+        f"  created new bundle: {out_dir} (case '{case_entry['id']}')",
+        file=sys.stderr,
+    )
+    print(
+        f"  gtest name: {_gtest_name(out_dir, args.bundle_dir, case_entry['id'])}",
+        file=sys.stderr,
+    )
+    if support_created:
+        print(f"  created empty support.json in {out_dir}", file=sys.stderr)
     return 0
 
 

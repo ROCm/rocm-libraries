@@ -445,6 +445,10 @@ struct tensile_params_t {
   /// Prefetch global read depth
   int prefetch_global_read = 2;
 
+  /// Buffer load/store flags - use buffer instructions for global memory access
+  bool buffer_load = true;
+  bool buffer_store = true;
+
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
   int math_clocks_unrolled_loop = 0;
 
@@ -469,6 +473,8 @@ struct tensile_params_t {
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
            wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
+           buffer_load == o.buffer_load &&
+           buffer_store == o.buffer_store &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
@@ -492,6 +498,8 @@ struct tensile_params_t {
                               wave_group_m,
                               wave_group_n,
                               prefetch_global_read,
+                              buffer_load,
+                              buffer_store,
                               math_clocks_unrolled_loop,
                               swizzle_a,
                               swizzle_b,
@@ -549,6 +557,12 @@ struct config_t {
 
   /// Whether output D is accessed with cache-flags (streaming/non-temporal).
   int cache_hints_d = 0;
+
+  /// Filled by memoize_non_temporal_availability() when the candidate list is
+  /// built. True when this macro tile has a non-temporal read of that operand
+  /// in the list. rank_configs() reads these and does not rescan.
+  bool non_temporal_a_available = false;
+  bool non_temporal_b_available = false;
 
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;

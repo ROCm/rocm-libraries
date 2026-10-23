@@ -1,0 +1,14 @@
+{% extends "device_topk_air.h.jinja2" %}
+
+{% block config_constructor -%}
+    segmented_topk_air_config_params{
+        { {{ config.block_size_x }}, {{ config.ipt }} },
+        {{ config.radix_bits }},
+        {{ config.adapt_coeff }},
+        {{ config.limit }}
+    }
+{%- endblock %}
+
+{% block config_base_type -%}
+    segmented_topk_air_config_params_base<key_type, value_type, size_type>
+{%- endblock %}

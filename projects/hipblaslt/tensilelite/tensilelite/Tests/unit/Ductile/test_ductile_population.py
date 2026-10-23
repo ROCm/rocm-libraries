@@ -6,7 +6,7 @@ import copy
 import numpy as np
 import pytest
 
-from Tensile.ductile.core.population import (
+from tensilelite.ductile.core.population import (
     ExceedsCapacity,
     Individual,
     IndividualSet,

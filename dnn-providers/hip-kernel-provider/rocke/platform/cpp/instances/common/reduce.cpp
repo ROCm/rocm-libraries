@@ -550,21 +550,26 @@ rocke_kernel_def_t*
             total = rocke_block_lds_reduce(b, acc, lds, tid, BS, combine);
         }
 
-        /* if spec.op == "mean": total = total * rcp(const_c(float(N))) */
+        /* if spec.op == "mean":
+         *     f64: total = fdiv(total, const_c(float(N)))  (one rounding)
+         *     else: total = total * rcp(const_c(float(N))) */
         if(strcmp(spec->op, "mean") == 0)
         {
-            total = rocke_b_fmul(
-                b, total, rocke_b_rcp(b, rocke_reduce2d_const_c(b, is_f64, (double)N)));
+            rocke_value_t* n_value = rocke_reduce2d_const_c(b, is_f64, (double)N);
+            if(is_f64)
+                total = rocke_b_fdiv(b, total, n_value);
+            else
+                total = rocke_b_fmul(b, total, rocke_b_rcp(b, n_value));
         }
 
         /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):
-         *     if is_f64: b.global_store(Y, row, total)
+         *     if is_f64: b.global_store(Y, row, total, align=8)
          *     else: store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
         {
             rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
             rocke_b_region_enter(b, iff.then_region);
             if(is_f64)
-                rocke_b_global_store(b, Y, row, total, 0);
+                rocke_b_global_store(b, Y, row, total, 8);
             else
                 rocke_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
             rocke_b_region_leave(b);

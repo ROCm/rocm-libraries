@@ -199,7 +199,7 @@ void rocke_sage_mfma_fold_scales(rocke_sage_mfma_ctx_t* ctx)
  *  extra_score_transform closure _k_block_scale_transform (Python lines
  *  534-553):
  *
- *      def _k_block_scale_transform(b, score, kt, _row_in_atom):
+ *      def _k_block_scale_transform(b, score, kt, _row, _query_pos, _key_pos):
  *          k_pos = b.mul(kt, c_block_k)
  *          k_block_idx = _magic_div(b, k_pos, spec.k_scale.scale_block)
  *          k_scale_v = load_k_scale_for_block(b, k_scale_ptr, spec=spec.k_scale,
@@ -213,6 +213,8 @@ rocke_value_t* rocke_sage_mfma_k_block_scale_transform(rocke_ir_builder_t* b,
                                                        rocke_value_t* score_log2,
                                                        rocke_value_t* kt,
                                                        int row_in_atom,
+                                                       rocke_value_t* query_pos,
+                                                       rocke_value_t* key_pos,
                                                        void* user)
 {
     rocke_sage_mfma_ctx_t* ctx = (rocke_sage_mfma_ctx_t*)user;
@@ -221,6 +223,8 @@ rocke_value_t* rocke_sage_mfma_k_block_scale_transform(rocke_ir_builder_t* b,
     rocke_value_t* k_scale_v;
 
     (void)row_in_atom; /* Python `_row_in_atom` -- unused */
+    (void)query_pos;
+    (void)key_pos;
 
     if(ctx == NULL)
     {

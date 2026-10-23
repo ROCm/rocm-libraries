@@ -121,7 +121,7 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
         p.dtype,
         p.block_size,
     ), "D128 SWA GQA-4:1 bf16 must be fold-eligible"
-    spec = au._tiled_spec_from_problem(p)
+    spec = au._tiled_spec_from_problem(p, "gfx942")
     ir = print_ir(build_gfx942_4warp_gqa(spec, arch="gfx942"))
     assert re.search(r"_4wgqa_fold\b", ir), "cohort must build the fold kernel"
 
