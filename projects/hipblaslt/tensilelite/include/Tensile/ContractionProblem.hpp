@@ -320,6 +320,16 @@ namespace TensileLite
             return m_useDeviceUserArguments;
         }
 
+        uint32_t world() const
+        {
+            return m_world;
+        }
+
+        void setWorld(uint32_t world)
+        {
+            m_world = world;
+        }
+
     protected:
         friend class ContractionProblemGemm;
         std::vector<TensorDescriptor> m_tensors;
@@ -333,6 +343,8 @@ namespace TensileLite
         rocisa::DataType m_computeInputTypeB;
 
         bool m_useDeviceUserArguments = false;
+
+        uint32_t m_world = 1;
     };
 
     /**
@@ -366,6 +378,7 @@ namespace TensileLite
             GATE_RESIDUAL = 17,
             // Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
             SCALEZEROA    = 18,
+            A2A_RECV      = 19,
             TENSOR_COUNT
         };
 
@@ -1319,14 +1332,17 @@ namespace TensileLite
             m_fusedA2AExtent = extent;
         }
 
-        uint32_t fusedA2AWorld() const
+        // recv[W][N][AM/W] in D's type.
+        void setA2ARecv()
         {
-            return m_fusedA2AWorld;
-        }
-
-        void setFusedA2AWorld(uint32_t world)
-        {
-            m_fusedA2AWorld = world;
+            const size_t world  = m_world;
+            const size_t nShard = m_fusedA2AExtent / world;
+            const size_t tokens = freeSizeB(0);
+            m_tensors[ContractionProblemGemm::TENSOR::A2A_RECV]
+                = {"a2aRecv",
+                   m_tensors[ContractionProblemGemm::TENSOR::D].dataType(),
+                   {nShard, tokens, world},
+                   {1, nShard, nShard * tokens}};
         }
 
         size_t mxBlockA() const
@@ -1599,7 +1615,6 @@ namespace TensileLite
         bool             m_swizzleTensorB          = false;
         bool             m_fusedGemmA2A            = false;
         int64_t          m_fusedA2AExtent          = 0;
-        uint32_t         m_fusedA2AWorld           = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;
@@ -1775,6 +1790,7 @@ namespace TensileLite
         void*                           fusedA2ACounter = nullptr;
         uint32_t                        fusedA2AMyRank  = 0;
         uint32_t                        fusedA2ADrain   = 0;
+        void*                           a2aRecv         = nullptr;
 
         // Workspace
         void* ws = nullptr;
