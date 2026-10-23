@@ -18,7 +18,7 @@ import threading
 import time
 import math
 
-from rocjitsu_sweep_plan import make_plan, sha256, POLICY, REGULAR_POLICY
+from rocjitsu_sweep_plan import make_batches, make_plan, sha256, POLICY, REGULAR_POLICY
 from rocjitsu_known_failures import apply_known_failures
 
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
@@ -72,7 +72,7 @@ def solution_report(job, result, backend):
         state,
         f"{observed}/{planned}",
         f"{result.get('target_dispatches', '?')}/{(planned - len(skipped)) * job.get('target_dispatches_per_case', 2 if backend == 'bench' else 1)}",
-        f"{result['seconds']:.2f}" if "seconds" in result else "—",
+        f"{result['batch_seconds']:.2f}" if "batch_seconds" in result else "—",
         notes or "Identity, numerical and race checks passed",
     ]
 
@@ -100,7 +100,7 @@ def render_report(manifest, summary):
         "SKIPPED cases did not run; PASS WITH SKIPS validates only the remaining cases.",
         f"Full shapes, identities, commands and logs are in the uploaded `sweep-{backend}/` artifacts.",
         "",
-        "| Solution index | Result | Numerical passes | Target dispatches | Seconds | Notes |",
+        "| Solution index | Result | Numerical passes | Target dispatches | Batch seconds | Notes |",
         "|---:|:---|---:|---:|---:|:---|",
     ]
     for job in manifest["jobs"]:
@@ -108,12 +108,12 @@ def render_report(manifest, summary):
             row = solution_report(job, results[job["id"]], backend)
         else:
             final = "unstarted" in summary
-            assigned = job["id"] < summary.get("assigned_jobs", 0)
+            assigned = job["id"] in summary.get("assigned_job_ids", [])
             state = "INCOMPLETE" if assigned else "PENDING"
             if final or (summary.get("stop") and not assigned):
                 state = "NOT RUN"
             row = [str(job["solutions"][0]["index"]), state, "—", "—", "—", ""]
-        row[-1] += f" (batch-{job['id']:03})"
+        row[-1] += f" (batch-{job.get('batch_id', job['id']):03})"
         lines.append("| " + " | ".join(map(cell, row)) + " |")
     lines += [
         "",
@@ -496,6 +496,50 @@ def classify_bench(job, text, returncode):
     )
 
 
+def classify_bench_batch(jobs, text, returncode):
+    """Check ordered records individually and retain diagnostics for the whole process."""
+    ends = [m.end() for m in re.finditer(r"^\s*--kernel name:[^\n]*", text, re.M)]
+    expected_records = sum(len(j["cases"]) for j in jobs)
+    batch_errors = []
+    if len(ends) != expected_records:
+        batch_errors.append(
+            f"Batch expected {expected_records} record boundaries, observed {len(ends)}"
+        )
+    races = re.findall(r"^RACE .*", text, re.M)
+    warnings = Counter(line for line in text.splitlines() if "[rj warn]" in line)
+    if races:
+        batch_errors.append(f"Batch reported {len(races)} races (none suppressed)")
+    if warnings:
+        batch_errors.append(
+            f"Batch reported {sum(warnings.values())} emulator warnings"
+        )
+    # A repeated kernel name may belong to several indices. Count every occurrence.
+    expected_dispatches = Counter()
+    for job in jobs:
+        expected_dispatches[job["solutions"][0]["kernel"]] += len(
+            job["cases"]
+        ) * job.get("target_dispatches_per_case", 2)
+    dispatches = Counter(
+        re.findall(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', text, re.M)
+    )
+    for kernel, wanted in expected_dispatches.items():
+        if dispatches[kernel] != wanted:
+            batch_errors.append(
+                f"Batch target dispatch mismatch for {kernel}: expected {wanted}, observed {dispatches[kernel]}"
+            )
+    results, start, record = [], 0, 0
+    for job in jobs:
+        record += len(job["cases"])
+        end = ends[record - 1] if record < len(ends) else len(text)
+        result = classify_bench(job, text[start:end], returncode)
+        result["batch_errors"] = batch_errors
+        result["errors"] += batch_errors
+        result["failed"] = bool(result["errors"])
+        results.append(result)
+        start = end
+    return results
+
+
 def convert_bench_input(client, stem, timeout, env):
     """Use the converter/template installed with the tested client."""
     helper = client.parent / "hipblaslt_gentest.py"
@@ -536,10 +580,13 @@ def execute_command(command, log, timeout, env):
             raise
 
 
-def run_queue(jobs, workers, execute, progress, deadline=None):
+def run_queue(
+    batches, workers, execute, progress, deadline=None, continue_on_failure=False
+):
     lock = threading.Lock()
     results = []
-    next_job = 0
+    next_batch = 0
+    assigned = []
     active = 0
     maximum = 0
     stop_snapshot = None
@@ -550,7 +597,8 @@ def run_queue(jobs, workers, execute, progress, deadline=None):
             stop_snapshot = {
                 "reason": reason,
                 "trigger_job": trigger_job,
-                "assigned_jobs": next_job,
+                "assigned_jobs": len(assigned),
+                "assigned_job_ids": assigned.copy(),
                 "in_flight": active,
             }
 
@@ -558,48 +606,57 @@ def run_queue(jobs, workers, execute, progress, deadline=None):
         return deadline is not None and time.monotonic() >= deadline
 
     def worker(slot):
-        nonlocal next_job, active, maximum
+        nonlocal next_batch, active, maximum
         while True:
             with lock:
-                if stop_snapshot is not None or next_job == len(jobs):
+                if stop_snapshot is not None or next_batch == len(batches):
                     return
                 if expired():
                     stop("suite-timeout")
                     return
-                job = jobs[next_job]
-                next_job += 1
+                batch = batches[next_batch]
+                next_batch += 1
+                assigned.extend(j["id"] for j in batch)
                 active += 1
                 maximum = max(maximum, active)
             try:
-                result = execute(job, slot)
+                completed = execute(batch, slot)
             except Exception as error:
-                result = {
-                    "id": job["id"],
-                    "failed": True,
-                    "errors": [repr(error)],
-                    "cases": [],
-                }
+                completed = [
+                    {
+                        "id": job["id"],
+                        "failed": True,
+                        "errors": [repr(error)],
+                        "cases": [],
+                    }
+                    for job in batch
+                ]
             with lock:
-                results.append(result)
+                results.extend(completed)
                 active -= 1
                 if expired():
-                    stop("suite-timeout", job["id"])
-                elif result["failed"]:
-                    stop("job-failure", job["id"])
+                    stop("suite-timeout", batch[0]["id"])
+                elif not continue_on_failure:
+                    failed = next((r for r in completed if r["failed"]), None)
+                    if failed is not None:
+                        stop("job-failure", failed["id"])
                 try:
                     progress(
                         {
                             "results": results,
-                            "assigned_jobs": next_job,
+                            "completed": completed,
+                            "assigned_jobs": len(assigned),
+                            "assigned_job_ids": assigned.copy(),
                             "stop": stop_snapshot,
                         }
                     )
                 except Exception as error:
-                    result["failed"] = True
-                    result.setdefault("errors", []).append(
-                        f"Cannot write progress: {error!r}"
-                    )
-                    stop("progress-error", job["id"])
+                    for result in completed:
+                        result["failed"] = True
+                        result.setdefault("errors", []).append(
+                            f"Cannot write progress: {error!r}"
+                        )
+                    stop("progress-error", batch[0]["id"])
 
     threads = [threading.Thread(target=worker, args=(slot,)) for slot in range(workers)]
     for thread in threads:
@@ -608,7 +665,8 @@ def run_queue(jobs, workers, execute, progress, deadline=None):
         thread.join()
     return {
         "results": sorted(results, key=lambda r: r["id"]),
-        "unstarted": [j["id"] for j in jobs[next_job:]],
+        "unstarted": [j["id"] for batch in batches[next_batch:] for j in batch],
+        "assigned_job_ids": assigned,
         "max_active": maximum,
         "stop": stop_snapshot,
     }
@@ -639,6 +697,22 @@ def run(args):
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
         manifest, config = prepare(args)
+        batch_size = getattr(args, "batch_size", None)
+        if batch_size is None:
+            batch_size = 8 if args.backend == "bench" else 1
+        if args.backend == "tensile" and batch_size != 1:
+            raise ValueError("Tensile backend requires batch size 1")
+        batches = make_batches(
+            manifest["jobs"], batch_size, group_by_shard=args.backend == "bench"
+        )
+        for batch_id, batch in enumerate(batches):
+            for job in batch:
+                job["batch_id"] = batch_id
+        manifest.update(
+            batch_size=batch_size,
+            batches=[[j["id"] for j in batch] for batch in batches],
+        )
+        write_json(args.reports / "manifest.json", manifest)
         print(
             f"{args.backend}: selected {len(manifest['jobs'])} solutions, "
             f"{manifest['planned_cases']} cases; preparation {manifest['preparation_seconds']:.2f}s. "
@@ -670,6 +744,8 @@ def run(args):
                 "timeout": args.timeout,
                 "suite_timeout": args.suite_timeout,
                 "backend": args.backend,
+                "batch_size": batch_size,
+                "continue_on_failure": getattr(args, "continue_on_failure", False),
                 "library_dir": manifest["library_dir"],
                 "controlled_environment": {
                     k: env[k]
@@ -684,149 +760,187 @@ def run(args):
             },
         )
 
-        def execute(job, slot):
+        def execute(batch, slot):
             begin = time.monotonic()
-            stem = args.reports / f"batch-{job['id']:03}"
-            if "planning_error" in job:
-                result = {
-                    "id": job["id"],
-                    "failed": True,
-                    "target_dispatches": 0,
-                    "errors": [job["planning_error"]],
-                    "cases": [
+            batch_id = batch[0]["batch_id"]
+            stem = args.reports / f"batch-{batch_id:03}"
+            completed, runnable = [], []
+            for job in batch:
+                if "planning_error" in job:
+                    completed.append(
                         {
-                            "case_id": c["id"],
-                            "index": job["solutions"][0]["index"],
-                            "shape": c["shape"],
-                            "status": "UNSUPPORTED_CASE",
+                            "id": job["id"],
+                            "failed": True,
+                            "errors": [job["planning_error"]],
+                            "target_dispatches": 0,
+                            "cases": [
+                                {
+                                    "case_id": c["id"],
+                                    "index": job["solutions"][0]["index"],
+                                    "shape": c["shape"],
+                                    "status": "UNSUPPORTED_CASE",
+                                }
+                                for c in job["cases"]
+                            ],
                         }
-                        for c in job["cases"]
-                    ],
-                }
-                write_json(stem.with_suffix(".result.json"), result)
-                return result
-            skipped = skipped_cases(job)
-            job = {**job, "cases": [c for c in job["cases"] if not c.get("skip")]}
-            if not job["cases"]:
-                result = {
-                    "id": job["id"],
-                    "failed": False,
-                    "errors": [],
-                    "cases": skipped,
-                    "target_dispatches": 0,
-                    "auxiliary_dispatches": {},
-                    "race_headers": [],
-                    "warnings": {},
-                    "returncode": None,
-                    "seconds": 0,
-                }
-                write_json(stem.with_suffix(".result.json"), result)
-                return result
-            if args.backend == "tensile":
-                options = client_options(job, stem.with_suffix(".csv"))
-                ini = [f"{k}={v}" for k, v in options.items()]
-                ini += [
-                    "problem-size=" + ",".join(map(str, c["shape"]))
-                    for c in job["cases"]
-                ]
-                ini += ["code-object=" + path for path in job["code_objects"]]
-                stem.with_suffix(".ini").write_text(
-                    "\n".join(ini) + "\n", encoding="utf-8"
-                )
-                client_args = ["--config-file", str(stem.with_suffix(".ini"))]
-            else:
-                import yaml
-
-                stem.with_suffix(".yaml").write_text(
-                    "Tests:\n"
-                    + (
-                        job["bench_yaml"]
-                        if "bench_yaml" in job
-                        else yaml.safe_dump(bench_options(job), sort_keys=False)
-                    ),
-                    encoding="utf-8",
-                )
-                # Convert outside emulation with the active Python and the
-                # template shipped alongside this particular bench binary.
-                rc = convert_bench_input(
-                    args.client,
-                    stem,
-                    min(args.timeout, deadline - time.monotonic()),
-                    env,
-                )
-                if rc != 0:
-                    result = finish_result(
-                        job,
-                        "",
-                        rc,
-                        {"id": job["id"], "cases": []},
-                        ["Bench YAML conversion failed; see conversion.log"],
-                        job.get("target_dispatches_per_case", 2),
                     )
-                    result["cases"] += skipped
-                    result["seconds"] = time.monotonic() - begin
-                    write_json(stem.with_suffix(".result.json"), result)
-                    return result
-                client_args = [
-                    "--host_side_fill_kernel",
-                    "--data",
-                    str(stem.with_suffix(".data")),
-                ]
-            command = [
-                "taskset",
-                "-c",
-                str(cpus[slot]),
-                str(args.rocjitsu),
-                "--config",
-                str(config),
-                "--",
-                str(args.client),
-                *client_args,
-            ]
-            write_json(stem.with_suffix(".command.json"), command)
-            launch_begin = time.monotonic()
-            rc = execute_command(
-                command,
-                stem.with_suffix(".log"),
-                min(args.timeout, deadline - launch_begin),
-                env,
+                    continue
+                active_job = {
+                    **job,
+                    "cases": [c for c in job["cases"] if not c.get("skip")],
+                }
+                if active_job["cases"]:
+                    runnable.append(active_job)
+                else:
+                    completed.append(
+                        {
+                            "id": job["id"],
+                            "failed": False,
+                            "errors": [],
+                            "cases": [],
+                            "target_dispatches": 0,
+                            "auxiliary_dispatches": {},
+                            "race_headers": [],
+                            "warnings": {},
+                            "returncode": None,
+                        }
+                    )
+            # Charge conversion and native execution to one shared batch deadline.
+            batch_deadline = min(deadline, begin + args.timeout * len(runnable))
+            conversion_seconds = native_seconds = 0
+            if runnable:
+                if args.backend == "tensile":
+                    job = runnable[0]
+                    options = client_options(job, stem.with_suffix(".csv"))
+                    ini = [f"{k}={v}" for k, v in options.items()]
+                    ini += [
+                        "problem-size=" + ",".join(map(str, c["shape"]))
+                        for c in job["cases"]
+                    ]
+                    ini += ["code-object=" + path for path in job["code_objects"]]
+                    write_text(stem.with_suffix(".ini"), "\n".join(ini) + "\n")
+                    client_args = ["--config-file", str(stem.with_suffix(".ini"))]
+                    rc = 0
+                else:
+                    import yaml
+
+                    write_text(
+                        stem.with_suffix(".yaml"),
+                        "Tests:\n"
+                        + "".join(
+                            (
+                                job["bench_yaml"]
+                                if "bench_yaml" in job
+                                else yaml.safe_dump(bench_options(job), sort_keys=False)
+                            )
+                            for job in runnable
+                        ),
+                    )
+                    conversion_begin = time.monotonic()
+                    rc = convert_bench_input(
+                        args.client, stem, batch_deadline - conversion_begin, env
+                    )
+                    conversion_seconds = time.monotonic() - conversion_begin
+                    client_args = [
+                        "--host_side_fill_kernel",
+                        "--data",
+                        str(stem.with_suffix(".data")),
+                    ]
+                if rc:
+                    completed += [
+                        finish_result(
+                            job,
+                            "",
+                            rc,
+                            {"id": job["id"], "cases": []},
+                            ["Bench YAML conversion failed; see batch conversion.log"],
+                            job.get("target_dispatches_per_case", 2),
+                        )
+                        for job in runnable
+                    ]
+                else:
+                    command = [
+                        "taskset",
+                        "-c",
+                        str(cpus[slot]),
+                        str(args.rocjitsu),
+                        "--config",
+                        str(config),
+                        "--",
+                        str(args.client),
+                        *client_args,
+                    ]
+                    write_json(stem.with_suffix(".command.json"), command)
+                    launch_begin = time.monotonic()
+                    rc = execute_command(
+                        command,
+                        stem.with_suffix(".log"),
+                        batch_deadline - launch_begin,
+                        env,
+                    )
+                    native_seconds = time.monotonic() - launch_begin
+                    text = stem.with_suffix(".log").read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                    completed += (
+                        [classify_tensile(runnable[0], text, rc)]
+                        if args.backend == "tensile"
+                        else classify_bench_batch(runnable, text, rc)
+                    )
+                if rc == 124:
+                    for result in completed:
+                        result["errors"].append(
+                            "Suite time budget exhausted"
+                            if time.monotonic() >= deadline
+                            else "Batch timeout"
+                        )
+                        result["failed"] = True
+            seconds = time.monotonic() - begin
+            for result in completed:
+                result.update(batch_id=batch_id, cpu=cpus[slot], batch_seconds=seconds)
+            write_json(
+                stem.with_suffix(".result.json"),
+                {
+                    "id": batch_id,
+                    "jobs": [j["id"] for j in batch],
+                    "seconds": seconds,
+                    "conversion_seconds": conversion_seconds,
+                    "native_seconds": native_seconds,
+                    "results": completed,
+                },
             )
-            classifier = (
-                classify_tensile if args.backend == "tensile" else classify_bench
-            )
-            result = classifier(
-                job,
-                stem.with_suffix(".log").read_text(encoding="utf-8", errors="replace"),
-                rc,
-            )
-            result["cases"] += skipped
-            if rc == 124:
-                result["errors"].append(
-                    "Suite time budget exhausted"
-                    if time.monotonic() >= deadline
-                    else "Process timeout"
-                )
-            result.update(cpu=cpus[slot], seconds=time.monotonic() - begin)
-            write_json(stem.with_suffix(".result.json"), result)
-            return result
+            return completed
 
         def progress(value):
+            for result in value["completed"]:
+                job = manifest["jobs"][result["id"]]
+                observed = {c["case_id"] for c in result["cases"]}
+                result["cases"] += [
+                    c for c in skipped_cases(job) if c["case_id"] not in observed
+                ]
+                result["batch_id"] = job["batch_id"]
+                write_json(
+                    args.reports / f"solution-{job['id']:03}.result.json", result
+                )
             write_json(args.reports / "progress.json", value)
             write_text(args.reports / "summary.md", render_report(manifest, value))
-            result = value["results"][-1]
-            row = solution_report(manifest["jobs"][result["id"]], result, args.backend)
-            print(
-                f"{args.backend} solution {row[0]}: {row[1]}; numerical={row[2]}; dispatches={row[3]}; seconds={row[4]}; {row[5]}",
-                flush=True,
-            )
+            for result in value["completed"]:
+                row = solution_report(
+                    manifest["jobs"][result["id"]], result, args.backend
+                )
+                print(
+                    f"{args.backend} solution {row[0]}: {row[1]}; numerical={row[2]}; dispatches={row[3]}; batch_seconds={row[4]}; {row[5]}",
+                    flush=True,
+                )
 
         start = time.monotonic()
         summary = run_queue(
-            manifest["jobs"],
+            batches,
             args.workers,
             execute,
             progress,
             deadline=deadline,
+            continue_on_failure=getattr(args, "continue_on_failure", False),
         )
         by_id = {j["id"]: j for j in manifest["jobs"]}
         counts = Counter()
@@ -840,7 +954,6 @@ def run(args):
             if skipped:
                 result["cases"] += skipped
                 observed.update(c["case_id"] for c in skipped)
-                write_json(args.reports / f"batch-{job['id']:03}.result.json", result)
             missing += [
                 {
                     "job": job["id"],
@@ -852,6 +965,8 @@ def run(args):
                 if c["id"] not in observed
             ]
             counts.update(c["status"] for c in result["cases"])
+            result["batch_id"] = job["batch_id"]
+            write_json(args.reports / f"solution-{job['id']:03}.result.json", result)
         unstarted = [
             {
                 "job": j,
@@ -914,6 +1029,16 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Solution indices per native process (bench: 8; tensile: 1)",
+    )
+    parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="Finish the selected workload after failures; still exit unsuccessfully",
+    )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument(
         "--solutions",
@@ -956,7 +1081,12 @@ def main():
         required=True,
         help="Seed for deterministic solution-name ranking; CI always uses 0",
     )
-    parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120,
+        help="Seconds per solution; multiplied by the number of runnable solutions in a batch",
+    )
     parser.add_argument(
         "--suite-timeout",
         type=float,
@@ -970,16 +1100,20 @@ def main():
             if args.policy == REGULAR_POLICY
             else "known_failures.yaml"
         )
+    if args.batch_size is None:
+        args.batch_size = 8 if args.backend == "bench" else 1
+    if args.batch_size < 1 or (args.backend == "tensile" and args.batch_size != 1):
+        parser.error("Batch size must be positive; tensile requires batch size 1")
     if args.policy == REGULAR_POLICY and args.backend != "bench":
         parser.error("regular-v1 requires the bench backend")
     if (
-        not 1 <= args.workers <= 4
+        not 1 <= args.workers <= 8
         or args.solutions < 1
         or not 0 < args.timeout <= 120
         or not 0 < args.suite_timeout <= 1500
     ):
         parser.error(
-            "Limits: 1–4 workers, a positive solution count, process timeout at most "
+            "Limits: 1–8 workers, a positive solution count, process timeout at most "
             "120 seconds, suite timeout at most 1500 seconds"
         )
     if args.all_solutions:

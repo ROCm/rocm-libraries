@@ -414,3 +414,19 @@ def make_plan(
         "library_dir": str(library_dir),
         "jobs": jobs,
     }
+
+
+def make_batches(jobs, size, *, group_by_shard):
+    """Preserve selection IDs and order within each shard; allow boundary crossings."""
+    if size < 1:
+        raise ValueError("Batch size must be positive")
+    if group_by_shard:
+        # Shards occupy disjoint index ranges in the packaged lazy library.
+        # Their first selected indices give the same ordering as their range starts.
+        first_index = {}
+        for job in jobs:
+            index = job["solutions"][0]["index"]
+            shard = job["library"]
+            first_index[shard] = min(first_index.get(shard, index), index)
+        jobs = sorted(jobs, key=lambda j: (first_index[j["library"]], j["library"]))
+    return [jobs[start : start + size] for start in range(0, len(jobs), size)]
