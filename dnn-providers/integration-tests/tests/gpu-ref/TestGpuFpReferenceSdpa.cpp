@@ -2085,3 +2085,77 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
         }
     }
 }
+
+// ============================================================================
+// Explicit-mask dropout (cuDNN custom dropout): GPU reference vs CPU reference,
+// mask broadcast over batch, with GQA, bias and bottom-right causal.
+// ============================================================================
+
+TEST(TestGpuSdpaFwdDropoutFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 5;
+    constexpr int64_t SKV = 8;
+    constexpr int64_t D = 16;
+    Tensor<float> q({BATCH, H, SQ, D});
+    Tensor<float> k({BATCH, HKV, SKV, D});
+    Tensor<float> v({BATCH, HKV, SKV, D});
+    Tensor<float> bias({SQ, SKV});
+    Tensor<float> keepMask({1, H, SQ, SKV});
+    q.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
+    v.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 1);
+    bias.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 2);
+    for(size_t i = 0; i < keepMask.elementCount(); ++i)
+    {
+        keepMask.memory().hostData()[i] = (i * 7 % 5 < 3) ? 1.0f : 0.0f;
+    }
+    for(auto* t : {&q, &k, &v, &bias, &keepMask})
+    {
+        t->memory().hostData();
+    }
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oCpu,
+                                0.25f,
+                                static_cast<const TensorBase<float>*>(&bias),
+                                -1,
+                                0,
+                                false,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &keepMask,
+                                1.0f / 0.6f);
+    GpuFpReferenceSdpa::fprop(q,
+                              k,
+                              v,
+                              oGpu,
+                              0.25f,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              0,
+                              false,
+                              nullptr,
+                              SdpaSoftmaxProbabilityMode::FLOAT,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              nullptr,
+                              0,
+                              nullptr,
+                              &keepMask,
+                              1.0f / 0.6f);
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+}

@@ -149,6 +149,9 @@ struct GpuSdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
     int64_t pagedMaxSeqKv;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
+    // Explicit-mask dropout (cuDNN custom dropout): mask and single-element scale.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
 };
 
 template <typename QDataType,
@@ -228,6 +231,17 @@ public:
                                _params.sinkTensor->strides);
         }
 
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> dropoutMask;
+        std::optional<float> dropoutScale;
+        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        {
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = resolveScalarOperand(
+                *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -252,7 +266,9 @@ public:
                 pageTableK.has_value() ? &pageTableK.value() : nullptr,
                 pageTableV.has_value() ? &pageTableV.value() : nullptr,
                 _params.pagedMaxSeqKv,
-                sinkTensor.has_value() ? &sinkTensor.value() : nullptr);
+                sinkTensor.has_value() ? &sinkTensor.value() : nullptr,
+                dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+                dropoutScale);
     }
 
 private:
@@ -332,12 +348,8 @@ public:
             return false;
         }
 
-        // Unsupported: dropout
-        if(nodeAttributes->dropout_probability().has_value()
-           || nodeAttributes->seed_tensor_uid().has_value()
-           || nodeAttributes->offset_tensor_uid().has_value()
-           || nodeAttributes->dropout_mask_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_tensor_uid().has_value()
+        // Dropout: only cuDNN's explicit-mask form, as on the CPU; Philox and RNG_DUMP declined.
+        if(!isSupportedSdpaDropout(*nodeAttributes, tensorMap)
            || nodeAttributes->rng_dump_tensor_uid().has_value())
         {
             return false;
@@ -445,34 +457,43 @@ public:
 
         const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaFwdPlan");
 
+        GpuSdpaFwdParams params(
+            *tensorMap.at(nodeAttributes->q_tensor_uid()),
+            *tensorMap.at(nodeAttributes->k_tensor_uid()),
+            *tensorMap.at(nodeAttributes->v_tensor_uid()),
+            *tensorMap.at(nodeAttributes->o_tensor_uid()),
+            std::move(scaleTensor),
+            band.leftBound,
+            band.rightBound,
+            band.topLeftAlignment,
+            attnMaskPtr,
+            lsePtr,
+            nodeAttributes->seq_len_q_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->seq_len_kv_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->page_table_k_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->page_table_k_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->page_table_v_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
+                : nullptr,
+            sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap),
+            nodeAttributes->sink_token_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                : nullptr);
+        if(nodeAttributes->dropout_mask_tensor_uid().has_value())
+        {
+            params.dropoutMaskTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->dropout_mask_tensor_uid().value()));
+            params.dropoutScaleTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->dropout_scale_tensor_uid().value()));
+        }
         return std::make_unique<
             GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float, MaskDataType>>(
-            GpuSdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->k_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->v_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                             std::move(scaleTensor),
-                             band.leftBound,
-                             band.rightBound,
-                             band.topLeftAlignment,
-                             attnMaskPtr,
-                             lsePtr,
-                             nodeAttributes->seq_len_q_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
-                                 : nullptr,
-                             nodeAttributes->seq_len_kv_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
-                                 : nullptr,
-                             nodeAttributes->page_table_k_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->page_table_k_tensor_uid().value())
-                                 : nullptr,
-                             nodeAttributes->page_table_v_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
-                                 : nullptr,
-                             sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap),
-                             nodeAttributes->sink_token_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
-                                 : nullptr));
+            std::move(params));
     }
 };
 

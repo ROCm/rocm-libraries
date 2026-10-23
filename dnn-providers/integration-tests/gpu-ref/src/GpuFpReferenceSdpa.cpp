@@ -88,7 +88,10 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        const SdpaPagedSide& pagedK,
                                        const SdpaPagedSide& pagedV,
                                        const float* sinkPtr,
-                                       int64_t sinkStride)
+                                       int64_t sinkStride,
+                                       const float* dropoutMaskPtr,
+                                       const std::vector<int64_t>& dropoutMaskStrides,
+                                       float dropoutScale)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -137,6 +140,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.blockSizeV = static_cast<long long>(pagedV.blockSize);
     args.sink = sinkPtr;
     args.sinkStride = static_cast<long long>(sinkStride);
+    args.dropoutMask = dropoutMaskPtr;
+    args.dropoutMaskStr = toSdpaStrides(dropoutMaskStrides);
+    args.dropoutScale = dropoutScale;
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
@@ -202,6 +208,10 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.seqLenKv = launch.seqLenKv;
     args.seqLenQStride = static_cast<long long>(launch.seqLenQStride);
     args.seqLenKvStride = static_cast<long long>(launch.seqLenKvStride);
+    args.dropoutMask = launch.dropoutMask;
+    args.dropoutMaskStr = toSdpaStrides(launch.dropoutMaskStrides);
+    args.dropoutScale = launch.dropoutScale;
+    args.dropoutScaleInv = launch.dropoutScaleInv;
 
     const auto run = [&](const char* name, int64_t elements) {
         auto& kernel = compiler.getOrCompile("GpuRefSdpaBwd.cpp", defines, name);
