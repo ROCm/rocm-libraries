@@ -4,14 +4,20 @@
 if(TENSILELITE_ENABLE_JIT)
     target_sources(tensilelite-tests
         PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/JitCompiler_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/Compiler_test.cpp"
     )
 
     target_link_libraries(tensilelite-tests PRIVATE roc::tensilelite-jit)
 endif()
 
 if(TENSILELITE_ENABLE_CODEGEN)
-    add_subdirectory(codegen)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMM_test.cpp"
+    )
+    # API tests include the shared support headers as Codegen/<name>.hpp.
+    target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_subdirectory(Codegen)
 endif()
 
 if(TENSILELITE_ENABLE_JIT_PYTHON)

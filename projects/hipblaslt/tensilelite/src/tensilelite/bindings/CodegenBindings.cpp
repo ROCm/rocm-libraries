@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <tensilelite/codegen/SkinnyGEMM.hpp>
-#include <tensilelite/codegen/Target.hpp>
+#include <tensilelite/API/SkinnyGEMM.hpp>
+#include <tensilelite/Codegen/Target.hpp>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -12,6 +12,7 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
+using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
 
 NB_MODULE(tensilelite_codegen, m) {

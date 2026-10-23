@@ -97,11 +97,10 @@ add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_JIT)
     find_package(amd_comgr CONFIG REQUIRED)
-    add_subdirectory(src/tensilelite)
 endif()
 
-if(TENSILELITE_ENABLE_CODEGEN)
-    add_subdirectory(src/tensilelite/codegen)
+if(TENSILELITE_ENABLE_JIT OR TENSILELITE_ENABLE_CODEGEN)
+    add_subdirectory(src/tensilelite)
 endif()
 
 if(TENSILELITE_ENABLE_AUTOBUILD)

@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <tensilelite/Compiler.hpp>
+#include <tensilelite/API/Compiler.hpp>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
