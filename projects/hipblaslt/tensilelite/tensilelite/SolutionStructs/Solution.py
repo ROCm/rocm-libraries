@@ -76,7 +76,9 @@ from ..Common.ValidParameters import validParameters, \
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
-  b_rotate_reason as segBRotateReason
+  b_rotate_reason as segBRotateReason, \
+  paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
+  paired_buffer_layout_reason as segPairedLayoutReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -6483,9 +6485,9 @@ class Solution(collections.abc.Mapping):
         state["1LDSBuffer"] = 1
 
     if _segDeferForBuf:
-      # 1LDSBuffer resolved now; re-run the oracle. A newly-eligible tight interleave is safe (pure
-      # reorder, no LDS growth); an aligned one needs LDS not reserved above, so a forced request is
-      # rejected rather than run as baseline.
+      # Re-evaluate after 1LDSBuffer resolves. Non-TDMSplit tight layouts still need the paired
+      # eligibility and capacity checks below. An aligned result needs LDS not reserved above,
+      # so a forced request is rejected rather than run as baseline.
       _segRes2 = segIntEval(state)
       if _segRes2["applicable"] and not _segRes2["aligned"]:
         state["LDSSegInterleaveOffsets"] = _segRes2["offsets"]
@@ -6510,6 +6512,40 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
       ldsNumBytesAB = state["LdsOffsetMetadata"] + ldsNumBytesMetadata
       state["StoreSwapAddr"] = False
+
+    # HalfPLR disables pointer expansion; resolve this before choosing the paired
+    # layout so rotation on/off uses the same buffering policy.
+    if state["HalfPLR"]:
+      state["ExpandPointerSwap"] = False
+
+    # Resolve paired placement before LDS occupancy, epilogue reuse and MaxLDS checks.
+    if state["LDSSegmentBRotate"]:
+      _bRotReason = segBRotateReason(state, isPersistent(state))
+      if _bRotReason is not None:
+        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
+        return
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned:
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+      if _pairedReason is None:
+        _pairedOffsets = segPairedOffsets(state)
+        _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
+      if _pairedReason is None and _segRequested == -1 and _pairedOffsets["pairedUsedBytes"] > ldsNumBytesAB:
+        _pairedReason = "paired layout needs more LDS than the ordinary layout"
+      if _pairedReason is None:
+        state["LDSSegInterleaveOffsets"] = _pairedOffsets
+        state["StoreSwapAddr"] = True
+        ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
+      elif state["LDSSegmentBRotate"] or _segRequested == 1:
+        # Explicit tight interleave and tight B rotation require a valid paired layout.
+        _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
+        reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
+        return
+      else:
+        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
+        # swap policy and byte count calculated above.
+        state["LDSSegmentInterleave"] = 0
+    if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
+      state["LDSSegInterleaveOffsets"] = {}
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
@@ -7029,7 +7065,6 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):
         if not isPersistentDataParallel(state):
           reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
@@ -7396,12 +7431,6 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
-
-    if state["LDSSegmentBRotate"]:
-      _bRotReason = segBRotateReason(state, isPersistent(state))
-      if _bRotReason is not None:
-        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
-        return
 
   ########################################
   @ staticmethod
