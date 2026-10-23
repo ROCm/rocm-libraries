@@ -134,7 +134,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                          {
                              return hipdnn_plugin_sdk::ingestor::
                                  makeEngine<Handle, Settings, Context>(
-                                     set.engine,
+                                     set,
                                      std::move(stateManager),
                                      kernel_ingestor_engine::deviceResolver());
                          }
@@ -220,8 +220,7 @@ Container::Container()
     kernel_ingestor_engine::registerNativeIngestorSymbols();
 #endif
 
-    _engineManager
-        = std::make_unique<hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>>();
+    _engineManager = std::make_unique<ApplicabilityManager>(_applicabilityPool);
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -240,7 +239,7 @@ Container::~Container()
     HIPDNN_PLUGIN_LOG_INFO("Destroying Container");
 }
 
-hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Container::getEngineManager()
+ApplicabilityManager& Container::getEngineManager()
 {
     return *_engineManager;
 }

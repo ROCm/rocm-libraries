@@ -37,20 +37,6 @@ if(BUILD_CLIENTS_ONLY)
   return()
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
-# The unit tests compile library translation units directly, so they must see the
-# same rocsparse_int width and the same configuration macros as librocsparse.
-if(BUILD_ROCSPARSE_ILP64)
-  add_compile_options(-Drocsparse_ILP64)
-endif()
-if(BUILD_MEMSTAT)
-  add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
-endif()
-if(BUILD_ROCSPARSE_DEBUGGING)
-  add_compile_options(-DROCSPARSE_DEBUGGING)
-endif()
-
 # Unit-test sources (the tests themselves + a minimal gtest main).
 #
 # Subsequent per-area unit-test branches append their host-pure sources here.
@@ -305,6 +291,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # sibling branches appending elsewhere. Needs the defining library TU in
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
   unit_test_internal_conversion_csr2ell_batch.cpp
+  # AISPARSE-669: distinct anchor to avoid stacked-branch merge conflicts.
+  # Launches rocsparse::csrsm (csrsm_device.h) directly on an undersized grid;
+  # header-only, so it needs no compile-in library TU.
+  unit_test_internal_level3_csrsm.cpp
   # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # the sibling unit-test branches above. Drives the public rocsparse_spmm entry

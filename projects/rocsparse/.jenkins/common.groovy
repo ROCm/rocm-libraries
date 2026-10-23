@@ -21,12 +21,54 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
                 set -ex
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
+                ${pullMatricesCommand()}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${auxiliary.gfxTargetParser()}
                 CXX=/opt/rocm/bin/${compiler} ${project.paths.build_command} ${hipClangArgs} ${staticArgs}
             """
 
     platform.runCommand(this, command)
+}
+
+// Fetches the DVC-tracked SuiteSparse archives in clients/matrices, which the client tests require
+def pullMatricesCommand()
+{
+    // The pull is skipped when the node's matrices cache already has every converted matrix.
+    // The sparse checkout may omit the .dvc directory at the repository root.
+    // Jenkins runs the container as a UID without a passwd entry, so dvc needs LOGNAME
+    // (https://docs.python.org/3/library/getpass.html#getpass.getuser).
+    // No "|| exit 1" after the subshell: it would disable set -e inside it, and the caller's set -e
+    // already stops on a failed subshell.
+    return """
+                (
+                    set -e
+                    repo_root=\$(git rev-parse --show-toplevel)
+                    matrices_cached=true
+                    for pointer in "\${repo_root}"/projects/rocsparse/clients/matrices/*.tar.gz.dvc; do
+                        if [ ! -f "\${JENKINS_HOME_DIR}/rocsparse_matrices/\$(basename "\${pointer}" .tar.gz.dvc).csr" ]; then
+                            matrices_cached=false
+                        fi
+                    done
+                    if [ "\${matrices_cached}" = true ]; then
+                        echo "All test matrices are in \${JENKINS_HOME_DIR}/rocsparse_matrices, skipping dvc pull"
+                        exit 0
+                    fi
+                    if [ ! -f "\${repo_root}/.dvc/config" ]; then
+                        mkdir -p "\${repo_root}/.dvc"
+                        git -C "\${repo_root}" show HEAD:.dvc/config > "\${repo_root}/.dvc/config.tmp"
+                        mv "\${repo_root}/.dvc/config.tmp" "\${repo_root}/.dvc/config"
+                    fi
+                    dvc_cmd=dvc
+                    if ! command -v dvc > /dev/null; then
+                        dvc_venv="\${PWD}/build/dvc-venv"
+                        python3 -m venv "\${dvc_venv}"
+                        "\${dvc_venv}/bin/python" -m pip install --quiet 'dvc[s3]==3.67.1'
+                        dvc_cmd="\${dvc_venv}/bin/dvc"
+                    fi
+                    cd "\${repo_root}"
+                    LOGNAME=jenkins DVC_NO_ANALYTICS=1 \${dvc_cmd} pull -R projects/rocsparse/clients/matrices
+                )
+            """
 }
 
 

@@ -27,6 +27,7 @@ Lowering needs no GPU and no comgr, so this runs anywhere.
 from __future__ import annotations
 
 import dataclasses as dc
+import functools
 import hashlib
 import json
 import sys
@@ -51,12 +52,18 @@ def _cases():
     tile, so a change to any selectable configuration is visible.
     """
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
-    from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
+    from dispatch.gdn.gfx950 import (
+        _TUNED_TILES_KDA,
+        FUSED_DEFAULT_TILE,
+        KDA_FUSED_SPEC_ID,
+    )
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
         spec = dc.replace(GdnDecodeSpec(), **overrides)
-        return lambda: build_gdn_decode(spec, arch=_ARCH)
+        fn = lambda: build_gdn_decode(spec, arch=_ARCH)  # noqa: E731
+        fn.spec = spec
+        return fn
 
     cases = {
         "default": build(),
@@ -116,12 +123,84 @@ def _cases():
         fuse_conv=True,
         fuse_out_norm=True,
     )
+    # Performance knobs, one flag-on case each at a tile where it changes the
+    # code, plus the fused-knob combinations. Every knob-off case above keeps
+    # its hash: the knobs default to the code emitted before they existed.
+    fused_bpv1 = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    cases.update(
+        {
+            "knob_state_load_hint": build(state_load_hint="streaming"),
+            "knob_state_store_hint": build(state_store_hint="streaming"),
+            "knob_dpp_reduce": build(dpp_reduce=True),
+            "knob_xcd_remap": build(xcd_remap=True),
+            "knob_stream_rows": build(stream_rows=True),
+            "knob_interleave_cols_stf32": build(
+                state_dtype="f32", interleave_cols=True
+            ),
+            "knob_waves_per_eu": build(waves_per_eu=4),
+            "knob_conv_once": build(**fused_bpv1, fuse_conv=True, conv_once=True),
+            "knob_conv_once_kda_stf32": build(
+                **fused_bpv1,
+                gate_kind="kda",
+                state_dtype="f32",
+                fuse_conv=True,
+                conv_once=True,
+            ),
+            "knob_conv_once_norm_gate_once": build(
+                **fused_bpv1,
+                fuse_conv=True,
+                fuse_out_norm=True,
+                conv_once=True,
+                norm_gate_once=True,
+            ),
+            "knob_out_lds": build(**fused_bpv1, fuse_out_norm=True, out_lds=True),
+            "knob_out_lds_norm_gate_once_kda": build(
+                **fused_bpv1,
+                gate_kind="kda",
+                fuse_conv=True,
+                fuse_out_norm=True,
+                conv_once=True,
+                norm_gate_once=True,
+                out_lds=True,
+            ),
+        }
+    )
+    # one wave: out_lds adds its own LDS barrier (no cross-wave reduction)
+    cases["knob_out_lds_w1"] = build(
+        **{**fused_bpv1, "num_warps": 1}, fuse_out_norm=True, out_lds=True
+    )
+    # one wave with conv_once at WTK 8: it loads first (late_row_inputs)
+    cases["knob_conv_once_kda_stf32_cv_rn_w1k8"] = build(
+        **{**fused_bpv1, "num_warps": 1, "warp_threads_k": 8},
+        gate_kind="kda",
+        state_dtype="f32",
+        fuse_conv=True,
+        fuse_out_norm=True,
+        conv_once=True,
+    )
+    # Every knob on every path it changes (below), and at other head dims.
+    named = {fn.spec.kernel_name() for fn in cases.values()}
+    for cid, overrides in [*_knob_class_cases(), *_knob_head_dim_cases()]:
+        fn = build(**overrides)
+        if fn.spec.kernel_name() not in named:
+            named.add(fn.spec.kernel_name())
+            cases[cid] = fn
     request = GdnDecodeRequest(batch=16, arch=_ARCH)
     for result in dispatch_gdn_decode_all(request):
         cases[f"registered_{result.candidate.spec_id}"] = (
             lambda spec=result.spec: build_gdn_decode(spec, arch=_ARCH)
         )
-    for _, tile, spec_id in _TUNED_TILES_KDA:
+    # Every KDA candidate: the work table's bands plus the fused default, which
+    # an unfused KDA request can also pin.
+    kda_candidates = [(tile, spec_id) for _, tile, spec_id in _TUNED_TILES_KDA]
+    kda_candidates.append((FUSED_DEFAULT_TILE, KDA_FUSED_SPEC_ID))
+    for tile, spec_id in kda_candidates:
         cases[f"tuned_{spec_id}"] = build(
             gate_kind="kda",
             num_warps=tile[0],
@@ -129,6 +208,150 @@ def _cases():
             blocks_per_v_dim=tile[2],
         )
     return cases
+
+
+# knob -> the overrides that switch it on (norm_gate_once needs conv_once)
+_KNOB_ON = {
+    "state_load_hint": dict(state_load_hint="streaming"),
+    "state_store_hint": dict(state_store_hint="streaming"),
+    "dpp_reduce": dict(dpp_reduce=True),
+    "xcd_remap": dict(xcd_remap=True),
+    "stream_rows": dict(stream_rows=True),
+    "interleave_cols": dict(interleave_cols=True),
+    "conv_once": dict(conv_once=True),
+    "norm_gate_once": dict(conv_once=True, norm_gate_once=True),
+    "out_lds": dict(out_lds=True),
+    "waves_per_eu": dict(waves_per_eu=4),
+}
+_CV_RN = dict(fuse_conv=True, fuse_out_norm=True)
+# The fused paths each knob runs on: every fusion mode a fused-only knob
+# accepts (and out_lds over norm_gate_once's LDS products), interleave_cols
+# with and without conv_once's LDS operands; any other knob on both fusions.
+_FUSED_PATHS = {
+    "conv_once": {"cv": dict(fuse_conv=True), "cv_rn": _CV_RN},
+    "out_lds": {
+        "rn": dict(fuse_out_norm=True),
+        "cv_rn": _CV_RN,
+        "cv_rn_ngo": dict(_CV_RN, conv_once=True, norm_gate_once=True),
+    },
+    "interleave_cols": {"cv_rn": _CV_RN, "cv_rn_co": dict(_CV_RN, conv_once=True)},
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _ir_modulo_name(spec):
+    """The spec's llvm20 IR with its kernel name replaced by ``K``."""
+    from kernels.gfx950.gdn_decode import build_gdn_decode
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    llvm = _lower_kernel_to_llvm_python(
+        build_gdn_decode(spec, arch=_ARCH), arch=_ARCH, llvm_flavor="llvm20"
+    )
+    return llvm.replace(spec.kernel_name(), "K")
+
+
+def _knob_changes_code(overrides, knob):
+    """True if the knob-on spec is legal and emits code other than the
+    knob-off kernel. The IR is compared with the kernel name normalized out,
+    and the name must follow it: a knob that changes nothing here keeps the
+    name (one name per distinct kernel), and a predicate that names a knob
+    whose emitter adds nothing fails here instead of pinning a renamed copy
+    of the knob-off kernel."""
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
+
+    spec = dc.replace(GdnDecodeSpec(), **overrides)
+    off = dc.replace(spec, **{knob: GdnDecodeSpec.__dataclass_fields__[knob].default})
+    if not is_valid_spec(spec, arch=_ARCH)[0]:
+        return False
+    same_ir = _ir_modulo_name(spec) == _ir_modulo_name(off)
+    same_name = spec.kernel_name() == off.kernel_name()
+    assert same_ir is same_name, (
+        f"{knob} on {overrides}: IR {'un' if same_ir else ''}changed but name "
+        f"{'un' if same_name else ''}changed ({spec.kernel_name()})"
+    )
+    return not same_ir
+
+
+def _knob_class_cases():
+    """Every knob alone on every path where it changes code: gate kind x
+    state dtype x reference / warp-tiled / fused (default heads, the default
+    tile and the fused (4,16,1) tile)."""
+    fused_tile = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    for knob, on in _KNOB_ON.items():
+        paths = {"simple": dict(simple=True), "plain": {}}
+        for tag, fused in _FUSED_PATHS.get(knob, {"cv_rn": _CV_RN}).items():
+            paths[f"fused_{tag}"] = dict(fused_tile, **fused)
+        for gate in ("gdn", "kda"):
+            for state_dtype in ("bf16", "f32"):
+                for tag, path in paths.items():
+                    ov = dict(path, **on, gate_kind=gate, state_dtype=state_dtype)
+                    if _knob_changes_code(ov, knob):
+                        yield f"knob_{knob}_{gate}_st{state_dtype}_{tag}", ov
+
+
+def _knob_head_dim_cases():
+    """Every knob at DK = DV = 64 and 256 (KDA, f32 state: every per-column
+    operand and every knob applies), warp-tiled and fused; and out_lds at
+    DV = 256 / 512 (4 / 8 rows per storing lane) and with two store rounds
+    (DV / 8 storing lanes > one wave)."""
+    tiles = {
+        64: ((2, 8, 2), (2, 8, 1)),
+        256: ((2, 16, 8), (8, 16, 1)),
+    }
+    kda32 = dict(gate_kind="kda", state_dtype="f32")
+    for d, ((pw, pk, pb), (fw, fk, fb)) in tiles.items():
+        dims = dict(kda32, head_k_dim=d, head_v_dim=d)
+        plain = dict(dims, num_warps=pw, warp_threads_k=pk, blocks_per_v_dim=pb)
+        fused = dict(
+            dims,
+            **_CV_RN,
+            num_k_heads=16,
+            num_v_heads=16,
+            num_warps=fw,
+            warp_threads_k=fk,
+            blocks_per_v_dim=fb,
+        )
+        for knob, on in _KNOB_ON.items():
+            for tag, path in (("plain", plain), ("fused_cv_rn", fused)):
+                ov = dict(path, **on)
+                if _knob_changes_code(ov, knob):
+                    yield f"knob_{knob}_dk{d}dv{d}_{tag}", ov
+    for dv, (nw, wtk) in ((256, (8, 16)), (512, (16, 16))):
+        tile = dict(
+            kda32,
+            head_v_dim=dv,
+            num_k_heads=16,
+            num_v_heads=16,
+            num_warps=nw,
+            warp_threads_k=wtk,
+            blocks_per_v_dim=1,
+            out_lds=True,
+        )
+        yield f"knob_out_lds_dv{dv}_rn", dict(tile, fuse_out_norm=True)
+        yield f"knob_out_lds_dv{dv}_cv_rn_ngo", dict(
+            tile, **_CV_RN, conv_once=True, norm_gate_once=True
+        )
+    rounds = dict(
+        kda32,
+        head_k_dim=8,
+        head_v_dim=576,
+        num_k_heads=4,
+        num_v_heads=4,
+        num_warps=1,
+        warp_threads_k=1,
+        blocks_per_v_dim=1,
+        out_lds=True,
+    )
+    yield "knob_out_lds_2rounds_rn", dict(rounds, fuse_out_norm=True)
+    yield "knob_out_lds_2rounds_cv_rn_ngo", dict(
+        rounds, **_CV_RN, conv_once=True, norm_gate_once=True
+    )
 
 
 def _current_flavor():

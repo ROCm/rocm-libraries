@@ -31,7 +31,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.KernelWriter import KernelWriter
 
 pytestmark = pytest.mark.unit
 
@@ -244,7 +244,7 @@ class TestForceGenerateKernel:
     def test_force_generate_kernel_keeps_the_source(self, monkeypatch):
         # The behaviour the early raise made unreachable.
         warnings = []
-        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        monkeypatch.setattr("tensilelite.KernelWriter.printWarning", warnings.append)
         source = KernelWriter._getKernelSource(self._writer(error=1, forceGenerateKernel=True),
                                                self._kernel())
         assert "s_endpgm" in source
@@ -254,7 +254,7 @@ class TestForceGenerateKernel:
 
     def test_clean_kernel_is_unaffected(self, monkeypatch):
         warnings = []
-        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        monkeypatch.setattr("tensilelite.KernelWriter.printWarning", warnings.append)
         source = KernelWriter._getKernelSource(self._writer(error=0, forceGenerateKernel=False),
                                                self._kernel())
         assert "s_endpgm" in source
