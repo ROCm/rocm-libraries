@@ -123,6 +123,21 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos3, nos7, qc2534, mplate]
 
+# sme3Dc max row nnz is 405, which on a 32-wide wavefront selects the hash
+# kernel's max_nnz < 16 * wavefront arm (and not the smaller arms).
+- name: csrilu0
+  category: quick
+  function: csrilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+
 # Pre_checkin
 - name: csrilu0_bad_arg
   category: pre_checkin

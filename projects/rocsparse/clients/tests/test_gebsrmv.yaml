@@ -146,6 +146,50 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
+# Complex gebsrmv for row-block dimensions 1, 3, and 4. Real precision already
+# covers the source lines; these instantiate the complex templates.
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [8]
+  N: [8]
+  row_block_dimA: [1]
+  col_block_dimA: [2]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [8]
+  N: [8]
+  row_block_dimA: [3]
+  col_block_dimA: [1]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [8]
+  N: [8]
+  row_block_dimA: [4]
+  col_block_dimA: [1]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
 # Pre_checkin
 - name: gebsrmv_bad_arg
   category: pre_checkin

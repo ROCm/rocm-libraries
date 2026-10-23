@@ -94,6 +94,61 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
 
+# Atomic remainder kernels: N=1 selects remainder <= 1, N=16 selects <= 16.
+# int8 A/B with f32 compute is the instantiation no longer reached elsewhere.
+- name: spmm_coo
+  category: quick
+  function: spmm_coo
+  indextype: *i32
+  precision: *int8_int8_float32_float32_abct_precision
+  M: [8]
+  N: [1, 16]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_coo_atomic]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# Segmented main kernel for 2 <= n < 4. i64 + int8/int32 is the lost instantiation.
+- name: spmm_coo
+  category: quick
+  function: spmm_coo
+  indextype: *i64
+  precision: *int8_int8_int32_int32_abct_precision
+  M: [8]
+  N: [2]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_coo_segmented]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# Segmented-atomic remainder == 7, both the non-transpose and transpose B paths.
+- name: spmm_coo
+  category: quick
+  function: spmm_coo
+  indextype: *i32
+  precision: *int8_int8_float32_float32_abct_precision
+  M: [8]
+  N: [7]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_coo_segmented_atomic]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
 # Pre_checkin
 - name: spmm_coo_bad_arg
   category: pre_checkin

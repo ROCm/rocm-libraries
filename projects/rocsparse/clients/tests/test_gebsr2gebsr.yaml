@@ -90,6 +90,22 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos3, qc2534, mplate]
 
+# Fast gebsr2gebsr kernel: row_block_dim_C > 16 selects block size 32.
+- name: gebsr2gebsr
+  category: quick
+  function: gebsr2gebsr
+  precision: *single_only_precisions
+  M: [32]
+  N: [32]
+  row_block_dimA: [4]
+  col_block_dimA: [4]
+  row_block_dimB: [17]
+  col_block_dimB: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
 # Pre_checkin
 - name: gebsr2gebsr_bad_arg
   category: pre_checkin

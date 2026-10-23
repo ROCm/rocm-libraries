@@ -126,6 +126,21 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
+# Transpose-transpose row-split for complex float and double. Column order is
+# what testing_csrmm uses, so transA and transB both transpose select csrmmtt.
+- name: csrmm
+  category: quick
+  function: csrmm
+  precision: *single_double_precisions_complex
+  M: [16]
+  N: [8]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
 # Pre_checkin
 - name: csrmm_bad_arg
   category: pre_checkin

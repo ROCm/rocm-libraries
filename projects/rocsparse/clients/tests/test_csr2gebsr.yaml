@@ -53,6 +53,21 @@ Tests:
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
+# n == 0 with m != 0, so the nnz query takes the second side of m == 0 || n == 0
+# and writes the block row pointer (bsr_row_ptr is non-null).
+- name: csr2gebsr
+  category: quick
+  function: csr2gebsr
+  precision: *single_only_precisions
+  M: [16]
+  N: [0]
+  row_block_dimA: [4]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
 - name: csr2gebsr
   category: quick
   function: csr2gebsr

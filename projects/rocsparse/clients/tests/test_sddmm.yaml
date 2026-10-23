@@ -114,6 +114,54 @@ Tests:
   filename: [nos3, qc2534, mplate]
   formatC: [rocsparse_format_csr]
 
+# Default-algorithm K dispatch in each format file: k>2, k>1, and k==1.
+# k>4 is already hit by the K=8/32/128 cases above.
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [8]
+  N: [8]
+  K: [1, 2, 4]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_ell]
+
+# All-half default algorithm. pre_checkin half uses the dense algorithm, which
+# does not instantiate the per-format sddmm_st<_Float16> kernels.
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float16_float16_abct_precision
+  M: [8]
+  N: [8]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_ell]
+
 # Pre_checkin
 - name: sddmm_bad_arg
   category: pre_checkin

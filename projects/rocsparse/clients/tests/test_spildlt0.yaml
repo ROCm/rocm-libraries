@@ -103,6 +103,36 @@ Tests:
   indextype: *i32
   batch_count: [1]
 
+# Max row nnz in (256, 512] selects the <=512 hash kernel. sme3Dc (405) passes
+# in double; scircuit (353) is the float case that stays within tolerance.
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
+  indextype: *i32
+  batch_count: [1]
+
 # Pre_checkin
 - name: spildlt0_bad_arg
   category: pre_checkin
