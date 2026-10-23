@@ -12,6 +12,7 @@ Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/h
   * FP16 inputs and output, with an FP16 gate.
   * BF16 inputs and output, with a BF16 gate.
   * FP8 inputs and FP32 output, with an FP32 or FP8 gate (FP8_FNUZ on gfx942).
+  * BF8 inputs and FP32 output, with an FP32 or BF8 gate (BF8_FNUZ on gfx942).
 
 ## hipSPARSELt 0.2.9 for ROCm 7.14
 

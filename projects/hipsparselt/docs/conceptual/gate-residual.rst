@@ -64,10 +64,14 @@ The gate residual is supported on ``gfx942`` and ``gfx950`` for the following da
    * - ``FP8``
      - ``FP32``
      - ``FP32`` or ``FP8``
+   * - ``BF8``
+     - ``FP32``
+     - ``FP32`` or ``BF8``
 
-``FP8`` refers to ``HIP_R_8F_E4M3`` on ``gfx950`` and ``HIP_R_8F_E4M3_FNUZ`` on ``gfx942``.
+``FP8`` and ``BF8`` refer to ``HIP_R_8F_E4M3`` and ``HIP_R_8F_E5M2`` on ``gfx950``, and to
+``HIP_R_8F_E4M3_FNUZ`` and ``HIP_R_8F_E5M2_FNUZ`` on ``gfx942``.
 
-Other combinations, including ``BF8`` and ``INT8`` inputs, are not supported.
+Other combinations, including ``INT8`` inputs, are not supported.
 
 Configuration
 =============
