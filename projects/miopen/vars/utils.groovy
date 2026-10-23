@@ -284,7 +284,7 @@ def buildTheRockDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:therock_cache"
 
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201;gfx1250;gfx1250-strict" // multiarch builds
 
     // Pin TheRock's build_tools (the install_rocm_from_artifacts.py installer) to the ref tracked
     // in the ci-env action, so the tooling that downloads the nightly tarball is reproducible.
@@ -512,7 +512,7 @@ def getDockerImage(Map conf=[:])
     def gpu_arch
     if (gpu_family == "ci")
     {
-        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1250;gfx1250-strict" // Builds docker image with subset of architectures that CI is run on.
     }
     else if (gpu_family == "gfx90X")
     {
@@ -1248,69 +1248,6 @@ def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
     if (condition) stagesMap[name] = { stage(name) { body() } }
 }
 
-def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
-    def result = getPassedStagesFromPreviousBuild()
-    def passedStages = result.passedStages
-    echo "Selective rerun: ${result.debugMsg}"
-    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
-    def stages = [:]
-
-    def hipPackage = 'HIP Package'
-    addStageIf(stages, !passedStages.contains(hipPackage), hipPackage) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
-
-    def hipNoGpuDebug = 'HipNoGPU Debug Build Test'
-    addStageIf(stages, pipelineParams.TARGET_NOGPU && !passedStages.contains(hipNoGpuDebug), hipNoGpuDebug) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        def hipNoGpuFlags = "-DMIOPEN_BACKEND=HIPNOGPU -DMIOPEN_INSTALL_CXX_HEADERS=On"
-                        def buildCmd = "ninja -j\$(nproc)"
-                        buildHipClangJob(build_type: 'debug', setup_flags: hipNoGpuFlags, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
-
-    def tunaFinBuild = 'Tuna Fin Build Test'
-    addStageIf(stages, !passedStages.contains(tunaFinBuild), tunaFinBuild) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DMIOPEN_BACKEND=HIPNOGPU", make_targets: "all", build_fin: "ON", needs_gpu: false, build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
-
-    def fp32NockBuild = 'Fp32 Hip Debug NOCK Build-Only'
-    addStageIf(stages, !passedStages.contains(fp32NockBuild), fp32NockBuild) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true, needs_gpu: false, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
-
-    return stages
-}
 
 def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
     def result = getPassedStagesFromPreviousBuild()
@@ -1328,20 +1265,6 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     def gfx1101_flags = pipelineEnv.gfx1101_flags
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
-    def hipTidy = 'Hip Tidy'
-    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
-                        def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
-                        buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
     // GFX90A Tests
     def dbsyncGfx90a = 'Dbsync gfx90a'

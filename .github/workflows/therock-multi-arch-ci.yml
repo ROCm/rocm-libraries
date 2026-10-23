@@ -7,14 +7,13 @@
 # TheRock's reusable workflows directly. It provides sharded, multi-stage
 # builds with per-architecture testing.
 #
-# Key differences from therock-ci.yml:
 # - Uses TheRock's multi-arch sharded build pipeline (foundation -> compiler-runtime -> math-libs)
 # - Supports prebuilt stages to skip certain build stages
-# - Better parallelization across GPU architectures
+# - Parallelizes across GPU architectures
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit df3d451a3c054e14705ddf94e58498e1208df8d5.
+# TheRock ref: pinned to ROCm/TheRock commit b0958085a97cb03a2c38931b8e2ec86ac78d1563.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -33,19 +32,15 @@ on:
     inputs:
       linux_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
-        default: ""
-      linux_test_labels:
-        type: string
-        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
+        description: "Comma-separated Linux GPU families to build and test, ex: gfx94X,gfx120X. Use 'none' to skip Linux or 'all' for every family."
         default: ""
       windows_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
+        description: "Comma-separated Windows GPU families to build and test, ex: gfx110X,gfx120X. Use 'none' to skip Windows or 'all' for every family."
         default: ""
-      windows_test_labels:
+      pr_labels:
         type: string
-        description: "If enabled, reduce test set on Windows to the list of labels prefixed with 'test:' ex: test:rocprim, test:hipcub"
+        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). On pull_request events the labels come from the event payload instead."
         default: ""
       prebuilt_stages:
         type: string
@@ -92,7 +87,9 @@ jobs:
     name: Load CI Environment
     runs-on: ubuntu-24.04
     outputs:
-      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      # Use the manually supplied or bot-maintained baseline. An empty value
+      # causes artifact reuse to be disabled and triggers a full stage build.
+      baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
@@ -119,7 +116,7 @@ jobs:
       # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
       test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      test_type: ${{ steps.configure.outputs.test_type }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -132,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+          ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -151,7 +148,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -161,28 +158,40 @@ jobs:
       # built it on every PR/push before Multi-Arch CI became the default, and this
       # restores that parity so gfx1250 build breaks are caught same-PR instead of
       # only nightly.
+      #
+      # An empty input means "not specified" here and falls back to these
+      # defaults, including on workflow_dispatch. To skip a platform entirely,
+      # pass 'none', which setup_multi_arch.yml resolves to an empty build
+      # config.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
-      # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
-      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
-      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
-      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      # Copy prebuilt stages only when the resolved reuse policy provides a
+      # baseline run ID. Otherwise, leave this empty for a full stage build.
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      # Use the baseline selected by the artifact reuse policy above.
+      baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       build_python_packages: ${{ inputs.build_python_packages || false }}
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
-      build_native_linux: ${{ inputs.build_native_linux || false }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # Preserve manual workflow_dispatch control and enable native package
+      # builds for pull requests carrying the opt-in label.
+      build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
+      # A missing baseline disables artifact reuse and causes TheRock to
+      # perform a full stage build.
+      stage_reuse_mode: >-
+        ${{
+          needs.ci-env.outputs.baseline-run-id != '' &&
+          'reuse-stage' ||
+          'off'
+        }}
       repository: ROCm/TheRock
-      ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -196,6 +205,11 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
+          "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.sha }}",
+          "pr_number": ${{ github.event.pull_request.number || 'null' }},
+          "event_name": "${{ github.event_name }}",
+          "skip_ci_config": ".github/skip-ci-config.toml",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
@@ -205,10 +219,9 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -216,13 +229,13 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
+      test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
       contents: read
       id-token: write
@@ -233,22 +246,21 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
+      test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
       contents: read
       id-token: write
@@ -279,6 +291,49 @@ jobs:
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
+  notify_teams_on_failure:
+    name: Notify Teams Channel on Failure
+    # Build and test jobs run inside TheRock's reusable workflows, so
+    # notify_teams.py reports each failed Linux::/Windows:: job of this run
+    # from here, routing to the MIOpen / hipDNN channels by PR title tag
+    # ([miopen], [hipdnn], [miopenprovider]) or component name.
+    # Webhook secrets are unavailable to fork PRs.
+    needs: [configure, linux_build_and_test, windows_build_and_test]
+    # A notification problem must never fail the PR.
+    continue-on-error: true
+    if: >-
+      ${{
+        always() &&
+        !github.event.pull_request.head.repo.fork &&
+        (
+          needs.linux_build_and_test.result == 'failure' ||
+          needs.windows_build_and_test.result == 'failure'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout notify script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/notify_teams.py
+          sparse-checkout-cone-mode: false
+
+      - name: Notify Teams for failed build and test jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          CHANGED_PROJECTS: ${{ needs.configure.outputs.changed_projects }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --failed-jobs-from-run \
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${CHANGED_PROJECTS}"
+
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
     if: always()
@@ -295,7 +350,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+          ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

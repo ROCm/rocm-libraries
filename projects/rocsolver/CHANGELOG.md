@@ -3,6 +3,33 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## rocSOLVER 3.38.0 for ROCm 10.2.0
+
+### Added
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+* Support added for the gfx1250-strict architecture.
+
+### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
+### Optimized
+
+* Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
+
+### Resolved issues
+
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
+* Improved kernel launches to detect invalid launch configuration.
+* Fixed sparse functions potentially not using the stream set in the handle.
+
+
+
 ## rocSOLVER 3.37.0 for ROCm 10.1.0
 
 ### Added

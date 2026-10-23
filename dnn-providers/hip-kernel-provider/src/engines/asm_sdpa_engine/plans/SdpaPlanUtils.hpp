@@ -55,35 +55,61 @@ enum class MaskType : int
     SLIDING_WINDOW = 3
 };
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set.
+// The diagonal band an SDPA (forward or backward) attribute set requests, with
+// the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
+struct DiagonalBand
+{
+    int64_t leftBound;
+    int64_t rightBound;
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
+};
+
+// Replace each bound that already covers the whole sequence span with -1
+// (unbounded).
 //
-// Two sources can describe the mask: the modern left_bound / right_bound /
-// diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
+// A bound that reaches the widest offset the band can span for this alignment
+// and these sequence lengths masks nothing on its side, so it becomes -1. That
+// is the same mask: computeMaskCoordinates() replaces -1 with exactly that
+// widest offset (seqLen - 1 on the matching axis). A covering window therefore
+// classifies as plain causal or no-mask. Bounds that survive are returned
+// unchanged as int64, so a kernel field filled from one must first confirm it
+// fits int32 (every survivor is below a sequence length, which does).
 //
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
+// A sequence length of 0 or 1 gives a span <= 0, so a bound of 0 also becomes
+// -1 (e.g. top-left causal with seqLenKv == 1 is unmasked).
 //
-// Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
-// fields as plain bool defaulting to false, with no has_*() accessor.
-// "Explicitly false" and "unset" are therefore indistinguishable; a false bool
-// is treated as "not requested". left_bound / right_bound are
-// flatbuffers::Optional, but an unset bound is treated as unbounded (-1) to
-// match the canonical convention used across the SDPA path, so a partially
-// specified trio (e.g. only right_bound = 0) still derives a mask rather than
-// silently falling back to NO_MASK.
+// Expects bounds >= -1 (resolveDiagonalBand() rejects the rest).
+inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ, int64_t seqLenKv)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+    const bool bottomRight = band.alignment == DiagonalAlignment::BOTTOM_RIGHT;
+    const int64_t leftSpan = bottomRight ? seqLenKv - 1 : seqLenQ - 1;
+    const int64_t rightSpan = bottomRight ? seqLenQ - 1 : seqLenKv - 1;
+    const auto unboundIfCovering
+        = [](int64_t bound, int64_t span) { return (bound < 0 || bound >= span) ? -1 : bound; };
+    band.leftBound = unboundIfCovering(band.leftBound, leftSpan);
+    band.rightBound = unboundIfCovering(band.rightBound, rightSpan);
+    return band;
+}
+
+// Extract the requested diagonal band, merging the deprecated booleans the way
+// cuDNN's setters compose: a boolean acts as if its setter ran first (right
+// bound 0, plus BOTTOM_RIGHT alignment for causal_mask_bottom_right) and the
+// stored bounds and alignment are applied on top. An unset bound, or one equal
+// to -1, does not override the causal right bound. causal_mask keeps the stored
+// alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
+// TOP_LEFT is the schema default and indistinguishable from an unset alignment.
+//
+// Setting both booleans, or a bound below -1, throws
+// HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     const bool causalDeprecated = attrs.causal_mask();
     const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
 
-    // The two deprecated booleans are mutually exclusive.
     if(causalDeprecated && bottomRightDeprecated)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -92,31 +118,43 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
-    if(causalDeprecated)
-    {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
     const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
     const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    if(left == -1 && right == -1) // both unbounded
+
+    if(left < -1 || right < -1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound and right_bound must be >= -1 (got left_bound=" + std::to_string(left)
+                + ", right_bound=" + std::to_string(right) + ")");
+    }
+
+    if(!causalDeprecated && !bottomRightDeprecated)
+    {
+        return {left, right, attrs.diagonal_alignment()};
+    }
+
+    return {left,
+            right >= 0 ? right : 0,
+            bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
+}
+
+// Classify a diagonal band (from resolveDiagonalBand(), typically passed through
+// makeCoveringBoundsUnbound() first).
+inline MaskType getMaskType(int64_t leftBound,
+                            int64_t rightBound,
+                            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    if(leftBound == -1 && rightBound == -1) // both unbounded
     {
         return MaskType::NO_MASK;
     }
-    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    if(leftBound == -1 && rightBound == 0) // causal: attend up to the diagonal
     {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
+        return alignment == DiagonalAlignment::BOTTOM_RIGHT ? MaskType::BOTTOM_RIGHT_CAUSAL
+                                                            : MaskType::TOP_LEFT_CAUSAL;
     }
     return MaskType::SLIDING_WINDOW; // anything else is a sliding window
 }
@@ -187,6 +225,14 @@ inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const c
         HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
         return std::nullopt;
     }
+}
+
+// The attention scale the kernels apply when the graph has no scale tensor:
+// attn_scale_value, or 1.0 (no scaling, cuDNN's default) when it is unset.
+template <typename SdpaAttrsT>
+float attnScaleOrDefault(const SdpaAttrsT& attrs)
+{
+    return attrs.attn_scale_value().value_or(1.0f);
 }
 
 } // namespace plan_utils

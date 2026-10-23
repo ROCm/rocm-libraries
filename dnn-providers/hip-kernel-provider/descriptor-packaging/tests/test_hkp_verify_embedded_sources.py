@@ -4,8 +4,9 @@
 """The embedded source check, run the way the build runs it.
 
 The tool takes emitted JSON and a key table, so every case here writes both by
-hand and invokes the script as a subprocess. Nothing imports the packer: a test
-that recomputed a key from the packer would pass on two sides of one mistake.
+hand and invokes the script as a subprocess. The sidecars are written through
+`hkp_pack.provenance_sidecar`, the format's one implementation, whose own tests
+pin the format; every key and path this check compares is spelled here by hand.
 """
 
 import json
@@ -15,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from hkp_pack import provenance_sidecar
+
 TOOL = Path(__file__).resolve().parents[1] / "tools" / "hkp_verify_embedded_sources.py"
 
 TARGET = "hip_kernel_provider_tests"
@@ -22,6 +25,9 @@ ARCH = "gfx942"
 OTHER_ARCH = "gfx90a"
 KEY = "kernels/PointwiseAdd.cpp"
 LABEL = "unit_pointwise"
+# HKP_PACK_STAMP_NAME. The tool takes the stamp as a path and never derives the
+# name, so the two are coupled only through the argument the build passes.
+STAMP_NAME = ".hkp-packed.stamp"
 
 
 def _kernel_source(key):
@@ -47,14 +53,24 @@ def _provenance(rel_dir, authored, label=LABEL):
     return provenance
 
 
+def _sidecar_of(descriptor):
+    return provenance_sidecar.sidecar_path(descriptor)
+
+
 def _write(path, doc):
+    """Write one descriptor as the packer ships it: compact, with each UKD's
+    provenance moved to the sidecar named after it, beside it, and the packed
+    marker in its directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    name, data = provenance_sidecar.detach(path.name, doc)
+    path.with_name(name).write_bytes(data)
+    path.with_name(provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+    path.write_text(json.dumps(doc, separators=(",", ":")) + "\n", encoding="utf-8")
     return path
 
 
 def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LABEL):
-    """A standalone UKD, which carries both blocks at its document root."""
+    """A standalone UKD, whose provenance its own sidecar holds."""
     doc = {
         "version": "1.0",
         "id": name,
@@ -72,7 +88,7 @@ def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LA
 
 
 def _kdp(shard, name, keys, rel_dir="."):
-    """A KDP, whose provenance sits on each inline entry and not at its root."""
+    """A KDP, whose sidecar holds one provenance entry per inline entry."""
     entries = [
         {
             "version": "1.0",
@@ -134,9 +150,11 @@ def _drop_anchor(path):
     return Path(path).relative_to(Path(path).anchor).as_posix()
 
 
-def _run(manifest, roots, source_roots, target=TARGET):
+def _run(manifest, roots, source_roots, target=TARGET, stamps=(), provenance_roots=()):
     """Invoke the tool. `manifest=None` omits the flag, as a target that
-    registers no kernel for embedding does."""
+    registers no kernel for embedding does. `stamps` names the wired packs, so
+    an empty one is the dormant shape: a root the build never packs.
+    `provenance_roots` pairs with `roots` in order."""
     argv = [
         sys.executable,
         str(TOOL),
@@ -147,8 +165,12 @@ def _run(manifest, roots, source_roots, target=TARGET):
         argv += ["--key-manifest", str(manifest)]
     for root in roots:
         argv += ["--staged-descriptor-root", str(root)]
+    for stamp in stamps:
+        argv += ["--pack-stamp", str(stamp)]
     for label, source_root in sorted(source_roots.items()):
         argv += ["--source-root", f"{label}={source_root}"]
+    for provenance_root in provenance_roots:
+        argv += ["--provenance-root", str(provenance_root)]
     return subprocess.run(argv, capture_output=True, text=True)
 
 
@@ -633,3 +655,148 @@ def test_each_inline_entry_of_a_kdp_is_read_with_its_own_provenance(tmp_path):
     # provenance would report the latter for every entry, including the matching one.
     assert "embeds no source under the key" in result.stderr
     assert "provenance" not in result.stderr
+
+
+def _checked_ukd(tmp_path):
+    """One standalone embedded_source UKD and a table that matches it, so only
+    what a test breaks can fail the run."""
+    root = tmp_path / "unit" / "pointwise"
+    descriptor = _ukd(root / ARCH, "pointwise_add", KEY)
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+    return root, descriptor, manifest
+
+
+@pytest.mark.quick
+def test_a_descriptor_whose_sidecar_is_missing_is_an_error(tmp_path):
+    root, descriptor, manifest = _checked_ukd(tmp_path)
+    _sidecar_of(descriptor).unlink()
+
+    result = _run(manifest, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert "has no provenance sidecar" in result.stderr
+    assert _sidecar_of(descriptor).name in result.stderr
+    assert "clean build directory" in result.stderr
+
+
+@pytest.mark.quick
+def test_a_staged_root_that_lost_its_marker_records_no_provenance(tmp_path):
+    """Read as authored, its sidecar unread, the descriptor has no authored
+    location to check: the run fails rather than passing it unchecked."""
+    root, descriptor, manifest = _checked_ukd(tmp_path)
+    (descriptor.parent / provenance_sidecar.PACKED_MARKER).unlink()
+
+    result = _run(manifest, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert "does not record provenance.rel_dir" in result.stderr
+
+
+@pytest.mark.quick
+def test_sidecars_under_a_provenance_root_are_found_there(tmp_path):
+    root, descriptor, manifest = _checked_ukd(tmp_path)
+    provenance_root = tmp_path / "provenance"
+    moved = provenance_root / descriptor.parent.relative_to(root)
+    moved.mkdir(parents=True)
+    _sidecar_of(descriptor).rename(moved / _sidecar_of(descriptor).name)
+
+    found = _run(
+        manifest, [root], _labels(tmp_path), provenance_roots=[provenance_root]
+    )
+    beside = _run(manifest, [root], _labels(tmp_path))
+
+    assert found.returncode == 0, found.stderr
+    assert found.stdout.strip() == _count_line(1, 1)
+    assert beside.returncode == 1
+    assert "has no provenance sidecar" in beside.stderr
+
+
+@pytest.mark.quick
+def test_provenance_roots_must_pair_with_staged_roots(tmp_path):
+    root, _descriptor, manifest = _checked_ukd(tmp_path)
+
+    result = _run(
+        manifest,
+        [root],
+        _labels(tmp_path),
+        provenance_roots=[tmp_path / "a", tmp_path / "b"],
+    )
+
+    assert result.returncode == 1
+    assert "2 provenance root(s) for 1 staged descriptor root(s)" in result.stderr
+
+
+# --- A stamped pack root holds at least one descriptor ----------------------
+
+
+def _stamp(root):
+    """The stamp a pack writes inside the root it filled."""
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / STAMP_NAME
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+@pytest.mark.quick
+def test_a_stamped_root_that_holds_no_descriptor_fails(tmp_path):
+    pack_root = tmp_path / "unit" / "pointwise"
+    stamp = _stamp(pack_root)
+
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "unit"],
+        _labels(tmp_path),
+        stamps=[stamp],
+    )
+
+    assert result.returncode == 1
+    assert "holds no descriptor" in result.stderr
+    assert str(pack_root) in result.stderr
+    assert str(stamp) in result.stderr
+
+
+@pytest.mark.quick
+def test_a_stamped_root_that_holds_a_descriptor_passes(tmp_path):
+    pack_root = tmp_path / "unit" / "pointwise"
+    stamp = _stamp(pack_root)
+    _ukd(pack_root / ARCH, "pointwise_add", KEY)
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+
+    result = _run(manifest, [tmp_path / "unit"], _labels(tmp_path), stamps=[stamp])
+
+    assert result.returncode == 0, result.stderr
+    # The stamp file is not a descriptor and is not counted as one.
+    assert result.stdout.strip() == _count_line(1, 1)
+
+
+@pytest.mark.quick
+def test_a_dormant_root_passes(tmp_path):
+    """An unwired pack contributes no stamp. Keying on 'the root was named'
+    instead would fail every build that leaves production off."""
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "arch_content"],
+        _labels(tmp_path),
+        stamps=[],
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.quick
+def test_a_wired_pack_that_has_not_run_passes(tmp_path):
+    """No stamp on disk is a root the next build packs, not a corrupted one."""
+    pack_root = tmp_path / "unit" / "pointwise"
+
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "unit"],
+        _labels(tmp_path),
+        stamps=[pack_root / STAMP_NAME],
+    )
+
+    assert result.returncode == 0, result.stderr

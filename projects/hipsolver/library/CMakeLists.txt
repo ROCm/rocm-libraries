@@ -22,7 +22,7 @@
 
 
 # This is incremented when the ABI to the library changes
-set(hipsolver_SOVERSION 1.4)
+set(hipsolver_SOVERSION 1.5)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_PATH}/cmake)
 
@@ -44,12 +44,6 @@ if(BUILD_VERBOSE)
   message(STATUS "\t==>CMAKE_CXX_COMPILER release flags: " ${CMAKE_CXX_FLAGS_RELEASE})
   message(STATUS "\t==>CMAKE_CXX_COMPILER relwithdebinfo flags: " ${CMAKE_CXX_FLAGS_RELWITHDEBINFO})
   message(STATUS "\t==>CMAKE_EXE_LINKER link flags: " ${CMAKE_EXE_LINKER_FLAGS})
-endif()
-
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
-  find_package(hip REQUIRED PATHS ${ROCM_PATH} /opt/rocm ${HIP_PATH})
-else()
-  find_package(HIP REQUIRED)
 endif()
 
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive

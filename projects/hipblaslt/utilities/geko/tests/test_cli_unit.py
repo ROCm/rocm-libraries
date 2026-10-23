@@ -11,6 +11,17 @@ import yaml
 from geko import cli
 
 
+@pytest.fixture(autouse=True)
+def _default_gpu_check_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the GPU pre-flight check to "pass" for all dispatch tests in this file.
+
+    Keeps the many pre-existing dispatch(...) tests deterministic/fast
+    without each needing to mock the new check individually. Tests that
+    want to exercise the check itself override cli.device.main directly.
+    """
+    monkeypatch.setattr(cli.device, "main", lambda _device_count: 0)
+
+
 def test_parse_cli_args_defaults_with_bench_and_workload(tmp_path: Path) -> None:
     workload = tmp_path / "wkld.yaml"
     workload.write_text("[]\n")
@@ -49,6 +60,27 @@ def test_parse_cli_args_search_default_keep_thr(tmp_path: Path) -> None:
 
     assert args.search is True
     assert args.keep_thr == 0.1
+
+
+def test_parse_cli_args_search_space_subtile(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        [
+            "--tune",
+            "--workload-log",
+            str(workload),
+            "--devices",
+            "0",
+            "--arch",
+            "gfx950",
+            "--search-space",
+            "subtile",
+        ]
+    )
+
+    assert args.search_space == "subtile"
 
 
 def test_parse_cli_args_custom_lib_flags(tmp_path: Path) -> None:
@@ -168,8 +200,109 @@ def test_parse_cli_args_inline_normalizes_transpose_and_retry_flag() -> None:
         "0",
         "--no_retry",
     ])
-    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N")
+    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N", False)
     assert args.retry is False
+
+
+def test_parse_cli_args_inline_mx_flag_accepted() -> None:
+    args = cli.parse_cli_args([
+        "--bench",
+        "--inline",
+        "1024", "1024", "1", "1024",
+        "F8", "S", "S", "N", "T", "MX",
+        "--arch", "gfx950",
+        "--devices", "0",
+    ])
+    assert args.inline == (1024, 1024, 1, 1024, "F8", "S", "S", "N", "T", True)
+
+
+def test_parse_cli_args_inline_mx_flag_requires_arch() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N", "T", "MX",
+            "--devices", "0",
+        ])
+
+
+def test_rows_from_gemm_config_yaml_uses_yaml_arch_for_mx_scale(tmp_path: Path) -> None:
+    """mx_scale must come from the ARCH resolved by load_prepared_config_from_yaml
+    (which may be set only inside the --list YAML), not the raw --arch CLI value."""
+    cfg = tmp_path / "cfg.yaml"
+    yaml.safe_dump(
+        {
+            "ARCH": "gfx950",
+            "TRANSA": "N",
+            "TRANSB": "N",
+            "DataType": "F4",
+            "DestDataType": "S",
+            "ComputeDataType": "S",
+            "SIZE_OPTION": 0,
+            "Sizes": [[32, 32, 1, 32]],
+        },
+        cfg.open("w"),
+        sort_keys=False,
+    )
+
+    rows, _config_overrides = cli._rows_from_gemm_config_yaml(cfg, arch=None)
+    assert rows[0]["scaleA"] == 1001
+    assert rows[0]["scaleB"] == 1001
+
+
+def test_dispatch_inline_mx_rejects_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+
+    args = cli.CliArgs(
+        tune=False,
+        bench=True,
+        search=False,
+        workload=None,
+        gemm_config=None,
+        inline=(1024, 1024, 1, 1024, "F8", "S", "S", "N", "T", True),
+        arch="gfx942",
+        hipblaslt=str(tmp_path),
+        verbose=0,
+        devices=[0],
+        n_slots=1,
+        keep_thr=0.0,
+        backend="ductile",
+        search_space=None,
+        workdir=str(tmp_path / "run"),
+        up_thr=1.03,
+        duration=0.04,
+        benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
+        retry=True,
+        bench_freq=False,
+    )
+
+    rc = cli.dispatch(args, anchor=str(tmp_path))
+    assert rc == 1
+
+
+def test_parse_cli_args_inline_invalid_tenth_arg_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N", "T", "NOTMX",
+            "--devices", "0",
+        ])
+
+
+def test_parse_cli_args_inline_wrong_arg_count_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N",
+            "--devices", "0",
+        ])
 
 
 def test_parse_cli_args_surfaces_device_parse_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -237,6 +370,108 @@ def test_dispatch_bench_workflow_calls_run_bench(monkeypatch: pytest.MonkeyPatch
     assert called["kwargs"]["devices"] == [0]
 
 
+def _bench_args(tmp_path: Path, workload: Path, **overrides) -> cli.CliArgs:
+    base = dict(
+        tune=False,
+        bench=True,
+        search=False,
+        workload=str(workload),
+        gemm_config=None,
+        inline=None,
+        arch=None,
+        hipblaslt=str(tmp_path),
+        verbose=0,
+        devices=[0],
+        n_slots=1,
+        keep_thr=0.0,
+        backend="ductile",
+        search_space=None,
+        workdir=str(tmp_path / "run"),
+        up_thr=1.03,
+        duration=0.04,
+        benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
+        retry=True,
+        bench_freq=False,
+    )
+    base.update(overrides)
+    return cli.CliArgs(**base)
+
+
+def test_dispatch_aborts_when_gpu_check_times_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+    monkeypatch.setattr(cli.device, "main", lambda _device_count: 1)
+
+    def _unexpected_run_bench(*_args, **_kwargs):
+        raise AssertionError("run_bench must not be called when the GPU check times out")
+
+    monkeypatch.setattr(cli, "run_bench", _unexpected_run_bench)
+
+    rc = cli.dispatch(_bench_args(tmp_path, workload), anchor=str(tmp_path))
+    assert rc == 1
+
+
+def test_dispatch_aborts_when_gpu_check_finds_insufficient_devices(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+    monkeypatch.setattr(cli.device, "main", lambda _device_count: 2)
+
+    def _unexpected_run_bench(*_args, **_kwargs):
+        raise AssertionError("run_bench must not be called when devices are insufficient")
+
+    monkeypatch.setattr(cli, "run_bench", _unexpected_run_bench)
+
+    rc = cli.dispatch(_bench_args(tmp_path, workload), anchor=str(tmp_path))
+    assert rc == 2
+
+
+def test_dispatch_skip_gpu_check_bypasses_the_check(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    called = {"gpu_check": False}
+
+    def _unexpected_gpu_check(_device_count):
+        called["gpu_check"] = True
+        return 0
+
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+    monkeypatch.setattr(cli.device, "main", _unexpected_gpu_check)
+    monkeypatch.setattr(cli, "run_bench", lambda *_a, **_k: 0)
+
+    rc = cli.dispatch(_bench_args(tmp_path, workload, skip_gpu_check=True), anchor=str(tmp_path))
+    assert rc == 0
+    assert called["gpu_check"] is False
+
+
+def test_parse_cli_args_skip_gpu_check_defaults_false(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        ["--bench", "--workload-log", str(workload), "--devices", "0"]
+    )
+    assert args.skip_gpu_check is False
+
+
+def test_parse_cli_args_skip_gpu_check_flag(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        ["--bench", "--workload-log", str(workload), "--devices", "0", "--skip-gpu-check"]
+    )
+    assert args.skip_gpu_check is True
+
+
 def test_dispatch_bench_forwards_custom_lib_params(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     workload = tmp_path / "wkld.yaml"
     workload.write_text("[]\n")
@@ -292,7 +527,7 @@ def test_dispatch_search_uses_generated_workload_from_list(
     monkeypatch.setattr(
         cli,
         "_rows_from_gemm_config_yaml",
-        lambda _path, _arch: [{"M": 16, "N": 16, "K": 16}],
+        lambda _path, _arch: ([{"M": 16, "N": 16, "K": 16}], {}),
     )
 
     captured = {}
@@ -385,6 +620,7 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
     workload.write_text("[]\n")
 
     order: list[str] = []
+    optimize_kwargs = {}
 
     monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
 
@@ -393,6 +629,7 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
 
     def _fake_opt(*_args, **_kwargs):
         order.append("optimize")
+        optimize_kwargs.update(_kwargs)
 
     monkeypatch.setattr(cli, "run_configure", _fake_cfg)
     monkeypatch.setattr(cli, "run_optimize", _fake_opt)
@@ -413,7 +650,7 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
         backend="ductile",
         search_space=None,
         workdir=str(tmp_path / "run"),
-        up_thr=1.03,
+        up_thr=1.0,
         duration=0.04,
         benchmark_duration=0.5,
         custom_lib_src=None,
@@ -425,6 +662,7 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
     rc = cli.dispatch(args, anchor=str(tmp_path))
     assert rc == 0
     assert order == ["configure", "optimize"]
+    assert optimize_kwargs["up_thr"] == 1.0
 
 
 def test_main_maps_non_int_system_exit_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -481,7 +719,7 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         search=False,
         workload=None,
         gemm_config=None,
-        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N"),
+        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N", False),
         arch=None,
         hipblaslt=str(tmp_path),
         verbose=0,

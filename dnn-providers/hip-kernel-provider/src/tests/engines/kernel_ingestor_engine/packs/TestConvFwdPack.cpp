@@ -7,10 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -21,11 +23,13 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+// Pointwise too: the cases below assert each engine refuses the other's graph.
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
@@ -51,6 +55,38 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 bool matches(const MatchContext& context)
 {
     return matchesGraph(CONV_FWD, context).has_value();
+}
+
+/// String twin of the SDK's tryGetBoundInt: nullopt when absent or not a string.
+std::optional<std::string> boundString(const BoundTokens& bound, std::string_view token)
+{
+    const auto entry = bound.find(std::string(token));
+    if(entry == bound.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&entry->second);
+    return value == nullptr ? std::nullopt : std::make_optional(*value);
+}
+
+using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+
+/// x = NCHW 2x3x8x6, w = KCRS 5x3x3x2, y = NKPQ 2x5x6x5 (P = 8-3+1, Q = 6-2+1). Distinct
+/// extents and element counts, so a wrong axis or operand cannot match by coincidence.
+flatbuffers::FlatBufferBuilder
+    buildAsymmetricConvGraph(data_objects::DataType dataType = data_objects::DataType::FLOAT,
+                             std::optional<data_objects::DataType> wDataType = std::nullopt)
+{
+    return buildConvFwdGraph(dataType,
+                             data_objects::ConvMode::CROSS_CORRELATION,
+                             /*stride=*/{1, 1},
+                             /*dilation=*/{1, 1},
+                             /*prePadding=*/{0, 0},
+                             /*postPadding=*/{0, 0},
+                             /*xDims=*/{2, 3, 8, 6},
+                             /*wDims=*/std::vector<int64_t>{5, 3, 3, 2},
+                             /*yDims=*/std::nullopt,
+                             wDataType);
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +120,108 @@ TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
               CONV_W_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.outputToken),
               CONV_Y_UID);
+}
+
+// ---------------------------------------------------------------------------
+// Problem binding: the dims, dtypes and cost fields a UHD ranks on
+// ---------------------------------------------------------------------------
+//
+// Token names are literals: they are the contract a UHD's features_signature references.
+
+TEST(TestConvFwdBinding, BindsEveryOperandDimPositionally)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // x, NCHW 2x3x8x6.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[0]"), 2);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[1]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[2]"), 8);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.x.dims[3]"), 6);
+
+    // w, KCRS 5x3x3x2.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[0]"), 5);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[1]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[2]"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.w.dims[3]"), 2);
+
+    // y, NKPQ 2x5x6x5.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[0]"), 2);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[1]"), 5);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[2]"), 6);
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.y.dims[3]"), 5);
+
+    // Rank 4 exactly.
+    EXPECT_FALSE(tryGetBoundInt(*bound, "conv_fwd.x.dims[4]").has_value());
+}
+
+TEST(TestConvFwdBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnumName)
+{
+    const GraphFixture floatFixture(buildAsymmetricConvGraph());
+    const GraphFixture halfFixture(buildAsymmetricConvGraph(data_objects::DataType::HALF));
+
+    const auto floatBound = matchesGraph(CONV_FWD, floatFixture.context());
+    const auto halfBound = matchesGraph(CONV_FWD, halfFixture.context());
+    ASSERT_TRUE(floatBound.has_value());
+    ASSERT_TRUE(halfBound.has_value());
+
+    // to_string(DataType)'s spelling, the vocabulary `categorical_encoding` is fitted on
+    // (not EnumNameDataType's "FLOAT"/"HALF").
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.x.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.w.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "conv_fwd.y.dtype"), "fp32");
+    EXPECT_EQ(boundString(*halfBound, "conv_fwd.x.dtype"), "fp16");
+
+    // A string, never a pre-encoded number.
+    EXPECT_FALSE(tryGetBoundInt(*floatBound, "conv_fwd.x.dtype").has_value());
+}
+
+TEST(TestConvFwdBinding, BindsFlopsAsTwoPerMultiplyAccumulate)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // By hand: N*K*P*Q = 300 outputs x C*R*S = 18 MACs x 2 flops = 10800.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"), 10800);
+}
+
+TEST(TestConvFwdBinding, BindsBytesAsThePerOperandSumOfElementsTimesItsOwnDtypeWidth)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph());
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // By hand: (288 + 90 + 300) elements x 4 bytes = 2712. Unequal counts, so sizing one
+    // operand and tripling it (3456) fails.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.bytes"), 2712);
+}
+
+TEST(TestConvFwdBinding, ByteCountFollowsTheOperandDtypeWidthAndFlopsDoesNot)
+{
+    const GraphFixture fixture(buildAsymmetricConvGraph(data_objects::DataType::HALF));
+
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // The same 678 elements at 2 bytes each.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.bytes"), 1356);
+    // flops is a pure shape count.
+    EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd.flops"), 10800);
+}
+
+/// The pack's kernel has one element type, so mixed-dtype convs never reach the binding and
+/// per-operand byte widths (RFC 0019 §13.6) cannot be observed here.
+TEST(TestConvFwdBinding, AMixedPrecisionConvIsRefusedSoPerOperandWidthCannotBeObservedHere)
+{
+    const GraphFixture fixture(
+        buildAsymmetricConvGraph(data_objects::DataType::FLOAT, data_objects::DataType::HALF));
+
+    EXPECT_FALSE(matchesGraph(CONV_FWD, fixture.context()).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +654,29 @@ constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 /// The entry point that descriptor names.
 constexpr const char* PACKED_SYMBOL = "ConvFwd";
 
+/// What the conv pack's own convFwdKernelSignature() declares: three device pointers
+/// followed by the seven int extents. A descriptor built here has to agree with it or the
+/// dispatch is refused before the archive is ever opened, which would mask the behaviour
+/// each case is after.
+const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& convSignature()
+{
+    static const hipdnn_plugin_sdk::ingestor::KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const hipdnn_plugin_sdk::ingestor::KernelArgument s_extent{
+        "by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> s_signature{s_buffer,
+                                                                                      s_buffer,
+                                                                                      s_buffer,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent};
+    return s_signature;
+}
+
 /// A KernelDefinition whose code comes from a kpack archive at
 /// `originDirectory / library`. Metadata carries exactly what the conv handler reads, so
 /// the only thing that differs from the embedded-source path is the source.
@@ -523,11 +684,16 @@ constexpr const char* PACKED_SYMBOL = "ConvFwd";
 /// `treeRoot` is the containment boundary the loader would have stamped. Passed
 /// separately from originDirectory because they differ for a nested descriptor, which is
 /// exactly the case whose archive lives at the arch root above it.
+///
+/// `sha256` is the descriptor's own digest rather than one recomputed here: the loader
+/// checks the shipped claim, and recomputing would compare this test's hash of the bytes
+/// against the loader's hash of the same bytes, which agrees however wrong both are.
 hipdnn_plugin_sdk::ingestor::KernelDefinition
     makeKpackConvKernel(const std::filesystem::path& originDirectory,
                         const std::filesystem::path& treeRoot,
                         const std::string& library,
                         const std::string& tocKey,
+                        const std::string& sha256,
                         int64_t blockSize)
 {
     auto kernel = makeKernel(blockSize, "HALF", PACKED_SYMBOL);
@@ -536,6 +702,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition
     kernel.source.library = library;
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = PACKED_SYMBOL;
+    kernel.source.sha256 = sha256;
+    kernel.source.signature = convSignature();
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     return kernel;
@@ -585,10 +753,10 @@ TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
 
     // originDirectory is the descriptor's own (nested) folder; the arch root is the tree,
     // and the archive sits under it -- the real shipped shape.
-    const auto first
-        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 64);
-    const auto second
-        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 256);
+    const auto first = makeKpackConvKernel(
+        source.originDirectory, packed, source.library, source.tocKey, source.sha256, 64);
+    const auto second = makeKpackConvKernel(
+        source.originDirectory, packed, source.library, source.tocKey, source.sha256, 256);
 
     const auto& handler = dispatchHandler(CONV_FWD);
     const size_t before = convFwdKpackModuleCache().size();

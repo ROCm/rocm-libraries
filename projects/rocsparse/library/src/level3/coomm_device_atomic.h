@@ -349,6 +349,7 @@ namespace rocsparse
                                                     int64_t              nnz,
                                                     I                    m,
                                                     I                    n,
+                                                    I                    k,
                                                     T                    alpha,
                                                     const I*             coo_row_ind,
                                                     const I*             coo_col_ind,
@@ -367,29 +368,33 @@ namespace rocsparse
             return;
         }
 
-        // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
+        // Compute size of dense_C for 4-argument atomic_add. C is k x n because op(A) = A^T.
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (k * ldc);
 
         const I row = coo_row_ind[gid] - idx_base;
         const I col = coo_col_ind[gid] - idx_base;
         const T val = rocsparse::conj_val(coo_val[gid], conj_A);
 
-        const T bval = (TRANSB) ? rocsparse::conj_val(dense_B[ldb * row + hipBlockIdx_y], conj_B)
-                                : rocsparse::conj_val(dense_B[hipBlockIdx_y * ldb + row], conj_B);
+        // grid.y carries the dense column index and is clamped by get_grid_size_y, so stride
+        // over the columns to cover panels beyond the cap.
+        // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+        // 64-bit counter stays live in the kernel.
+        using U = std::make_unsigned_t<I>;
+        for(U l = hipBlockIdx_y; l < static_cast<U>(n); l += hipGridDim_y)
+        {
+            const T bval = (TRANSB) ? rocsparse::conj_val(dense_B[ldb * row + l], conj_B)
+                                    : rocsparse::conj_val(dense_B[l * ldb + row], conj_B);
 
-        if(order_C == rocsparse_order_column)
-        {
-            rocsparse::atomic_add(dense_C,
-                                  hipBlockIdx_y * ldc + col,
-                                  dense_C_size,
-                                  static_cast<C>(alpha * (val * bval)));
-        }
-        else
-        {
-            rocsparse::atomic_add(dense_C,
-                                  col * ldc + hipBlockIdx_y,
-                                  dense_C_size,
-                                  static_cast<C>(alpha * (val * bval)));
+            if(order_C == rocsparse_order_column)
+            {
+                rocsparse::atomic_add(
+                    dense_C, l * ldc + col, dense_C_size, static_cast<C>(alpha * (val * bval)));
+            }
+            else
+            {
+                rocsparse::atomic_add(
+                    dense_C, col * ldc + l, dense_C_size, static_cast<C>(alpha * (val * bval)));
+            }
         }
     }
 }
