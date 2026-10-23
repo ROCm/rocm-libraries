@@ -149,3 +149,42 @@ def test_a_unit_tile_emits_nothing():
     rather than emitting a predicate that is always true."""
     tags = _by_tag(_state(macrotile=(1, 1, 1)))
     assert M_TAG not in tags and K_TAG not in tags
+
+
+# -- batch and buffer-addressing limits -----------------------------------
+
+BATCH_TAG = "BatchSizeEqual"
+BUFFER_TAG = "BufferAddressingLimitCheck"
+
+
+def test_batch_is_pinned_to_one():
+    """The kernels are 2-D: no batch strides, workgroup_id_z unread, but a
+    grid of [TilesX, TilesY, Batch]. Every z-slice recomputes batch 0, so
+    batches 1..N-1 come back wrong."""
+    tags = _by_tag(_state())
+    assert len(tags.get(BATCH_TAG, [])) == 1
+    assert tags[BATCH_TAG][0].value == 1
+    assert tags[BATCH_TAG][0].index == 0
+
+
+def test_buffer_addressing_limit_is_declared():
+    """One buffer descriptor per tensor, sized over the whole tensor with a
+    32-bit num_records: at 4 GiB it wraps and the kernel zeroes its output."""
+    assert len(_by_tag(_state()).get(BUFFER_TAG, [])) == 1
+
+
+def test_batch_and_buffer_limits_survive_a_unit_tile():
+    """Neither depends on the tile shape, so a kernel whose macrotile emits no
+    size multiples still declares both."""
+    tags = _by_tag(_state(macrotile=(1, 1, 1)))
+    assert BATCH_TAG in tags and BUFFER_TAG in tags
+
+
+@pytest.mark.parametrize("name", [
+    "Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgs_MT64x64x256",
+    "wvSpltK_bf16_tn_m1",
+])
+def test_batch_and_buffer_limits_are_rocroller_only(name):
+    """Other kernel families handle batching and large tensors themselves."""
+    tags = _by_tag(_state(name=name))
+    assert BATCH_TAG not in tags and BUFFER_TAG not in tags

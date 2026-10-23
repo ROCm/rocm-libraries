@@ -755,6 +755,17 @@ class ProblemPredicate(Properties.Predicate):
                 if depthU and depthU > 1:
                     rv += [cls('BoundSizeMultiple', index=-1, value=depthU)]
 
+            # The kernels are 2-D. They carry no batch strides and never read
+            # workgroup_id_z, but their grid is [TilesX, TilesY, Batch], so every
+            # z-slice recomputes batch 0 and batches 1..N-1 come back wrong.
+            rv += [cls('BatchSizeEqual', index=0, value=1)]
+
+            # Each tensor gets one buffer descriptor sized over the whole tensor
+            # with a 32-bit num_records, so at 4 GiB the output is zeroed rather
+            # than the launch failing. The rocRoller-on path rejects the same
+            # problems in RocRollerGemmKernel::exceedsBufferAddressingLimit.
+            rv += [cls('BufferAddressingLimitCheck')]
+
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
         size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
