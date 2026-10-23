@@ -111,3 +111,59 @@ TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
     ASSERT_NE(expected, fullF32);
     EXPECT_EQ(d[0], expected);
 }
+
+TEST(ReferenceBiasReduction, BatchedInputsRespectSourceAndOutputStrides)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    const size_t m = 3, n = 5, batches = 2;
+    for(auto source : {Tensor::A, Tensor::B})
+    for(bool transpose : {false, true})
+    for(size_t k : {size_t{0}, size_t{7}})
+    for(size_t padding : {size_t{0}, size_t{4}})
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            transpose, transpose, m, n, k, transpose ? std::max(k, size_t{1}) : m,
+            transpose ? n : std::max(k, size_t{1}), m, 1.0, false, batches);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setUseBias(1);
+        problem.setUseGradient(true);
+        size_t length = source == Tensor::A ? m : n;
+        size_t stride = length + padding;
+        problem.setBias(rocisa::DataType::Float, length, stride, true, source);
+        std::vector<float> a(problem.a().totalAllocatedElements(), 0);
+        std::vector<float> b(problem.b().totalAllocatedElements(), 0);
+        auto const& tensor = source == Tensor::A ? problem.a() : problem.b();
+        auto& input = source == Tensor::A ? a : b;
+        const size_t reduce = source == Tensor::A ? (transpose ? 0 : 1)
+                                                  : (transpose ? 1 : 0);
+        for(size_t batch = 0; batch < batches; ++batch)
+        for(size_t i = 0; i < length; ++i)
+        for(size_t j = 0; j < k; ++j)
+        {
+            std::vector<size_t> coord(3);
+            coord[reduce] = j;
+            coord[1 - reduce] = i;
+            coord[2] = batch;
+            input[tensor.index(coord)] = float(100 * batch + 10 * i + j);
+        }
+        std::vector<float> c(m * n * batches, 1), d(c.size(), -123);
+        std::vector<float> bias(stride * batches, -123);
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 1.0f);
+        inputs.bias = bias.data();
+        SolveGemmCPU(problem, inputs, size_t(-1), false);
+        for(size_t batch = 0; batch < batches; ++batch)
+        for(size_t i = 0; i < stride; ++i)
+        {
+            const float expected = i < length
+                ? float(k * (100 * batch + 10 * i) + (k ? k * (k - 1) / 2 : 0)) : -123;
+            EXPECT_EQ(bias[batch * stride + i], expected);
+        }
+        for(float value : d)
+            EXPECT_EQ(value, 1);
+        problem.setBias(rocisa::DataType::Float, length, length - 1, true, source);
+        EXPECT_THROW(SolveGemmCPU(problem, inputs, size_t(-1), false), std::runtime_error);
+    }
+}

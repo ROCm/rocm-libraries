@@ -25,7 +25,7 @@
 from rocisa.code import RegSet, Module
 from rocisa.container import EXEC, vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.enum import HighBitSel, SelectBit
-from rocisa.instruction import SBarrier, \
+from rocisa.instruction import SWaitCnt, SBarrier, \
     SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, \
     VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32, \
     ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
@@ -317,6 +317,10 @@ class SumUnrollMfma(SumUnroll):
                 numRegs = max(1, bps // 4)
                 imod.add(dsStore(bps, dstAddr=dst, src=vgpr(vgprStr, numRegs), ds=ds, comment="local store bias"))
                 idx += 1
+        # A workgroup barrier does not retire this wave's LDS stores. The
+        # bias writer can read another wave's partials (notably BiasSrc=B),
+        # so publish only after the stores have completed.
+        imod.add(SWaitCnt(dscnt=0, comment="finish bias LDS stores before publication"))
         # tReg
         writer.vgprPool.checkIn(tReg)
         imod.add(SSetMask(dst=EXEC(), src=-1, comment="reset mask" ))

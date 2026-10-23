@@ -1865,6 +1865,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
       mod.add(SMovB32(sgpr(sIter), hex(iter_count - 1), f"iter_count={iter_count}-1"))
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
+  mod.add(writer.suppressUnusedTDMInput(kernel, tc, descSgprName(1)))
   return mod
 
 

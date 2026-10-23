@@ -42,6 +42,13 @@ class TileProcessingStrategy(Component):
     keepsConstantsInSgpr = False
     supportsSubtileImpl = True
 
+    @staticmethod
+    def needsInputBiasReduction(kernel):
+        """Raw A/B bias gradients require K work independently of GEMM alpha."""
+        problem = kernel["ProblemType"]
+        return (problem.get("Gradient", False) and problem.get("UseBias", False)
+                and problem.get("BiasSrc") in ("A", "B"))
+
     def tileWork(self, kernel):
         return TileWork("PersistentTileID")
 
@@ -153,10 +160,11 @@ class DataParallel(TileProcessingStrategy):
         # tile is visited. Its compute loop must still skip the empty sum.
         module.add(SCmpEQU32(src0=sgpr("SizesSum+%u" % writer.states.unrollIdx), src1=0, comment="Empty summation"))
         module.add(SCSelectB32(dst=sgpr(loopCounterName), src0=0, src1=sgpr(loopCounterName), comment="K=0 still stores the tile but issues no compute"))
-        alphaLabel2 = Label(writer.labels.getNameInc('PersistentAlphaCheck'), '')
-        module.add(BranchIfNotZero('Alpha', kernel['ProblemType']['ComputeDataType'].toEnum(), alphaLabel2))
-        module.add(SMovB32(dst=sgpr(loopCounterName), src=0, comment='Skip iterations'))
-        module.add(alphaLabel2)
+        if not self.needsInputBiasReduction(kernel):
+            alphaLabel2 = Label(writer.labels.getNameInc('PersistentAlphaCheck'), '')
+            module.add(BranchIfNotZero('Alpha', kernel['ProblemType']['ComputeDataType'].toEnum(), alphaLabel2))
+            module.add(SMovB32(dst=sgpr(loopCounterName), src=0, comment='Skip iterations'))
+            module.add(alphaLabel2)
         if not kernel['NoTailLoop']:
             tmpSgpr = tmpSgprInfo.idx
             unrollIdx = writer.states.unrollIdx
