@@ -6,9 +6,12 @@ Every case runs one compiled ``kernels/gfx1151/wmma_fmha_fwd_v2`` object
 against a float64 reference over every sequence, head and row, checking O and
 the natural-log LSE. Features: softcap, attention sinks, ALiBi, QQ-bias, OCP
 E4M3FN K/V with runtime scales, ragged (varlen) and paged K/V (per-tile and
-per-row block-table lookups, shuffled pages, NaN-poisoned unused slots), each
-alone and in model combinations (gpt-oss sinks + sliding window at D64 GQA,
-Gemma-2 softcap + sliding window at D256, everything at once).
+per-row block-table lookups, shuffled pages, NaN-poisoned unused slots), a
+batch-strided (dense) Q against a paged cache, per-sequence live query counts
+(``seqused_q``: rows past them, and gaps between packed sequences, stay
+untouched), each alone and in model combinations (gpt-oss sinks + sliding
+window at D64 GQA, Gemma-2 softcap + sliding window at D256, everything at
+once).
 
 Reference order (natural domain): scale, softcap, ALiBi ``slope * (k -
 ctx)``, QQ-bias ``qq[q, k - ctx]`` inside its bounds, additive bias, then the
@@ -38,11 +41,13 @@ _GPTOSS = dict(Hq=16, Hkv=2, dq=64, mask="causal", wl=127, wr=0)
 
 # name -> options. Common keys: layout (dense / ragged / paged), B + Sq + Sk
 # (dense) or lens_q + lens_k (packed), Hq, Hkv, Hv, dq, dv, mask, br, wl, wr,
-# flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V), cap, scale, ps
-# (page size), bias ((kind, (b, h, q, k) full flags)), qq (rows, cols, pad),
-# bn (block_n), unsplit (gfx12 wave_pair=False), ninf ((n, fill): the first n
-# keys' bias / QQ-bias entries become fill, "inf" -> -inf, "finfo" -> the
-# dtype's most negative finite value).
+# flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V, d dense Q (paged),
+# u seqused_q), cap, scale, ps (page size), bias ((kind, (b, h, q, k) full
+# flags)), qq (rows, cols, pad), bn (block_n), unsplit (gfx12 wave_pair=False),
+# ninf ((n, fill): the first n keys' bias / QQ-bias entries become fill, "inf"
+# -> -inf, "finfo" -> the dtype's most negative finite value), gaps (u: rows
+# past each sequence's live count -- packed: before the next sequence; dense
+# Q: up to Sq = max(lens_q + gaps)).
 CASES = {
     "softcap_none_d128": dict(B=2, Sq=77, Sk=150, dq=128, flags="c", cap=5.0, scale=1.0),
     "softcap_large_logits_d64": dict(
@@ -155,6 +160,51 @@ CASES = {
     "unsplit_q256_v128_paged32_sinks": dict(
         layout="paged", ps=32, lens_q=(40, 9), lens_k=(70, 100), dq=256, dv=128,
         flags="s", unsplit=True,
+    ),
+    # Uniform decode against a paged cache: dense [B, Sq, Hq, D] Q, CUDA-graph
+    # padding rows (no keys) write zeros.
+    "denseq_paged16_decode_gqa": dict(
+        layout="paged", ps=16, lens_q=(1, 1, 1, 1), lens_k=(37, 0, 200, 16),
+        Hq=8, Hkv=2, dq=128, mask="causal", br=1, wr=0, flags="d",
+    ),
+    "denseq_paged32_spec_decode_d64": dict(
+        layout="paged", ps=32, lens_q=(3, 3, 3), lens_k=(3, 70, 129), dq=64,
+        mask="causal", br=1, wr=0, flags="d",
+    ),
+    "denseq_used_paged16_window": dict(
+        layout="paged", ps=16, lens_q=(1, 3, 0, 2), gaps=(3, 1, 4, 2),
+        lens_k=(40, 90, 0, 33), dq=128, mask="causal", br=1, wl=31, wr=0,
+        flags="du",
+    ),
+    "used_paged16_gaps": dict(
+        layout="paged", ps=16, lens_q=(5, 0, 40, 1), gaps=(3, 2, 0, 7),
+        lens_k=(20, 0, 300, 50), Hq=8, Hkv=1, dq=128, mask="causal", br=1,
+        wl=63, wr=0, flags="u",
+    ),
+    "used_ragged_gaps_d64": dict(
+        layout="ragged", lens_q=(17, 4), gaps=(5, 0), lens_k=(30, 4), dq=64,
+        flags="u",
+    ),
+    "denseq_used_pair_d256": dict(
+        layout="paged", ps=16, lens_q=(2, 1), gaps=(0, 1), lens_k=(70, 5),
+        Hq=4, Hkv=2, dq=256, mask="causal", br=1, wr=0, flags="du",
+    ),
+    # gpt-oss decode through hipDNN's paged graph: a dense Q with sinks. Rows of
+    # a sequence with no keys write O = 0 and LSE = the sink.
+    "gptoss_denseq_paged16_sinks_decode": dict(
+        layout="paged", ps=16, lens_q=(1, 1, 1), lens_k=(37, 0, 300), br=1,
+        flags="ds", **_GPTOSS,
+    ),
+    "denseq_used_paged32_sinks_window": dict(
+        layout="paged", ps=32, lens_q=(4, 0, 2), gaps=(0, 4, 2), lens_k=(70, 0, 33),
+        Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="dsu",
+    ),
+    # A stale seqused_k past seqlen_k (the longest sequence's keys) is clamped
+    # to seqlen_k: unclamped, the lookup would walk into the poisoned row padding
+    # and the next sequence's block_table row.
+    "paged16_seqused_k_past_seqlen_k": dict(
+        layout="paged", ps=16, lens_q=(9, 4), lens_k=(150, 60), kover=(100, 0),
+        dq=128, mask="causal", br=1, wr=0,
     ),
     # A -inf bias / QQ-bias over a row's first whole key tile: the running max
     # stays -inf through an unmasked tile, which must not produce -inf - -inf.
@@ -270,7 +320,7 @@ def test_prefill_feature_matches_reference(case, dtype):
     opt = dict(
         layout="dense", Hq=4, Hkv=2, Hv=None, dv=None, mask="none", br=0, wl=-1,
         wr=-1, flags="", cap=None, scale=None, ps=0, bias=None, qq=None, bn=32,
-        unsplit=False, ninf=None,
+        unsplit=False, ninf=None, gaps=None, kover=None,
     )  # fmt: skip
     opt.update(CASES[case])
     if opt["unsplit"] and _ARCH != "gfx12-generic":
@@ -298,6 +348,10 @@ def test_prefill_feature_matches_reference(case, dtype):
     else:
         lens_q, lens_k = opt["lens_q"], opt["lens_k"]
     B, max_q, max_k = len(lens_q), max(lens_q), max(lens_k)
+    dense_q, used = "d" in flags, "u" in flags
+    spans = [n + g for n, g in zip(lens_q, opt["gaps"] or (0,) * B)]
+    assert used or spans == list(lens_q), "gaps need seqused_q"
+    assert not dense_q or len(set(spans)) == 1, "a dense Q spans Sq rows per sequence"
     scale = opt["scale"] or dq**-0.5
     spec = WmmaFmhaFwdV2Spec(
         dtype=dtype,
@@ -311,6 +365,8 @@ def test_prefill_feature_matches_reference(case, dtype):
         use_qq_bias="q" in flags,
         layout=layout,
         page_block_size=opt["ps"],
+        dense_q=dense_q,
+        seqused_q=used,
         kv_dtype="fp8e4m3" if fp8 else "",
         block_n=opt["bn"],
         wave_pair=False if opt["unsplit"] else None,
@@ -412,17 +468,41 @@ def test_prefill_feature_matches_reference(case, dtype):
                 "lse": (Hq * max_q, 1, max_q),
             }
         else:
-            total_q = sum(lens_q)
-            q_all = np.concatenate(qs)
-            o_like = np.zeros((total_q, Hq, dv), npdt)
-            lse_like = np.zeros((Hq, max(total_q, 1)), np.float32)
-            cu_q = np.concatenate([[0], np.cumsum(lens_q)]).astype(np.int32)
-            values["cu_seqlens_q"] = dev.put(cu_q)
-            strides = {
-                "q": (0, Hq * dq, dq),
-                "o": (0, Hq * dv, dv),
-                "lse": (0, 1, max(total_q, 1)),
-            }
+            # Live query rows, then each sequence's untouched gap rows.
+            q_seqs = [
+                (
+                    np.concatenate([q, rnd(s - len(q), Hq, dq).astype(npdt)])
+                    if s > len(q)
+                    else q
+                )
+                for q, s in zip(qs, spans)
+            ]
+            if used:
+                values["seqused_q"] = dev.put(np.array(lens_q, np.int32))
+            if dense_q:
+                sq = spans[0]
+                values["seqlen_q"] = sq
+                q_all = np.stack(q_seqs)
+                o_like = np.zeros((B, sq, Hq, dv), npdt)
+                lse_like = np.zeros((B, Hq, sq), np.float32)
+                strides = {
+                    "q": (sq * Hq * dq, Hq * dq, dq),
+                    "o": (sq * Hq * dv, Hq * dv, dv),
+                    "lse": (Hq * sq, 1, sq),
+                }
+            else:
+                total_q = sum(spans)
+                values["seqlen_q"] = max(max(spans), 1)
+                q_all = np.concatenate(q_seqs)
+                o_like = np.zeros((total_q, Hq, dv), npdt)
+                lse_like = np.zeros((Hq, max(total_q, 1)), np.float32)
+                cu_q = np.concatenate([[0], np.cumsum(spans)]).astype(np.int32)
+                values["cu_seqlens_q"] = dev.put(cu_q)
+                strides = {
+                    "q": (0, Hq * dq, dq),
+                    "o": (0, Hq * dv, dv),
+                    "lse": (0, 1, max(total_q, 1)),
+                }
             if layout == "ragged":
                 k_all, v_all = np.concatenate(ks_dev), np.concatenate(vs_dev)
                 cu_k = np.concatenate([[0], np.cumsum(lens_k)]).astype(np.int32)
@@ -438,7 +518,10 @@ def test_prefill_feature_matches_reference(case, dtype):
                 nan = 0x7F if fp8 else np.nan  # NaN-poison every unused slot
                 k_all = np.full((n_pages, ps, Hk, dq), nan, kv_np)
                 v_all = np.full((n_pages, ps, Hv, dv), nan, kv_np)
-                table = np.zeros((B, max_pages + 2), np.int32)  # padded rows
+                # Padded rows; the padding is never read, so poison it with ids
+                # outside [0, num_blocks).
+                table = np.zeros((B, max_pages + 2), np.int32)
+                table[:, max_pages:] = (-1, n_pages + 5)
                 nxt = 0
                 for bi, n in enumerate(lens_k):
                     for pg in range(pages[bi]):
@@ -448,7 +531,10 @@ def test_prefill_feature_matches_reference(case, dtype):
                         t0, t1 = pg * ps, min(n, (pg + 1) * ps)
                         k_all[phys, : t1 - t0] = ks_dev[bi][t0:t1]
                         v_all[phys, : t1 - t0] = vs_dev[bi][t0:t1]
-                values["seqused_k"] = dev.put(np.array(lens_k, np.int32))
+                used_k = np.array(lens_k, np.int32) + np.array(
+                    opt["kover"] or (0,) * B, np.int32
+                )
+                values["seqused_k"] = dev.put(used_k)
                 values["block_table"] = dev.put(table)
                 values["block_table_stride"] = table.shape[1]
                 values["stride_k_block"] = ps * Hk * dq
@@ -500,7 +586,7 @@ def test_prefill_feature_matches_reference(case, dtype):
         )
         module = rt.load_module(artifact.hsaco)
         grid, block = wmma_fmha_fwd_v2_grid(
-            spec, batch=B, seqlen_q=max(max_q, 1), num_query_heads=Hq
+            spec, batch=B, seqlen_q=max(values["seqlen_q"], 1), num_query_heads=Hq
         )
         rt.launch(
             module.get_function(artifact.kernel_name),
@@ -517,13 +603,21 @@ def test_prefill_feature_matches_reference(case, dtype):
             module.unload()
         dev.free()
 
+    gap_rows = []
     if layout == "dense":
         outs = [out[bi] for bi in range(B)]
         lses = [got_lse[bi] for bi in range(B)]
+    elif dense_q:
+        outs = [out[bi, : lens_q[bi]] for bi in range(B)]
+        lses = [got_lse[bi, :, : lens_q[bi]] for bi in range(B)]
+        gap_rows = [out[bi, lens_q[bi] :] for bi in range(B)]
     else:
-        off = np.concatenate([[0], np.cumsum(lens_q)])
-        outs = [out[off[bi] : off[bi + 1]] for bi in range(B)]
-        lses = [got_lse[:, off[bi] : off[bi + 1]] for bi in range(B)]
+        off = np.concatenate([[0], np.cumsum(spans)])
+        outs = [out[off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
+        lses = [got_lse[:, off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
+        gap_rows = [out[off[bi] + lens_q[bi] : off[bi + 1]] for bi in range(B)]
+    for bi, rows in enumerate(gap_rows):
+        assert np.isnan(rows).all(), f"sequence {bi}: a row past seqused_q was written"
     tol = 4e-2 if dtype == "bf16" else 2e-2
     for bi in range(B):
         o, ref = outs[bi], refs[bi]
@@ -537,3 +631,192 @@ def test_prefill_feature_matches_reference(case, dtype):
             np.testing.assert_allclose(
                 got[fin], want[fin], rtol=0, atol=lse_tol, err_msg=f"sequence {bi}"
             )
+
+
+# A paged cache past 4 GiB: (page size, block_n, head dim, fp8 K/V). Pages that
+# hold whole key tiles take a per-tile resource based at the page; smaller ones
+# take 64-bit addressed loads per row.
+_FAR_CASES = {
+    "tile_paged32_d128": (32, 32, 128, False),
+    "tile_paged64_bn64_d64": (64, 64, 64, False),
+    "row_paged16_d128": (16, 32, 128, False),
+    "row_paged16_d256": (16, 32, 256, False),
+    "row_paged32_bn64_d64": (32, 64, 64, False),
+    "row_paged16_fp8_d128": (16, 32, 128, True),
+}
+_FAR_BYTES = (4 << 30) + (512 << 20)  # per cache
+
+
+@pytest.mark.gpu
+@_NEEDS_RDNA
+@pytest.mark.parametrize("case", sorted(_FAR_CASES))
+def test_paged_cache_past_4gib(case):
+    """Pages above 2 GiB and 4 GiB of each cache, among low ones, against the
+    float64 reference. Every other page holds NaN (0xFF bytes): a page term
+    truncated to 32 bits reads one of those and poisons the output."""
+    ps, bn, dq, fp8 = _FAR_CASES[case]
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+    npdt = ml_dtypes.bfloat16
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        WmmaFmhaFwdV2Spec,
+        build_wmma_fmha_fwd_v2,
+        wmma_fmha_fwd_v2_grid,
+        wmma_fmha_fwd_v2_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    Hq, Hk = 4, 2
+    lens_q, lens_k = (37, 1, 64), (300, 129, 64)
+    B, max_q, max_k = len(lens_q), max(lens_q), max(lens_k)
+    opt = dict(mask="causal", br=1, wl=-1, wr=0, flags="")
+    scale = dq**-0.5
+    spec = WmmaFmhaFwdV2Spec(
+        dtype="bf16",
+        head_dim=dq,
+        head_dim_v=dq,
+        mask="causal",
+        layout="paged",
+        page_block_size=ps,
+        kv_dtype="fp8e4m3" if fp8 else "",
+        block_n=bn,
+    )
+    rng = np.random.default_rng(29)
+
+    def rnd(*shape):
+        return rng.standard_normal(shape, dtype=np.float32) * 0.5
+
+    qs = [rnd(n, Hq, dq).astype(npdt) for n in lens_q]
+    if fp8:
+        f8 = ml_dtypes.float8_e4m3fn
+        ks8 = [(rnd(n, Hk, dq) / _K_SCALE).astype(f8) for n in lens_k]
+        vs8 = [(rnd(n, Hk, dq) / _V_SCALE).astype(f8) for n in lens_k]
+        ks = [x.astype(np.float64) * _K_SCALE for x in ks8]
+        vs = [x.astype(np.float64) * _V_SCALE for x in vs8]
+        ks_dev, vs_dev = [x.view(np.uint8) for x in ks8], [
+            x.view(np.uint8) for x in vs8
+        ]
+        kv_np = np.uint8
+    else:
+        ks_dev = [rnd(n, Hk, dq).astype(npdt) for n in lens_k]
+        vs_dev = [rnd(n, Hk, dq).astype(npdt) for n in lens_k]
+        ks, vs, kv_np = ks_dev, vs_dev, npdt
+    refs, ref_lses = [], []
+    for bi in range(B):
+        o, l = _reference_seq(
+            qs[bi].astype(np.float64),
+            np.asarray(ks[bi], np.float64),
+            np.asarray(vs[bi], np.float64),
+            scale,
+            opt,
+            sinks=None,
+            slopes=None,
+            qq=None,
+            bias_fn=None,
+        )
+        refs.append(o)
+        ref_lses.append(l)
+
+    page_elems = ps * Hk * dq
+    page_bytes = page_elems * np.dtype(kv_np).itemsize
+    n_pages = -(-_FAR_BYTES // page_bytes)
+    pages = [-(-n // ps) for n in lens_k]
+    # Physical pages: a few low ones, then pages past 2 GiB and past 4 GiB,
+    # shuffled across the sequences.
+    two, four = (2 << 30) // page_bytes, (4 << 30) // page_bytes
+    pool = np.concatenate(
+        [np.arange(1, 4), np.arange(two + 1, two + 4), np.arange(four + 1, n_pages)]
+    )
+    phys_ids = rng.permutation(pool)[: sum(pages)]
+    assert (phys_ids >= four).any() and (phys_ids >= two).any()
+    table = np.full((B, max(pages)), -1, np.int32)
+
+    rt = Runtime()
+    dev = _Dev(rt)
+    module = None
+    caches = []
+    try:
+        for _ in range(2):
+            ptr = rt.alloc(n_pages * page_bytes)
+            caches.append(ptr)
+            rt.memset(ptr, 0xFF, n_pages * page_bytes)
+        nxt = 0
+        for bi, n in enumerate(lens_k):
+            for pg in range(pages[bi]):
+                phys = int(phys_ids[nxt])
+                nxt += 1
+                table[bi, pg] = phys
+                t0, t1 = pg * ps, min(n, (pg + 1) * ps)
+                for ptr, src in zip(caches, (ks_dev[bi], vs_dev[bi])):
+                    page = np.full((ps, Hk, dq), 0x7F if fp8 else np.nan, kv_np)
+                    page[: t1 - t0] = src[t0:t1]
+                    rt.memcpy_h2d(
+                        ptr + phys * page_bytes, _host_bytes(page), page_bytes
+                    )
+        cu_q = np.concatenate([[0], np.cumsum(lens_q)]).astype(np.int32)
+        total_q = int(cu_q[-1])
+        o_like = np.zeros((total_q, Hq, dq), npdt)
+        lse_like = np.zeros((Hq, total_q), np.float32)
+        values = dict(
+            scale_log2=scale * _LOG2E, batch=B, seqlen_q=max_q, seqlen_k=max_k,
+            num_query_heads=Hq, num_kv_heads=Hk, num_v_heads=Hk, head_dim_q=dq,
+            head_dim_v=dq, bottom_right=1, window_left=-1, window_right=0,
+            write_lse=1, Q=dev.put(np.concatenate(qs)), K=caches[0], V=caches[1],
+            cu_seqlens_q=dev.put(cu_q), seqused_k=dev.put(np.array(lens_k, np.int32)),
+            block_table=dev.put(table), block_table_stride=table.shape[1],
+            stride_k_block=page_elems, stride_v_block=page_elems, num_blocks=n_pages,
+        )  # fmt: skip
+        values["O"] = o_ptr = dev.put(np.full_like(o_like, np.nan))
+        values["LSE"] = lse_ptr = dev.put(lse_like)
+        strides = {
+            "q": (0, Hq * dq, dq),
+            "k": (0, Hk * dq, dq),
+            "v": (0, Hk * dq, dq),
+            "o": (0, Hq * dq, dq),
+            "lse": (0, 1, total_q),
+        }
+        for t, (sb, st, sh) in strides.items():
+            values.update(
+                {
+                    f"stride_{t}_batch": sb,
+                    f"stride_{t}_token": st,
+                    f"stride_{t}_head": sh,
+                }
+            )
+        if fp8:
+            values.update(k_scale=_K_SCALE, v_scale=_V_SCALE)
+        artifact = compile_kernel(
+            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
+        )
+        module = rt.load_module(artifact.hsaco)
+        grid, block = wmma_fmha_fwd_v2_grid(
+            spec, batch=B, seqlen_q=max_q, num_query_heads=Hq
+        )
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            grid,
+            block,
+            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
+        )
+        rt.sync()
+        out = dev.get(o_ptr, o_like).astype(np.float64)
+        got_lse = dev.get(lse_ptr, lse_like)
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        dev.free()
+        for ptr in caches:
+            rt.free(ptr)
+
+    for bi in range(B):
+        o = out[cu_q[bi] : cu_q[bi + 1]]
+        assert np.isfinite(o).all(), f"sequence {bi}: non-finite output"
+        np.testing.assert_allclose(
+            o, refs[bi], rtol=0, atol=4e-2, err_msg=f"sequence {bi}"
+        )
+        np.testing.assert_allclose(
+            got_lse[:, cu_q[bi] : cu_q[bi + 1]], ref_lses[bi], rtol=0, atol=2e-2,
+            err_msg=f"sequence {bi}",
+        )  # fmt: skip

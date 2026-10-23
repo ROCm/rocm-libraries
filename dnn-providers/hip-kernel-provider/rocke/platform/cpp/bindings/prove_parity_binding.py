@@ -795,6 +795,14 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
         ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
     )
+    # flags d dense Q (paged), u seqused_q.
+    query_lengths = (
+        ("bf16", 128, 128, "causal", None, "d", "paged", 16, 32, None),
+        ("fp16", 64, 64, "causal", None, "du", "paged", 32, 32, None),
+        ("bf16", 128, 128, "causal", None, "u", "paged", 16, 32, None),
+        ("fp16", 128, 128, "none", None, "u", "ragged", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "du", "paged", 16, 32, None),
+    )
 
     def feat(row):
         dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
@@ -810,6 +818,8 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
             use_qq_bias="q" in flags,
             layout=layout,
             page_block_size=ps,
+            dense_q="d" in flags,
+            seqused_q="u" in flags,
             kv_dtype="fp8e4m3" if "8" in flags else "",
             block_n=bn,
             wave_pair=pair,
@@ -822,6 +832,9 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         out.append((feat(row), g12))
     out.append((feat(feats[2]), "gfx1151"))
     out.append((feat(feats[8]), "gfx1201"))
+    for arch in archs:
+        for row in query_lengths:
+            out.append((feat(row), arch))
     return out
 
 

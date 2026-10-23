@@ -92,6 +92,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The paged-K/V suite of the RDNA prefill engine, gated the same way; it GTEST_SKIPs
+    # on devices other than gfx11 / gfx12.
+    hkp_product_offers_engine(_hkp_rdna_attention_bundle "hipkernel:Gfx1151WmmaAttention")
+    if(_hkp_rdna_attention_bundle AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1151WmmaAttentionPaged.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

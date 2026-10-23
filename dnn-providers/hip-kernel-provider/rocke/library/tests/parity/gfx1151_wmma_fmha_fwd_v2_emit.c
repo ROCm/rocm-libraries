@@ -47,7 +47,8 @@ static void push(const char* arch, rocke_wmma_fmha_fwd_v2_spec_t s)
 }
 
 /* FEATURES rows of the Python emitter; flags: c softcap, s sinks, a ALiBi,
- * q QQ-bias, 8 FP8 (OCP E4M3FN) K/V; pair -1 = None. */
+ * q QQ-bias, 8 FP8 (OCP E4M3FN) K/V, d dense Q (paged), u seqused_q;
+ * pair -1 = None. */
 typedef struct
 {
     const char* dtype;
@@ -97,6 +98,14 @@ static const feature_row_t k_features_gfx12[] = {
     {"fp16", 256, 128, "none", NULL, "s", "paged", 32, 32, 0},
 };
 
+static const feature_row_t k_query_lengths[] = {
+    {"bf16", 128, 128, "causal", NULL, "d", "paged", 16, 32, -1},
+    {"fp16", 64, 64, "causal", NULL, "du", "paged", 32, 32, -1},
+    {"bf16", 128, 128, "causal", NULL, "u", "paged", 16, 32, -1},
+    {"fp16", 128, 128, "none", NULL, "u", "ragged", 0, 32, -1},
+    {"bf16", 256, 256, "causal", NULL, "du", "paged", 16, 32, -1},
+};
+
 static rocke_wmma_fmha_fwd_v2_spec_t feature_spec(const feature_row_t* r)
 {
     rocke_wmma_fmha_fwd_v2_spec_t s = base_spec(r->dtype, r->hd, r->hdv, r->mask, r->bias);
@@ -106,6 +115,8 @@ static rocke_wmma_fmha_fwd_v2_spec_t feature_spec(const feature_row_t* r)
     s.use_qq_bias = strchr(r->flags, 'q') != NULL;
     s.layout = r->layout;
     s.page_block_size = r->ps;
+    s.dense_q = strchr(r->flags, 'd') != NULL;
+    s.seqused_q = strchr(r->flags, 'u') != NULL;
     s.kv_dtype = strchr(r->flags, '8') != NULL ? "fp8e4m3" : "";
     s.block_n = r->bn;
     s.wave_pair = r->pair;
@@ -221,6 +232,9 @@ static void build_table(void)
         push("gfx12-generic", feature_spec(&k_features_gfx12[i]));
     push("gfx1151", feature_spec(&k_features[2]));
     push("gfx1201", feature_spec(&k_features[8]));
+    for(a = 0; a < 2; ++a)
+        for(i = 0; i < (int)(sizeof(k_query_lengths) / sizeof(k_query_lengths[0])); ++i)
+            push(archs[a], feature_spec(&k_query_lengths[i]));
 }
 
 int main(int argc, char** argv)

@@ -30,7 +30,7 @@ One design for both families, one query row per lane:
   bias; applied on every tile, before the masks), attention sinks (seed the
   softmax state), OCP E4M3FN K/V (decoded and scaled into the LDS tiles) and
   paged K/V (a block-table lookup per key tile, or per row for pages smaller
-  than a tile).
+  than a tile; the page term is 64-bit, so a cache may pass 4 GiB).
 
 The caller (``kernels/gfx1151/wmma_fmha_fwd_v2.py``) declares parameters,
 decodes the CTA, and builds per-(batch, head) buffer resources; this module
@@ -45,7 +45,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from rocke.core.ir import BF16, F16, F32, I8, I16, I32, IRBuilder, Value, VectorType
+from rocke.core.ir import (
+    BF16,
+    F16,
+    F32,
+    I8,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    Value,
+    VectorType,
+)
 
 __all__ = ["RdnaAttentionConfig", "rdna_attention_fwd_body", "rdna_attention_lds_bytes"]
 
@@ -199,8 +210,8 @@ def rdna_attention_fwd_body(
     cfg: RdnaAttentionConfig,
     *,
     q_rsrc: Value,
-    k_rsrc: Value,
-    v_rsrc: Value,
+    k_rsrc: Optional[Value],
+    v_rsrc: Optional[Value],
     o_rsrc: Value,
     lse_rsrc: Optional[Value],
     stride_q: Value,
@@ -238,6 +249,8 @@ def rdna_attention_fwd_body(
     stride_k_block: Optional[Value] = None,
     stride_v_block: Optional[Value] = None,
     num_blocks: Optional[Value] = None,
+    k_ptr: Optional[Value] = None,
+    v_ptr: Optional[Value] = None,
 ) -> None:
     """Emit the K loop and epilogue of one CTA.
 
@@ -269,12 +282,15 @@ def rdna_attention_fwd_body(
     mass. FP8 K / V (``cfg.kv_fp8``): offsets and ``k_bytes`` / ``v_bytes``
     are in bytes of one-byte elements; values are decoded, multiplied by
     ``k_scale`` / ``v_scale`` and rounded to the Q dtype on the way to LDS.
-    Paged K / V (``cfg.page_block_size``): ``k_rsrc`` / ``v_rsrc`` cover the
-    whole cache at this head; key ``t`` lives at element ``block_table[
-    table_row + t / page] * stride_{k,v}_block + (t % page) * stride_{k,v}``
-    (``k_bytes`` / ``v_bytes`` unused). The table's values are caller data: a
-    page id outside ``[0, num_blocks)`` (the caches' page count) is not
-    addressed -- its keys read as zero K / V rows, like rows past the sequence.
+    Paged K / V (``cfg.page_block_size``): ``k_ptr`` / ``v_ptr`` point at
+    this head of the caches (``k_rsrc`` / ``v_rsrc``, ``k_bytes`` / ``v_bytes``
+    unused); key ``t`` lives at element ``block_table[table_row + t / page] *
+    stride_{k,v}_block + (t % page) * stride_{k,v}`` of them. The page term is
+    64-bit: a page that holds whole key tiles is read through one resource
+    based at that page, a smaller page by 64-bit addressed loads per row. The
+    table's values are caller data: a page id outside ``[0, num_blocks)`` (the
+    caches' page count) is not addressed -- its keys read as zero K / V rows,
+    like rows past the sequence.
     """
     cfg.validate()
     bf16 = cfg.dtype == "bf16"
@@ -313,9 +329,17 @@ def rdna_attention_fwd_body(
             (
                 "paged",
                 paged,
-                (block_table, table_row, stride_k_block, stride_v_block, num_blocks),
+                (
+                    block_table,
+                    table_row,
+                    stride_k_block,
+                    stride_v_block,
+                    num_blocks,
+                    k_ptr,
+                    v_ptr,
+                ),
             ),
-            ("dense K/V", not paged, (k_bytes, v_bytes)),
+            ("dense K/V", not paged, (k_rsrc, v_rsrc, k_bytes, v_bytes)),
         )
         if need and any(v is None for v in vals)
     ]
@@ -419,6 +443,7 @@ def rdna_attention_fwd_body(
     # one per tile.
     ps = cfg.page_block_size
     row_paged = paged and ps % BN != 0
+    kv_eb = 1 if cfg.kv_fp8 else 2
 
     def kv_byte(x):
         """K / V element offset -> byte offset."""
@@ -436,6 +461,9 @@ def rdna_attention_fwd_body(
     nk = -(-tot_k // NT)
     k_goff, k_loff = [], []
     k_valid, k_rows = [], []
+    # Row-paged chunks keep their in-row byte offset and its validity apart:
+    # their loads are 64-bit addressed, with no out-of-range offset to mask to.
+    k_cok, v_cok = [], []
     for i in range(nk):
         cidx = b.add(tid, ci(i * NT))
         valid = b.cmp_lt(cidx, ci(tot_k)) if (i + 1) * NT > tot_k else None
@@ -443,7 +471,13 @@ def rdna_attention_fwd_body(
         d0 = b.mul(b.mod(cidx, ci(cpr_k)), ci(8))
         off = kv_byte(d0 if row_paged else b.add(b.mul(r, stride_k), d0))
         ok = b.cmp_lt(d0, head_dim_q)
-        k_goff.append(masked_off(off, ok if valid is None else b.land(ok, valid)))
+        if valid is not None:
+            ok = b.land(ok, valid)
+        if row_paged:
+            k_goff.append(off)
+            k_cok.append(ok)
+        else:
+            k_goff.append(masked_off(off, ok))
         k_loff.append(b.add(b.mul(r, ci(KS)), d0))
         k_valid.append(valid)
         k_rows.append(r)
@@ -465,16 +499,19 @@ def rdna_attention_fwd_body(
         for rr in range(G):
             row = b.add(b.mul(g, ci(G)), ci(rr))
             off = kv_byte(d0 if row_paged else b.add(b.mul(row, stride_v), d0))
-            offs.append(masked_off(off, ok))
+            offs.append(off if row_paged else masked_off(off, ok))
             rows.append(row)
         v_goff.append(offs)
+        v_cok.append(ok)
         v_loff.append(b.add(b.mul(d0, ci(VS)), b.mul(g, ci(G))))
         v_valid.append(valid)
         v_rows.append(rows)
     if not paged:
-        kv_eb = 1 if cfg.kv_fp8 else 2
         tile_k_bytes = b.mul(stride_k, ci(BN * kv_eb))
         tile_v_bytes = b.mul(stride_v, ci(BN * kv_eb))
+    if row_paged:
+        kv_dwords = 2 if cfg.kv_fp8 else 4
+        kv_zero = b.zero_vec(I32, kv_dwords)
 
     def issue_loads(t, valid):
         """Global loads of key tile ``t`` (zeros, no traffic, if not valid).
@@ -493,6 +530,13 @@ def rdna_attention_fwd_body(
         """``phys`` names a page of the cache: ``0 <= phys < num_blocks``."""
         return b.land(b.cmp_ge(phys, c0), b.cmp_lt(phys, num_blocks))
 
+    def page_base(ptr, phys, stride_blk):
+        """``ptr`` advanced to page ``phys``: the page term is 64-bit."""
+        p64 = b.zext(phys, I64)
+        s64 = b.zext(stride_blk, I64)
+        off = b.mul(b.mul(p64, s64), b.const_i64(kv_eb))
+        return b.global_ptr_add(ptr, off)
+
     def issue_paged_loads(t, valid):
         """Paged K / V: rows past the sequence (or of an invalid tile) read
         nothing; their block-table index is clamped to 0."""
@@ -500,44 +544,58 @@ def rdna_attention_fwd_body(
         tok0 = b.mul(t, ci(BN))
         rem = b.select(valid, b.sub(seqlen_k, tok0), c0)  # live rows of the tile
         if not row_paged:
-            # The whole tile sits in one page: one lookup per tile.
+            # The whole tile sits in one page: one lookup per tile, and one
+            # resource per tile based at its page (a dead page has no live
+            # rows, so its resource is never read).
             blk = b.select(valid, b.lshr(tok0, ci(lps)), c0)
             phys = b.global_load_i32(block_table, b.add(table_row, blk))
             rem = b.select(page_ok(phys), rem, c0)
             in_page = b.land(tok0, ci(ps - 1))
-            tk = kv_byte(b.add(b.mul(phys, stride_k_block), b.mul(in_page, stride_k)))
-            tv = kv_byte(b.add(b.mul(phys, stride_v_block), b.mul(in_page, stride_v)))
+            k_page = b.buffer_rsrc(
+                page_base(k_ptr, phys, stride_k_block), ci(0x7FFFFFFF)
+            )
+            v_page = b.buffer_rsrc(
+                page_base(v_ptr, phys, stride_v_block), ci(0x7FFFFFFF)
+            )
+            tk = kv_byte(b.mul(in_page, stride_k))
+            tv = kv_byte(b.mul(in_page, stride_v))
 
             def at_tile(o, r, tile_off):
                 return b.select(b.cmp_lt(r, rem), b.add(o, tile_off), oob)
 
-            kr = [load_kv(k_rsrc, at_tile(o, r, tk)) for o, r in zip(k_goff, k_rows)]
+            kr = [load_kv(k_page, at_tile(o, r, tk)) for o, r in zip(k_goff, k_rows)]
             vr = [
-                [load_kv(v_rsrc, at_tile(o, r, tv)) for o, r in zip(offs, rows)]
+                [load_kv(v_page, at_tile(o, r, tv)) for o, r in zip(offs, rows)]
                 for offs, rows in zip(v_goff, v_rows)
             ]
             return kr, vr
 
-        def at_row(o, r, stride_blk, stride_tok):
+        def row_load(ptr, o, cok, r, stride_blk, stride_tok):
+            """One chunk of key row ``r`` from its page, 64-bit addressed. A
+            dead chunk reads this head's first element and yields zeros."""
             tok = b.add(tok0, r)
             ok = b.cmp_lt(r, rem)
             blk = b.select(ok, b.lshr(tok, ci(lps)), c0)
             phys = b.global_load_i32(block_table, b.add(table_row, blk))
-            ok = b.land(ok, page_ok(phys))
+            ok = b.land(b.land(ok, page_ok(phys)), cok)
             in_page = b.land(tok, ci(ps - 1))
-            row = b.add(b.mul(phys, stride_blk), b.mul(in_page, stride_tok))
-            return b.select(ok, b.add(o, kv_byte(row)), oob)
+            within = b.add(o, kv_byte(b.mul(in_page, stride_tok)))
+            within = b.select(ok, within, c0)
+            base = page_base(ptr, b.select(ok, phys, c0), stride_blk)
+            addr = b.global_ptr_add(base, b.zext(within, I64))
+            raw = b.global_load_vN(addr, c0, I32, kv_dwords, align=4)
+            return b.select(ok, raw, kv_zero)
 
         kr = [
-            load_kv(k_rsrc, at_row(o, r, stride_k_block, stride_k))
-            for o, r in zip(k_goff, k_rows)
+            row_load(k_ptr, o, cok, r, stride_k_block, stride_k)
+            for o, cok, r in zip(k_goff, k_cok, k_rows)
         ]
         vr = [
             [
-                load_kv(v_rsrc, at_row(o, r, stride_v_block, stride_v))
+                row_load(v_ptr, o, cok, r, stride_v_block, stride_v)
                 for o, r in zip(offs, rows)
             ]
-            for offs, rows in zip(v_goff, v_rows)
+            for offs, cok, rows in zip(v_goff, v_cok, v_rows)
         ]
         return kr, vr
 

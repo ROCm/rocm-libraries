@@ -37,6 +37,9 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             dict(layout="ragged", page_block_size=16),
             dict(page_block_size=16),
             dict(kv_dtype="fp8e5m2"),
+            dict(dense_q=True),
+            dict(layout="ragged", dense_q=True),
+            dict(seqused_q=True),
         )
         for fields in bad:
             with self.subTest(**fields), self.assertRaises(ValueError):
@@ -83,6 +86,12 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             replace(base, layout="ragged"),
             replace(base, layout="paged", page_block_size=16),
             replace(base, layout="paged", page_block_size=32),
+            replace(base, layout="paged", page_block_size=16, dense_q=True),
+            replace(base, layout="paged", page_block_size=16, seqused_q=True),
+            replace(
+                base, layout="paged", page_block_size=16, dense_q=True, seqused_q=True
+            ),
+            replace(base, layout="ragged", seqused_q=True),
             replace(base, kv_dtype="fp8e4m3"),
         ]
         names = [v.kernel_name() for v in variants]
@@ -209,6 +218,29 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             [p["name"] for p in wmma_fmha_fwd_v2_signature(ragged)],
             base + ["cu_seqlens_q", "cu_seqlens_k"],
         )
+        paged = dict(layout="paged", page_block_size=16)
+        tail = ["seqused_k", "block_table", "block_table_stride"]
+        tail += ["stride_k_block", "stride_v_block", "num_blocks"]
+        for fields, head in (
+            (dict(dense_q=True), []),
+            (dict(dense_q=True, seqused_q=True), ["seqused_q"]),
+            (dict(seqused_q=True), ["cu_seqlens_q", "seqused_q"]),
+        ):
+            spec = WmmaFmhaFwdV2Spec(**paged, **fields)
+            with self.subTest(**fields):
+                self.assertEqual(
+                    [p["name"] for p in wmma_fmha_fwd_v2_signature(spec)],
+                    base + head + tail,
+                )
+        self.assertEqual(
+            [
+                p["name"]
+                for p in wmma_fmha_fwd_v2_signature(
+                    WmmaFmhaFwdV2Spec(layout="ragged", seqused_q=True)
+                )
+            ],
+            base + ["cu_seqlens_q", "seqused_q", "cu_seqlens_k"],
+        )
 
     def test_features_build_on_both_families(self):
         from rocke.core.ir_serialize import serialize
@@ -220,6 +252,13 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             WmmaFmhaFwdV2Spec(layout="ragged", kv_dtype="fp8e4m3", mask="causal"),
             WmmaFmhaFwdV2Spec(layout="paged", page_block_size=16, head_dim=256),
             WmmaFmhaFwdV2Spec(layout="paged", page_block_size=64, use_sinks=True),
+            WmmaFmhaFwdV2Spec(
+                layout="paged", page_block_size=16, dense_q=True, mask="causal"
+            ),
+            WmmaFmhaFwdV2Spec(
+                layout="paged", page_block_size=32, seqused_q=True, mask="causal"
+            ),
+            WmmaFmhaFwdV2Spec(layout="ragged", seqused_q=True, head_dim=64),
         )
         for arch in _ARCHS:
             for spec in specs:

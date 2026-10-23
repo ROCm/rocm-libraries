@@ -314,6 +314,22 @@ class WmmaFmhaDecodeSpec:
         """Workgroups sharing one O row; the spec must state it (or be resolved)."""
         return self.resolved_dv_split
 
+    def catalog_layout(self) -> str:
+        """Q / K / V layout: ``"dense"``, ``"ragged"`` or ``"paged"``."""
+        return self.layout
+
+    def catalog_page_block_size(self) -> int:
+        """Keys per K / V page (paged only, else 0)."""
+        return self.page_block_size
+
+    def catalog_dense_q(self) -> int:
+        """0: a packed layout packs Q / O through ``cu_seqlens_q``."""
+        return 0
+
+    def catalog_seqused_q(self) -> int:
+        """0: the query count is each sequence's ``cu_seqlens_q`` span."""
+        return 0
+
     def kernel_name(self) -> str:
         """Symbol name; a resolved spec names every resolved knob (``t16`` / ``khalf``
         / ``si`` mark the fixed 16-key tile, gfx11 half-K loads and interleaved splits).
