@@ -373,7 +373,24 @@ namespace
                 D.at(i, i) = c.absolute ? cplx(std::abs(Aop.at(i, i)), 0.0) : Aop.at(i, i);
             Aop = D;
         }
-        const auto   hy = pr.dY.host();
+        const auto hy = pr.dY.host();
+        // A triangular solve is backward stable in any summation order: the computed Y
+        // solves (op(A) + E) Y = alpha * op(X) with |E| <= gamma_m |op(A)|, where gamma_m
+        // is about m * u (u the unit roundoff, a small multiple of it for complex
+        // arithmetic), so |Y - Y_exact| <= gamma_m |op(A)^-1| |op(A)| |Y|. With m <= 40,
+        // gamma_m is about 2.4e-6 in single and 4.4e-15 in double precision.
+        // For a non-unit diagonal and opA = none, each row has at most three off-diagonal
+        // entries of modulus <= sqrt(0.375^2 + 0.125^2) ~ 0.395 and a diagonal of modulus
+        // >= 2.5, so the off-diagonal row sum is at most 0.48 of the diagonal and the
+        // growth |op(A)^-1| |op(A)| is at most (1 + 0.48) / (1 - 0.48) < 3. The unit
+        // diagonal cases and the transposed ones (whose rows are columns of A, which are
+        // not limited to three entries) are not diagonally dominant by rows and have no
+        // such a priori bound; only m <= 40 and the small off-diagonal entries limit
+        // their growth. The tolerances leave about two (single) and five (double) orders
+        // of magnitude above gamma_m for that growth and the alpha scaling, and the
+        // measured errors are far below them. The diagonal solve mode divides entry by
+        // entry. float and float complex (4 and 8 bytes) are single precision, the rest
+        // double.
         const double tol
             = (sizeof(T) == 4 || sizeof(T) == 8 && is_complex_t<T>::value) ? 2e-4 : 1e-9;
         for(int64_t b = 0; b < c.batch; ++b)
