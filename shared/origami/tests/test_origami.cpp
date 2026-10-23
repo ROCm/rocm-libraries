@@ -1812,3 +1812,35 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE(hw_v2.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }
+
+TEST_CASE("Origami: gfx1250 memory-bound near-ties take the finer split", "[origami]") {
+  // Tall-skinny problem, memory-bound for every tile below. 128x240x64 and 128x224x64 model within
+  // 0.1% of each other at 18 vs 19 rounds, 128x256x64 is >5% ahead of both.
+  auto problem =
+      make_problem(128, size_t(1) << 20, 256, origami::transpose_t::T, origami::transpose_t::N);
+  std::vector<origami::config_t> tie = {make_config(128, 240, 64, 16, 16, 32),
+                                        make_config(128, 224, 64, 16, 16, 32)};
+
+  SECTION("gfx1250 takes the one with more rounds") {
+    auto hardware = make_hardware(1250);
+    auto results  = origami::rank_configs(problem, hardware, tie);
+    REQUIRE(results.size() == 2);
+    REQUIRE(results[0].config.mt.n == 224);
+    REQUIRE(results[1].config.mt.n == 240);
+    REQUIRE(results[0].latency <= results[1].latency * 1.02);
+  }
+
+  SECTION("gfx950 keeps the model order") {
+    auto hardware = make_hardware(950);
+    auto results  = origami::rank_configs(problem, hardware, tie);
+    REQUIRE(results[0].config.mt.n == 240);
+  }
+
+  SECTION("a clearly faster config is not displaced") {
+    auto hardware = make_hardware(1250);
+    auto configs  = tie;
+    configs.push_back(make_config(128, 256, 64, 16, 16, 32));
+    auto results = origami::rank_configs(problem, hardware, configs);
+    REQUIRE(results[0].config.mt.n == 256);
+  }
+}
