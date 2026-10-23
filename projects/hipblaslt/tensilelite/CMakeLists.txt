@@ -115,6 +115,7 @@ set(TENSILELITE_HOST_SOURCES
 )
 set(TENSILELITE_HOST_MSGPACK_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/MessagePack.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/SolutionState.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/Writing.cpp"
 )
 
