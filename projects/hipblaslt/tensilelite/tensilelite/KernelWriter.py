@@ -10793,7 +10793,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     tP["idx"] = kernel["ProblemType"]["Index%d"%tP["tensorIdx"]] # index 0 is tile dimension belonging to A. Note 'idx' may not be in tP['ia'].
     tP["NonTemporal"] = kernel["NonTemporal%s"%cM]               # non-temporal read type
     tP["TemporalHint"] = kernel.get("TemporalHint%s"%cM, 0)      # temporal-hint read type
-    tP["shiftGR"] = 0 if (tP["bpeGR"] >= tP["bpeDS"]) else int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))  # Shift global read register for cvt spaces
+    # Shift global read register for cvt spaces: the packed source sits at the top of its
+    # expanded space, so an in-place forward expansion only overwrites consumed sources.
+    if tP["bpeGR"] >= tP["bpeDS"]:
+      tP["shiftGR"] = 0
+    elif tP["bpeGR"] < 1:
+      tP["shiftGR"] = int(tP["glvw"] * (tP["bpeDS"] - tP["bpeGR"]) / self.states.bpr)
+    else:
+      tP["shiftGR"] = int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))
     tP["bpeRatio"] = tP["bpeDS"] // tP["bpeGR"] if tP["bpeGR"] < tP["bpeDS"] else 1                                # g2lIdx multiplier
 
     tP["is_sparse"] = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"])
