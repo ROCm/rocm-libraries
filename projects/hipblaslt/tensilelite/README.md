@@ -42,6 +42,61 @@ tox -e coverage-unit
 
 Runs only Python unit tests.
 
+### Updating Python dependencies
+
+Declare dependency compatibility ranges in `pyproject.toml`; `uv.lock` records the resolved
+versions. Dependency-group comments in `pyproject.toml` describe their intended workflows.
+After editing a declaration, run these commands from `projects/hipblaslt/tensilelite`:
+
+```bash
+uv lock
+python scripts/generate_requirements.py
+python scripts/generate_requirements.py --check
+```
+
+`uv lock` updates the lock while preferring existing locked versions that still satisfy
+the declarations. It does not automatically upgrade packages or select the lowest versions.
+For packages without a reusable lock entry, uv defaults to the highest compatible version.
+Keep the existing lock when regenerating it; deleting it discards those version selections.
+
+To deliberately change a locked version, use one of these commands in place of `uv lock`,
+then regenerate and check the requirements files as above:
+
+| Intent | Command |
+|---|---|
+| Upgrade one package | `uv lock --upgrade-package black` |
+| Select a specific release | `uv lock --upgrade-package black==24.4.0` |
+| Upgrade all packages | `uv lock --upgrade` |
+
+Review the lock and generated requirements diffs for version changes. See uv's
+[upgrade rules](https://docs.astral.sh/uv/concepts/projects/sync/#upgrading-locked-package-versions)
+and [resolution strategies](https://docs.astral.sh/uv/concepts/resolution/#resolution-strategy).
+
+The generated, fully pinned requirements files provide these environments for pip consumers:
+
+| File | Purpose |
+|---|---|
+| `requirements.txt` | Minimal Python requirements to build the core project from source and use its installed code. |
+| `requirements-test.txt` | Minimal Python requirements to run tests against a prebuilt installation. |
+| `requirements-dev.txt` | Full Python requirements for building and using the core, running tests, and performing contributor tasks such as linting, formatting, and coverage analysis. |
+
+The base profile obtains rocisa from the native build or a separate installation;
+the test profile uses rocisa from the prebuilt installation.
+Installing the test profile preserves the prebuilt project installation. Source-only tests
+use the development requirements and require checkout files such as `tasks.py` and `uv.lock`.
+ROCm, device access, and a prebuilt client remain workflow prerequisites.
+Tests may build temporary artifacts to check packaging or generate kernels to exercise the core.
+
+The development requirements include local rocisa as a noneditable installation. Pip does not
+apply the `tool.uv` editable build settings. Run installations from this directory so the relative
+rocisa path resolves. The development profile supplies tox for the documented test workflows.
+
+The unit suite checks that the lock and generated requirements are current. This runs
+in the existing `coverage-unit` CI job and the affected-tests hook for dependency changes.
+Tox provisions uv for this check; it still installs test environments with pip. For direct pytest
+runs in a pip-only source environment, install uv separately or run through tox. Installed artifacts
+omit this repository-only test.
+
 ### Pre-commit hook (affected tests)
 
 An opt-in git pre-commit hook runs the unit + characterization tests affected by
