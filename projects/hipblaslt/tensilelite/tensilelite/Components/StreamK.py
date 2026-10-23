@@ -1851,6 +1851,8 @@ class StreamK(TileProcessingStrategy):
         """Write the StreamK completion flag.
 
         `src` is an SGPR holding the flag value (1 = ready, 0 = reset).
+        The caller must select one wave per flag. The VMEM path selects one
+        active lane within that wave, restores incoming EXEC, and clobbers SCC.
         gfx950 uses VMEM even when HasScalarStore is available, because
         SMEM stores are not coherent across XCD-split L2.
         """
@@ -1867,6 +1869,10 @@ class StreamK(TileProcessingStrategy):
         return module
 
     def setFlagValue(self, writer, src, soffset, comment=""):
+        """Store a wave-uniform flag value through the first active lane.
+
+        The caller selects one wave per flag. EXEC is restored; SCC is clobbered.
+        """
         module = Module("Buffer Store Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_setFlagValue_tmpSgprBuffer", preventOverflow=False)
