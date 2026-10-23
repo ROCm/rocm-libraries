@@ -46,12 +46,23 @@ Supported operation axes (deliberately narrow -- see "Not supported" below)
   - masking:      diagonal band via --left-bound / --right-bound /
                   --diagonal-alignment, matching the graph's non-deprecated
                   bound attributes (a causal mask is --right-bound 0)
+  - GQA / MQA:    H_q a multiple of H_kv; dK and dV sum over each query group
+  - padding:      --seq-lens-q / --seq-lens-kv (padding_mask). Rows past a
+                  batch's query length, and rows the band leaves empty, are
+                  fully masked: O = 0, LSE = -inf, zero gradients (cuDNN)
+  - bias + dBias: --additive-mask with --bias-dims (any broadcast of
+                  [B, H_q, S_q, S_kv]) and --dbias (the unscaled dS reduced to
+                  the bias shape, as cuDNN)
+  - dropout:      --dropout-p draws an explicit keep mask; dropout_scale =
+                  1 / (1 - p) and dropout_scale_inv = 1 - p, where cuDNN's
+                  composition is the exact gradient
+
+The padding, GQA, dBias and dropout features are single-graph only (the sweep
+templates cannot express them) and are always cross-checked against an
+independent FP64 autograd evaluation of the forward definition.
 
 Not supported yet, rejected with an explicit error rather than silently
-mis-generated: GQA (H_q != H_kv), FP8, BSHD/ragged layouts, GROUP mode
-(variable sequence lengths), dropout, additive bias/dBias, and ALiBi. Each needs
-its own reference semantics and its own bundle topology; they will be added as
-the corresponding reference features land.
+mis-generated: FP8, BSHD/ragged layouts, Philox dropout, sinks and ALiBi.
 
 Output:
   backward bundle: {base_filename}.json + .tensor{uid}.bin + .meta.json
@@ -110,7 +121,11 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 # 1.2.0 — --left-bound is cuDNN's left_bound: it keeps that many keys including the
 #         diagonal (SdpaSemanticsRegister SEM-001), so it must be >= 1. Windowed
 #         bundles from earlier versions keep one more key and must be regenerated.
-GENERATOR_VERSION = "1.2.0"
+# 1.3.0 — GQA, padding (--seq-lens-q/--seq-lens-kv), broadcast bias with dBias
+#         (--bias-dims/--dbias) and explicit-mask dropout (--dropout-p), each
+#         checked against FP64 autograd. Bundles without these flags are
+#         byte-identical to 1.2.0.
+GENERATOR_VERSION = "1.3.0"
 
 # Backward tensor UID assignment. These match the checked-in graph-only
 # SdpaBackward template topology (integration-test-bundles/*/SdpaBackward/), so
@@ -133,6 +148,26 @@ UID_ATTN_MASK = 9
 # first UID free in *that* map rather than reusing UID_ATTN_MASK.
 FWD_UID_ATTN_MASK = 12
 
+# Padding, dropout and dBias tensors, present only when their flags are given.
+# Backward: the first UIDs free after UID_ATTN_MASK.
+UID_SEQ_LEN_Q = 10
+UID_SEQ_LEN_KV = 11
+UID_DROPOUT_MASK = 12
+UID_DROPOUT_SCALE = 13
+UID_DROPOUT_SCALE_INV = 14
+UID_DBIAS = 15
+# Forward: the sequence lengths use the forward generator's own UIDs (5, 6); the
+# dropout tensors take the first UIDs free after FWD_UID_ATTN_MASK.
+FWD_UID_SEQ_LEN_Q = 5
+FWD_UID_SEQ_LEN_KV = 6
+FWD_UID_DROPOUT_MASK = 13
+FWD_UID_DROPOUT_SCALE = 14
+
+# FP64 autograd must agree with the matched-precision backward to this relative
+# deviation. The backward is anchored to the bundle's IO-dtype O, autograd to the
+# exact O, so they differ by about the IO rounding of O.
+AUTOGRAD_TOLERANCE = 2e-2
+
 # Forward tensor UID assignment -- the contract generate_sdpa_fwd_golden.py uses.
 FWD_UID_Q = 0
 FWD_UID_K = 1
@@ -150,7 +185,145 @@ REFERENCE_STRATEGY = "matched_precision"
 LAYOUT = "bhsd"
 
 
-def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None, attn_bias=None):
+def expand_kv_heads(tensor, num_heads_q):
+    """Repeat each K/V head over its query group (GQA/MQA); a no-op without GQA."""
+    num_heads_kv = tensor.shape[1]
+    if num_heads_kv == num_heads_q:
+        return tensor
+    return tensor.repeat_interleave(num_heads_q // num_heads_kv, dim=1)
+
+
+def sum_kv_groups(tensor, num_heads_kv):
+    """Sum per-query-head gradients onto their K/V head; a no-op without GQA."""
+    batch, num_heads_q, seq, dim = tensor.shape
+    if num_heads_q == num_heads_kv:
+        return tensor
+    return tensor.view(batch, num_heads_kv, num_heads_q // num_heads_kv, seq, dim).sum(
+        dim=2
+    )
+
+
+def reduce_to_shape(tensor, dims):
+    """Sum a [B, H_q, S_q, S_kv] gradient over every axis the bias broadcasts."""
+    axes = [i for i, d in enumerate(dims) if d == 1 and tensor.shape[i] != 1]
+    return tensor.sum(dim=axes, keepdim=True) if axes else tensor
+
+
+def build_padded_keep_mask(
+    s_q, s_kv, seq_lens_q, seq_lens_kv, left_bound, right_bound, top_left
+):
+    """[B, 1, S_q, S_kv] keep-mask for padded variable sequence lengths.
+
+    Batch b attends only within its first seq_lens_q[b] queries and
+    seq_lens_kv[b] keys, and the band's bottom-right offset uses those live
+    lengths, as the CPU and GPU references do (SdpaSemanticsRegister SEM-008).
+    """
+    masks = []
+    for live_q, live_kv in zip(seq_lens_q, seq_lens_kv):
+        keep = torch.zeros(s_q, s_kv, dtype=torch.bool)
+        band = build_bound_mask(live_q, live_kv, left_bound, right_bound, top_left)
+        keep[:live_q, :live_kv] = True if band is None else band
+        masks.append(keep)
+    return torch.stack(masks).unsqueeze(1)
+
+
+def compute_forward_explicit(
+    Q, K, V, scale, keep_mask=None, attn_bias=None, dropout_mask=None, dropout_scale=1.0
+):
+    """FP32 forward for what PyTorch's SDPA cannot express.
+
+    Fully-masked rows give O = 0 and LSE = -inf (cuDNN), and an explicit dropout
+    mask gives O = (P * mask * dropout_scale) V with the LSE taken before
+    dropout. Returns (O in FP32, LSE in FP32 [B, H_q, S_q, 1]).
+    """
+    num_heads_q = Q.shape[1]
+    Q_f = Q.float()
+    K_f = expand_kv_heads(K.float(), num_heads_q)
+    V_f = expand_kv_heads(V.float(), num_heads_q)
+    scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
+    if attn_bias is not None:
+        scores = scores + attn_bias.float()
+    if keep_mask is not None:
+        scores = scores.masked_fill(~keep_mask, float("-inf"))
+    lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+    # A fully-masked row computes exp(-inf - -inf) = NaN; its probabilities are 0.
+    probs = torch.nan_to_num(torch.exp(scores - lse), nan=0.0)
+    if dropout_mask is not None:
+        probs = probs * dropout_mask * dropout_scale
+    return torch.matmul(probs, V_f), lse
+
+
+def autograd_fp64_gradients(
+    Q,
+    K,
+    V,
+    dO,
+    scale,
+    keep_mask=None,
+    attn_bias=None,
+    dropout_mask=None,
+    dropout_scale=1.0,
+):
+    """The gradients of the forward definition, by PyTorch autograd in FP64.
+
+    Shares no code with compute_backward: the softmax goes through
+    torch.softmax, GQA through repeat_interleave (autograd sums each group) and
+    a broadcast bias through broadcasting (autograd reduces dBias). Fully-masked
+    rows are multiplied out, so their gradients are exactly zero.
+    Returns (dQ, dK, dV, dBias or None) in FP64.
+    """
+    num_heads_q = Q.shape[1]
+    Q_d = Q.double().requires_grad_(True)
+    K_d = K.double().requires_grad_(True)
+    V_d = V.double().requires_grad_(True)
+    bias_d = None if attn_bias is None else attn_bias.double().requires_grad_(True)
+    scores = (
+        torch.matmul(Q_d, expand_kv_heads(K_d, num_heads_q).transpose(-2, -1)) * scale
+    )
+    if bias_d is not None:
+        scores = scores + bias_d
+    if keep_mask is not None:
+        alive = keep_mask.any(dim=-1, keepdim=True)
+        scores = scores.masked_fill(~keep_mask, float("-inf"))
+        scores = torch.where(alive, scores, torch.zeros_like(scores))
+        probs = torch.softmax(scores, dim=-1) * alive
+    else:
+        probs = torch.softmax(scores, dim=-1)
+    if dropout_mask is not None:
+        probs = probs * dropout_mask.double() * dropout_scale
+    O = torch.matmul(probs, expand_kv_heads(V_d, num_heads_q))
+    O.backward(dO.double())
+    return Q_d.grad, K_d.grad, V_d.grad, None if bias_d is None else bias_d.grad
+
+
+def worst_relative_deviation(pairs):
+    """max |a - b| / max |b| over (name, a, b) pairs, printing each."""
+    worst = 0.0
+    for name, ours, reference in pairs:
+        reference = reference.double()
+        diff = (ours.double() - reference).abs()
+        ref_max = reference.abs().max().item()
+        max_abs = diff.max().item()
+        worst = max(worst, max_abs / ref_max if ref_max > 0 else max_abs)
+        print(f"  fp64 autograd {name}: max_abs={max_abs:.3e} ref_max={ref_max:.3e}")
+    return worst
+
+
+def compute_backward(
+    Q,
+    K,
+    V,
+    O,
+    lse,
+    dO,
+    scale,
+    keep_mask=None,
+    attn_bias=None,
+    dropout_mask=None,
+    dropout_scale=1.0,
+    dropout_scale_inv=1.0,
+    dbias_dims=None,
+):
     """SDPA backward reference: dQ, dK, dV from the saved forward O and LSE.
 
     Matched-precision (RFC 0011): inputs arrive in the bundle's IO dtype, every
@@ -173,10 +346,18 @@ def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None, attn_bias=None)
     rounded to the IO dtype), not higher-precision pre-conversion values --
     otherwise the golden gradients would not be the gradients of the bundle's
     own inputs.
+
+    GQA: K and V are repeated over each query group and dK, dV are summed back.
+    Dropout follows cuDNN's backward: dP is masked, D is scaled by
+    dropout_scale_inv, dS by dropout_scale, and dV uses P * mask * dropout_scale.
+    dBias is the unscaled dS reduced to dbias_dims.
+    Returns (dQ, dK, dV, dBias or None) in FP32.
     """
+    num_heads_q = Q.shape[1]
+    num_heads_kv = K.shape[1]
     Q_f = Q.float()
-    K_f = K.float()
-    V_f = V.float()
+    K_f = expand_kv_heads(K.float(), num_heads_q)
+    V_f = expand_kv_heads(V.float(), num_heads_q)
     O_f = O.float()
     dO_f = dO.float()
 
@@ -197,15 +378,24 @@ def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None, attn_bias=None)
 
     row_sum = (dO_f * O_f).sum(dim=-1, keepdim=True)  # D[b, h, sq]
     d_probs = torch.matmul(dO_f, V_f.transpose(-2, -1))
+    if dropout_mask is not None:
+        d_probs = d_probs * dropout_mask
+        row_sum = row_sum * dropout_scale_inv
     d_scores = probs * (d_probs - row_sum)
+    if dropout_mask is not None:
+        d_scores = d_scores * dropout_scale
     if keep_mask is not None:
         d_scores = torch.where(keep_mask, d_scores, torch.zeros_like(d_scores))
     d_scores_scaled = d_scores * scale
 
     dQ = torch.matmul(d_scores_scaled, K_f)
-    dK = torch.matmul(d_scores_scaled.transpose(-2, -1), Q_f)
-    dV = torch.matmul(probs.transpose(-2, -1), dO_f)
-    return dQ, dK, dV
+    dK = sum_kv_groups(
+        torch.matmul(d_scores_scaled.transpose(-2, -1), Q_f), num_heads_kv
+    )
+    kept_probs = probs if dropout_mask is None else probs * dropout_mask * dropout_scale
+    dV = sum_kv_groups(torch.matmul(kept_probs.transpose(-2, -1), dO_f), num_heads_kv)
+    dBias = None if dbias_dims is None else reduce_to_shape(d_scores, dbias_dims)
+    return dQ, dK, dV, dBias
 
 
 def validate_against_autograd(
@@ -254,6 +444,29 @@ def _tensor_entry(uid, name, dims, data_type):
     }
 
 
+def _seq_len_entry(uid, name, batch):
+    dims = [batch, 1, 1, 1]
+    return {
+        "uid": uid,
+        "name": name,
+        "dims": dims,
+        "strides": compute_contiguous_strides(dims),
+        "data_type": "int32",
+        "virtual": False,
+    }
+
+
+def _float_entry(uid, name, dims):
+    return {
+        "uid": uid,
+        "name": name,
+        "dims": dims,
+        "strides": compute_contiguous_strides(dims),
+        "data_type": "float",
+        "virtual": False,
+    }
+
+
 def build_backward_graph_json(
     q_dims,
     k_dims,
@@ -265,6 +478,9 @@ def build_backward_graph_json(
     right_bound,
     diagonal_alignment,
     attn_mask_dims=None,
+    padded=False,
+    dropout=False,
+    dbias=False,
 ):
     """Graph JSON for a single SdpaBackwardAttributes node.
 
@@ -297,6 +513,21 @@ def build_backward_graph_json(
         tensors.append(
             _tensor_entry(UID_ATTN_MASK, "attn_mask", attn_mask_dims, dtype_str)
         )
+    if padded:
+        tensors.append(_seq_len_entry(UID_SEQ_LEN_Q, "seq_len_q", B))
+        tensors.append(_seq_len_entry(UID_SEQ_LEN_KV, "seq_len_kv", B))
+    if dropout:
+        tensors.append(
+            _float_entry(UID_DROPOUT_MASK, "dropout_mask", [B, H_q, S_q, k_dims[2]])
+        )
+        tensors.append(_float_entry(UID_DROPOUT_SCALE, "dropout_scale", [1, 1, 1, 1]))
+        tensors.append(
+            _float_entry(UID_DROPOUT_SCALE_INV, "dropout_scale_inv", [1, 1, 1, 1])
+        )
+    if dbias:
+        tensors.append(
+            _tensor_entry(UID_DBIAS, "SdpaBwd_0::dBias", attn_mask_dims, dtype_str)
+        )
 
     return {
         "nodes": [
@@ -315,23 +546,25 @@ def build_backward_graph_json(
                     "attn_mask_tensor_uid": (
                         None if attn_mask_dims is None else UID_ATTN_MASK
                     ),
-                    "seq_len_q_tensor_uid": None,
-                    "seq_len_kv_tensor_uid": None,
+                    "seq_len_q_tensor_uid": UID_SEQ_LEN_Q if padded else None,
+                    "seq_len_kv_tensor_uid": UID_SEQ_LEN_KV if padded else None,
                     "seed_tensor_uid": None,
                     "offset_tensor_uid": None,
-                    "dropout_mask_tensor_uid": None,
-                    "dropout_scale_tensor_uid": None,
-                    "dropout_scale_inv_tensor_uid": None,
+                    "dropout_mask_tensor_uid": UID_DROPOUT_MASK if dropout else None,
+                    "dropout_scale_tensor_uid": UID_DROPOUT_SCALE if dropout else None,
+                    "dropout_scale_inv_tensor_uid": (
+                        UID_DROPOUT_SCALE_INV if dropout else None
+                    ),
                 },
                 "outputs": {
                     "dq_tensor_uid": UID_DQ,
                     "dk_tensor_uid": UID_DK,
                     "dv_tensor_uid": UID_DV,
-                    "dbias_tensor_uid": None,
+                    "dbias_tensor_uid": UID_DBIAS if dbias else None,
                 },
                 "parameters": {
                     "alibi_mask": False,
-                    "padding_mask": False,
+                    "padding_mask": padded,
                     # The deprecated causal flags stay false: masking is expressed
                     # through the bound + alignment attributes.
                     "causal_mask": False,
@@ -363,6 +596,8 @@ def build_forward_graph_json(
     right_bound,
     diagonal_alignment,
     attn_mask_dims=None,
+    padded=False,
+    dropout=False,
 ):
     """Graph JSON for the paired forward bundle (always with the LSE output).
 
@@ -382,6 +617,7 @@ def build_forward_graph_json(
         scale,
         dtype_str=dtype_str,
         stats=True,
+        emit_seq_lens=padded,
         layout=LAYOUT,
     )
     attributes = graph["nodes"][0]["attributes"]
@@ -400,6 +636,16 @@ def build_forward_graph_json(
             }
         )
         graph["nodes"][0]["inputs"]["attn_mask_tensor_uid"] = FWD_UID_ATTN_MASK
+    if dropout:
+        B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
+        graph["tensors"].append(
+            _float_entry(FWD_UID_DROPOUT_MASK, "dropout_mask", [B, H_q, S_q, k_dims[2]])
+        )
+        graph["tensors"].append(
+            _float_entry(FWD_UID_DROPOUT_SCALE, "dropout_scale", [1, 1, 1, 1])
+        )
+        graph["nodes"][0]["inputs"]["dropout_mask_tensor_uid"] = FWD_UID_DROPOUT_MASK
+        graph["nodes"][0]["inputs"]["dropout_scale_tensor_uid"] = FWD_UID_DROPOUT_SCALE
     return graph
 
 
@@ -443,6 +689,7 @@ def _base_meta_json(config, direction, reference_backend):
             "right_bound": config["right_bound"],
             "diagonal_alignment": config["diagonal_alignment"],
             "additive_mask": config["additive_mask"],
+            **config["extensions"],
         },
     }
 
@@ -595,6 +842,16 @@ def write_sweep_golden(sweep_bundle_dir, case_id, graph_json, meta_json, tensors
     return golden_dir
 
 
+def seq_len_tensor(lengths):
+    """INT32 [B, 1, 1, 1] per-batch sequence lengths (cuDNN padding layout)."""
+    return torch.tensor(lengths, dtype=torch.int32).view(len(lengths), 1, 1, 1)
+
+
+def scalar_tensor(value):
+    """A one-element FLOAT [1, 1, 1, 1] tensor (dropout scale / scale_inv)."""
+    return torch.tensor([value], dtype=torch.float32).view(1, 1, 1, 1)
+
+
 def generate_bundles(
     base_filename,
     forward_base_filename,
@@ -612,6 +869,11 @@ def generate_bundles(
     additive_mask=False,
     sweep_bundle_dir=None,
     case_id=None,
+    seq_lens_q=None,
+    seq_lens_kv=None,
+    bias_dims=None,
+    dbias=False,
+    dropout_p=None,
 ):
     # Validated before anything else: the remaining arguments mean different
     # things in sweep mode and in single-graph mode.
@@ -658,11 +920,38 @@ def generate_bundles(
                 errors.append(f"--{name}-dims[{i}] must be positive (got {d})")
     if B_v != B:
         errors.append(f"Batch mismatch: Q batch={B}, V batch={B_v}")
-    if H_kv != H_q:
-        # GQA backward sums the gradients of every query head in a group into one
-        # K/V head. That accumulation is not implemented here yet, and generating
-        # it wrongly would be worse than not generating it.
-        errors.append(f"GQA is not supported yet: H_q ({H_q}) must equal H_kv ({H_kv})")
+    if H_q % H_kv != 0:
+        errors.append(f"H_q ({H_q}) must be a multiple of H_kv ({H_kv})")
+    padded = seq_lens_q is not None or seq_lens_kv is not None
+    if padded:
+        if seq_lens_q is None or seq_lens_kv is None:
+            errors.append("--seq-lens-q and --seq-lens-kv must be given together")
+        elif len(seq_lens_q) != B or len(seq_lens_kv) != B:
+            errors.append(
+                f"--seq-lens-q and --seq-lens-kv need one value per batch ({B})"
+            )
+        elif not all(1 <= v <= S_q for v in seq_lens_q) or not all(
+            1 <= v <= S_kv for v in seq_lens_kv
+        ):
+            errors.append("sequence lengths must be in [1, S_q] and [1, S_kv]")
+    if bias_dims is not None:
+        full = [B, H_q, S_q, S_kv]
+        if not additive_mask:
+            errors.append("--bias-dims requires --additive-mask")
+        elif len(bias_dims) != 4 or any(
+            d not in (1, f) for d, f in zip(bias_dims, full)
+        ):
+            errors.append(f"--bias-dims must broadcast to {full} (each dim 1 or full)")
+    if dbias and not additive_mask:
+        errors.append("--dbias requires --additive-mask")
+    if dropout_p is not None and not 0.0 < dropout_p < 1.0:
+        errors.append(f"--dropout-p must be in (0, 1) (got {dropout_p})")
+    extended = padded or H_q != H_kv or dbias or dropout_p is not None
+    if extended and sweep_bundle_dir is not None:
+        errors.append(
+            "GQA, padding, dBias and dropout are single-graph only: the sweep "
+            "templates cannot express them"
+        )
     if min_val >= max_val:
         errors.append(f"--min ({min_val}) must be less than --max ({max_val})")
     if left_bound is not None and left_bound < 1:
@@ -684,8 +973,15 @@ def generate_bundles(
         attn_scale = 1.0
 
     top_left = diagonal_alignment == "top_left"
-    keep_mask = build_bound_mask(S_q, S_kv, left_bound, right_bound, top_left)
-    if keep_mask is not None and not bool(keep_mask.any(dim=-1).all()):
+    if padded:
+        keep_mask = build_padded_keep_mask(
+            S_q, S_kv, seq_lens_q, seq_lens_kv, left_bound, right_bound, top_left
+        )
+    else:
+        keep_mask = build_bound_mask(S_q, S_kv, left_bound, right_bound, top_left)
+    # Padding defines fully-masked rows (O = 0, LSE = -inf, zero gradients, as in
+    # cuDNN), so they are part of what a padded bundle checks.
+    if not padded and keep_mask is not None and not bool(keep_mask.any(dim=-1).all()):
         # A fully-masked query row has LSE = -inf and no defined softmax, so its
         # gradients are not a meaningful reference. Reject the configuration
         # rather than emitting zeros or NaNs.
@@ -721,38 +1017,94 @@ def generate_bundles(
         # A per-(query, key) bias shared across batch and heads. The leading unit
         # dims exercise the reference's right-aligned broadcast while keeping the
         # payload independent of B and H.
-        attn_mask_dims = [1, 1, S_q, S_kv]
+        attn_mask_dims = [1, 1, S_q, S_kv] if bias_dims is None else list(bias_dims)
         attn_mask_tensor = torch.empty(attn_mask_dims, dtype=torch_dtype).uniform_(
             min_val, max_val, generator=rng
         )
+
+    # Drawn last, so bundles without dropout keep their RNG draw order.
+    dropout_mask = None
+    dropout_scale = 1.0
+    dropout_scale_inv = 1.0
+    if dropout_p is not None:
+        dropout_mask = (
+            torch.empty([B, H_q, S_q, S_kv]).uniform_(0.0, 1.0, generator=rng)
+            >= dropout_p
+        ).float()
+        dropout_scale = 1.0 / (1.0 - dropout_p)
+        dropout_scale_inv = 1.0 - dropout_p
 
     # The bundles store the mask in the IO dtype, so the reference must see the
     # rounded values the executors will read back, not the FP32 draw.
     attn_bias = None if attn_mask_tensor is None else attn_mask_tensor.float()
 
     # Step 1: forward reference -> O, LSE.
-    O = compute_forward(Q, K, V, attn_scale, H_q, H_kv, keep_mask, attn_bias).to(
-        torch_dtype
-    )
-    lse = compute_lse(Q, K, attn_scale, H_q, H_kv, keep_mask, attn_bias)
-    _check_finite("O", O)
-    _check_finite("LSE", lse)
+    if padded or dropout_mask is not None:
+        O_f, lse = compute_forward_explicit(
+            Q, K, V, attn_scale, keep_mask, attn_bias, dropout_mask, dropout_scale
+        )
+        O = O_f.to(torch_dtype)
+        _check_finite("O", O)
+        # Fully-masked rows carry LSE = -inf by contract; nothing else may.
+        alive = keep_mask.any(dim=-1, keepdim=True).expand_as(lse)
+        _check_finite("LSE", lse[alive])
+    else:
+        O = compute_forward(Q, K, V, attn_scale, H_q, H_kv, keep_mask, attn_bias).to(
+            torch_dtype
+        )
+        lse = compute_lse(Q, K, attn_scale, H_q, H_kv, keep_mask, attn_bias)
+        _check_finite("O", O)
+        _check_finite("LSE", lse)
 
     # Step 2: backward reference on the O and LSE just computed -- specifically on
     # the IO-dtype O that is written to the bundles, so the gradients are the
     # gradients of the bundle's own inputs.
-    dQ, dK, dV = compute_backward(Q, K, V, O, lse, dO, attn_scale, keep_mask, attn_bias)
-    if validate:
+    dQ, dK, dV, dBias = compute_backward(
+        Q,
+        K,
+        V,
+        O,
+        lse,
+        dO,
+        attn_scale,
+        keep_mask,
+        attn_bias,
+        dropout_mask,
+        dropout_scale,
+        dropout_scale_inv,
+        attn_mask_dims if dbias else None,
+    )
+    if validate and not extended:
         worst = validate_against_autograd(
             Q, K, V, dO, attn_scale, keep_mask, dQ, dK, dV, attn_bias
         )
         print(f"  autograd cross-check worst relative deviation: {worst:.3e}")
+    if extended:
+        # The new features always get the independent FP64 check.
+        aQ, aK, aV, aBias = autograd_fp64_gradients(
+            Q, K, V, dO, attn_scale, keep_mask, attn_bias, dropout_mask, dropout_scale
+        )
+        pairs = [("dQ", dQ, aQ), ("dK", dK, aK), ("dV", dV, aV)]
+        if dbias:
+            pairs.append(("dBias", dBias, reduce_to_shape(aBias, attn_mask_dims)))
+        worst = worst_relative_deviation(pairs)
+        print(f"  fp64 autograd worst relative deviation: {worst:.3e}")
+        if worst > AUTOGRAD_TOLERANCE:
+            print(
+                f"ERROR: the backward reference deviates from FP64 autograd by "
+                f"{worst:.3e} (> {AUTOGRAD_TOLERANCE})",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     dQ = dQ.to(torch_dtype)
     dK = dK.to(torch_dtype)
     dV = dV.to(torch_dtype)
     for name, tensor in [("dQ", dQ), ("dK", dK), ("dV", dV)]:
         _check_finite(name, tensor)
+    if dbias:
+        dBias = dBias.to(torch_dtype)
+        _check_finite("dBias", dBias)
 
     generated_at = datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
@@ -769,6 +1121,18 @@ def generate_bundles(
         "right_bound": right_bound,
         "diagonal_alignment": diagonal_alignment,
         "additive_mask": additive_mask,
+        # Only the features a bundle uses, so earlier bundles' metadata is unchanged.
+        "extensions": {
+            k: v
+            for k, v in [
+                ("seq_lens_q", seq_lens_q),
+                ("seq_lens_kv", seq_lens_kv),
+                ("bias_dims", attn_mask_dims if bias_dims is not None else None),
+                ("dbias", True if dbias else None),
+                ("dropout_p", dropout_p),
+            ]
+            if v is not None
+        },
         "generated_at": generated_at,
         "forward_bundle": os.path.relpath(
             f"{forward_base_filename}.json",
@@ -791,6 +1155,8 @@ def generate_bundles(
             right_bound,
             diagonal_alignment.upper(),
             attn_mask_dims,
+            padded,
+            dropout_mask is not None,
         ),
         forward_meta,
         [
@@ -804,6 +1170,22 @@ def generate_bundles(
             []
             if attn_mask_tensor is None
             else [("attn_mask", attn_mask_tensor, FWD_UID_ATTN_MASK)]
+        )
+        + (
+            []
+            if not padded
+            else [
+                ("seq_len_q", seq_len_tensor(seq_lens_q), FWD_UID_SEQ_LEN_Q),
+                ("seq_len_kv", seq_len_tensor(seq_lens_kv), FWD_UID_SEQ_LEN_KV),
+            ]
+        )
+        + (
+            []
+            if dropout_mask is None
+            else [
+                ("dropout_mask", dropout_mask, FWD_UID_DROPOUT_MASK),
+                ("dropout_scale", scalar_tensor(dropout_scale), FWD_UID_DROPOUT_SCALE),
+            ]
         ),
     )
 
@@ -818,6 +1200,9 @@ def generate_bundles(
         right_bound,
         diagonal_alignment.upper(),
         attn_mask_dims,
+        padded,
+        dropout_mask is not None,
+        dbias,
     )
     backward_meta = build_backward_meta_json(config, forward_meta)
     backward_tensors = [
@@ -835,6 +1220,23 @@ def generate_bundles(
         if attn_mask_tensor is None
         else [("attn_mask", attn_mask_tensor, UID_ATTN_MASK)]
     )
+    if padded:
+        backward_tensors += [
+            ("seq_len_q", seq_len_tensor(seq_lens_q), UID_SEQ_LEN_Q),
+            ("seq_len_kv", seq_len_tensor(seq_lens_kv), UID_SEQ_LEN_KV),
+        ]
+    if dropout_mask is not None:
+        backward_tensors += [
+            ("dropout_mask", dropout_mask, UID_DROPOUT_MASK),
+            ("dropout_scale", scalar_tensor(dropout_scale), UID_DROPOUT_SCALE),
+            (
+                "dropout_scale_inv",
+                scalar_tensor(dropout_scale_inv),
+                UID_DROPOUT_SCALE_INV,
+            ),
+        ]
+    if dbias:
+        backward_tensors.append(("dBias", dBias, UID_DBIAS))
 
     if sweep_bundle_dir is None:
         print(f"Backward bundle: {base_filename}")
@@ -924,8 +1326,9 @@ def main():
         "--additive-mask",
         action="store_true",
         help="Add an explicit additive attention-mask tensor of shape "
-        "[1, 1, S_q, S_kv] in the IO data type. It is added to the scores before "
-        "the diagonal band, matching the CPU reference. dBias is not produced.",
+        "--bias-dims (default [1, 1, S_q, S_kv]) in the IO data type. It is added "
+        "to the scores before the diagonal band, matching the CPU reference. "
+        "dBias is produced only with --dbias.",
     )
     parser.add_argument(
         "--sweep-bundle-dir",
@@ -936,6 +1339,41 @@ def main():
     parser.add_argument(
         "--case-id",
         help="Sweep case id, lowercase_snake_case. Requires --sweep-bundle-dir.",
+    )
+    parser.add_argument(
+        "--seq-lens-q",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Per-batch query lengths (padding); requires --seq-lens-kv",
+    )
+    parser.add_argument(
+        "--seq-lens-kv",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Per-batch key/value lengths (padding); requires --seq-lens-q",
+    )
+    parser.add_argument(
+        "--bias-dims",
+        type=int,
+        nargs=4,
+        default=None,
+        help="Shape of the --additive-mask tensor, any broadcast of "
+        "[B, H_q, S_q, S_kv] (default: [1, 1, S_q, S_kv])",
+    )
+    parser.add_argument(
+        "--dbias",
+        action="store_true",
+        help="Emit dBias (requires --additive-mask): the unscaled dS reduced to "
+        "the bias shape",
+    )
+    parser.add_argument(
+        "--dropout-p",
+        type=float,
+        default=None,
+        help="Explicit-mask dropout with this drop probability: a FLOAT keep mask "
+        "[B, H_q, S_q, S_kv], dropout_scale = 1/(1-p), dropout_scale_inv = 1-p",
     )
     args = parser.parse_args()
 
@@ -956,6 +1394,11 @@ def main():
         additive_mask=args.additive_mask,
         sweep_bundle_dir=args.sweep_bundle_dir,
         case_id=args.case_id,
+        seq_lens_q=args.seq_lens_q,
+        seq_lens_kv=args.seq_lens_kv,
+        bias_dims=args.bias_dims,
+        dbias=args.dbias,
+        dropout_p=args.dropout_p,
     )
     print("\nDone.")
 
