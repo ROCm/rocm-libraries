@@ -959,6 +959,132 @@ def test_gfx942_page_one_default_uses_async_gather(dim, monkeypatch):
     assert not spec.use_wide_kv_load
 
 
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("dim", [64, 128, 256])
+def test_automatic_page_one_selects_bounded_pair(arch, dim):
+    from kernels.common import attention_unified as au
+
+    problem, _ = inputs()
+    problem = replace(problem, head_size=dim, clamp_arch=arch)
+    segment, reducer = au._default_3d_specs_from_problem(problem, arch=arch)
+    assert segment.metadata_containment and reducer.metadata_containment
+    assert segment.tile_size == 32 and segment.use_decode_grid
+    assert (
+        reducer.num_segments == segment.num_segments == au._num_segments(problem, arch)
+    )
+    assert "bounds_v1" in segment.kernel_name()
+    assert "bounds_v1" in reducer.kernel_name()
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_automatic_page_one_workspace_and_cache_contract(arch):
+    from kernels.common import attention_unified as au
+
+    problem, _ = inputs()
+    problem = replace(problem, clamp_arch=arch)
+    segments = au._num_segments(problem, arch)
+    expected = au.WorkspacePool.required_nbytes(
+        au._attention_3d_workspace_specs(
+            problem, segments, None, metadata_containment=True
+        )
+    )
+    assert au.attention_3d_workspace_nbytes(problem, arch=arch) == expected
+    key = au._tiled_3d_cache_key(problem, arch)
+    assert key[-2:] == ("metadata_containment", True)
+    legacy = replace(problem, block_size=32)
+    assert au._tiled_3d_cache_key(legacy, arch)[-2:] != key[-2:]
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_automatic_page_one_pipeline_compiles_matching_abi(arch, monkeypatch):
+    from types import SimpleNamespace
+    from kernels.common import attention_unified as au
+
+    problem, _ = inputs()
+    problem = replace(problem, clamp_arch=arch)
+    kernels, launchers = [], []
+
+    def compile_spy(kernel, **kwargs):
+        kernels.append(kernel)
+        return SimpleNamespace(hsaco=b"test", kernel_name=kernel.name)
+
+    def launcher_spy(**kwargs):
+        launchers.append(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(au, "_ATTN_3D_TILED_CACHE", {})
+    monkeypatch.setattr(au, "_3D_PIPELINES", {})
+    monkeypatch.setattr(au, "compile_kernel", compile_spy)
+    monkeypatch.setattr(au, "KernelLauncher", launcher_spy)
+    monkeypatch.setattr(au, "PipelineLauncher", lambda stages: stages)
+    key = au._tiled_3d_cache_key(problem, arch)
+    prepared = au._get_3d_pipeline(
+        problem, key, au._num_segments(problem, arch), arch=arch
+    )
+    assert len(kernels) == len(launchers) == 2
+    assert all("bounds_v1" in kernel.name for kernel in kernels)
+    seg_names = [param.name for param in kernels[0].params]
+    red_names = [param.name for param in kernels[1].params]
+    assert seg_names[-6:] == [
+        "metadata_status_ptr",
+        "physical_pages",
+        "max_seqlen_k",
+        "table_cols",
+        "k_span_bytes",
+        "v_span_bytes",
+    ]
+    assert red_names[-2:] == ["metadata_status_ptr", "num_seqs"]
+    assert launchers[0]["signature"] == au._3d_signature(
+        problem.dtype, metadata_containment=True
+    )
+    assert launchers[1]["signature"] == au._reduce_signature(
+        problem.dtype, metadata_containment=True
+    )
+    assert prepared.seg_config.grid[0] == problem.num_seqs
+    assert (
+        au._get_3d_pipeline(problem, key, au._num_segments(problem, arch), arch=arch)
+        is prepared
+    )
+    assert len(kernels) == 2
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_automatic_page_one_launch_passes_actual_bounds(arch, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from kernels.common import attention_unified as au
+
+    args = _paged_runtime_kwargs(arch, 1)
+    args["tuning_spec"] = None
+    args["use_graph"] = False
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            float32="torch.float32",
+            int32="torch.int32",
+            empty=lambda shape, dtype, device: Tensor(shape, dtype),
+        ),
+    )
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.setattr(au, "_torch_stream_capturing", lambda: False)
+    monkeypatch.setattr(au, "_run_3d_tiled", au._run_3d_tiled_on_stream)
+    monkeypatch.setattr(au, "_get_3d_pipeline", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        au, "_launch_3d_pipeline", lambda prepared, seg, red, stream, **kw: (seg, red)
+    )
+    segment, reducer = au.run_unified_attention_torch(**args)
+    status = segment["metadata_status_ptr"]
+    assert reducer["metadata_status_ptr"] is status
+    assert status.shape == (3, 2, au._num_segments(args["problem"], arch))
+    assert segment["physical_pages"] == args["k"].shape[0]
+    assert segment["k_span_bytes"] == args["k"].numel() * 2
+    assert segment["v_span_bytes"] == args["v"].numel() * 2
+    assert segment["max_seqlen_k"] == args["problem"].max_seqlen_k
+    assert segment["table_cols"] == args["block_table"].shape[1]
+    assert reducer["num_seqs"] == 3
+
+
 @pytest.mark.parametrize(
     "arch,path", [("gfx942", "2d"), ("gfx950", "2d"), ("gfx1250", "3d")]
 )

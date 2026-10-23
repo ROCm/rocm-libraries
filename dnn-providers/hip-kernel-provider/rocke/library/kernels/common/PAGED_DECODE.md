@@ -109,8 +109,10 @@ at identical geometry must enter the concrete spec and compilation identity.
 The `attention_paged_decode_t32` candidate uses ABI `rocke-attention-paged/v2`
 and enables strict boolean `metadata_containment` on both specs. Explicit marked
 pairs receive the same guards in direct, prepared, internal graph and external
-capture execution. Generic automatic/unmarked legacy paged routes retain their
-caller-validity contract. Kernel names append `_bounds_v1`; installed shared C
+capture execution. Direct automatic page-size-1 launches also select a bounded
+segment/reducer pair, including prepared execution and graph replay. Other
+unmarked legacy paged routes retain their caller-validity contract.
+Kernel names append `_bounds_v1`; installed shared C
 spec POD layouts remain unchanged. Raw native callers select the versioned
 builders in [the bounded builder header](../../../platform/cpp/include/rocke/instance_attention_paged_decode_bounded.h).
 

@@ -3875,6 +3875,26 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
             )
 
 
+def _default_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):
+    """Resolve the default paged pair, including its shared launch ABI."""
+    segment = _tiled_3d_spec_from_problem(problem, arch)
+    _, reduce_type, *_ = _tiled_3d_impl(arch)
+    reducer = reduce_type(
+        head_size=problem.head_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        num_segments=segment.num_segments,
+        waves_per_eu=_select_3d_waves_per_eu(problem, arch),
+        **(
+            {"metadata_containment": segment.metadata_containment}
+            if arch in ("gfx942", "gfx950")
+            else {}
+        ),
+    )
+    return segment, reducer
+
+
 def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):
     """One spec policy for direct and dispatched non-paged decode."""
     if arch not in ("gfx942", "gfx950"):
@@ -4024,6 +4044,10 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
             getattr(sp, "use_fused_reduce", False),
             getattr(sp, "use_dpp_softmax", False),
         )
+    from .attention_paged_decode import _default_paged_metadata_containment
+
+    if _default_paged_metadata_containment(problem, arch):
+        return base + ("metadata_containment", True)
     return base
 
 
@@ -4402,15 +4426,24 @@ def _run_3d_tiled_on_stream(
         paged_metadata_bounds,
     )
 
-    bounded = has_paged_metadata_containment(tuning_spec)
+    _launch_arch = _resolve_attention_arch()
+    bounded = kv_cache_layout is None and has_paged_metadata_containment(
+        tuning_spec, problem=problem, arch=_launch_arch
+    )
     bounds = (
         paged_metadata_bounds(
-            problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
+            problem,
+            (q, k, v, out, cu_seqlens_q, seqused_k, block_table),
+            tuning_spec,
+            specs=(
+                _default_3d_specs_from_problem(problem, arch=_launch_arch)
+                if tuning_spec is None
+                else None
+            ),
         )
         if bounded
         else None
     )
-    _launch_arch = _resolve_attention_arch()
     if tuning_spec is not None:
         num_segments = int(tuning_spec.kernel_spec.num_segments)
         cache_key = tuning_spec.cache_key()
@@ -5212,7 +5245,7 @@ def attention_3d_workspace_nbytes(
     """
     from .attention_paged_decode import has_paged_metadata_containment
 
-    bounded = has_paged_metadata_containment(tuning_spec)
+    bounded = has_paged_metadata_containment(tuning_spec, problem=problem, arch=arch)
     if tuning_spec is not None and tuning_spec.arch != arch:
         raise ValueError("workspace query arch disagrees with tuning_spec")
     segments = (
@@ -5258,7 +5291,9 @@ def _get_3d_pipeline(
     """
     from .attention_paged_decode import has_paged_metadata_containment
 
-    bounded = has_paged_metadata_containment(tuning_spec)
+    bounded = not strided_kv and has_paged_metadata_containment(
+        tuning_spec, problem=problem, arch=arch
+    )
     _assert_cache_key_arch(cache_key, arch, "_get_3d_pipeline")
     # The prepared pipeline owns both launch grids and the workspace, so it is
     # per shape; the HSACO pair under cache_key is shared.
@@ -5281,14 +5316,8 @@ def _get_3d_pipeline(
                     problem, arch=arch
                 )
             else:
-                segment_spec = _tiled_3d_spec_from_problem(problem, arch)
-                reduce_spec = UnifiedAttentionReduceTiledSpec(
-                    head_size=problem.head_size,
-                    num_query_heads=problem.num_query_heads,
-                    num_kv_heads=problem.num_kv_heads,
-                    dtype=problem.dtype,
-                    num_segments=num_segments,
-                    waves_per_eu=_select_3d_waves_per_eu(problem, arch),
+                segment_spec, reduce_spec = _default_3d_specs_from_problem(
+                    problem, arch=arch
                 )
             seg_kernel = build_unified_attention_3d_tiled(segment_spec, arch=arch)
             red_kernel = build_unified_attention_reduce_tiled(reduce_spec, arch=arch)
@@ -6034,7 +6063,9 @@ def run_unified_attention_torch(
         paged_metadata_bounds,
     )
 
-    bounded = has_paged_metadata_containment(tuning_spec)
+    bounded = has_paged_metadata_containment(
+        tuning_spec, problem=problem, arch=_launch_arch
+    )
     loader_geometry = validate_paged_loader_geometry(problem, tuning_spec)
     feature_inputs = dict(
         softcap=softcap,
@@ -6060,7 +6091,14 @@ def run_unified_attention_torch(
         if tuning_spec is None:
             validate_paged_3d_features(problem, None, q=q, **feature_inputs)
         validate_paged_decode(
-            problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
+            problem,
+            (q, k, v, out, cu_seqlens_q, seqused_k, block_table),
+            tuning_spec,
+            specs=(
+                _default_3d_specs_from_problem(problem, arch=_launch_arch)
+                if tuning_spec is None
+                else None
+            ),
         )
         if problem.clamp_arch is None:
             problem = replace(problem, clamp_arch=arch)
@@ -6068,7 +6106,14 @@ def run_unified_attention_torch(
 
     if bounded:
         paged_metadata_bounds(
-            problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
+            problem,
+            (q, k, v, out, cu_seqlens_q, seqused_k, block_table),
+            tuning_spec,
+            specs=(
+                _default_3d_specs_from_problem(problem, arch=_launch_arch)
+                if tuning_spec is None
+                else None
+            ),
         )
     bt_stride = (
         int(block_table.stride(0))

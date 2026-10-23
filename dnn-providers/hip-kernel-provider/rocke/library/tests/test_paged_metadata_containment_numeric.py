@@ -9,10 +9,20 @@ import pytest
 from tests.test_strided_kv_decode_numeric import gpu, _reference
 
 
-@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize(
+    "page,route,dim,ratio",
+    [(page, "explicit", 64, 4) for page in (1, 16, 32, 64)]
+    + [
+        (1, route, dim, ratio)
+        for route in ("auto", "3d")
+        for dim, ratio in ((64, 1), (128, 4), (256, 16))
+    ],
+)
 @pytest.mark.parametrize("dtype_name", ["fp16", "bf16"])
 @pytest.mark.parametrize("mode", ["eager", "prepared", "graph", "external"])
-def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, mode):
+def test_live_metadata_failure_and_recovery(
+    gpu, monkeypatch, page, route, dim, ratio, dtype_name, mode
+):
     torch, arch = gpu
     if arch not in ("gfx942", "gfx950"):
         pytest.skip("bounded decode targets gfx942/gfx950")
@@ -22,7 +32,8 @@ def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, 
 
     monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", "1")
     dtype = torch.float16 if dtype_name == "fp16" else torch.bfloat16
-    capacity, dim, batch, hq, hk = 65, 64, 2, 8, 2
+    capacity, batch, hk = 65, 2, 2
+    hq = hk * ratio
     req = AttentionRequest(
         batch=batch,
         nhead_q=hq,
@@ -37,7 +48,7 @@ def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, 
         algorithm="paged_decode_t32",
         target_ctas=8,
     )
-    selected = dispatch_attention(req)
+    selected = dispatch_attention(req) if route == "explicit" else None
     problem = _problem(req)
     torch.manual_seed(112)
     qh = torch.randn(batch, hq, dim, dtype=dtype)
@@ -70,8 +81,8 @@ def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, 
         block_table=table,
         softmax_scale=1 / math.sqrt(dim),
         softcap=0.0,
-        backend="3d",
-        tuning_spec=selected.spec,
+        backend="3d" if route == "explicit" else route,
+        tuning_spec=selected.spec if selected is not None else None,
         use_graph=mode == "graph",
     )
     owner = None
@@ -151,12 +162,15 @@ def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, 
         au.clear_attention_3d_graph_cache()
 
 
-@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize(
+    "page,route",
+    [(page, "explicit") for page in (1, 16, 32, 64)] + [(1, "auto"), (1, "3d")],
+)
 @pytest.mark.parametrize("dtype_name", ["fp16", "bf16"])
 @pytest.mark.parametrize("mode", ["eager", "prepared", "graph", "external"])
 @pytest.mark.parametrize("use_sinks", [False, True])
 def test_window_excluded_metadata_and_recovery(
-    gpu, monkeypatch, page, dtype_name, mode, use_sinks
+    gpu, monkeypatch, page, route, dtype_name, mode, use_sinks
 ):
     torch, arch = gpu
     if arch not in ("gfx942", "gfx950"):
@@ -212,10 +226,11 @@ def test_window_excluded_metadata_and_recovery(
             use_sinks=use_sinks,
             target_ctas=8,
         )
-        selected = dispatch_attention(req)
-        assert selected.candidate.name == "attention_paged_decode_t32"
-        assert selected.spec.kernel_spec.metadata_containment
-        assert selected.spec.reduce_spec.metadata_containment
+        selected = dispatch_attention(req) if route == "explicit" else None
+        if selected is not None:
+            assert selected.candidate.name == "attention_paged_decode_t32"
+            assert selected.spec.kernel_spec.metadata_containment
+            assert selected.spec.reduce_spec.metadata_containment
         args = dict(
             problem=_problem(req),
             q=q,
@@ -228,8 +243,8 @@ def test_window_excluded_metadata_and_recovery(
             sinks=sinks,
             softmax_scale=1 / math.sqrt(dim),
             softcap=0.0,
-            backend="3d",
-            tuning_spec=selected.spec,
+            backend="3d" if route == "explicit" else route,
+            tuning_spec=selected.spec if selected is not None else None,
             use_graph=mode == "graph",
         )
         table.copy_(valid_table)

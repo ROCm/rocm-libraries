@@ -307,7 +307,7 @@ def _validate_gather_wide_load(spec):
         raise ValueError("paged gather requires kernel_spec.use_wide_kv_load=False")
 
 
-def validate_paged_decode(problem, tensors, tuning_spec=None):
+def validate_paged_decode(problem, tensors, tuning_spec=None, *, specs=None):
     """Validate the new loader ABI without synchronization or graph allocation.
 
     Caller-owned values: lengths lie in [0,max_seqlen_k], query offsets are
@@ -331,12 +331,14 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
     if not 0 <= p.max_seqlen_k <= BUFFER_LIMIT:
         raise ValueError("paged gather sequence length exceeds token-offset bound")
     if tuning_spec is not None:
-        segment = tuning_spec.kernel_spec
-        _validate_gather_wide_load(segment)
-        validate_attention_3d_spec_types(segment)
         if tuning_spec.path != "3d" or tuning_spec.reduce_spec is None:
             raise ValueError("paged gather requires segment and reduce specs")
-        validate_attention_3d_spec_types(tuning_spec.reduce_spec, reducer=True)
+        specs = tuning_spec.kernel_spec, tuning_spec.reduce_spec
+    if specs is not None:
+        segment, reducer = specs
+        _validate_gather_wide_load(segment)
+        validate_attention_3d_spec_types(segment)
+        validate_attention_3d_spec_types(reducer, reducer=True)
         for name, expected in (
             ("kv_layout", "paged"),
             ("head_size", p.head_size),
@@ -364,15 +366,11 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
             "dtype",
             "num_segments",
         ):
-            if getattr(tuning_spec.reduce_spec, name, None) != getattr(segment, name):
+            if getattr(reducer, name, None) != getattr(segment, name):
                 raise ValueError(f"paged reduce_spec.{name} disagrees with segment")
     # The segment workspace uses bounded scalar offsets too. Default routing
     # selects at most 128 segments; use that ceiling before building its spec.
-    segments = (
-        128
-        if tuning_spec is None
-        else getattr(tuning_spec.kernel_spec, "num_segments", 0)
-    )
+    segments = 128 if specs is None else getattr(specs[0], "num_segments", 0)
     if not 1 <= segments <= 128:
         raise ValueError("paged gather requires 1..128 segments")
     if p.num_seqs * p.num_query_heads * p.head_size * segments * 4 > BUFFER_LIMIT:
@@ -421,10 +419,14 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
         raise ValueError("paged decode Q/K/V/O must be 16-byte aligned")
 
 
-def paged_metadata_bounds(problem, tensors, tuning_spec):
+def paged_metadata_bounds(problem, tensors, tuning_spec=None, *, specs=None):
     """Trusted scalar limits for bounded specs, without reading device contents."""
-    validate_paged_decode(problem, tensors, tuning_spec)
-    segment, reducer = tuning_spec.kernel_spec, tuning_spec.reduce_spec
+    validate_paged_decode(problem, tensors, tuning_spec, specs=specs)
+    if tuning_spec is not None:
+        specs = tuning_spec.kernel_spec, tuning_spec.reduce_spec
+    if specs is None:
+        raise ValueError("bounded decode requires a selected segment/reducer pair")
+    segment, reducer = specs
     if not (
         getattr(segment, "metadata_containment", False)
         and getattr(reducer, "metadata_containment", False)
@@ -464,9 +466,17 @@ def paged_metadata_bounds(problem, tensors, tuning_spec):
     }
 
 
-def has_paged_metadata_containment(tuning_spec):
+def _default_paged_metadata_containment(problem, arch: str) -> bool:
+    return arch in ("gfx942", "gfx950") and problem.block_size == 1
+
+
+def has_paged_metadata_containment(tuning_spec, *, problem=None, arch=None):
     if tuning_spec is None:
-        return False
+        return (
+            problem is not None
+            and arch is not None
+            and _default_paged_metadata_containment(problem, arch)
+        )
     segment = getattr(tuning_spec.kernel_spec, "metadata_containment", False)
     reducer = getattr(
         getattr(tuning_spec, "reduce_spec", None), "metadata_containment", False
