@@ -1084,6 +1084,32 @@ namespace TensileLite
 
     namespace
     {
+        bool usePerTileStreamKSplit(ContractionSolution const& solution,
+                                   ContractionProblemGemm const& problem,
+                                   PersistentLaunchSettings const& launch,
+                                   size_t tiles, size_t itersPerTile)
+        {
+            if(!solution.internalArgsSupport.perTileExtraIters)
+                return false;
+            if(problem.getParams().uniformSummationOrder())
+                return true;
+            // With an integral number of workers per tile, distribute the
+            // remainder within each tile. Global first-E distribution otherwise
+            // makes workers straddle tile boundaries and creates extra fixups.
+            // A single tile, exact K division and whole tiles need no change.
+            if(!solution.sizeMapping.hasStaticAssignment()
+               || (!solution.customKernel.name.empty() && !solution.customKernel.generated)
+               || solution.sizeMapping.useSubtileImpl || solution.problemType.useGradient
+               || solution.problemType.sparse || problem.groupedGemm()
+               || launch.reduction != origami::reduction_t::tree
+               || tiles <= 1 || launch.grid <= tiles || launch.grid % tiles != 0)
+                return false;
+            const size_t factor = launch.grid / tiles;
+            return factor <= itersPerTile && itersPerTile % factor != 0
+                   && (!solution.usesStreamKSpatialCluster()
+                       || launch.clusterSchedule.split.skTiles == tiles);
+        }
+
         template <typename KA>
         void appendLegacyDataParallelSchedulingArgs(ContractionSolution const& solution,
                                                    ContractionSolution::Problem const& problem,
@@ -1594,8 +1620,7 @@ namespace TensileLite
                 // predates the gate (custom kernels, older logic) would receive
                 // a bit it misreads.
                 assert((magicShiftItersPerTile & 0x60000000u) == 0u);
-                if(internalArgsSupport.perTileExtraIters
-                   && problem.getParams().uniformSummationOrder())
+                if(usePerTileStreamKSplit(*this, problem, launch, tiles, itersPerTile))
                     magicShiftItersPerTile |= 0x20000000u;
 
                 args.template append<uint32_t>("itersPerTile", itersPerTile);
