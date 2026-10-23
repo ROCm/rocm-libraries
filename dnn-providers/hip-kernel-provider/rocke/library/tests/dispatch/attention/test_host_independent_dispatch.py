@@ -631,7 +631,6 @@ _LIVE_ARCH_CALLERS_ALLOWED = frozenset(
         "run_unified_attention_torch",  # the public launch entry
         "_run_3d_tiled",  # split-KV decode stream boundary
         "_run_3d_tiled_on_stream",  # compile and launch on the established stream
-        "replay_scope",  # validate the prepared target at scoped launch entry
         "_run_2d_graphed",  # 2D graph-replay launch
         # ``_canonical_arch_for_selection`` is the canonicalizer for the public
         # gates (``supports_native_unified_attention_tiled`` etc.).  Its

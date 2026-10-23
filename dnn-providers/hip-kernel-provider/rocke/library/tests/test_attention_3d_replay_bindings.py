@@ -108,6 +108,47 @@ def test_warm_replay_and_storage_rebinding(replay, runtime, owned):
     assert not resident
 
 
+def test_gfx1250_preserves_context_and_direct_graph_storage_keys(
+    replay, runtime, monkeypatch
+):
+    arguments, resident, operations = replay
+    arguments["problem"] = replace(
+        arguments["problem"], dtype="bf16", num_query_heads=8
+    )
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx1250")
+    empty = sys.modules["torch"].empty
+
+    def initialized_empty(*args, **kwargs):
+        tensor = empty(*args, **kwargs)
+        tensor.fill_ = lambda value: operations.append(("fill", value))
+        tensor.zero_ = lambda: operations.append(("zero",))
+        return tensor
+
+    monkeypatch.setattr(sys.modules["torch"], "empty", initialized_empty)
+    arguments["q"] = Tensor(128)
+    arguments["q"].device = SimpleNamespace(index=0)
+    runtime.contexts.clear()
+    au._run_3d_tiled(**arguments, stream=17, use_graph=True)
+    assert runtime.contexts
+    first_key = next(iter(resident))
+    first = resident[first_key]
+    assert len(first_key) == 26 and first_key[5] == first.bindings
+    assert len(first.bindings) == 11
+    assert first.bindings[0][0][:2] == (
+        str(arguments["q"].device),
+        str(arguments["q"].dtype),
+    )
+    allocations = len(runtime.allocations)
+    arguments["q"].contents += 1
+    au._run_3d_tiled(**arguments, stream=17, use_graph=True)
+    assert len(runtime.allocations) == allocations and resident[first_key] is first
+    arguments["out"].pointer += 256
+    au._run_3d_tiled(**arguments, stream=17, use_graph=True)
+    assert len(resident) == 2 and resident[first_key] is first
+    au.clear_attention_3d_graph_cache()
+    assert not resident
+
+
 @pytest.mark.parametrize("field", ["shape", "strides", "dtype", "device"])
 @pytest.mark.parametrize("owned", [False, True])
 def test_same_tensor_metadata_change_rechecks_binding(replay, field, owned):

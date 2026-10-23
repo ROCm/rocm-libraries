@@ -11,9 +11,8 @@ until every required primitive and correctness/perf path is present.
 from __future__ import annotations
 
 from collections import OrderedDict
-from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from threading import Lock, RLock, current_thread, get_ident
+from threading import Lock, RLock, current_thread
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from rocke.core.arch import validate_arch
@@ -4186,27 +4185,13 @@ def _attn_values(
     return vals
 
 
-class _Attention3DReplay:
-    """A thread-bound operation valid only inside its execution scope."""
-
-    def __init__(self, operation):
-        self._operation = operation
-        self._thread = get_ident()
-
-    def __call__(self):
-        if self._operation is None or get_ident() != self._thread:
-            raise RuntimeError("replay must run on its thread inside replay_scope")
-        with Runtime.submission():
-            self._operation()
-
-
 class Attention3DExecution:
     """Own reusable scratch for one fixed 3D geometry and effective stream.
 
     Create with :func:`prepare_unified_attention_torch` outside a timed loop.
     Sequential launches reuse scratch; separate streams need separate owners.
     ``close`` waits for queued work before releasing bindings and storage.
-    Prepare, launch, rebind, replay and close on the same host thread that
+    Prepare, launch and close on the same host thread that
     submits other shared 3D attention calls and performs completion cleanup.
     Concurrent host submission or cleanup is unsupported. Stop submitting
     before draining queued work; asynchronous GPU execution remains supported.
@@ -4225,10 +4210,6 @@ class Attention3DExecution:
         self._stream = None
         self._closed = False
         self._graphs = OrderedDict()
-        self._setup_thread = None
-        self._setup_entered = False
-        self._scope_operation = None
-        self._bind_replay = False
 
     def launch(self, **overrides: Any) -> LaunchSummary:
         """Launch with prepared bindings, optionally replacing inputs or scalars.
@@ -4241,111 +4222,6 @@ class Attention3DExecution:
         arguments = dict(self._arguments, **overrides)
         arguments["execution"] = self
         return run_unified_attention_torch(**arguments)
-
-    @contextmanager
-    def replay_scope(self):
-        """Yield a fixed-binding asynchronous operation for a repeated loop.
-
-        Entry validates and warms the saved bindings once. The scope owns the
-        device, stream and whole-pair lock until exit drains queued work. Tensor
-        contents and device lengths may change in place on this stream, within
-        the admitted maximum. Addresses, layouts, scalars and configuration must
-        stay fixed; leave the scope and call ``rebind`` before changing them.
-        Outer capture is unsupported here; use ``launch`` for capture. The
-        yielded callable is valid only on the entering thread inside this scope.
-        """
-        import torch
-
-        if not self._lock.acquire(blocking=False):
-            raise RuntimeError("execution is already submitting work")
-        replay = None
-        try:
-            if self._arguments is None or self._closed:
-                raise RuntimeError("execution is closed or has not been prepared")
-            if self._scope_operation is not None:
-                raise RuntimeError("previous scope did not drain; close execution")
-            if _torch_stream_capturing():
-                raise RuntimeError("replay_scope cannot enter during capture")
-            with torch.cuda.device(self._device), torch.cuda.stream(
-                torch.cuda.ExternalStream(self._stream, device=self._device)
-            ):
-                if _torch_stream_capturing():
-                    raise RuntimeError("replay_scope cannot enter during capture")
-                if _resolve_attention_arch() not in ("gfx942", "gfx950"):
-                    raise NotImplementedError(
-                        "replay_scope requires gfx942/gfx950 split-KV"
-                    )
-                try:
-                    self._setup_thread = get_ident()
-                    self._bind_replay = True
-                    try:
-                        with no_fence():
-                            run_unified_attention_torch(
-                                **self._arguments, execution=self
-                            )
-                    finally:
-                        self._setup_thread = None
-                        self._setup_entered = False
-                        self._bind_replay = False
-                    if self._scope_operation is None:
-                        raise NotImplementedError(
-                            "replay_scope requires gfx942/gfx950 split-KV"
-                        )
-                    replay = _Attention3DReplay(self._scope_operation)
-                    yield replay
-                finally:
-                    if replay is not None:
-                        replay._operation = None
-                    # Keep the immutable launch buffers reachable if draining
-                    # raises. Close retries the drain before releasing them.
-                    wait_stream_and_release(self._stream)
-                    self._scope_operation = None
-        finally:
-            self._lock.release()
-
-    def rebind(self, **overrides):
-        """Drain and validate replacement fixed bindings outside a replay loop.
-
-        Geometry, layouts, dtype, device and effective stream remain fixed, as
-        for ``launch`` overrides. New storage and scalar values are permitted.
-        Use a new execution for a different geometry or layout.
-        """
-        import torch
-
-        if not self._lock.acquire(blocking=False):
-            raise RuntimeError("execution is already submitting work")
-        try:
-            if self._arguments is None or self._closed:
-                raise RuntimeError("execution is closed or has not been prepared")
-            if self._scope_operation is not None:
-                raise RuntimeError("previous scope did not drain; close execution")
-            if "execution" in overrides:
-                raise ValueError("rebind cannot replace the execution owner")
-            if _torch_stream_capturing():
-                raise RuntimeError("cannot rebind execution during capture")
-            arguments = dict(self._arguments, **overrides)
-            with torch.cuda.device(self._device), torch.cuda.stream(
-                torch.cuda.ExternalStream(self._stream, device=self._device)
-            ):
-                if _torch_stream_capturing():
-                    raise RuntimeError("cannot rebind execution during capture")
-                wait_stream_and_release(self._stream)
-                self._setup_thread = get_ident()
-                # Keep replacement tensors reachable if submission or its final
-                # drain fails. Ordinary launch owns asynchronous argument buffers.
-                self._scope_operation = lambda _bindings=arguments: None
-                try:
-                    run_unified_attention_torch(**arguments, execution=self)
-                finally:
-                    self._setup_thread = None
-                    self._setup_entered = False
-                    # Also drain a partially submitted pair after setup fails.
-                    # Preserve bound buffers if the drain itself fails.
-                    wait_stream_and_release(self._stream)
-                    self._scope_operation = None
-            self._arguments = arguments
-        finally:
-            self._lock.release()
 
     def close(self) -> None:
         """Drain the prepared stream and release this owner's resources.
@@ -4366,7 +4242,6 @@ class Attention3DExecution:
                         raise RuntimeError("cannot close execution during capture")
                     wait_stream_and_release(self._stream)
             self._graphs.clear()
-            self._scope_operation = None
             self._workspace = None
             self._arguments = None
             self._closed = True
@@ -4476,32 +4351,12 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
         stream = int(torch.cuda.current_stream(q.device).cuda_stream)
     else:
         stream = resolve_stream(stream, device=q.device)
-    borrowing_lock = (
-        execution is not None
-        and execution._setup_thread == get_ident()
-        and not execution._setup_entered
-    )
-    if (
-        execution is not None
-        and not borrowing_lock
-        and not execution._lock.acquire(blocking=False)
-    ):
-        # Reject reentrant/concurrent submission instead of interleaving pairs.
+    if execution is not None and not execution._lock.acquire(blocking=False):
         raise RuntimeError("execution is already submitting work")
-    if borrowing_lock:
-        # Only the setup call may borrow the owner's lock. Recursive submission
-        # on the same thread must still reject overlapping segment/reducer work.
-        execution._setup_entered = True
     try:
         launch_arch = _resolve_attention_arch()
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
-        if (
-            execution is not None
-            and not borrowing_lock
-            and execution._scope_operation is not None
-        ):
-            raise RuntimeError("previous scope did not drain; close execution")
         # Allocation and replay already use the required stream in the common
         # case. Avoid constructing an ExternalStream and switching contexts
         # when the caller has established that device/stream boundary.
@@ -4531,7 +4386,7 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
                 **kwargs,
             )
     finally:
-        if execution is not None and not borrowing_lock:
+        if execution is not None:
             execution._lock.release()
 
 
@@ -4805,25 +4660,6 @@ def _run_3d_tiled_on_stream(
             "segm_expsum_ptr": segm_expsum,
             "seq_lens_ptr": seqused_k,
         }
-        if execution is not None and execution._bind_replay:
-            if _launch_arch not in ("gfx942", "gfx950"):
-                raise NotImplementedError(
-                    "replay_scope requires gfx942/gfx950 split-KV"
-                )
-            bound_segment = prepared.pipeline.stages[0].bind(
-                seg_vals,
-                config=replace(prepared.seg_config, stream=stream, fence=False),
-            )
-            bound_reduce = prepared.pipeline.stages[1].bind(
-                red_vals,
-                config=replace(prepared.red_config, stream=stream, fence=False),
-            )
-
-            def submit_pair(_prepared=prepared):
-                bound_segment()
-                bound_reduce()
-
-            execution._scope_operation = submit_pair
         if binding_key is not None:
             # Cache packed addresses without retaining request-local input storage.
             # Scratch stays owned by this cache; input storage is retained only in
@@ -5075,8 +4911,6 @@ def _run_3d_graph(
     if not recent:
         graphs.move_to_end(graph_key)
     # The boundary established the caller's effective Torch stream.
-    if execution is not None and execution._bind_replay:
-        execution._scope_operation = entry.graph.replay
     fence = _resolved_fence(True)
     with Runtime.submission():
         entry.graph.replay()
