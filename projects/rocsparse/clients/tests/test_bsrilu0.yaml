@@ -42,13 +42,6 @@ Definitions:
 
 Tests:
 # Quick
-
-# pre_checkin already runs block_dim 3 and 6 (<=8 kernel), 15 and 27 (<=32),
-# both directions, both index bases, and both analysis policies.
-# On wavefront 64 the remaining launches are block_dim in (32,64] (33_64
-# kernel), block_dim > 64 (general), and complex double with block_dim > 32
-# (general via the f64_c clause). Numeric boost and the zero matrix are also
-# absent from pre_checkin.
 - name: bsrilu0
   category: quick
   function: bsrilu0
