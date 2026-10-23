@@ -22,7 +22,7 @@ def test_dependency_sync():
 
     # A deleted pyproject must fail here instead of letting uv discover a parent project.
     assert (project / "pyproject.toml").is_file(), "Missing source pyproject.toml"
-    # Tox provisions uv on PATH; uv-based development already has it.
+    # tox-uv exposes its executable on PATH; uv-based development already has it.
     assert shutil.which("uv"), (
         "Dependency synchronization needs uv on PATH. Run these tests through tox "
         "or install uv before running pytest directly."

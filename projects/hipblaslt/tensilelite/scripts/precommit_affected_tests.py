@@ -330,6 +330,20 @@ def main() -> int:
         log(bar)
         return 1
 
+    # Refresh native code once before pytest starts its workers. Do not import
+    # rocisa first: its stale-source diagnostic would reject the old extension.
+    # --no-sync keeps the provisioned environment and lock unchanged mid-commit.
+    rebuild = subprocess.run(
+        [
+            "uv", "run", "--no-sync", "python", "-c",
+            "import importlib.util; importlib.util.find_spec('rocisa').loader.rebuild()",
+        ],
+        cwd=tl_root,
+    )
+    if rebuild.returncode:
+        log("[tensilelite-tests] rocisa rebuild failed; tests were not run.")
+        return rebuild.returncode
+
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
     # -n 8: fixed; -n auto = os.cpu_count() over-subscribes large CI/dev hosts.
     argv = ["uv", "run", "--no-sync", "pytest", "-q", "-ra", "-n", "8", *nodes]

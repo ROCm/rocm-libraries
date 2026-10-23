@@ -30,7 +30,7 @@ profiles = {
     "requirements.txt": ["--group", "build"],
     # Installed-artifact tests must not depend on a checked-out rocisa tree.
     "requirements-test.txt": ["--group", "test", "--no-emit-package", "rocisa"],
-    # Preserve the pip development profile's noneditable local rocisa install.
+    # Preserve pip's noneditable install; pip does not apply tool.uv build settings.
     "requirements-dev.txt": ["--group", "dev", "--no-editable"],
 }
 header = (
