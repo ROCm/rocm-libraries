@@ -13,7 +13,7 @@ enum class IntegerRounding : uint8_t {
 };
 
 enum class IntegerOverflow : uint8_t {
-    // Require representability for value-returning casts; checked casts report failure.
+    // Require the rounded value to be representable in the destination.
     Reject,
     Saturate,
     // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.

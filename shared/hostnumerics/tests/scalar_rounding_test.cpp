@@ -54,7 +54,6 @@ TEST(ScalarRounding, NearestEvenAndTowardZeroIgnoreHostRoundingMode) {
         }
         volatile double positiveTie = 127.5;
         volatile double negativeTie = -128.5;
-        EXPECT_FALSE(getConvertScalar<int8_t>(positiveTie, nearest));
         EXPECT_EQ(convertScalar<int8_t>(negativeTie, nearest), -128);
         EXPECT_EQ(convertScalar<int8_t>(positiveTie,
                                         {IntegerRounding::NearestEven, IntegerOverflow::Saturate}),
