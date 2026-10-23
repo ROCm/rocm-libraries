@@ -34,6 +34,9 @@ package-dir = { "" = "." }
 where = ["."]
 include = ["kernels*", "builders*", "dispatch*", "benchmarks*"]
 
+[tool.setuptools.package-data]
+dispatch = ["grouped_convolution_instances/*.json"]
+
 [project.scripts]
 rocke-attention-combo-sweep = "benchmarks.common.attention_combo_sweep:main"
 rocke-dense-prefill-table-sweep = "benchmarks.gfx950.attention.prefill.dense_prefill_table_sweep:main"

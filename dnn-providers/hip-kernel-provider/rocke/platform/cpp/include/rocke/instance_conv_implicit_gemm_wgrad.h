@@ -198,6 +198,14 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     /* WgradConvSpec.group_merge.  Only 1 is ported: stream-K folds the
      * groups into GEMM-M itself, and the grid-per-group path is Python-only. */
     int group_merge; /* default 1 */
+    /* prefetch_addr: carry each A/B chunk's global byte offset across K
+     * iterations, so every iteration issues its buffer loads first and derives
+     * the next tile's offsets while they are in flight. Applies to the
+     * single-buffer synchronous K loop (mem/compv3/compv4/basic); rejected with
+     * async_dma, unroll_k and on WMMA. Mirrors WgradConvSpec.prefetch_addr.
+     * Appended last so existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool prefetch_addr; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

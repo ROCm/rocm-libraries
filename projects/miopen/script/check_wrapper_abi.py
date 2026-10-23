@@ -37,6 +37,13 @@ def main():
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
     )
     parser.add_argument(
+        "--needed-baseline",
+        help="committed DT_NEEDED list the wrapper must match exactly. Off by "
+        "default because the list names ROCm soversions and the platform's "
+        "loader; the checks it matters for (libMIOpen_private linked, the hipDNN "
+        "backend not) run without it",
+    )
+    parser.add_argument(
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
@@ -69,6 +76,8 @@ def main():
         "--private-lib",
         private_lib,
     ]
+    if args.needed_baseline:
+        command += ["--needed-baseline", args.needed_baseline]
     if args.public_header:
         command += ["--public-header", args.public_header]
     print(f"+ {' '.join(str(a) for a in command)}", flush=True)

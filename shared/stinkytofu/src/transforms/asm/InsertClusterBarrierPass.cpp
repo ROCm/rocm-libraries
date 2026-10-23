@@ -24,6 +24,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
+#include <optional>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -32,6 +34,7 @@
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/ScalarBranchFacts.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
@@ -330,7 +333,8 @@ void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
 }
 
-void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
+std::pair<StinkyInstruction*, StinkyInstruction*> insertWorkgroupBarrierSyncBefore(
+    IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
     assert(signalDesc && waitDesc &&
@@ -342,6 +346,7 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
     StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
     waitInst->addSrcReg(StinkyRegister(kWorkgroupBarrierId));
     waitInst->addModifier<CommentData>(CommentData{"sync workgroup before cluster signal"});
+    return {signalInst, waitInst};
 }
 
 void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
@@ -949,7 +954,7 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
 /// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
 /// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
 /// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
-/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
+/// Same idiom as StinkyRemoveWaitCntPass.
 bool isAnyCounterDrain(const StinkyInstruction& inst) {
     return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
 }
@@ -980,7 +985,7 @@ bool isAnyCounterDrain(const StinkyInstruction& inst) {
 ///
 /// Wait-cnt instructions never write SCC, so hoisting past them cannot move a
 /// cluster wait into or out of a live SCC range.
-IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
+IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor, bool sameSegmentOnly = false) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return anchor;
     IRBase* hoisted = anchor;
@@ -989,6 +994,7 @@ IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
         --it;
         auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (prev == nullptr) continue;
+        if (sameSegmentOnly && isSegmentBoundary(*prev)) break;
         if (isPseudoInst(prev)) continue;
         if (!isAnyCounterDrain(*prev)) break;
         hoisted = prev;
@@ -1012,6 +1018,171 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
         return isClusterBarrierWait(*prev);
     }
     return false;
+}
+
+/// The run-up wait may already have a complete local rendezvous before its
+/// first load. Recognize only the straight-line wait/drain/barrier sequence:
+/// a wait on another CFG path, or a barrier inside a wave-election guard, does
+/// not establish an all-wave handoff on the first-load path.
+struct RunUpClusterWait {
+    StinkyInstruction* wait = nullptr;
+    bool hasWorkgroupJoin = false;
+};
+
+RunUpClusterWait findRunUpClusterWait(StinkyInstruction* firstLoad) {
+    BasicBlock* parent = firstLoad->getParent();
+    if (parent == nullptr) return {};
+    bool pendingWorkgroupWait = false;
+    bool sawWorkgroupJoin = false;
+    bool incompleteWorkgroupJoin = false;
+    auto it = BasicBlock::iterator(firstLoad);
+    while (it != parent->begin()) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        // Labels are pseudo instructions too; test boundaries before skipping
+        // pseudo instructions so a different predecessor cannot supply the join.
+        if (isSegmentBoundary(*inst)) return {};
+        if (isPseudoInst(inst) || isAnyCounterDrain(*inst)) continue;
+        if (isClusterBarrierWait(*inst)) {
+            if (pendingWorkgroupWait || incompleteWorkgroupJoin)
+                STINKY_UNREACHABLE("Rule 2: incomplete workgroup rendezvous after cluster wait");
+            return {inst, sawWorkgroupJoin};
+        }
+        // MemTokenData annotates memory dependencies, not participation in
+        // the physical -1 rendezvous; token-annotated WG pairs count too.
+        if (isWorkgroupBarrierWait(*inst)) {
+            incompleteWorkgroupJoin |= pendingWorkgroupWait;
+            pendingWorkgroupWait = true;
+            continue;
+        }
+        if (isWorkgroupBarrierSignal(*inst)) {
+            incompleteWorkgroupJoin |= !pendingWorkgroupWait;
+            pendingWorkgroupWait = false;
+            sawWorkgroupJoin = true;
+            continue;
+        }
+        return {};
+    }
+    return {};
+}
+
+/// Can existing local joins order the next cluster phase without the new entry
+/// pair? Follow feasible paths, cutting each at a complete local signal/wait
+/// pair. Every local arrival in that cut is after the entry cluster wait, so
+/// the local waits order all waves before the next cluster signal. Distinct
+/// uniform paths may use different static pairs on the same physical barrier.
+/// Calls, unresolved transfers, another cluster operation, or an uncovered
+/// exit conservatively keep the pair. Only the pair just added by Rule 2 can go.
+bool hasLaterWorkgroupHandoff(StinkyInstruction* entryLocalWait) {
+    BasicBlock* parent = entryLocalWait->getParent();
+    if (parent == nullptr) return false;
+
+    std::vector<StinkyInstruction*> instructions;
+    std::unordered_map<std::string, size_t> labels;
+    size_t entry = 0;
+    for (IRBase& ir : *parent) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == entryLocalWait) entry = instructions.size();
+        if (isLabel(*inst)) {
+            if (const auto* label = inst->getModifier<LabelData>()) {
+                if (!labels.emplace(label->label, instructions.size()).second) return false;
+            }
+        }
+        instructions.push_back(inst);
+    }
+
+    // Seed facts from the preceding fall-through guard, without crossing a
+    // label that could admit another predecessor. Nonpersistent prefetch uses
+    // `if K == 0: skip` here, then re-tests that unchanged counter after shadow
+    // initialization. A structural walk incorrectly treats both tests as free.
+    size_t start = entry;
+    bool crossedGuard = false;
+    while (start > 0) {
+        const auto& inst = *instructions[start - 1];
+        if (isLabel(inst) || isCall(inst) || isUnconditionalBranch(inst)) break;
+        if (isBranch(inst)) {
+            const auto opcode = inst.getUnifiedOpcode();
+            if (crossedGuard || (opcode != GFX::s_cbranch_scc0 && opcode != GFX::s_cbranch_scc1))
+                break;
+            crossedGuard = true;
+        }
+        --start;
+    }
+    ScalarBranchFacts entryFacts;
+    for (size_t i = start; i <= entry; ++i) {
+        const auto& inst = *instructions[i];
+        entryFacts.transfer(inst);
+        if (isBranch(inst) && !entryFacts.assumeScc(inst.getUnifiedOpcode() == GFX::s_cbranch_scc0))
+            return false;
+    }
+
+    std::vector<std::optional<ScalarBranchFacts>> incoming(instructions.size());
+    std::deque<size_t> paths;
+    bool uncoveredExit = false;
+    auto enqueue = [&](size_t index, const ScalarBranchFacts& facts) {
+        if (index == instructions.size()) {
+            uncoveredExit = true;
+            return;
+        }
+        auto& old = incoming[index];
+        if (!old) {
+            old = facts;
+            paths.push_back(index);
+        } else if (old->merge(facts)) {
+            paths.push_back(index);
+        }
+    };
+    enqueue(entry + 1, entryFacts);
+    bool foundJoin = false;
+    while (!paths.empty()) {
+        size_t index = paths.front();
+        paths.pop_front();
+        const auto& inst = *instructions[index];
+        if (isClusterBarrierSignal(inst) || isClusterBarrierWait(inst) || isCall(inst) ||
+            isEndOfFunction(inst))
+            return false;
+
+        if (isWorkgroupBarrierSignal(inst)) {
+            // Token annotations describe LDS dependencies, not participation in
+            // the physical -1 barrier. Accept complete pairs with drains only.
+            size_t next = index + 1;
+            for (; next < instructions.size(); ++next) {
+                const auto& following = *instructions[next];
+                if (isSegmentBoundary(following)) break;
+                if (isPseudoInst(&following) || isAnyCounterDrain(following)) continue;
+                break;
+            }
+            if (next < instructions.size() && isWorkgroupBarrierWait(*instructions[next])) {
+                foundJoin = true;
+                continue;
+            }
+        }
+
+        ScalarBranchFacts facts = *incoming[index];
+        facts.transfer(inst);
+        if (!isBranch(inst)) {
+            enqueue(index + 1, facts);
+            continue;
+        }
+        const auto opcode = inst.getUnifiedOpcode();
+        const bool sccBranch = opcode == GFX::s_cbranch_scc0 || opcode == GFX::s_cbranch_scc1;
+        ScalarBranchFacts taken = facts;
+        if (!sccBranch || taken.assumeScc(opcode == GFX::s_cbranch_scc1)) {
+            const auto targets = getBranchTargets(inst);
+            if (targets.empty()) return false;
+            for (const std::string& target : targets) {
+                auto found = labels.find(target);
+                if (found == labels.end()) return false;
+                enqueue(found->second, taken);
+            }
+        }
+        if (!isUnconditionalBranch(inst) &&
+            (!sccBranch || facts.assumeScc(opcode == GFX::s_cbranch_scc0)))
+            enqueue(index + 1, facts);
+    }
+    return foundJoin && !uncoveredExit;
 }
 
 struct PreLoopSignalAnchor {
@@ -1571,16 +1742,31 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
         }
 
-        // Rule 2: one cluster wait immediately before the run-up's first tensor
-        // load, pairing Rule 1's prologue arrive. Only skip when that load is
-        // already directly preceded by a cluster wait; a wait on a different CFG
-        // path above (e.g. StreamK zero-iter skip) does not count.
+        // Rule 2: pair Rule 1's arrival with the run-up's first-load wait,
+        // then gather all local waves before any may signal the next phase.
+        // Rule 3 may hoist the first iteration's signal above its head WG join;
+        // RegionClonePass subsequently copies that placement into the init-C
+        // iteration. Establish the entry handoff here, before cloning, without
+        // shortening the steady-state signal lead. No SCC value is clobbered.
+        // Writer contract: every local wave executes the run-up's first tensor
+        // load under uniform tile/K/alpha guards. A textually first load in
+        // arbitrary divergent IR would not be a safe all-wave insertion point.
+        std::pair<StinkyInstruction*, StinkyInstruction*> entryJoin{nullptr, nullptr};
         StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
-        if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
+        if (firstTL != nullptr) {
             BasicBlock* parent = firstTL->getParent();
             AsmIRBuilder irBuilder(*parent, archId);
-            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
-                                           "cluster_barrier wait", irBuilder, archId);
+            const RunUpClusterWait existing = findRunUpClusterWait(firstTL);
+            if (existing.wait == nullptr) {
+                IRBase* anchor = hoistAboveLeadingWaitCnts(firstTL, /*sameSegmentOnly=*/true);
+                insertClusterBarrierWaitBefore(anchor, "cluster_barrier wait", irBuilder, archId);
+                entryJoin = insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId);
+            } else if (!existing.hasWorkgroupJoin) {
+                // Also repair the wait already emitted by the Python generator.
+                // Insert directly after it, preserving leading counter drains.
+                IRBase* anchor = std::next(BasicBlock::iterator(existing.wait)).getNodePtr();
+                entryJoin = insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId);
+            }
         }
 
         for (BasicBlock& bb : func) {
@@ -1817,6 +2003,17 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
             emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, getName(),
                                  "ResolvedSymbolicOperands", message});
+        }
+
+        // Rule 2 establishes a safe handoff before signal placement. Once all
+        // signals are fixed, reuse any later all-path workgroup joins instead
+        // of paying for a second rendezvous. In particular, O0 can retain the
+        // Python prefetch-prologue barrier that O3's LDS-token rebuild removes.
+        // Do not move an existing join or shorten the chosen loop signal lead.
+        if (entryJoin.second != nullptr && hasLaterWorkgroupHandoff(entryJoin.second)) {
+            BasicBlock* parent = entryJoin.first->getParent();
+            parent->eraseIR(BasicBlock::iterator(entryJoin.first));
+            parent->eraseIR(BasicBlock::iterator(entryJoin.second));
         }
 
         return PreservedAnalyses::none();

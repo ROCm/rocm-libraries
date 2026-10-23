@@ -37,7 +37,7 @@
 #include <shared_mutex>
 
 #if MIOPEN_USE_HIPBLASLT
-#include <hipblaslt/hipblaslt.h>
+#include <miopen/hipblaslt_errors.hpp>
 #endif
 
 /// hipMemGetInfo constantly fails on gfx906/900 and Navi21.
@@ -1066,9 +1066,10 @@ const hipblasLt_handle_ptr& Handle::HipblasLtHandle() const
 hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
 {
     hipblasLtHandle_t handle = nullptr;
-    if(hipblasLtCreate(&handle) != hipblasStatus_t::HIPBLAS_STATUS_SUCCESS)
+    const auto status        = hipblasLtCreate(&handle);
+    if(status != hipblasStatus_t::HIPBLAS_STATUS_SUCCESS)
     {
-        MIOPEN_THROW(miopenStatusUnknownError, "failed creating hipBLASLt handle");
+        MIOPEN_THROW(miopenStatusUnknownError, HipblasLtErrorMessage(status, "hipblasLtCreate"));
     }
 
     return hipblasLt_handle_ptr{handle};

@@ -76,8 +76,8 @@ bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
  *            a natively discovered COMGR candidate's LLVM version. If no compiler
  *            can be queried, lowering fails. When compilation is owned
  *            by the caller, pass an explicit flavor matching that compiler.
- *   arch   : ISA backend gfx string ("gfx942","gfx950",...). NULL => "gfx950"
- *            (the byte-identical baseline).
+ *   arch   : ISA backend gfx string ("gfx942","gfx950",...). Required: NULL
+ *            fails with ROCKE_ERR_VALUE, because there is no default target.
  *   out_text : on ROCKE_OK, receives a malloc'd NUL-terminated string the caller
  *              frees with free(); set to NULL on failure.
  *

@@ -165,8 +165,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
         throwIfInvalidDescriptor(variantPack);
 
         handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
+        const auto executionCount
+            = executionPlan->asDescriptor<ExecutionPlanDescriptor>()->recordExecution();
 
-        LOG_API_SUCCESS(apiName, "executionPlan={}", logPtr(executionPlan));
+        LOG_API_SUCCESS(
+            apiName, "executionPlan={}, executionCount={}", logPtr(executionPlan), executionCount);
     });
 }
 

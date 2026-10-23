@@ -404,7 +404,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--tune` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--arch ARCH` | _none_ | Target gfx architecture. Can also come from `ARCH:` inside a `--list` YAML. Choices: `gfx950`, `gfx950_128cu`, `gfx942`, `gfx942_80cu`, `gfx942_38cu`, `gfx942_20cu`, `gfx942_228cu`. |
+| `--arch ARCH` | _none_ | Target gfx architecture. Can also come from `ARCH:` inside a `--list` YAML. Choices: `gfx950`, `gfx950_128cu`, `gfx942`, `gfx942_80cu`, `gfx942_38cu`, `gfx942_20cu`, `gfx942_228cu`, `gfx1250`, `gfx1250_96cu`, `gfx1250_192cu`, `gfx1250-strict`, `gfx1250-strict_96cu`, `gfx1250-strict_192cu` (A0). The retired `gfx1250v0*` names are still accepted, with a deprecation warning. A0 runs set `HSA_DISABLE_GFX12_STRICT=0`. |
 | `--backend {ductile,tensile}` | `ductile` | Tuning backend used in the configure step. Only used with `--tune`. |
 | `-n, --n_slots INT` | `4` | Max concurrent optimization jobs per device during the optimize step. |
 | `--up_thr FLOAT` | `1.03` | Performance uplift threshold (e.g. `1.03` keeps kernels with ≥3% uplift). |

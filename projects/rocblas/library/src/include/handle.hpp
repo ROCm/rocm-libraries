@@ -103,6 +103,8 @@ enum class Processor : int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250
@@ -307,7 +309,7 @@ public:
     {
         int gfx_arch = getArch();
         if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950
-           || gfx_arch == 942)
+           || gfx_arch == 942 || gfx_arch == 1170 || gfx_arch == 1171)
         {
             return true;
         }
@@ -323,11 +325,8 @@ public:
      * This function determines whether or not to try using the hipBLASLt backend
      * - If the environment variable is set, its value determines whether or not to
      *   try the hipBLASLt backend.
-     * - Otherwise try when the current architecture is defaulted to hipBLASLt support
-     * - Always disable for any `batched` API when the current handle is in stream
-     *   capture mode (as hipblaslt batched dispatch does synchronous memory copies)
      ******************************************************************************/
-    bool tryHipBLASLt(bool batched)
+    bool tryHipBLASLt()
     {
         bool status = false;
 
@@ -342,11 +341,6 @@ public:
         else
             status = hipblasltEnvVar == 1;
 #endif
-
-        if(status && batched)
-        {
-            status = !is_stream_in_capture_mode();
-        }
 
         return status;
     }

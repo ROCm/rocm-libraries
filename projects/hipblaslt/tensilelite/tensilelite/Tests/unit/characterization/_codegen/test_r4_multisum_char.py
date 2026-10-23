@@ -73,9 +73,9 @@ def _build_minimal_kwa(kernel, *, globalReadIncsUseVgpr: bool):
     from rocisa.enum import RegisterType
     from rocisa.register import RegisterPool
 
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriter import KernelWriter, StateValues
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriter import KernelWriter, StateValues
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
 
     ri = _rocisa_mod.rocIsa.getInstance()
 
