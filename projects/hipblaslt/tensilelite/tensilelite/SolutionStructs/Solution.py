@@ -4941,13 +4941,19 @@ class Solution(collections.abc.Mapping):
             state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
           state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
+      # The DepthU ceiling belongs to the subtile pre-shuffled global read, whose K
+      # step rides in the MUBUF immediate. The classic swizzle path builds its step
+      # differently and ships above the ceiling -- gfx942 F8 swizzle-A logic carries
+      # DepthU 1024 -- so only ask on the subtile path.
+      subtilePreShuffled = isMxf4SubtilePath(state)
+
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
         if state["ProblemType"][f"SwizzleTensor{tc}"]:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
-          if state["DepthU"] > SWIZZLE_MAX_DEPTHU:
+          if subtilePreShuffled and state["DepthU"] > SWIZZLE_MAX_DEPTHU:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {SWIZZLE_MAX_DEPTHU}")
             continue
           laneSize = swizzleGeometry(state, tc)["laneSize"]
