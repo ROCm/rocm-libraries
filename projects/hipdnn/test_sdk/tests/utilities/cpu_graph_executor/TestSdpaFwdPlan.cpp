@@ -1081,6 +1081,107 @@ TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
 }
 
+// Philox dropout is checked through RNG_DUMP (decision C3): with dropout_probability, seed, offset
+// and an rng_dump output FLOAT [B, H, Sq, Skv], the reference reads the engine's dumped keep mask
+// as an explicit mask with scale 1 / (1 - p). Without rng_dump there is no exact oracle.
+// Raw graph [1, 2, 4, 8]; seed uid 23, offset uid 24, rng_dump uid 22.
+TEST(TestSdpaFwdPlanDropout, PhiloxNeedsRngDump)
+{
+    const auto applicable = [](SdpaAttributesT attrs, const std::vector<RawExtraTensor>& extras) {
+        auto graphBuilder
+            = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    SdpaAttributesT philox;
+    philox.dropout_probability = 0.25F;
+    philox.seed_tensor_uid = 23;
+    philox.offset_tensor_uid = 24;
+    const RawExtraTensor seed{23, "Seed", DataType::INT64, {1}};
+    const RawExtraTensor offset{24, "Offset", DataType::INT64, {1}};
+    const RawExtraTensor dump{22, "RngDump", DataType::FLOAT, {1, 2, 4, 4}};
+    EXPECT_FALSE(applicable(philox, {seed, offset}));
+
+    SdpaAttributesT withDump = philox;
+    withDump.rng_dump_tensor_uid = 22;
+    EXPECT_TRUE(applicable(withDump, {seed, offset, dump}));
+    EXPECT_FALSE(
+        applicable(withDump, {seed, offset, {22, "RngDump", DataType::FLOAT, {1, 1, 4, 4}}}));
+    EXPECT_FALSE(
+        applicable(withDump, {seed, offset, {22, "RngDump", DataType::HALF, {1, 2, 4, 4}}}));
+
+    SdpaAttributesT certainDrop = withDump;
+    certainDrop.dropout_probability = 1.0F;
+    EXPECT_FALSE(applicable(certainDrop, {seed, offset, dump}));
+}
+
+TEST(TestSdpaFwdPlanDropout, PhiloxWithRngDumpUsesDumpedMask)
+{
+    SdpaAttributesT attrs;
+    attrs.dropout_probability = 0.25F;
+    attrs.seed_tensor_uid = 23;
+    attrs.offset_tensor_uid = 24;
+    attrs.rng_dump_tensor_uid = 22;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            {{23, "Seed", DataType::INT64, {1}},
+                                             {24, "Offset", DataType::INT64, {1}},
+                                             {22, "RngDump", DataType::FLOAT, {1, 2, 4, 4}}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dumpedMask({1, 2, 4, 4});
+    hipdnn_data_sdk::utilities::Tensor<int64_t> seed({1});
+    hipdnn_data_sdk::utilities::Tensor<int64_t> offset({1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 81);
+    k.fillWithRandomValues(-1.0F, 1.0F, 82);
+    v.fillWithRandomValues(-1.0F, 1.0F, 83);
+    for(size_t i = 0; i < dumpedMask.elementCount(); ++i)
+    {
+        dumpedMask.memory().hostData()[i] = (i % 4 == 1) ? 0.0F : 1.0F;
+    }
+    seed.fillWithValue(1234);
+    offset.fillWithValue(0);
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {22, dumpedMask.memory().hostData()},
+                                                            {23, seed.memory().hostData()},
+                                                            {24, offset.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oRef,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &dumpedMask,
+                                1.0F / 0.75F);
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(o, oRef));
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
 {
     // The reference produces only the log-sum-exp stats output; the running-max softmax

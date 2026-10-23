@@ -224,8 +224,11 @@ batch when `seq_len_q/kv` are set).
   one-element FLOAT scale, optional scale_inv). `dropout_probability` / seed / offset and RNG_DUMP are declined: no
   reference can reproduce a kernel's random stream. Pinned by `TestCpuFpReferenceSdpaGradCheck.ExplicitMaskDropout`
   (mutation: dropping the scale_inv factor fails dQ, dK and dBias).
-- **Open:** validating Philox dropout needs engines to expose their keep mask (RNG_DUMP), then the explicit-mask
-  reference checks them; or a reproduction of each kernel's RNG stream.
+- **Philox dropout (decision C3):** validated through RNG_DUMP. A forward graph with `dropout_probability`, seed,
+  offset and an `rng_dump` output FLOAT `[B, H_q, Sq, Skv]` is accepted by the CPU and GPU forward references, which
+  read the engine's dumped keep mask as the explicit mask with scale `1/(1−p)`. Engines that claim Philox dropout must
+  support RNG_DUMP. Without RNG_DUMP the references decline (no exact oracle). Harness hand-off of the engine's
+  rng_dump to the reference: pending (design in the decisions notes).
 
 ## Score modifiers (extensions and conventions)
 

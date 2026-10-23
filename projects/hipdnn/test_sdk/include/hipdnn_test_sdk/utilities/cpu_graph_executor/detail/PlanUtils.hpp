@@ -307,6 +307,43 @@ inline float
     return *static_cast<const float*>(it->second);
 }
 
+/// Whether an SDPA forward node is Philox dropout that the references can check through
+/// RNG_DUMP: dropout_probability in [0, 1), seed and offset given, no explicit mask, and an
+/// rng_dump output FLOAT [B, H_q, Sq, Skv]. The engine writes its keep mask to rng_dump; the
+/// references read it back as the explicit mask with scale 1 / (1 - p) (cuDNN's composition).
+template <typename TensorMap>
+bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                 const TensorMap& tensorMap)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    if(!attrs.dropout_probability().has_value() || !attrs.seed_tensor_uid().has_value()
+       || !attrs.offset_tensor_uid().has_value() || !attrs.rng_dump_tensor_uid().has_value()
+       || attrs.dropout_mask_tensor_uid().has_value()
+       || attrs.dropout_scale_tensor_uid().has_value())
+    {
+        return false;
+    }
+    const auto p = attrs.dropout_probability().value();
+    if(!(p >= 0.0F && p < 1.0F))
+    {
+        return false;
+    }
+    const auto dumpIt = tensorMap.find(attrs.rng_dump_tensor_uid().value());
+    const auto qIt = tensorMap.find(attrs.q_tensor_uid());
+    const auto kIt = tensorMap.find(attrs.k_tensor_uid());
+    if(dumpIt == tensorMap.end() || qIt == tensorMap.end() || kIt == tensorMap.end()
+       || dumpIt->second->dims() == nullptr || qIt->second->dims() == nullptr
+       || kIt->second->dims() == nullptr || dumpIt->second->data_type() != DataType::FLOAT)
+    {
+        return false;
+    }
+    const auto* d = dumpIt->second->dims();
+    const auto* q = qIt->second->dims();
+    const auto* k = kIt->second->dims();
+    return d->size() == 4 && q->size() == 4 && k->size() == 4 && d->Get(0) == q->Get(0)
+           && d->Get(1) == q->Get(1) && d->Get(2) == q->Get(2) && d->Get(3) == k->Get(2);
+}
+
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
     do                                              \
     {                                               \
