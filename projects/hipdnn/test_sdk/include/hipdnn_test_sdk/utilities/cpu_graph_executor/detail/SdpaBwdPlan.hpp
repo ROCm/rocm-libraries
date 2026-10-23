@@ -97,6 +97,10 @@ struct SdpaBwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dBiasTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
+    // Explicit-mask dropout (cuDNN custom dropout): mask, scale, and optional scale_inv.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleInvTensor;
 };
 
 template <typename QDataType,
@@ -159,6 +163,22 @@ public:
                 *_params.seqLenKvTensor, variantPack.at(_params.seqLenKvTensor->uid));
         }
 
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDropoutMask;
+        std::optional<float> dropoutScale;
+        std::optional<float> dropoutScaleInv;
+        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        {
+            shallowDropoutMask = createShallowTensor<float>(
+                *_params.dropoutMaskTensor, variantPack.at(_params.dropoutMaskTensor->uid));
+            dropoutScale = resolveHostScalarOperand(
+                *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
+        }
+        if(_params.dropoutScaleInvTensor.has_value())
+        {
+            dropoutScaleInv = resolveHostScalarOperand(
+                *_params.dropoutScaleInvTensor, variantPack, "SDPA dropout scale inverse");
+        }
+
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
@@ -204,7 +224,10 @@ public:
                                                       _params.topLeftAlignment,
                                                       shallowDBiasTensor.get(),
                                                       shallowSeqLenQ.get(),
-                                                      shallowSeqLenKv.get());
+                                                      shallowSeqLenKv.get(),
+                                                      shallowDropoutMask.get(),
+                                                      dropoutScale,
+                                                      dropoutScaleInv);
     }
 
 private:
@@ -330,15 +353,26 @@ public:
             }
         }
 
-        // Unsupported: dropout
-        if(nodeAttributes->dropout_probability().has_value()
-           || nodeAttributes->seed_tensor_uid().has_value()
-           || nodeAttributes->offset_tensor_uid().has_value()
-           || nodeAttributes->dropout_mask_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_inv_tensor_uid().has_value())
+        // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv must be one FLOAT element.
+        if(!isSupportedSdpaDropout(*nodeAttributes, tensorMap))
         {
             return false;
+        }
+        if(nodeAttributes->dropout_scale_inv_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dropout_scale_inv_tensor_uid().value());
+            const auto inv = unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->dropout_scale_inv_tensor_uid().value()));
+            int64_t count = 1;
+            for(const auto dim : inv.dims)
+            {
+                count *= dim;
+            }
+            if(count != 1 || inv.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+               || !nodeAttributes->dropout_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
@@ -399,6 +433,17 @@ public:
                              nodeAttributes->seq_len_kv_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
                                  : nullptr);
+        for(auto [uid, field] :
+            {std::pair{nodeAttributes->dropout_mask_tensor_uid(), &params.dropoutMaskTensor},
+             std::pair{nodeAttributes->dropout_scale_tensor_uid(), &params.dropoutScaleTensor},
+             std::pair{nodeAttributes->dropout_scale_inv_tensor_uid(),
+                       &params.dropoutScaleInvTensor}})
+        {
+            if(uid.has_value())
+            {
+                *field = unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
 
         return std::make_unique<SdpaBwdPlan<QDataType,
                                             KDataType,

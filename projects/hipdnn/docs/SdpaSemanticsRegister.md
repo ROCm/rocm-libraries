@@ -208,6 +208,22 @@ batch when `seq_len_q/kv` are set).
   (`TestCpuFpReferenceSdpaGradCheckDBias`, mutation-checked against using the scaled dS).
 - **Contract:** cuDNN. A dBias whose shape or dtype differs from the bias is declined.
 
+### SEM-015: Dropout
+
+- **Status:** Aligned for cuDNN's explicit-mask ("custom") dropout (CPU references); Philox dropout declined.
+- **cuDNN:** forward `O = (P ∘ M · s) V` with mask M `[B|1, H|1, Sq, Skv]` and `dropout_scale` s; Stats are the
+  pre-dropout softmax's. Backward (composite lowering, `scaled_dot_product_flash_attention.h`):
+  `D = rowsum(dO ∘ O) · dropout_scale_inv` (1 when absent), `dS = s · P ∘ (M ∘ dP − D)`, `dV = (P ∘ M · s)ᵀ dO`,
+  dBias reduces that dS. With `dropout_scale_inv = 1/s` this is the exact gradient; without it, only for s = 1.
+- **PyTorch / AOTriton:** Philox dropout with seed/offset; the keep mask is not exposed except through test
+  helpers (`_fill_mem_eff_dropout_mask_`).
+- **hipDNN today:** the CPU forward and backward references implement the explicit-mask form (FLOAT mask,
+  one-element FLOAT scale, optional scale_inv). `dropout_probability` / seed / offset and RNG_DUMP are declined: no
+  reference can reproduce a kernel's random stream. Pinned by `TestCpuFpReferenceSdpaGradCheck.ExplicitMaskDropout`
+  (mutation: dropping the scale_inv factor fails dQ, dK and dBias).
+- **Open:** validating Philox dropout needs engines to expose their keep mask (RNG_DUMP), then the explicit-mask
+  reference checks them; or a reproduction of each kernel's RNG stream.
+
 ## Score modifiers (extensions and conventions)
 
 ### SEM-020: Softcap
