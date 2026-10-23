@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -17,9 +16,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
-#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp>
 
 #include "GpuScalarOperand.hpp"
 #include "GpuSdpaFwdPlan.hpp" // reuse REFERENCE_SDPA_PROBABILITY_MODE
@@ -28,94 +28,6 @@
 
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
-
-// Unpacked attributes and resolved parameters for a ragged SDPA node (RFC-0014 logical
-// [B,H,S,D], packed BSHD + ragged_offset). q/k/v/o each carry an int32 offset aux [B+1,1,1,1],
-// scaled to elements by the tensor's ragged_offset_multiplier.
-// The optional LSE [B,H,Sq,1] is packed if it has its own ragged_offset aux, else dense.
-struct GpuSdpaRaggedFwdParams
-{
-    GpuSdpaRaggedFwdParams(
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& raggedOffsetQAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& raggedOffsetKAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& raggedOffsetVAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& raggedOffsetOAttributes,
-        std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor,
-        int64_t leftBound,
-        int64_t rightBound,
-        bool topLeftAlignment,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* raggedOffsetLseAttributes
-        = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
-        : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
-        , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
-        , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
-        , oTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(oAttributes))
-        , raggedOffsetQTensor(
-              hipdnn_test_sdk::detail::unpackTensorAttributes(raggedOffsetQAttributes))
-        , raggedOffsetKTensor(
-              hipdnn_test_sdk::detail::unpackTensorAttributes(raggedOffsetKAttributes))
-        , raggedOffsetVTensor(
-              hipdnn_test_sdk::detail::unpackTensorAttributes(raggedOffsetVAttributes))
-        , raggedOffsetOTensor(
-              hipdnn_test_sdk::detail::unpackTensorAttributes(raggedOffsetOAttributes))
-        , scaleTensor(std::move(scaleTensor))
-        , leftBound(leftBound)
-        , rightBound(rightBound)
-        , topLeftAlignment(topLeftAlignment)
-        , lseTensor(lseAttributes != nullptr
-                        ? std::make_optional(
-                              hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
-                        : std::nullopt)
-        , raggedOffsetLseTensor(
-              raggedOffsetLseAttributes != nullptr
-                  ? std::make_optional(
-                        hipdnn_test_sdk::detail::unpackTensorAttributes(*raggedOffsetLseAttributes))
-                  : std::nullopt)
-        , descaleQTensor(descaleQAttributes != nullptr
-                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
-                                   *descaleQAttributes))
-                             : std::nullopt)
-        , descaleKTensor(descaleKAttributes != nullptr
-                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
-                                   *descaleKAttributes))
-                             : std::nullopt)
-        , descaleVTensor(descaleVAttributes != nullptr
-                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
-                                   *descaleVAttributes))
-                             : std::nullopt)
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT qTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT kTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT vTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT oTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetQTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetKTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetVTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetOTensor;
-    // Folded scale operand (scale tensor, else baked attn_scale_value), resolved at execute time.
-    // Absent means 1.0 (no scaling), as in cuDNN.
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
-    int64_t leftBound;
-    int64_t rightBound;
-    bool topLeftAlignment;
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
-    // Set only for a packed LSE. Absent means a dense [B,H,Sq,1] LSE.
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> raggedOffsetLseTensor;
-    // Optional fp8 descales (float): scalar [1] or per-KV-head [B, H_kv, 1, 1].
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
-};
 
 // Runs the ragged SDPA GPU reference on the variant-pack device buffers.
 template <typename QDataType,
@@ -126,7 +38,7 @@ template <typename QDataType,
 class GpuSdpaRaggedFwdPlan : public IGpuGraphNodePlanExecutor
 {
 public:
-    explicit GpuSdpaRaggedFwdPlan(GpuSdpaRaggedFwdParams&& params)
+    explicit GpuSdpaRaggedFwdPlan(hipdnn_test_sdk::detail::RaggedSdpaFwdParams&& params)
         : _params(std::move(params))
     {
     }
@@ -167,7 +79,7 @@ public:
                                           _params.raggedOffsetLseTensor->strides);
         }
 
-        // A host-scalar descale (baked or pass-by-value) is staged in a one-element tensor.
+        // A pass-by-value descale (baked or runtime) is staged in a one-element tensor.
         // A device descale is viewed in place. fpropRagged checks the shape.
         const auto bindDescale
             = [&variantPack](
@@ -179,7 +91,7 @@ public:
             {
                 return nullptr;
             }
-            if(isHostScalarOperand(*d))
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(*d))
             {
                 staged.emplace(std::vector<int64_t>{1});
                 staged->fillWithValue(resolveScalarOperand(*d, variantPack, "SDPA descale"));
@@ -239,13 +151,11 @@ public:
     }
 
 private:
-    GpuSdpaRaggedFwdParams _params;
+    hipdnn_test_sdk::detail::RaggedSdpaFwdParams _params;
 };
 
-// Same unsupported-feature gates as the dense GpuSdpaFwdPlanBuilder, plus: q/k/v/o (and a packed
-// LSE) must each carry a ragged_offset aux with a multiplier >= 1 and use the RFC-0014
-// [B, H, S, D] token-major layout, and seq_len_q/kv must be absent (the padded variant is not
-// supported).
+// Applicability is hipdnn_test_sdk::detail::isSupportedRaggedSdpaFwdNode, which the CPU
+// SdpaRaggedFwdPlanBuilder shares, plus this builder's Q/K/V/O data types.
 // GpuReferenceGraphExecutor::buildSignatureKey picks dense vs ragged.
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
@@ -266,166 +176,20 @@ public:
             tensorMap) const override
     {
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
-        if(nodeAttributes == nullptr)
+        if(nodeAttributes == nullptr
+           || !hipdnn_test_sdk::detail::isSupportedRaggedSdpaFwdNode(*nodeAttributes, tensorMap))
         {
             return false;
         }
-
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->q_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->k_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->v_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->o_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->q_tensor_uid(), QDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
-
-        // Each primary needs an INT32 ragged_offset aux (without them this is a dense SDPA node),
-        // a ragged_offset_multiplier >= 1 and the RFC-0014 [B, H, S, D] token-major layout.
-        for(const auto primaryUid : {nodeAttributes->q_tensor_uid(),
-                                     nodeAttributes->k_tensor_uid(),
-                                     nodeAttributes->v_tensor_uid(),
-                                     nodeAttributes->o_tensor_uid()})
-        {
-            const auto* primary = tensorMap.at(primaryUid);
-            if(!primary->ragged_offset_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, primary->ragged_offset_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              primary->ragged_offset_tensor_uid().value(),
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
-            if(!isSupportedRaggedLayout(*primary))
-            {
-                return false;
-            }
-        }
-
-        // The padded seq-lens variant is not supported. Lengths come from ragged_offset alone.
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
-        {
-            return false;
-        }
-
-        // Unsupported: additive attention bias (gated off on the ASM v3 path)
-        if(nodeAttributes->attn_mask_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: dropout
-        if(nodeAttributes->dropout_probability().has_value()
-           || nodeAttributes->seed_tensor_uid().has_value()
-           || nodeAttributes->offset_tensor_uid().has_value()
-           || nodeAttributes->dropout_mask_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_tensor_uid().has_value()
-           || nodeAttributes->rng_dump_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: paged KV cache (a separate task on top of ragged)
-        if(nodeAttributes->page_table_k_tensor_uid().has_value()
-           || nodeAttributes->page_table_v_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // AITER fp8 fwd descales Q/K/V only, with no softmax/output requant. Q/K/V descales must
-        // be FLOAT, and a host-scalar descale must be a single element.
-        if(nodeAttributes->descale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_o_tensor_uid().has_value()
-           || nodeAttributes->amax_s_tensor_uid().has_value()
-           || nodeAttributes->amax_o_tensor_uid().has_value())
-        {
-            return false;
-        }
-        for(const auto descaleUid : {nodeAttributes->descale_q_tensor_uid(),
-                                     nodeAttributes->descale_k_tensor_uid(),
-                                     nodeAttributes->descale_v_tensor_uid()})
-        {
-            if(descaleUid.has_value())
-            {
-                CHECK_TENSOR_EXISTS(tensorMap, descaleUid.value());
-                CHECK_TENSOR_TYPE(tensorMap,
-                                  descaleUid.value(),
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-                const auto descale = hipdnn_test_sdk::detail::unpackTensorAttributes(
-                    *tensorMap.at(descaleUid.value()));
-                if(isHostScalarOperand(descale) && elementCount(descale) != 1)
-                {
-                    return false;
-                }
-            }
-        }
-
-        // The scale may be baked, pass-by-value or device-resident. It must be one element, and a
-        // device scale must be FLOAT since it is read back as one float.
-        if(nodeAttributes->scale_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
-            const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
-            if(elementCount(scale) != 1
-               || (!isHostScalarOperand(scale)
-                   && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
-            {
-                return false;
-            }
-        }
-
-        // The reference does not produce max / sum-exp stats. LSE is handled below.
-        if(nodeAttributes->max_tensor_uid().has_value()
-           || nodeAttributes->sum_exp_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // LSE (stats tensor) must be FLOAT. With an INT32 ragged_offset aux it is packed,
-        // otherwise dense [B,H,Sq,1].
-        if(nodeAttributes->stats_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->stats_tensor_uid().value(),
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-            const auto statsRaggedOffsetUid
-                = tensorMap.at(nodeAttributes->stats_tensor_uid().value())
-                      ->ragged_offset_tensor_uid();
-            if(statsRaggedOffsetUid.has_value())
-            {
-                CHECK_TENSOR_EXISTS(tensorMap, statsRaggedOffsetUid.value());
-                CHECK_TENSOR_TYPE(tensorMap,
-                                  statsRaggedOffsetUid.value(),
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
-                if(!isSupportedRaggedLayout(
-                       *tensorMap.at(nodeAttributes->stats_tensor_uid().value())))
-                {
-                    return false;
-                }
-            }
-        }
-
         return true;
     }
 
+    // fpropRagged checks that O (and a packed LSE) has Q's per-batch lengths and V has K's.
     std::unique_ptr<IGpuGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
@@ -436,75 +200,13 @@ public:
             throw std::runtime_error("Node attributes are not of type SdpaAttributes");
         }
 
-        const auto& tensorMap = graph.getTensorMap();
-
-        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
-                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
-                                   : nullptr;
-        std::optional<float> attnScaleValue;
-        if(nodeAttributes->attn_scale_value().has_value())
-        {
-            attnScaleValue = nodeAttributes->attn_scale_value();
-        }
-        auto scaleTensor = hipdnn_test_sdk::detail::foldSdpaScale(scalePtr, attnScaleValue);
-
-        const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
-                                 ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
-                                 : nullptr;
-        const auto* raggedOffsetLsePtr
-            = (lsePtr != nullptr && lsePtr->ragged_offset_tensor_uid().has_value())
-                  ? tensorMap.at(lsePtr->ragged_offset_tensor_uid().value())
-                  : nullptr;
-
-        const auto descalePtr = [&tensorMap](::flatbuffers::Optional<int64_t> uid)
-            -> const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* {
-            return uid.has_value() ? tensorMap.at(uid.value()) : nullptr;
-        };
-        const auto* descaleQPtr = descalePtr(nodeAttributes->descale_q_tensor_uid());
-        const auto* descaleKPtr = descalePtr(nodeAttributes->descale_k_tensor_uid());
-        const auto* descaleVPtr = descalePtr(nodeAttributes->descale_v_tensor_uid());
-
-        // Same resolution as the dense GPU and CPU references: a deprecated causal flag composes
-        // with explicit bounds the way cuDNN's setters do, rather than overriding them.
-        const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaRaggedFwdPlan");
-
-        // isApplicable checked that every primary has a ragged_offset aux. fpropRagged checks
-        // that o and v share the per-batch lengths of q and k.
-        const auto* qAttr = tensorMap.at(nodeAttributes->q_tensor_uid());
-        const auto* kAttr = tensorMap.at(nodeAttributes->k_tensor_uid());
-        const auto* vAttr = tensorMap.at(nodeAttributes->v_tensor_uid());
-        const auto* oAttr = tensorMap.at(nodeAttributes->o_tensor_uid());
+        auto [leftBound, rightBound, isTopLeft]
+            = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaRaggedFwdPlan");
 
         return std::make_unique<
             GpuSdpaRaggedFwdPlan<QDataType, KDataType, VDataType, ODataType, float>>(
-            GpuSdpaRaggedFwdParams(*qAttr,
-                                   *kAttr,
-                                   *vAttr,
-                                   *oAttr,
-                                   *tensorMap.at(qAttr->ragged_offset_tensor_uid().value()),
-                                   *tensorMap.at(kAttr->ragged_offset_tensor_uid().value()),
-                                   *tensorMap.at(vAttr->ragged_offset_tensor_uid().value()),
-                                   *tensorMap.at(oAttr->ragged_offset_tensor_uid().value()),
-                                   std::move(scaleTensor),
-                                   band.leftBound,
-                                   band.rightBound,
-                                   band.topLeftAlignment,
-                                   lsePtr,
-                                   raggedOffsetLsePtr,
-                                   descaleQPtr,
-                                   descaleKPtr,
-                                   descaleVPtr));
-    }
-
-private:
-    // RFC-0014 requires ragged_offset_multiplier >= 1 and a token-major [B, H, S, D] layout.
-    static bool
-        isSupportedRaggedLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr)
-    {
-        const auto unpacked = hipdnn_test_sdk::detail::unpackTensorAttributes(attr);
-        return unpacked.ragged_offset_multiplier >= 1
-               && hipdnn_test_sdk::detail::isTokenMajorRaggedLayout(unpacked.dims,
-                                                                    unpacked.strides);
+            hipdnn_test_sdk::detail::RaggedSdpaFwdParams(
+                *nodeAttributes, graph.getTensorMap(), leftBound, rightBound, isTopLeft));
     }
 };
 

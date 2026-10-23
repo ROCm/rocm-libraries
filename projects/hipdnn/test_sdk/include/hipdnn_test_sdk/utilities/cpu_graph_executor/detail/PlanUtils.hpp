@@ -384,8 +384,8 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
 #define CHECK_OPTIONAL_TENSOR_TYPE(tensor_map, optional_tensor_uid, datatype_enum) \
     CHECK_TENSOR_TYPE(tensor_map, *(optional_tensor_uid), datatype_enum)
 
-// The CPU references do not support ragged tensors. Reject any graph that
-// contains one so the plan builder is reported as not applicable.
+// For reference plans that do not support ragged tensors: a graph containing one makes the plan
+// builder report not applicable.
 #define CHECK_NO_RAGGED_TENSORS(tensor_map)                                        \
     do                                                                             \
     {                                                                              \

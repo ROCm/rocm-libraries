@@ -149,9 +149,9 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
-| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
-| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
+| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V addressed through INT32 page tables | Not supported |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
@@ -160,12 +160,14 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
 | Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference (forward and backward follow the CPU table) | Not supported |
 | Block-sparse attention | Not supported | Not supported |
-| Softmax max / sum-exp stats outputs | Not supported | - |
+| Softmax max / sum-exp stats outputs | Not supported | Not supported |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
-The ragged plan requires the RFC-0014 `[B, S, H, D]` token-major layout with a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its Q/K/V/O tensors has a `ragged_offset`; a
-partly ragged node is rejected there instead of running as dense. The harness records the
-dense-path FP8 gap in `knownReferenceGaps()`
+The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
+strides and an `INT32` `ragged_offset` aux on every primary. A node is keyed as ragged when any of
+its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
+plan rejects any ragged tensor. So a partly ragged node is declined. The CPU reference keys and gates
+ragged nodes the same way. The harness records the dense-path FP8 gap in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
 
 ## Validators
@@ -200,7 +202,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; no ragged) | Yes (dense incl. variable seq. len.; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense incl. variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |

@@ -18,6 +18,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "RaggedGraphTestUtils.hpp"
@@ -31,6 +32,9 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
+using hipdnn_test_sdk::utilities::FloatOperandSpec;
+using hipdnn_test_sdk::utilities::OperandStorage;
 
 namespace
 {
@@ -136,8 +140,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }
 
-// Ragged tensors are not yet supported by the GPU SDPA reference.
-// TODO: remove once supported.
+// The dense plan rejects ragged tensors; ragged nodes go to GpuSdpaRaggedFwdPlan.
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -493,7 +496,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
     scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
     EXPECT_TRUE(isApplicableWith(scale));
 
-    scale.storage = OperandStorage::DEVICE;
+    scale.storage = OperandStorage::TENSOR;
     EXPECT_TRUE(isApplicableWith(scale));
 
     scale.dims = {2};
