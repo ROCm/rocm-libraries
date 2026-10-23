@@ -710,3 +710,53 @@ std::vector<size_t> data_descriptor_t::corresponding_axes_in_embedding() const
 
     return ret;
 }
+
+data_descriptor_t data_descriptor_t::split_length_axis(size_t                dim,
+                                                       std::optional<size_t> factor) const
+{
+    if(dim >= get_len_rank())
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " got length axis index "
+                                    + std::to_string(dim) + " for a layout of "
+                                    + std::to_string(get_len_rank()) + " length axes.");
+    const auto& axis = len_axes[dim];
+    const auto  span = axis.logical_span();
+    if(!factor)
+    {
+        // the largest divisor d with d * d <= span is the one closest to sqrt(span)
+        factor = 1;
+        for(size_t d = 2; d * d <= span; d++)
+            if(span % d == 0)
+                factor = d;
+        if(*factor == 1)
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " found no non-trivial factor of "
+                                        + std::to_string(span) + " (length axis "
+                                        + std::to_string(dim) + ").");
+    }
+    if(*factor <= 1 || *factor >= span || span % *factor != 0)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": " + std::to_string(*factor)
+                                    + " is not a non-trivial factor of " + std::to_string(span)
+                                    + " (length axis " + std::to_string(dim) + ").");
+    if(axis.lower % *factor != 0)
+        throw std::invalid_argument(
+            ROCFFT_CURRENT_FUNCTION + ": partial range [" + std::to_string(axis.lower) + ", "
+            + std::to_string(axis.upper) + ") along length axis " + std::to_string(dim)
+            + " is not aligned on multiples of " + std::to_string(*factor) + ".");
+
+    data_descriptor_t ret = *this;
+    ret.len_axes[dim]     = axis_t{0, *factor, axis.inbuffer_stride};
+    ret.len_axes.insert(
+        ret.len_axes.begin() + dim + 1,
+        axis_t{axis.lower / *factor, axis.upper / *factor, *factor * axis.inbuffer_stride});
+    if(embedding)
+    {
+        // flattened axis indices past dim shift by one; dim's embedding axis is split alike
+        ret.embedding->clear();
+        for(const auto axis_idx : *embedding)
+        {
+            ret.embedding->push_back(axis_idx > dim ? axis_idx + 1 : axis_idx);
+            if(axis_idx == dim)
+                ret.embedding->push_back(dim + 1);
+        }
+    }
+    return ret;
+}
