@@ -397,21 +397,27 @@ def launchKernel(kernel: LoadedKernel, grid, block, args) -> None:
     hipCheck(hip.hipDeviceSynchronize())
 
 
+def reduceArgs(dBuf, wsBuf, ldD: int, m: int, n: int, splits: int) -> tuple:
+    """The explicit kernargs of splitk_reduce."""
+    return (
+        dBuf.pointer,
+        wsBuf.pointer,
+        ctypes.c_int32(ldD),
+        ctypes.c_int32(m),
+        ctypes.c_int32(n),
+        ctypes.c_int32(splits),
+    )
+
+
+def reduceLaunchDims(m: int, n: int) -> tuple[tuple, tuple]:
+    """(grid, block) of splitk_reduce."""
+    return (ceilDiv(m, REDUCE_BLOCK), n, 1), (REDUCE_BLOCK, 1, 1)
+
+
 def launchReduce(kernel, dBuf, wsBuf, ldD: int, m: int, n: int, splits: int) -> None:
     """Runs splitk_reduce: D (bf16 bits) from the f32 workspace."""
-    launchKernel(
-        kernel,
-        (ceilDiv(m, REDUCE_BLOCK), n, 1),
-        (REDUCE_BLOCK, 1, 1),
-        (
-            dBuf.pointer,
-            wsBuf.pointer,
-            ctypes.c_int32(ldD),
-            ctypes.c_int32(m),
-            ctypes.c_int32(n),
-            ctypes.c_int32(splits),
-        ),
-    )
+    grid, block = reduceLaunchDims(m, n)
+    launchKernel(kernel, grid, block, reduceArgs(dBuf, wsBuf, ldD, m, n, splits))
 
 
 # Skinny GEMM configuration, ported from the driver. The pick* functions choose
@@ -904,26 +910,31 @@ def reduceKernel() -> LoadedKernel:
     return _kernelCache[REDUCE_KERNEL_NAME]
 
 
-def launchGemm(p: Problem, kernel, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf) -> None:
-    """Runs the GEMM kernel with its explicit kernargs: the six pointers, then
-    ldD, ldA, ldB, m, n, k and spk."""
-    launchKernel(
-        kernel,
-        p.grid,
-        (64 * p.waves, 1, 1),
-        (
-            dBuf.pointer,
-            aBuf.pointer,
-            bBuf.pointer,
-            sclABuf.pointer,
-            sclBBuf.pointer,
-            wsBuf.pointer,
-            *(
-                ctypes.c_int32(value)
-                for value in (p.ldD, p.ldA, p.ldB, p.m, p.n, p.k, p.spk)
-            ),
+def gemmArgs(p: Problem, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf) -> tuple:
+    """The explicit kernargs of the GEMM kernel: the six pointers, then ldD, ldA,
+    ldB, m, n, k and spk."""
+    return (
+        dBuf.pointer,
+        aBuf.pointer,
+        bBuf.pointer,
+        sclABuf.pointer,
+        sclBBuf.pointer,
+        wsBuf.pointer,
+        *(
+            ctypes.c_int32(value)
+            for value in (p.ldD, p.ldA, p.ldB, p.m, p.n, p.k, p.spk)
         ),
     )
+
+
+def gemmBlock(p: Problem) -> tuple[int, int, int]:
+    return (64 * p.waves, 1, 1)
+
+
+def launchGemm(p: Problem, kernel, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf) -> None:
+    """Runs the GEMM kernel with its explicit kernargs."""
+    args = gemmArgs(p, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf)
+    launchKernel(kernel, p.grid, gemmBlock(p), args)
 
 
 def verifyGemm(p: Problem, inputs: Inputs, dBits: np.ndarray, ws: np.ndarray) -> None:
