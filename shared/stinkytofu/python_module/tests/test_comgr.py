@@ -7,14 +7,25 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../build/lib"))
 
+import pytest
+
 import stinkytofu
 
+# Assembler probes need comgr. Hardware-table queries do not: a standalone
+# build without ROCm still has to answer getHardwareCaps from the tables.
+needs_comgr = pytest.mark.skipif(
+    not stinkytofu.hasComgrSupport(),
+    reason="built without amd_comgr",
+)
 
+
+@needs_comgr
 class TestComgrSupport:
     def test_has_comgr_support(self):
         assert stinkytofu.hasComgrSupport() is True
 
 
+@needs_comgr
 class TestProbeToolchainCaps:
     def test_gfx1250_returns_dict(self):
         caps = stinkytofu.probeToolchainCaps([12, 5, 0])
@@ -40,6 +51,7 @@ class TestVgprMsbModeEnum:
         assert stinkytofu.VgprMsbMode.MSB16.value == 2
 
 
+@needs_comgr
 class TestTryAssemble:
     """Tests for the tryAssemble Python binding."""
 
@@ -70,6 +82,7 @@ class TestGetHardwareCaps:
         assert caps1["archCaps"] == caps2["archCaps"]
 
 
+@needs_comgr
 class TestAsmCapsVsCompiler:
     """Verify asmCaps values against actual compiler assembly probes.
 
