@@ -311,10 +311,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
 )
 
 if(BUILD_WITH_SPSORT)
-  # SpSort descriptor, stage-order and buffer-size unit tests (ROCM-33112).
-  # Appended right after ROCSPARSE_UNIT_TEST_DEVICE_SOURCES closes (that set()
-  # call is unconditional, so a gated entry cannot live inside it) rather than
-  # inline with the other conversion tests above.
   list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
 endif()
 
