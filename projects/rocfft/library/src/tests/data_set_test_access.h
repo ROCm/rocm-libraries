@@ -22,6 +22,7 @@
 #define DATA_SET_TEST_ACCESS_H
 
 #include "data_set.h"
+#include <array>
 #include <optional>
 #include <vector>
 
@@ -41,18 +42,25 @@ struct data_set_test_access
     {
         data_set.full_range_reset(lengths, {}, {batch}, {}, false);
     }
-    // Copy of a data set (embedding included) given an array type and a precision
-    // (left unset if std::nullopt) the way friends set them, e.g., upon finalization.
+    // Copy of a data set (embedding included) given an array type, a precision (left
+    // unset if std::nullopt) and offsets the way friends set them, e.g., upon finalization.
     static data_set_t with_type(data_set_t                      data_set,
                                 rocfft_array_type               array_type,
-                                std::optional<rocfft_precision> precision)
+                                std::optional<rocfft_precision> precision,
+                                const std::array<size_t, 2>&    offsets = {0, 0})
     {
-        data_set.array_type = array_type;
+        data_set.set_array_type_and_offsets(array_type, offsets);
         if(precision)
             data_set.set_precision(*precision);
         else
             data_set.precision = data_set_t::precision_unset;
         return data_set;
+    }
+    static void set_array_type_and_offsets(data_set_t&                  data_set,
+                                           rocfft_array_type            array_type,
+                                           const std::array<size_t, 2>& offsets)
+    {
+        data_set.set_array_type_and_offsets(array_type, offsets);
     }
 };
 
