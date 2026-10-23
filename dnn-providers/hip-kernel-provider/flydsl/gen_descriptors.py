@@ -95,6 +95,7 @@ SDPA_OPS = (
     "sdpa_cdna_dualwave",
     "sdpa_cdna_decode",
     "sdpa_aiw",
+    "sdpa_bwd_merged",
 )
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
@@ -123,7 +124,10 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
 # `kv_align`) say which graphs an object can serve: the matcher gates on them, and
-# autotune compares the objects they distinguish as separate catalog entries.
+# autotune compares the objects they distinguish as separate catalog entries. For the
+# SDPA backward, `dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
+# head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
+# dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only).
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -145,6 +149,12 @@ GRAPH_DETERMINED_FIELDS = {
     "has_sink",
     "merge_symbol",
     "kernel",
+    "dropout",
+    "padded",
+    "floor",
+    "dform",
+    "store_db",
+    "gqa_pack",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -169,6 +179,9 @@ TUNING_FIELDS = {
     "k_prefetch_dist",
     "v_prefetch_dist",
     "kv_addr_hoist",
+    "block_kv",
+    "role_order",
+    "hints",
 }
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
