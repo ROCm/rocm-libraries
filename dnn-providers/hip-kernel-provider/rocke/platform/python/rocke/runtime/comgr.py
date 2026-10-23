@@ -139,6 +139,17 @@ def _check_mapped_compiler(candidate: str) -> None:
             )
 
 
+@dataclass(frozen=True)
+class _ComgrSelection:
+    selected_candidate: str
+    failed_candidates: tuple[str, ...]
+
+
+def _candidate_key(path: str) -> str:
+    # Bare names belong to the linker search path, not the current directory.
+    return os.path.abspath(path) if os.path.dirname(path) else path
+
+
 def _load_lib(candidates: Sequence[str] | None = None) -> ctypes.CDLL:
     # Keep every load failure in candidate order. A mapped conflict is a hard
     # error for overrides and automatic fallbacks alike, not another load miss.
@@ -149,7 +160,14 @@ def _load_lib(candidates: Sequence[str] | None = None) -> ctypes.CDLL:
         _check_mapped_compiler(p)
         try:
             _add_dll_dir(p)
-            return ctypes.CDLL(p)
+            lib = ctypes.CDLL(p)
+            # Bind provenance to this successful handle, for both default and
+            # explicit selection. Failed loads retain no selection record.
+            lib._rocke_selection = _ComgrSelection(
+                _candidate_key(p),
+                tuple(_candidate_key(path) for path, _ in failures),
+            )
+            return lib
         except OSError as e:
             failures.append((p, e))
     name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
@@ -366,9 +384,24 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
         bundled = _torch_bundled_lib("amd_comgr")
         if bundled is None:
             return resolved_lib_rocm_version()
-        desired = os.environ.get("ROCKE_COMGR_LIB") or bundled
+        candidates = _comgr_candidate_paths(["3"], [bundled])
+        desired = candidates[0]
         if _lib is not None:
+            selection = getattr(_lib, "_rocke_selection", None)
+            if selection is not None:
+                # Failed candidates have already yielded to this retained
+                # compiler. Do not dlopen them again, even if now repaired.
+                desired = next(
+                    (
+                        _candidate_key(path)
+                        for path in candidates
+                        if _candidate_key(path) not in selection.failed_candidates
+                    ),
+                    selection.selected_candidate,
+                )
             retained = getattr(_lib, "_name", "")
+            if selection is not None:
+                retained = selection.selected_candidate
             try:
                 retained = _library_for_symbol(_lib.amd_comgr_get_version) or retained
             except AttributeError:
@@ -383,7 +416,7 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
                     "compile in a separate process to change compilers."
                 )
         else:
-            _lib = _load_lib(_comgr_candidate_paths(["3"], [bundled]))
+            _lib = _load_lib(candidates)
         return resolved_lib_rocm_version()
 
 

@@ -50,6 +50,11 @@ Already-imported torch does not add a default COMGR tier. Call
 a non-empty library override still wins. An unavailable bundle uses ordinary
 discovery. The selected handle is retained and cannot be replaced by a different
 compiler through a later opt-in.
+Repeated opt-in accepts the same retained selection after earlier candidates
+failed to load. Those failures are recorded on the successful handle for both
+default discovery and explicit opt-in; they are not retried even if repaired
+later. Relative candidate paths are bound to their original working directory.
+A newly requested different compiler still requires a separate process.
 If torch is not imported yet and COMGR is already retained, the opt-in fails
 before importing torch, since that import can itself preload another compiler.
 Package release metadata is informational. `loaded_compiler_info()` supplies

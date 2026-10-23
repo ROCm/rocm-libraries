@@ -7840,7 +7840,9 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
             os.environ["ROCKE_COMGR_LIB"] = missing
             with mock.patch.object(
-                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+                comgr_mod.ctypes,
+                "CDLL",
+                side_effect=[OSError("missing"), types.SimpleNamespace()],
             ) as load:
                 comgr_mod._load_lib()
                 self.assertEqual(
@@ -7854,7 +7856,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             with open(invalid, "w") as fh:
                 fh.write("not a shared library")
             os.environ["ROCKE_COMGR_LIB"] = invalid
-            loaded = object()
+            loaded = types.SimpleNamespace()
             with mock.patch.object(
                 comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
             ) as load:

@@ -368,6 +368,127 @@ assert len(rc._mapped_comgr_files()) == 1
     )
 
 
+@pytest.mark.parametrize(
+    "failure,entry",
+    [
+        (failure, entry)
+        for failure in ("missing", "text", "dependency")
+        for entry in ("opt_in", "default")
+    ]
+    + [("bundle", "opt_in")],
+)
+def test_repeated_opt_in_after_fallback_retains_compiler(tmp_path, entry, failure):
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so")
+    (bundle.parent.parent / "__init__.py").write_text(
+        "from types import SimpleNamespace\nversion = SimpleNamespace(hip='7.0')\n"
+    )
+    failed = tmp_path / "failed" / "libamd_comgr.so"
+    if failure == "text":
+        failed.parent.mkdir()
+        failed.write_text("not ELF")
+    elif failure == "dependency":
+        dependency = build_library(
+            failed.parent, name="libfixture.so", text="void fixture(void){}"
+        )
+        build_library(
+            failed.parent,
+            name=failed.name,
+            text="extern void fixture(void); void amd_comgr_get_version(void){fixture();}",
+            extra=("-L" + str(failed.parent), "-lfixture", "-Wl,-rpath,$ORIGIN"),
+        )
+        dependency.unlink()
+    expected = bundle
+    env = dict(ROCKE_COMGR_LIB=str(failed))
+    if failure == "bundle":
+        bundle.write_text("not ELF")
+        expected = build_library(sdk_install(tmp_path))
+        env = {}
+    elif entry == "default":
+        # Default discovery and opt-in must lead to the same compiler.
+        env["ROCM_PATH"] = str(bundle.parent.parent)
+    different = build_library(tmp_path / "different", 22)
+    run_child(
+        tmp_path,
+        """
+import os, sys
+from rocke.runtime import comgr
+import torch
+if sys.argv[1] == 'opt_in':
+    comgr.prefer_bundled_lib()
+first = comgr.loaded_compiler_info()
+retained = comgr._lib
+assert os.path.samefile(first.comgr_path, sys.argv[2])
+real_cdll = comgr.ctypes.CDLL
+def no_second_library(name, *args, **kwargs):
+    if name is None:
+        return real_cdll(name, *args, **kwargs)  # dladdr provenance lookup
+    raise AssertionError('repeat opened another library')
+comgr.ctypes.CDLL = no_second_library
+for _ in range(2):
+    comgr.prefer_bundled_lib()
+    assert comgr._lib is retained and comgr.loaded_compiler_info() is first
+    assert len(rc._mapped_comgr_files()) == 1
+os.environ['ROCKE_COMGR_LIB'] = sys.argv[3]
+try:
+    comgr.prefer_bundled_lib()
+except comgr.ComgrError as error:
+    assert sys.argv[3] in str(error) and 'retained compiler' in str(error)
+else:
+    raise AssertionError('accepted a different compiler')
+assert comgr._lib is retained and comgr.loaded_compiler_info() is first
+assert len(rc._mapped_comgr_files()) == 1
+""",
+        entry,
+        expected,
+        different,
+        **env,
+    )
+
+
+@pytest.mark.parametrize("change", ["repair", "cwd"])
+def test_relative_failed_override_remains_bound_to_original_selection(tmp_path, change):
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so")
+    (bundle.parent.parent / "__init__.py").write_text(
+        "from types import SimpleNamespace\nversion = SimpleNamespace(hip='7.0')\n"
+    )
+    new_cwd = tmp_path / "other"
+    different = build_library(new_cwd / "failed", 22, "libamd_comgr.so")
+    run_child(
+        tmp_path,
+        """
+import os, sys
+from pathlib import Path
+from rocke.runtime import comgr
+comgr.prefer_bundled_lib()
+first = comgr.loaded_compiler_info()
+retained = comgr._lib
+if sys.argv[1] == 'repair':
+    Path('failed').mkdir()
+    Path('failed/libamd_comgr.so').symlink_to(sys.argv[2])
+else:
+    os.chdir(sys.argv[3])
+real_cdll = comgr.ctypes.CDLL
+def no_second_library(name, *args, **kwargs):
+    if name is None:
+        return real_cdll(name, *args, **kwargs)
+    raise AssertionError('repeat opened another library')
+comgr.ctypes.CDLL = no_second_library
+try:
+    comgr.prefer_bundled_lib()
+except comgr.ComgrError as error:
+    assert sys.argv[1] == 'cwd' and 'retained compiler' in str(error)
+else:
+    assert sys.argv[1] == 'repair'
+assert comgr._lib is retained and comgr.loaded_compiler_info() is first
+assert len(rc._mapped_comgr_files()) == 1
+""",
+        change,
+        different,
+        new_cwd,
+        ROCKE_COMGR_LIB="failed/libamd_comgr.so",
+    )
+
+
 @pytest.mark.parametrize("mode", ["bundle", "override", "missing", "retained"])
 def test_explicit_bundled_opt_in_and_retained_handle(tmp_path, mode):
     wheel = build_library(sdk_install(tmp_path))

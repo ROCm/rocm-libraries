@@ -152,6 +152,68 @@ def test_unqueryable_success_is_retained_without_retry(monkeypatch):
     probe.assert_called_once()
 
 
+def test_failed_load_attempt_does_not_authorize_later_opt_in(monkeypatch, tmp_path):
+    from rocke.runtime import runtime_coexistence as rc
+    import sys
+
+    abandoned = str(tmp_path / "abandoned.so")
+    failed = str(tmp_path / "missing.so")
+    selected = str(tmp_path / "torch" / "libamd_comgr.so")
+    library = compiler_library((23, 0, 0), selected)
+    monkeypatch.setattr(comgr, "_lib", None)
+    monkeypatch.setattr(comgr, "_check_mapped_compiler", lambda path: None)
+    monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: [abandoned])
+    load = Mock(side_effect=OSError("missing"))
+    monkeypatch.setattr(comgr.ctypes, "CDLL", load)
+    with pytest.raises(comgr.ComgrError, match="cannot load"):
+        comgr._resolve_lib()
+    assert comgr._lib is None
+
+    monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: [failed, selected])
+    load.side_effect = [OSError("missing"), library]
+    assert comgr._resolve_lib() is library
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(__file__="torch.py"))
+    monkeypatch.setattr(comgr, "_torch_bundled_lib", lambda stem: selected)
+    monkeypatch.setattr(rc, "_sdk_comgr_candidates", lambda: [])
+    monkeypatch.setattr(rc, "_rocm_root_libdirs", lambda: [])
+    monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: selected)
+    monkeypatch.setattr(comgr, "resolved_lib_rocm_version", lambda: None)
+    load.side_effect = AssertionError("opt-in opened another library")
+    monkeypatch.setenv("ROCKE_COMGR_LIB", failed)
+    comgr.prefer_bundled_lib()
+    assert comgr._lib is library
+
+    monkeypatch.setenv("ROCKE_COMGR_LIB", abandoned)
+    with pytest.raises(comgr.ComgrError, match="retained compiler"):
+        comgr.prefer_bundled_lib()
+    assert comgr._lib is library
+
+
+def test_fallback_provenance_cannot_authorize_another_handle(monkeypatch, tmp_path):
+    from rocke.runtime import runtime_coexistence as rc
+    import sys
+
+    failed = str(tmp_path / "missing.so")
+    selected = str(tmp_path / "selected.so")
+    other = compiler_library((20, 0, 0), str(tmp_path / "other.so"))
+    first = compiler_library((23, 0, 0), selected)
+    monkeypatch.setattr(comgr, "_check_mapped_compiler", lambda path: None)
+    monkeypatch.setattr(
+        comgr.ctypes, "CDLL", Mock(side_effect=[OSError("missing"), first])
+    )
+    assert comgr._load_lib([failed, selected]) is first
+    monkeypatch.setattr(comgr, "_lib", other)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(__file__="torch.py"))
+    monkeypatch.setattr(comgr, "_torch_bundled_lib", lambda stem: selected)
+    monkeypatch.setattr(rc, "_sdk_comgr_candidates", lambda: [])
+    monkeypatch.setattr(rc, "_rocm_root_libdirs", lambda: [])
+    monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: other._name)
+    monkeypatch.setenv("ROCKE_COMGR_LIB", failed)
+    with pytest.raises(comgr.ComgrError, match="retained compiler"):
+        comgr.prefer_bundled_lib()
+    assert comgr._lib is other
+
+
 @pytest.mark.parametrize("source", ["api", "environment"])
 def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
