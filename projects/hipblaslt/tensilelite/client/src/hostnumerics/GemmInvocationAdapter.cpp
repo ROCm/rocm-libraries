@@ -131,18 +131,15 @@ namespace TensileLite::Client::hostnumerics
             const bool compatible = std::visit(
                 [&](const auto& item) {
                     using Value = std::remove_cvref_t<decltype(item)>;
-                    if constexpr(std::is_same_v<Value, std::complex<float>>
-                                 || std::is_same_v<Value, std::complex<double>>)
+                    if constexpr(std::is_same_v<
+                                     Value,
+                                     std::complex<
+                                         float>> || std::is_same_v<Value, std::complex<double>>)
                         return complex;
                     else if(complex)
                         return std::is_same_v<Value, float> || std::is_same_v<Value, double>;
                     else
-                        return std::is_same_v<Value, float> || std::is_same_v<Value, double>
-                               || std::is_same_v<Value, Half> || std::is_same_v<Value, int32_t>
-                               || std::is_same_v<Value, BFloat16> || std::is_same_v<Value, int8_t>
-                               || std::is_same_v<Value, Float8> || std::is_same_v<Value, BFloat8>
-                               || std::is_same_v<Value, Float8_fnuz>
-                               || std::is_same_v<Value, BFloat8_fnuz>;
+                        return std::is_same_v<Value, float> || std::is_same_v<Value, double> || std::is_same_v<Value, Half> || std::is_same_v<Value, int32_t> || std::is_same_v<Value, BFloat16> || std::is_same_v<Value, int8_t> || std::is_same_v<Value, Float8> || std::is_same_v<Value, BFloat8> || std::is_same_v<Value, Float8_fnuz> || std::is_same_v<Value, BFloat8_fnuz>;
                 },
                 value);
             if(!compatible)
@@ -434,7 +431,7 @@ namespace TensileLite::Client::hostnumerics
                                "ScaleAB mode must be empty, Scalar, or Vector.");
             }
 
-            auto mapType = [](rocisa::DataType type) { return getHostNumericsScalarType(type); };
+            auto mapType    = [](rocisa::DataType type) { return getHostNumericsScalarType(type); };
             auto assignType = [&](ScalarType& destination, rocisa::DataType source) {
                 auto mapped = mapType(source);
                 if(!mapped)
@@ -878,26 +875,26 @@ namespace TensileLite::Client::hostnumerics
                 void*         currentD = inputs.batchD == nullptr ? inputs.d : inputs.batchD[batch];
 
                 auto borrowedA = readA ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                             typeA, layoutA, currentA, batchOffsetA)
+                                     typeA, layoutA, currentA, batchOffsetA)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                             detail::BorrowedConstTensor{layoutA, {}});
+                                           detail::BorrowedConstTensor{layoutA, {}});
                 if(!borrowedA)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedA.error())));
                 auto borrowedB = readB ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                             typeB, layoutB, currentB, batchOffsetB)
+                                     typeB, layoutB, currentB, batchOffsetB)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                             detail::BorrowedConstTensor{layoutB, {}});
+                                           detail::BorrowedConstTensor{layoutB, {}});
                 if(!borrowedB)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedB.error())));
                 auto borrowedC = readC ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                             typeC, layoutC, currentC, batchOffsetC)
+                                     typeC, layoutC, currentC, batchOffsetC)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                             detail::BorrowedConstTensor{layoutC, {}});
+                                           detail::BorrowedConstTensor{layoutC, {}});
                 if(!borrowedC)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedC.error())));
@@ -1218,8 +1215,8 @@ namespace TensileLite::Client::hostnumerics
 
     GemmInvocationAdapter::GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept = default;
 
-    GemmInvocationAdapter& GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept
-        = default;
+    GemmInvocationAdapter&
+        GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept = default;
 
     void TranslatedGemmBatch::runGemm(roc::hostnumerics::GemmBackend backend) const
     {
