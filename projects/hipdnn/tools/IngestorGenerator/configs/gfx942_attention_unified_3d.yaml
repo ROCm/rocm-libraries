@@ -1,6 +1,6 @@
 # Packaged-dialect (`variants`) selection for the hipkernel:Gfx942AttentionUnified3d
 # catalog: the full admitted space of rocKE's strided split-KV decode candidate on
-# gfx942, 132 cells / 2092 kernels (segment + reduce launches each). The source of
+# gfx942, 138 cells / 2192 kernels (segment + reduce launches each). The source of
 # truth is the rocKE dispatcher registry, expanded from
 # configs/gfx942_attention_unified_3d.engine.yaml; regenerate it, from this directory,
 # with (RUNBOOK stage "Populate from the whole registry"):
@@ -14,7 +14,7 @@
 # against the manifest. A cell is (dtype, head_size, heads); block_size, its tile
 # and num_segments are the arms. `default: true` marks each cell's default arm (the
 # split rule's pick for kv_block_size 16, batch 32, seqlen_k 8192); neither it nor
-# `reduction` reaches a descriptor. 2092 is over the 1000 AOT budget: accepted
+# `reduction` reaches a descriptor. 2192 is over the 1000 AOT budget: accepted
 # pending owner sign-off (AICK-2683).
 
 dialect: packaged
@@ -1303,6 +1303,68 @@ packs:
       - {block_size: 16, num_segments: 7, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942', default: true}
       - {block_size: 16, num_segments: 2, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
       - {block_size: 16, num_segments: 3, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 14, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 28, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 57, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 8, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 16, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 32, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 64, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 128, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 8, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 16, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 32, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 64, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 128, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0}
+  - name: attention_unified_3d.bf16_d64_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 3, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 2, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 7, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 14, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 28, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 57, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 8, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 16, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 32, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 64, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, num_segments: 128, metadata: {tile_size_override: 32}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 8, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 16, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 32, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 64, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, num_segments: 128, metadata: {tile_size_override: 64}, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0}
+  - name: attention_unified_3d.fp16_d64_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 3, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 2, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 7, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
       - {block_size: 16, num_segments: 14, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
       - {block_size: 16, num_segments: 28, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
       - {block_size: 16, num_segments: 57, metadata: {tile_size_override: 16}, tag: 'seg{md_num_segments}.gfx942'}
@@ -2660,6 +2722,68 @@ packs:
       - {block_size: 64, tile_size_override: 32, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
     shapes:
     - {knobs: knobs0, resolved: {tile_size_override: 16}}
+  - name: attention_unified_3d.bf16_d128_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, tile_size_override, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 2, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 4, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 9, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 19, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 38, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0, resolved: {tile_size_override: 16}}
+  - name: attention_unified_3d.fp16_d128_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, tile_size_override, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 2, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 4, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 9, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 19, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 38, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0, resolved: {tile_size_override: 16}}
   - name: attention_unified_3d.bf16_d128_hq32_kv32_b{block_size}_t{md_tile_size_override}_{tag}
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
     spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, tile_size_override, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
@@ -3814,6 +3938,60 @@ packs:
         bf16: BF16
         fp16: FP16
     spec_defaults: {head_size: 256, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0, resolved: {tile_size_override: 16}}
+  - name: attention_unified_3d.bf16_d256_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, tile_size_override, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 256, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
+    knob_sets:
+      knobs0:
+      - {block_size: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942', default: true}
+      - {block_size: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 32, tile_size_override: 16, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 8, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 16, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 32, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 64, tag: 'seg{md_num_segments}.gfx942'}
+      - {block_size: 64, tile_size_override: 32, num_segments: 128, tag: 'seg{md_num_segments}.gfx942'}
+    shapes:
+    - {knobs: knobs0, resolved: {tile_size_override: 16}}
+  - name: attention_unified_3d.fp16_d256_hq16_kv16_b{block_size}_t{md_tile_size_override}_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, use_alibi, use_qq_bias, num_seqs, waves_per_eu, kv_storage_dtype, tile_size_override, use_invariant_hoist, use_wide_kv_load, use_i64_kv_addr, kv_layout, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load]
+    policy_knobs: [tile_size_override]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 256, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_sinks: false, sliding_window: 0, has_softcap: false, use_alibi: false, use_qq_bias: false, num_seqs: 32, waves_per_eu: null, kv_storage_dtype: null, use_invariant_hoist: false, use_wide_kv_load: false, use_i64_kv_addr: false, kv_layout: strided, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, use_wave_page_id_load: false}
     knob_sets:
       knobs0:
       - {block_size: 16, num_segments: 16, tag: 'seg{md_num_segments}.gfx942', default: true}

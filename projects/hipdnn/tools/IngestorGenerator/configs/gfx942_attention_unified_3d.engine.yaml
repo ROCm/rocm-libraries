@@ -167,6 +167,7 @@ enumerate:
         - [64, 64, 32, 8]
         - [64, 64, 64, 8]
         - [64, 64, 128, 8]
+        - [64, 64, 16, 16]
         - [64, 64, 32, 32]
         - [64, 64, 64, 64]
         - [128, 128, 1, 1]
@@ -189,6 +190,7 @@ enumerate:
         - [128, 128, 32, 8]
         - [128, 128, 64, 8]
         - [128, 128, 128, 8]
+        - [128, 128, 16, 16]
         - [128, 128, 32, 32]
         - [128, 128, 64, 64]
         - [256, 256, 1, 1]
@@ -211,6 +213,7 @@ enumerate:
         - [256, 256, 32, 8]
         - [256, 256, 64, 8]
         - [256, 256, 128, 8]
+        - [256, 256, 16, 16]
         - [256, 256, 32, 32]
         - [256, 256, 64, 64]
     - fields: [dtype]
@@ -242,8 +245,8 @@ enumerate:
   # test_every_shipped_engine_manifest_loads_through_its_own_loader), but the
   # enumerator enforces it only under `space: slice`. Under `space: full` it only
   # records the enumerated count; the aot_budget_per_arch WARN below is the live
-  # check (2092 > 1000, accepted pending owner sign-off).
-  max_kernels: 2092
+  # check (2192 > 1000, accepted pending owner sign-off).
+  max_kernels: 2192
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.

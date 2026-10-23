@@ -7,8 +7,8 @@ graph's, so a claimed case whose cell the catalog lacks surfaces only as a broke
 claim on a gfx942 runner. This compares the two host-side, from the shipped descriptor
 and the sweep JSON, so every runner that builds the packaging tests sees the drift.
 
-Unlike the gfx950 dense check, the comparison runs one way. The catalog holds 132 cells
-(22 head pairs per head size x 3 head sizes x 2 dtypes); the sweeps sample them, they are
+Unlike the gfx950 dense check, the comparison runs one way. The catalog holds 138 cells
+(23 head pairs per head size x 3 head sizes x 2 dtypes); the sweeps sample them, they are
 not meant to reach each one. Only cases support.json claims for the engine on gfx942
 count: the sweeps are shared, and another engine's cases are not this catalog's to serve.
 """
