@@ -118,6 +118,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_dgrad_weight_transforms,
     direct_wgrad_fold_knobs,
     direct_dgrad_workspaces,
+    direct_entry_wave_reason,
     direct_spec_for_problem,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
@@ -493,6 +494,9 @@ def plan_for(
     if not meta.get("kernel_name"):
         return None, "cache entry has no kernel_name (rebuild the cache)"
     variant = identity.algorithm
+    why = direct_entry_wave_reason(variant, identity.wave_size, meta)
+    if why is not None:
+        return None, why
     knobs = json.loads(identity.knobs) if identity.knobs else {}
     if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
         chunks = _batch_chunks(problem)
@@ -502,7 +506,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
-    spec, why = direct_spec_for_problem(variant, problem, knobs, arch)
+    spec, why = direct_spec_for_problem(
+        variant, problem, knobs, arch, identity.wave_size
+    )
     if spec is None:
         return None, why
 
