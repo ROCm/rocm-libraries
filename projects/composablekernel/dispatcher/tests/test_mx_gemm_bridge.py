@@ -644,6 +644,58 @@ class TestMxArchitectureKernels(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     _validate(cfg.to_codegen_config())
 
+    def test_gfx1250_tdm_v2_requires_exactly_four_waves(self):
+        from unified_mx_gemm_codegen import _validate
+
+        four_waves = (
+            replace(default_fp8_config("gfx1250", "comp_tdm_v2"), warp_m=4, warp_n=1),
+            replace(default_fp8_config("gfx1250", "comp_tdm_v2"), warp_m=1, warp_n=4),
+            replace(
+                default_fp8_config("gfx1250", "comp_tdm_v2"),
+                warp_m=1,
+                warp_n=2,
+                warp_k=2,
+                tile_k=256,
+            ),
+        )
+        for cfg in four_waves:
+            with self.subTest(waves=(cfg.warp_m, cfg.warp_n, cfg.warp_k)):
+                self.assertTrue(cfg.is_valid())
+                _validate(cfg.to_codegen_config())
+
+        eight_waves = replace(
+            default_fp8_config("gfx1250", "comp_tdm_v2"), warp_m=2, warp_n=4
+        )
+        from gemm_validation_utils import validate_gemm_mx
+
+        valid, error = validate_gemm_mx(
+            eight_waves.tile_m,
+            eight_waves.tile_n,
+            eight_waves.tile_k,
+            eight_waves.warp_m,
+            eight_waves.warp_n,
+            eight_waves.warp_k,
+            eight_waves.warp_tile_m,
+            eight_waves.warp_tile_n,
+            eight_waves.warp_tile_k,
+            eight_waves.datatype,
+            eight_waves.datatype,
+            "fp16",
+            eight_waves.pipeline,
+            eight_waves.layout,
+            eight_waves.gpu_target,
+        )
+        self.assertFalse(valid)
+        self.assertIn("exactly 4 waves", error)
+        self.assertFalse(eight_waves.is_valid())
+        with self.assertRaises(ValueError):
+            _validate(eight_waves.to_codegen_config())
+
+        # TDM v1 does not have the four-wave static_assert.
+        tdm_v1 = replace(default_fp8_config("gfx1250", "comp_tdm"), warp_m=2, warp_n=4)
+        self.assertTrue(tdm_v1.is_valid())
+        _validate(tdm_v1.to_codegen_config())
+
     def test_gfx950_fp8_weight_preshuffle_vmcnt_limit(self):
         from dataclasses import replace
         from unified_mx_gemm_codegen import _load_mx_builder, _validate
