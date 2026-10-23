@@ -232,6 +232,8 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
         return rocke_b_global_load_i32(b, v->base, off, 0);
     if(rocke_tv_name_is(dt, "i64"))
         return rocke_b_global_load_i64(b, v->base, off, 0);
+    if(rocke_tv_name_is(dt, "f64"))
+        return rocke_b_global_load_f64(b, v->base, off, 0);
     return rocke_b_global_load(b, v->base, off, dt, 0);
 }
 
@@ -273,6 +275,8 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
         return;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    if(align <= 0 && rocke_tv_name_is(dt, "f64"))
+        align = 8; /* Same 8-byte element alignment as the f64 load_scalar. */
     if(align <= 0)
         rocke_b_global_store(b, v->base, off, value, 0); /* Python: align default 1 */
     else

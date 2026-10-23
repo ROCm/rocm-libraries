@@ -8,7 +8,7 @@
 // the environment variables torchrun sets.
 
 #include "allclose.hpp"
-#include "benchmark_timing.hpp"
+#include "benchmark_hooks.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
