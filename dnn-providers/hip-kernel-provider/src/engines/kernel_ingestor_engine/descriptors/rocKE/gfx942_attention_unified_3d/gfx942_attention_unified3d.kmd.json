@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "id": "fa42fab2-67a1-4154-b45f-55b25c1f5265",
+  "name": "Gfx942AttentionUnified3d variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 32
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "tile_size_override",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "num_segments",
+      "type": "int",
+      "default_value": 16
+    }
+  ]
+}

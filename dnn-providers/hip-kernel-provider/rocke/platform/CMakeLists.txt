@@ -522,7 +522,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
-        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -592,7 +593,8 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
     # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
-    # automatically; the RDNA WMMA spec tests sit outside it and are named beside it.
+    # automatically; the RDNA WMMA spec tests and the unified LSE host contract sit
+    # outside it and are named beside it.
     # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
@@ -605,6 +607,7 @@ if(ROCKE_INSTALL_TESTS)
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")
@@ -713,6 +716,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"

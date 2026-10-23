@@ -688,6 +688,510 @@
         "seed": 42,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaFwdBshdFp16.Correctness_b2_hq8_kv1_sq512_skv512_d64_fp16_bshd_nomask"
       }
+    },
+    {
+      "id": "1_8_32768_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              32768,
+              64
+            ],
+            "strides": [
+              16777216,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              64
+            ],
+            "strides": [
+              2048,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1,
+              64
+            ],
+            "strides": [
+              2048,
+              64,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              32768,
+              64
+            ],
+            "strides": [
+              16777216,
+              64,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b1_hq32_kv8_sq1_skv32768_d64_bf16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "1_8_8192_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              8192,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              8192,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b1_hq32_kv8_sq1_skv8192_d128_bf16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "1_8_8192_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              8,
+              8192,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              8192,
+              128
+            ],
+            "strides": [
+              8388608,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b1_hq32_kv8_sq1_skv8192_d128_fp16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "2_8_1_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b2_hq32_kv8_sq1_skv1_d128_fp16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "4_1_256_128_bfp16_nchw_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1,
+              256,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1,
+              256,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b4_hq8_kv1_sq1_skv256_d128_bf16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "4_1_4096_128_fp16_nchw_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1,
+              4096,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1,
+              4096,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.08838834764831843,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "hand-authored SdpaFwd decode shape (seqlen_q 1) for hipkernel:Gfx942AttentionUnified3d: the Default graph template with BSHD strides and attn_scale 1/sqrt(D)",
+        "notes": "b4_hq8_kv1_sq1_skv4096_d128_fp16_bshd_causal_br",
+        "seed": 42,
+        "generator": "import_graph.py"
+      }
     }
   ]
 }

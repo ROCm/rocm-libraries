@@ -1,11 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The authored selection (configs/gfx950_attention_dense.yaml), gated against the
-rocKE registry space named by the manifest and against the shipped catalog.
+"""Each engine's authored selection (configs/<engine>.yaml), gated against the
+rocKE registry space named by its manifest (configs/<engine>.engine.yaml) and
+against its shipped catalog.
 
 Spec fields the selection omits are compared against their dataclass defaults, so a
 changed default (or builder) recompiles shipped kernels with every gate here green.
+
+To cover a new engine, add one `Engine` row to `ENGINES`; an engine whose files are
+not in the checkout yet skips.
 """
 
 from __future__ import annotations
@@ -30,24 +34,83 @@ import registry_enumerator as enumerator  # noqa: E402
 
 _PROVIDER = enumerator._REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE_LIBRARY = _PROVIDER / "rocke" / "library"
-_SHIPPED_DIR = (
-    _PROVIDER
-    / "src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense"
+_KIE = _PROVIDER / "src/engines/kernel_ingestor_engine"
+
+
+@dataclasses.dataclass(frozen=True)
+class Engine:
+    name: str
+    manifest: Path
+    selection: Path
+
+
+def _engine(name: str) -> Engine:
+    """`name` is the config stem (and the bundle folder)."""
+    return Engine(
+        name=name,
+        manifest=_ROOT / "configs" / f"{name}.engine.yaml",
+        selection=_ROOT / "configs" / f"{name}.yaml",
+    )
+
+
+ENGINES = (
+    _engine("gfx950_attention_dense"),
+    _engine("gfx942_attention_unified_3d"),
 )
-_SHIPPED_KDP = _SHIPPED_DIR / "artifacts" / "gfx950_attention_dense.kdp.json"
-_SHIPPED_KMD = _SHIPPED_DIR / "gfx950_attention_dense.kmd.json"
-_SELECTION = _ROOT / "configs" / "gfx950_attention_dense.yaml"
-_MANIFEST = _ROOT / "configs" / "gfx950_attention_dense.engine.yaml"
+
+
+@pytest.fixture(scope="module", params=ENGINES, ids=lambda e: e.name)
+def engine(request) -> Engine:
+    return request.param
+
+
+def _require(engine: Engine, path: Path, what: str) -> None:
+    """Skip only an engine not started at all; a partly added engine fails."""
+    if path.is_file():
+        return
+    started = [p.name for p in (engine.manifest, engine.selection) if p.is_file()]
+    if not started:
+        pytest.skip(
+            f"{engine.name}: engine not added yet (no manifest or selection in configs/)"
+        )
+    pytest.fail(f"{engine.name}: {what} missing beside {started}: {path}")
+
+
+def _shipped(selection) -> tuple[Path, Path]:
+    """The shipped (KDP, KMD), located from the selection itself: its descriptor
+    dir names the bundle folder and its engine slug the file stem, which can differ
+    from the folder (`gfx942_attention_unified3d` in `gfx942_attention_unified_3d/`)."""
+    bundle = _KIE / selection.descriptor_dir
+    slug = selection.engine.slug
+    return bundle / "artifacts" / f"{slug}.kdp.json", bundle / f"{slug}.kmd.json"
+
+
+def _require_shipped_kdp(engine: Engine, selection) -> tuple[Path, Path]:
+    """The KMD is git-tracked, so a missing one fails. The shipped KDP is
+    DVC-tracked: skip only when its pointer exists (not pulled)."""
+    kdp, kmd = _shipped(selection)
+    _require(engine, kmd, "shipped KMD")
+    if kdp.is_file():
+        return kdp, kmd
+    pointer = kdp.parent.with_suffix(".dvc")
+    if pointer.is_file():
+        pytest.skip(f"shipped KDP not in this checkout: {kdp}")
+    pytest.fail(
+        f"{engine.name}: shipped KDP missing and no DVC pointer: "
+        f"{kdp} (expected {pointer})"
+    )
 
 
 @pytest.fixture(scope="module")
-def selection():
-    return load_config(_SELECTION)
+def selection(engine):
+    _require(engine, engine.selection, "selection")
+    return load_config(engine.selection)
 
 
 @pytest.fixture(scope="module")
-def manifest() -> dict:
-    return enumerator.load_manifest(str(_MANIFEST))
+def manifest(engine) -> dict:
+    _require(engine, engine.manifest, "manifest")
+    return enumerator.load_manifest(str(engine.manifest))
 
 
 @pytest.fixture(scope="module")
@@ -166,10 +229,9 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
 
 
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
-    selection, tmp_path_factory, capsys
+    engine, selection, tmp_path_factory, capsys
 ):
-    if not _SHIPPED_KDP.is_file():
-        pytest.skip(f"shipped KDP not in this checkout: {_SHIPPED_KDP}")
+    shipped_kdp, shipped_kmd = _require_shipped_kdp(engine, selection)
     out = tmp_path_factory.mktemp("g2")
     IngestorGenerator(_ROOT / "templates").render(selection, out)
     descriptors = out / selection.descriptor_dir
@@ -184,13 +246,13 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     rc = catalog_diff.main(
         [
             "--shipped",
-            str(_SHIPPED_KDP),
+            str(shipped_kdp),
             "--regenerated",
             str(kdp),
             "--ignore-ids",
             "--strict-spec",
             "--shipped-kmd",
-            str(_SHIPPED_KMD),
+            str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
         ]
@@ -200,15 +262,14 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
 
 def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
-    registry_config, tmp_path_factory, capsys
+    engine, selection, registry_config, tmp_path_factory, capsys
 ):
     """The manifest's own enumeration, rendered and diffed against the shipped
     catalog: the gate that the registry, not the authored selection, still yields
     the shipped kernels. Keyed on the shipped spec fields, because the enumeration
     also carries `lds_k_row_pad`, which the shipped specs omit and g1 asserts sits at
     its default."""
-    if not _SHIPPED_KDP.is_file():
-        pytest.skip(f"shipped KDP not in this checkout: {_SHIPPED_KDP}")
+    shipped_kdp, shipped_kmd = _require_shipped_kdp(engine, selection)
     out = tmp_path_factory.mktemp("g3")
     path = out / "registry.yaml"
     path.write_text(yaml.safe_dump(registry_config, sort_keys=False))
@@ -220,12 +281,12 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     rc = catalog_diff.main(
         [
             "--shipped",
-            str(_SHIPPED_KDP),
+            str(shipped_kdp),
             "--regenerated",
             str(kdp),
             "--ignore-ids",
             "--shipped-kmd",
-            str(_SHIPPED_KMD),
+            str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
         ]

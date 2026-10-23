@@ -3,17 +3,36 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gfx942_attention_tiled_3d_emit.py -- Python reference emitter for
-# the gfx942 narrow-atom tiled split-KV 3D *segment* attention kernel parity
-# harness. Selects one of the sampled configs by argv[1], builds a
-# UnifiedAttention3DTiledSpec, emits the segment kernel via
-# build_unified_attention_3d_tiled(spec, arch="gfx942") and prints
-# lower_kernel_to_llvm(kernel, arch="gfx942") to stdout so it can be
-# byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
+# the gfx942 narrow-atom tiled split-KV 3D attention kernels parity harness.
+#
+# Selects one of the sampled configs by argv[1] and emits, in Python execution
+# order, BOTH kernels the module exposes:
+#   1. the per-segment SEGMENT kernel via
+#      build_unified_attention_3d_tiled(spec, arch="gfx942")
+#   2. the REDUCE kernel via
+#      build_unified_attention_reduce_tiled(reduce_spec, arch="gfx942")
+# whose UnifiedAttentionReduceTiledSpec is derived from the same config by
+# reduce_spec_for_segment (head_size / num_query_heads / num_kv_heads / dtype /
+# num_segments / waves_per_eu), as build_unified_attention_3d_module does.
+#
+# Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
+# .ll texts are concatenated (segment first, then reduce) to stdout so they can
+# be byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
+import sys
+
 from kernels.gfx942.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     build_unified_attention_3d_tiled,
+    build_unified_attention_reduce_tiled,
+    reduce_spec_for_segment,
 )
-from _emit_common import run_emit
+
+try:
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 _CONFIGS = {
@@ -288,24 +307,75 @@ _CONFIGS = {
 }
 
 
-def _kernel(idx: int):
+def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
+    """A strided (non-paged) decode spec as the strided decode candidate selects it:
+    one CTA per sequence, streamed K/V, the runtime's auto tile for the block."""
+    return dict(
+        head_size=head_size,
+        block_size=block_size,
+        num_query_heads=heads[0],
+        num_kv_heads=heads[1],
+        dtype=dtype,
+        num_segments=num_segments,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        tile_size_override=tile,
+        kv_layout="strided",
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    )
+
+
+# 18-26: representative strided decode specs spanning the catalog's D x block
+# axes (D64/128/256 x block 16/32/64); 27 is 22 with waves_per_eu=2.
+_CONFIGS.update(
+    {
+        18: _strided_decode(64, 16, None, "fp16", 64),
+        19: _strided_decode(64, 32, None, "bf16", 16),
+        20: _strided_decode(64, 64, None, "fp16", 8),
+        21: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
+        22: _strided_decode(128, 32, 16, "fp16", 16),
+        23: _strided_decode(128, 64, 32, "bf16", 2),
+        24: _strided_decode(256, 16, None, "fp16", 22),
+        25: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
+        26: _strided_decode(256, 64, 32, "fp16", 8),
+        27: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
+    }
+)
+
+
+def _kernels(idx: int):
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
-    spec = UnifiedAttention3DTiledSpec(**_CONFIGS[idx])
-    return build_unified_attention_3d_tiled(spec, arch="gfx942")
-
-
-def _emit_build(kernel, arch=None):
-    return kernel
+    cfg = _CONFIGS[idx]
+    spec = UnifiedAttention3DTiledSpec(**cfg)
+    seg_kernel = build_unified_attention_3d_tiled(spec, arch="gfx942")
+    red_kernel = build_unified_attention_reduce_tiled(
+        reduce_spec_for_segment(spec), arch="gfx942"
+    )
+    return seg_kernel, red_kernel
 
 
 def main() -> int:
-    return run_emit(
-        _kernel,
-        _emit_build,
-        usage="usage: gfx942_attention_tiled_3d_emit.py <config_index>\n",
-        arch="gfx942",
-    )
+    if len(sys.argv) < 2:
+        sys.stderr.write("usage: gfx942_attention_tiled_3d_emit.py <config_index>\n")
+        return 2
+    idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode not in ("ll", "ir", "verify"):
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
+    for kernel in _kernels(idx):
+        if mode == "ll":
+            sys.stdout.write(_native_lower(kernel, arch="gfx942"))
+        elif mode == "ir":
+            sys.stdout.write(serialize(kernel))
+        else:
+            sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    return 0
 
 
 if __name__ == "__main__":

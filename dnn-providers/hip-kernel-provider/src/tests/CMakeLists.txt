@@ -144,6 +144,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
+    # The shipped (product) descriptor tree, the same binary-relative offset
+    # integration_tests uses. Read only by TestGfx942AttentionUnified3dDispatch, which loads
+    # the shipped set itself: main() above points discovery at the unit set, and adding the
+    # product tree to discovery would widen it for every unit test.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    if(TARGET hkp_packaging_product)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+    endif()
+
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read
     # the kpack reldir stay in the ordinary binary, and a define no source here consumes
@@ -291,6 +301,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
             "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for the gfx942 unified 3D (split-KV decode) production pack; gated like
+    # gfx950's above.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
+    if(_hkp_gfx942_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified3dPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942AttentionUnified3d for "
+            "gfx942, so its census is not registered.")
     endif()
 
     # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks

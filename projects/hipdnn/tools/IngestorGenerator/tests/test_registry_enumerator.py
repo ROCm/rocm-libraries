@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import json
 import os
 import re
 import subprocess
@@ -99,6 +100,120 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert _run_probe(probe) == 0
     kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
+
+
+_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
+
+
+def test_manifest_launches_reach_every_generated_kernel_source(probe):
+    """A split-KV engine (segment + reduce): every generated kernel is a
+    multi-launch descriptor, as the generator's loader reads it."""
+    from codegen.config_loader import load_config
+
+    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    assert _run_probe(probe) == 0
+    text = probe.out.read_text()
+    # One shared object would dump as a YAML anchor and aliases, not per-kernel copies.
+    assert "&id" not in text and "*id" not in text
+    raw = yaml.safe_load(text)["packs"][0]["kernels"]
+    assert all(k["kernel_source"]["launches"] == _LAUNCHES for k in raw)
+    kernels = [k for p in load_config(probe.out).packs for k in p.kernels]
+    assert len(kernels) == len(raw) > 0
+    for kernel in kernels:
+        launches = kernel.kernel_source.launches
+        assert list(launches) == ["segment", "reduce"]
+        assert launches["reduce"].role == "reduce"
+        assert launches["segment"].builder == kernel.kernel_source.builder
+
+
+def test_each_generated_kernel_owns_its_launches(probe):
+    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    config = re_.build_config(probe.manifest, warn=lambda message: None)
+    sources = [k["kernel_source"]["launches"] for k in config["packs"][0]["kernels"]]
+    owners = [probe.manifest["launches"], *sources]
+    assert len({id(s) for s in owners}) == len(owners)
+    assert len({id(s["reduce"]) for s in owners}) == len(owners)
+
+
+def _run_both_ways(tmp: Path, manifest: dict, capsys, *argv) -> list:
+    """Run the CLI on ``manifest`` without, then with, `launches`; return each
+    run's exit code, stdout and generated config (parsed, or None)."""
+    runs = []
+    for launches in (None, _LAUNCHES):
+        m = copy.deepcopy(manifest)
+        if launches:
+            m["launches"] = copy.deepcopy(launches)
+        path = synth.write_manifest(tmp / "m.engine.yaml", m)
+        out = tmp / "c.yaml"
+        out.unlink(missing_ok=True)
+        capsys.readouterr()
+        code = re_.main(["--manifest", str(path), *argv])
+        text = capsys.readouterr().out.replace(str(out), "<out>")
+        runs.append(
+            (code, text, yaml.safe_load(out.read_text()) if out.exists() else None)
+        )
+    return runs
+
+
+def _without_launches(config: dict) -> dict:
+    for kernel in config["packs"][0]["kernels"]:
+        assert kernel["kernel_source"].pop("launches") == _LAUNCHES
+    return config
+
+
+def test_manifest_launches_change_nothing_but_the_kernel_sources(probe, capsys):
+    """`--out` and `--shapes`: the same kernels, the same report."""
+    (shapes := probe.tmp / "shapes.json").write_text(
+        '[{"hdim": 64, "heads": 8, "dtype": "bf16", "mask": 1}]'
+    )
+    out = str(probe.tmp / "c.yaml")
+    for argv in (["--out", out], ["--out", out, "--shapes", str(shapes)]):
+        plain, launched = _run_both_ways(probe.tmp, probe.manifest, capsys, *argv)
+        assert plain[0] == launched[0] == 0, argv
+        assert plain[1] == launched[1], argv
+        assert _without_launches(launched[2]) == plain[2], argv
+    assert "covered: 1 shapes" in launched[1]
+
+
+def test_manifest_launches_leave_the_plan_space_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    plain, launched = _run_both_ways(tmp_path, manifest, capsys, "--plan-space")
+    assert plain[0] == launched[0] == 0
+    assert plain[1] == launched[1] != ""
+
+
+def test_a_manifest_without_launches_emits_no_launches(probe):
+    """Regression guard: the single-launch output is unchanged."""
+    assert _run_probe(probe) == 0
+    raw = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert all(
+        set(k["kernel_source"]) == {"kind", "source", "builder", "spec"} for k in raw
+    )
+
+
+def test_manifest_launches_must_be_a_mapping(probe, capsys):
+    probe.manifest["launches"] = ["segment", "reduce"]
+    assert _run_probe(probe) == 2
+    assert "launches" in capsys.readouterr().err
+    assert not probe.out.exists()
+
+
+@pytest.mark.parametrize(
+    "launches",
+    [{"segment": {}}, {"segment": {}, "Reduce": {"role": "reduce"}}],
+    ids=["single-launch", "bad-name"],
+)
+def test_bad_manifest_launches_are_refused_when_the_config_loads(probe, launches):
+    """The enumerator only carries `launches`; the loader owns the one rule for
+    their count and names, and refuses the generated config."""
+    from codegen.config_loader import ConfigError, load_config
+
+    probe.manifest["launches"] = launches
+    assert _run_probe(probe) == 0
+    with pytest.raises(ConfigError, match="launches"):
+        load_config(probe.out)
 
 
 def _declined(m):
@@ -441,3 +556,216 @@ def test_the_order_key_is_total_on_mixed_values_and_numeric():
     }
     assert len(orders) == 1
     assert sorted([128, None, 32, 1024], key=re_._order_key) == [32, 128, 1024, None]
+
+
+# selector_fields / neutral_fields: a rule-driven candidate (the split probe picks
+# num_segments from batch and seqlen) names one kernel from many request combos.
+
+
+@pytest.fixture
+def split(tmp_path, monkeypatch):
+    return synth.split_probe_manifest(synth.provider(tmp_path, monkeypatch))
+
+
+def _dedup(manifest, selector=("batch", "seqlen"), neutral=("num_seqs",)):
+    out = copy.deepcopy(manifest)
+    out["enumerate"]["selector_fields"] = list(selector)
+    out["enumerate"]["neutral_fields"] = list(neutral)
+    return out
+
+
+def _kernels(manifest) -> list:
+    config = re_.build_config(manifest, warn=lambda message: None)
+    return config["packs"][0]["kernels"]
+
+
+def test_without_dedup_keys_a_rule_driven_family_repeats_its_names(split):
+    """Today's behaviour, kept: one cell per combo, so one name per combo."""
+    with pytest.raises(re_.EnumerationError, match="duplicated kernel name"):
+        _kernels(split)
+
+
+def test_selector_only_cells_merge_into_the_union_of_their_picks(split):
+    kernels = _kernels(_dedup(split))
+    by_cell = OrderedDict()
+    for k in kernels:
+        by_cell.setdefault(k["metadata"]["hdim"], []).append(k)
+    assert list(by_cell) == [64, 128]
+    for hdim, cell in by_cell.items():
+        spec = [k["kernel_source"]["spec"] for k in cell]
+        # Combo picks 1, 8, 1, 4, 1, 1 -> {1, 4, 8}; the first combo's pick is the
+        # default, the rest follow sorted.
+        assert [s["num_segments"] for s in spec] == [1, 4, 8]
+        assert [bool(k.get("default")) for k in cell] == [True, False, False]
+        assert [k["name"] for k in cell] == [
+            f"split_probe.fp16_d{hdim}_num_segments{n}" for n in (1, 4, 8)
+        ]
+    # The merged cell carries no selector field: no kernel claims one combo's value.
+    assert all("batch" not in k["metadata"] for k in kernels)
+
+
+def test_the_merged_default_is_the_first_combos_pick(split):
+    group = next(g for g in split["enumerate"]["cells"] if g["fields"] == ["seqlen"])
+    group["values"] = [1024, 64]
+    cell = [k for k in _kernels(_dedup(split)) if k["metadata"]["hdim"] == 64]
+    assert [k["kernel_source"]["spec"]["num_segments"] for k in cell] == [8, 1, 4]
+    assert [bool(k.get("default")) for k in cell] == [True, False, False]
+
+
+def test_neutral_fields_take_the_default_specs_value(split):
+    specs = [k["kernel_source"]["spec"] for k in _kernels(_dedup(split))]
+    assert {s["num_seqs"] for s in specs} == {1}
+    batch = next(g for g in split["enumerate"]["cells"] if g["fields"] == ["batch"])
+    batch["values"] = [2, 1, 8]
+    specs = [k["kernel_source"]["spec"] for k in _kernels(_dedup(split))]
+    assert {s["num_seqs"] for s in specs} == {2}
+
+
+def test_a_combo_pick_the_merged_cell_drops_is_refused(split):
+    """Without num_seqs neutral, num_seqs varies, is held at the default, and the
+    batch-2 combos' kernels would silently not ship."""
+    with pytest.raises(
+        re_.EnumerationError, match=r"num_seqs=2\) for request \{hdim: 64, batch: 2"
+    ):
+        _kernels(_dedup(split, neutral=()))
+
+
+def test_plan_space_counts_after_merging(split, tmp_path, capsys):
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", _dedup(split))
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    out = capsys.readouterr().out
+    assert "cells: 2 (12 request combos merged on selector_fields" in out
+    assert "instances (current classification): 6 " in out
+    assert "num_seqs: {" not in out
+
+
+def test_plan_space_does_not_claim_a_merge_when_nothing_merges(split, tmp_path, capsys):
+    """neutral_fields alone merges no combo: the cell line says so plainly."""
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", _dedup(split, selector=()))
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    out = capsys.readouterr().out
+    assert "  cells: 12\n" in out
+    assert "merged" not in out
+
+
+def _also_feature(m):
+    m["enumerate"]["selector_fields"] = ["hdim", "batch"]
+
+
+def _also_performance(m):
+    m["enumerate"]["neutral_fields"] = ["num_segments"]
+
+
+@pytest.mark.parametrize(
+    "mutate, words",
+    [
+        (lambda m: m["enumerate"].update(selector_fields="batch"), ["selector_fields"]),
+        (lambda m: m["enumerate"].update(neutral_fields=[1]), ["neutral_fields"]),
+        (
+            lambda m: m["enumerate"].update(selector_fields=["batch", "nope"]),
+            ["selector_fields", "nope"],
+        ),
+        (
+            lambda m: m["enumerate"].update(selector_fields=["dtype"]),
+            ["selector_fields", "dtype"],
+        ),
+        (
+            lambda m: m["enumerate"].update(neutral_fields=["no_such"]),
+            ["neutral_fields", "no_such"],
+        ),
+        (_also_feature, ["selector_fields", "hdim", "feature"]),
+        (_also_performance, ["neutral_fields", "num_segments", "performance"]),
+    ],
+    ids=[
+        "selector-not-a-list",
+        "neutral-not-names",
+        "selector-unknown",
+        "selector-not-a-cell-field",
+        "neutral-unknown",
+        "selector-is-feature",
+        "neutral-is-performance",
+    ],
+)
+@pytest.mark.parametrize("mode", ["--plan-space", "--out"])
+def test_a_bad_dedup_key_is_exit_2_naming_it(
+    split, tmp_path, capsys, mutate, words, mode
+):
+    manifest = _dedup(split)
+    mutate(manifest)
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    out = tmp_path / "c.yaml"
+    argv = ["--plan-space"] if mode == "--plan-space" else ["--out", str(out)]
+    assert re_.main(["--manifest", str(path), *argv]) == 2
+    err = capsys.readouterr().err
+    assert all(w in err for w in words), err
+    assert not out.exists()
+
+
+def test_duplicate_names_after_merging_still_fail(split):
+    manifest = _dedup(split)
+    manifest["kernel_name_template"] = "split_probe.{dtype}"
+    with pytest.raises(re_.EnumerationError, match="duplicated kernel name"):
+        _kernels(manifest)
+
+
+@pytest.mark.parametrize("family", ["probe", "conv"])
+@pytest.mark.parametrize("mode", ["--plan-space", "--out"])
+def test_empty_dedup_keys_are_byte_identical_to_none(
+    tmp_path, monkeypatch, capsys, family, mode
+):
+    """The keys are opt-in: an absent key and an empty one produce the same bytes
+    (gfx950's own regeneration gates pin absent == today)."""
+    root = synth.provider(tmp_path, monkeypatch)
+    base = (
+        synth.probe_manifest(root)
+        if family == "probe"
+        else synth.conv_probe_manifest(root)
+    )
+    if family == "probe" and mode == "--plan-space":
+        base["enumerate"]["space"] = "full"
+        base["reduction"] = {
+            "fields": {"feature": ["dtype"], "performance": [], "ignored": []}
+        }
+    outputs = []
+    for manifest in (base, _dedup(base, selector=(), neutral=())):
+        path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+        out = tmp_path / "c.yaml"
+        out.unlink(missing_ok=True)
+        argv = ["--plan-space"] if mode == "--plan-space" else ["--out", str(out)]
+        capsys.readouterr()
+        assert re_.main(["--manifest", str(path), *argv]) == 0
+        outputs.append(
+            (capsys.readouterr().out, out.read_bytes() if out.exists() else None)
+        )
+    assert outputs[0] == outputs[1]
+
+
+def _shapes_run(manifest, tmp_path, capsys, shapes) -> str:
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    (data := tmp_path / "shapes.json").write_text(json.dumps(shapes))
+    out = tmp_path / "c.yaml"
+    capsys.readouterr()
+    argv = ["--manifest", str(path), "--out", str(out), "--shapes", str(data)]
+    assert re_.main(argv) == 0
+    return capsys.readouterr().out
+
+
+def test_the_shapes_report_keys_a_merged_cell_without_its_selector_fields(
+    split, tmp_path, capsys
+):
+    """A graph carries no selector field (or a value the cells do not list): the
+    selector fields only steer the rule, so the shape lands in its merged cell."""
+    out = _shapes_run(
+        _dedup(split),
+        tmp_path,
+        capsys,
+        [{"hdim": 64}, {"hdim": 128, "batch": 16, "seqlen": 4096}],
+    )
+    assert "  covered: 2 shapes, 2 cells\n" in out, out
+    assert "  GAP: 0 shapes, 0 cells\n" in out, out
+
+
+def test_a_shape_outside_the_merged_cells_is_still_a_gap(split, tmp_path, capsys):
+    out = _shapes_run(_dedup(split), tmp_path, capsys, [{"hdim": 256}, {"hdim": 64}])
+    assert "  covered: 1 shapes, 1 cells\n" in out, out
+    assert "  GAP: 1 shapes, 1 cells\n    1 x {hdim: 256}\n" in out, out

@@ -57,12 +57,14 @@ DTYPES = {
     "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
 }
 # (q / k head dim, v head dim) -> head_dim value. v may be narrower than q / k:
-# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv). 256 is the widest head the gfx942
+# split-KV decode kernels (hipkernel:Gfx942AttentionUnified3d) are built for.
 HEAD_DIMS = {
     (64, 64): "64",
     (128, 128): "128",
     (192, 192): "192",
     (192, 128): "192x128",
+    (256, 256): "256",
 }
 # Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
 LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}

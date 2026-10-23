@@ -1,0 +1,369 @@
+# Engine manifest for hipkernel:Gfx942AttentionUnified3d (single-token decode, split-KV).
+#
+# Everything about the engine that rocKE does not know: identity, KMD schema,
+# metadata mapping, the registry space its kernels are drawn from, and how that
+# space is reduced. The shipped kernel set is configs/gfx942_attention_unified_3d.yaml;
+# tests/test_registry_regeneration.py gates it against this manifest.
+#
+#     python tools/registry_enumerator.py --manifest configs/gfx942_attention_unified_3d.engine.yaml --out <scratch>/config.yaml
+#     python tools/registry_enumerator.py --manifest configs/gfx942_attention_unified_3d.engine.yaml --plan-space
+#
+# Every kernel is one rocKE KernelModule with two launches: the split-KV segment
+# kernel (`segment`) writes per-segment partials into the workspace, and the reduce
+# kernel (`reduce`, the module's companion) combines them. The reduce spec is
+# derived from the segment spec inside build_unified_attention_3d_module, so the
+# one segment spec below fully identifies both kernels.
+#
+# Scope (v1): dense (strided) KV, seqlen_q == 1, no
+# sliding window, no stats (LSE) output. Admission is parity with rocKE's
+# `attention_strided_decode` candidate (dispatch/attention/strided_decode.py).
+#
+# Mask: at seqlen_q == 1 a bottom-right-aligned causal mask keeps every key
+# (the single query row sits on the last key), so NO_MASK and
+# BOTTOM_RIGHT_CAUSAL are the same computation. The segment spec has no mask
+# field: the candidate selects a bit-identical spec for both. The manifest
+# therefore enumerates with one representative mask (BOTTOM_RIGHT_CAUSAL), no
+# KMD field carries a mask, and the engine claims both graphs in its native
+# matcher (packs/Gfx942AttentionUnified3dNative.cpp): it accepts a graph with no
+# causal mask or with a bottom-right causal mask, and declines top-left causal
+# (the candidate's own decline) and any sliding window.
+#
+# The generated packs/Gfx942AttentionUnified3dNative.cpp and its matcher test are
+# stubs; the provider's copies are hand-maintained and must not be overwritten.
+
+dialect: packaged
+authored_subpath: rocKE/gfx942_attention_unified_3d
+engine:
+  name: hipkernel:Gfx942AttentionUnified3d
+  census_name_symbol: GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
+  sdk_version: 1.0.0
+  # A dense graph carries no KV block size or split count, so the engine chooses
+  # both. tile_size_override is not a knob: (head_size, block_size) determine it.
+  knobs:
+  - block_size
+  - num_segments
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 32
+- name: num_kv_heads
+  type: int
+  default_value: 8
+# Always 0 in v1 (owner decision: no window kernels). Kept so the matcher can
+# compare it with the graph's left bound and a later catalog can add windows.
+- name: sliding_window
+  type: int
+  default_value: 0
+# KV block (`kv_block_size` in the request, `block_size` in the spec): keys per
+# inner-loop step. A tuning arm, not a catalog cell: a dense graph carries no
+# block size, so the native matcher does not compare it with the graph and the
+# scorer (or the knob) picks among the shipped block sizes.
+- name: block_size
+  type: int
+  default_value: 16
+# KV tile the segment kernel runs, in keys: block_size // 2 at head_size >= 128
+# and block_size >= 32, else block_size (spec value None, recorded resolved via
+# resolved_tile_size_override). Fixed by (head_size, block_size), so it adds no
+# kernels; it is a performance field because it varies with block_size.
+- name: tile_size_override
+  type: int
+  default_value: 16
+# Number of KV splits the segment kernel is compiled for; also the reduce
+# kernel's input count. Any value is correct; the native scorer picks the one
+# closest to rocKE's gfx942 split rule for the live CU count.
+- name: num_segments
+  type: int
+  default_value: 16
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - sliding_window
+  - block_size
+  - tile_size_override
+  - num_segments
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    sliding_window:
+      field: sliding_window
+    block_size:
+      field: block_size
+    tile_size_override:
+      method: resolved_tile_size_override
+    num_segments:
+      field: num_segments
+kernel_source_kind: rocke
+# The workspace (segment partials, max, expsum, seqused_k, cu_seqlens_q) depends on
+# the graph's batch and the kernel's num_segments; the native pack sizes it.
+workspace_policy: derived
+
+pack: gfx942_attention_unified_3d
+arch: gfx942
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx942/attention_tiled_3d.py
+builder: build_unified_attention_3d_module
+launches:
+  segment: {}
+  reduce: {role: reduce}
+kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_b{block_size}_t{tile_size_override}_seg{num_segments}.gfx942
+
+# The registry space the selection is drawn from (see registry_enumerator.py).
+enumerate:
+  candidates: dispatch.attention:attention_candidates
+  request: dispatch.attention.common:AttentionRequest
+  # Selects the one strided (dense KV) split-KV decode candidate.
+  pin: {algorithm: strided_decode, spec_id: strided_decode}
+  # Request fields every cell shares. num_cus 304 is the MI300X CU count, the
+  # catalog's reference device; the runtime scorer reads the live count instead.
+  # num_cus changes only which num_segments the split rule emits, never admission.
+  fixed: {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
+  # Crossed in order, first group outermost (the catalog order). Every cell is
+  # admitted by the candidate: D 64/128/256 x fp16/bf16
+  # x kv_block_size 16/32/64 x every GQA ratio it takes (1/2/4/8/16).
+  #
+  # List order is the default-arm mechanism: a merged cell's default is its first
+  # combo's pick, and the first combo takes the first value of every selector
+  # group. So each selector group lists first a representative mid-size decode,
+  # kv_block_size 16, batch 32, seqlen_k 8192; the rest follow ascending.
+  cells:
+    - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+      values:
+        - [64, 64, 1, 1]
+        - [64, 64, 2, 1]
+        - [64, 64, 4, 1]
+        - [64, 64, 8, 1]
+        - [64, 64, 16, 1]
+        - [64, 64, 2, 2]
+        - [64, 64, 4, 2]
+        - [64, 64, 8, 2]
+        - [64, 64, 16, 2]
+        - [64, 64, 32, 2]
+        - [64, 64, 4, 4]
+        - [64, 64, 8, 4]
+        - [64, 64, 16, 4]
+        - [64, 64, 32, 4]
+        - [64, 64, 64, 4]
+        - [64, 64, 8, 8]
+        - [64, 64, 16, 8]
+        - [64, 64, 32, 8]
+        - [64, 64, 64, 8]
+        - [64, 64, 128, 8]
+        - [64, 64, 16, 16]
+        - [64, 64, 32, 32]
+        - [64, 64, 64, 64]
+        - [128, 128, 1, 1]
+        - [128, 128, 2, 1]
+        - [128, 128, 4, 1]
+        - [128, 128, 8, 1]
+        - [128, 128, 16, 1]
+        - [128, 128, 2, 2]
+        - [128, 128, 4, 2]
+        - [128, 128, 8, 2]
+        - [128, 128, 16, 2]
+        - [128, 128, 32, 2]
+        - [128, 128, 4, 4]
+        - [128, 128, 8, 4]
+        - [128, 128, 16, 4]
+        - [128, 128, 32, 4]
+        - [128, 128, 64, 4]
+        - [128, 128, 8, 8]
+        - [128, 128, 16, 8]
+        - [128, 128, 32, 8]
+        - [128, 128, 64, 8]
+        - [128, 128, 128, 8]
+        - [128, 128, 16, 16]
+        - [128, 128, 32, 32]
+        - [128, 128, 64, 64]
+        - [256, 256, 1, 1]
+        - [256, 256, 2, 1]
+        - [256, 256, 4, 1]
+        - [256, 256, 8, 1]
+        - [256, 256, 16, 1]
+        - [256, 256, 2, 2]
+        - [256, 256, 4, 2]
+        - [256, 256, 8, 2]
+        - [256, 256, 16, 2]
+        - [256, 256, 32, 2]
+        - [256, 256, 4, 4]
+        - [256, 256, 8, 4]
+        - [256, 256, 16, 4]
+        - [256, 256, 32, 4]
+        - [256, 256, 64, 4]
+        - [256, 256, 8, 8]
+        - [256, 256, 16, 8]
+        - [256, 256, 32, 8]
+        - [256, 256, 64, 8]
+        - [256, 256, 128, 8]
+        - [256, 256, 16, 16]
+        - [256, 256, 32, 32]
+        - [256, 256, 64, 64]
+    - fields: [dtype]
+      values: [bf16, fp16]
+    - fields: [kv_block_size]
+      values: [16, 32, 64]
+    # batch and seqlen_k only drive the split rule (they change the CTA count, hence
+    # num_segments); the engine admits any batch and any seqlen_k >= 1.
+    - fields: [batch]
+      values: [32, 1, 2, 4, 8, 16, 64, 128, 256]
+    - fields: [seqlen_k]
+      values: [8192, 1, 64, 256, 512, 2048, 32768, 131072]
+  sweep_level: production
+  space: full
+  # The candidate is rule-driven: one spec per request, num_segments picked from
+  # batch and seqlen_k, block_size and its tile from kv_block_size. They only steer
+  # that pick, so the 216 (kv_block_size, batch, seqlen_k) combos of each (head,
+  # dtype) cell merge into one cell holding every (block, num_segments) the rule
+  # picks; its default is the (kv_block_size 16, batch 32, seqlen_k 8192) pick.
+  selector_fields: [kv_block_size, batch, seqlen_k]
+  # num_seqs (= batch) is not baked into the decode-grid segment kernel, proven by
+  # rocKE's test_num_seqs_is_ir_neutral_on_the_decode_grid
+  # (rocke/library/tests/test_attention_tiled_3d_module.py); every kernel carries
+  # the default's num_seqs (32, the default batch). The rocKE binding requires
+  # spec.num_seqs to equal the problem's, so the runtime launch path, not the
+  # catalog, sets it.
+  neutral_fields: [num_seqs]
+  # Required of every shipped manifest (test_config_loader's
+  # test_every_shipped_engine_manifest_loads_through_its_own_loader), but the
+  # enumerator enforces it only under `space: slice`. Under `space: full` it only
+  # records the enumerated count; the aot_budget_per_arch WARN below is the live
+  # check (2,192 exceeds the 1000 AOT budget: a warning).
+  max_kernels: 2192
+
+# How the variant space is reduced; copied verbatim into the generated config.
+# Feature fields define a cell; performance knobs are the tuning arms, in priority order.
+# block_size and tile_size_override are performance (see their KMD fields).
+# num_seqs is neutral (above), so it never varies; it is listed ignored to state
+# that it is not a kernel axis.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window]
+    performance:
+      - {name: block_size}
+      - {name: tile_size_override, unset_resolves_by: resolved_tile_size_override}
+      - {name: num_segments}
+    ignored: [num_seqs]
+  aot_budget_per_arch: 1000
+
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+# `${<request field>}` fills a scalar; `value_map` translates a request value to that
+# scalar or to patches; an unlisted value fails the row. The template is gfx950 dense's:
+# packed BSHD Q/K/V/O with Sq a placeholder, which at seqlen_q 1 is the contiguous
+# [B, Hq, 1, D] Q/O and unit-D-stride K/V this engine's matcher requires, and the layout
+# of every servable external decode graph. Its attn_scale_value is null (1.0, cuDNN's
+# default); the kernel takes the scale as a launch argument, so timing does not depend
+# on it. Map the owner rows' batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q,
+# hdim_v, dtype and mask_type. NO_MASK and BOTTOM_RIGHT_CAUSAL are the same computation
+# at seqlen_q 1 (see the header); TOP_LEFT_CAUSAL is declined, so it is not listed.
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      BOTTOM_RIGHT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: true}
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: false}
+
+# The Python/C++ launch-contract restatement, per surface (tools/launch_surface.py).
+# C++ mirrors are relative to the repo root; python_source to rocke/library.
+launch_surface:
+  - name: grid
+    python_source: kernels/common/attention_unified.py:_get_3d_pipeline
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dGeometry
+    kmd_fields: [num_segments, num_query_heads, num_kv_heads]
+    guard: >
+      gfx942AttentionUnified3dGeometry() throws HipdnnPluginException for a
+      non-positive batch, head count or segment count. Segment grid is
+      (B, Hkv, num_segments) from the graph's B/Hkv and the candidate's own
+      num_segments (decode grid); reduce grid is (B, Hq, 1).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
+
+  - name: block
+    python_source: kernels/common/attention_unified.py:_get_3d_pipeline
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dGeometry
+    kmd_fields: []
+    guard: >
+      Both launches are one wave64 CTA (GFX942_UNIFIED_3D_WAVE_LANES = 64), as
+      _get_3d_pipeline sets off gfx1250.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
+
+  - name: workspace
+    python_source: kernels/common/attention_unified.py:_attention_3d_workspace_specs
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dWorkspace
+    kmd_fields: [num_segments, head_size, num_query_heads]
+    guard: >
+      f32 segm_output[B,Hq,nseg,D], segm_max[B,Hq,nseg], segm_expsum[B,Hq,nseg]
+      plus int32 seqused_k[B] and cu_seqlens_q[B+1], each 256-byte aligned;
+      workspaceBytes() sizes it with the candidate's num_segments, and
+      launch() refuses a null workspace. The segment kernel writes every slot
+      and the reduce always runs, so the unzeroed hipDNN workspace is safe.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dMatchers.cpp:WorkspaceIsTheGeometryHeadersLayoutForTheCandidate
+
+  - name: split_rule
+    python_source: kernels/common/attention_unified.py:_num_segments
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942SplitRuleSegments
+    kmd_fields: [num_segments, block_size]
+    guard: >
+      Perf only: scoreKernel() ranks block_size 16 first, then num_segments
+      nearest gfx942SplitRuleSegments(B, Hq, Hkv, D, 16, Skv, live CUs or 120),
+      ties to fewer segments. It never removes a candidate (any num_segments
+      is correct). The restatement holds only for sliding_window 0 and
+      target_ctas 0, which graph_match guarantees by refusing every window.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dScorer.cpp
+
+  - name: admission
+    python_source: dispatch/attention/strided_decode.py:make_candidate
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:gfx942AttentionUnified3dGraphMatches
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    guard: >
+      graph_match restates make_candidate().admits() (Sq 1; D 64/128/256;
+      fp16/bf16; GQA ratio 1/2/4/8/16; not top-left causal) plus the strided
+      binding's tensor contract (contiguous [B,Hq,1,D] Q/O; KvTensorLayout's
+      K/V rules), and refuses in v1 every window, stats/LSE, attn-mask,
+      dropout, sinks, page tables, seq_len tensors, FP8 scales, ALiBi and
+      padding masks. kernelMatches() compares dtype, head_size,
+      num_query_heads and num_kv_heads exactly and requires sliding_window 0;
+      never batch or Skv as cell fields. It declines a candidate whose
+      num_segments would take segm_output, segm_max/expsum, Q or O to 2^31
+      elements at the graph's batch (i32 offsets). A record missing a field,
+      with block_size outside {16,32,64}, num_segments <= 0, or a
+      tile_size_override other than rocKE's gfx942 rule is declined. The
+      admission table is generated from rocKE and kept current by a quick
+      pytest drift guard.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dAdmission.cpp
+
+  - name: kernargs
+    python_source: kernels/common/attention_unified.py:_3d_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArguments.hpp:gfx942Unified3dSegmentArguments
+    kmd_fields: []
+    guard: >
+      gfx942Unified3dSegmentArguments() is the ordered 27-argument segment
+      list launch() passes (19 base + 8 strided-KV, _3d_signature(dtype,
+      strided_kv=True)): null sink/block-table/ALiBi/QQ-bias pointers,
+      k_scale = v_scale = 1, softcap 0, num_seqs = B, block_table_stride 0,
+      and gfx942StridedKvArguments() = KvTensorLayout.arguments() byte strides
+      and per-head span. segmentSignature() is derived from it, and prepare()
+      compares it and the reduce list (_reduce_signature(dtype) without LSE)
+      with both launches' recorded lists (names included) before loading
+      either. A rocKE-generated table pins every value and the order for
+      BHSD, BSHD, padded-row, padded-capacity and mixed K/V layouts, kept
+      current by a quick pytest drift guard.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dArguments.cpp
