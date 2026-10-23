@@ -1,0 +1,16 @@
+{
+  "description": "An opcode set binds result 'mean', which layernorm declares and rmsnorm does not.",
+  "valid": false,
+  "error": "opcode 'rmsnorm' declares no result 'mean'",
+  "ued": {
+    "version": "1.0",
+    "id": "30eb9135-855a-5feb-8fd9-92e6cc243477",
+    "name": "ued_fixture:one_of_member_missing_edge",
+    "metadata": "ce4429f4-9599-5f3f-84b8-b0f97479c3a4",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "norm", "op": {"one_of": ["rmsnorm", "layernorm"]}, "results": {"mean": "$mean"}}
+      ]
+    }
+  }
+}

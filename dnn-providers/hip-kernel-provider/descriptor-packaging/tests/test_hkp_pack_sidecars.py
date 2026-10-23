@@ -1037,7 +1037,7 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
         ),
         pytest.param(
             _set("graph_match", {"nodes": []}),
-            "unknown fields",
+            "must not be empty",
             id="graph_match_declarative_arm",
         ),
         pytest.param(

@@ -180,7 +180,8 @@ endfunction()
 #     _interp          interpreter the pack tool runs under
 #     _interp_what     how diagnostics name that interpreter
 #     _producer_deps   file-level dependencies of the pack step beyond its inputs
-#     _tool_cmd        `cmake -E env ... -- <interp> <tool>` prefix
+#     _tool_cmd        `cmake -E env ... -- <interp> <tool>` prefix; the env carries
+#                      the op-schema registry (_hkp_op_schema_registry_env)
 #     _producer_arg    producer flag(s) appended to the tool's arguments
 #
 #   Validates the ENABLE_ROCKE contract documented on hkp_wire_pack_target().
@@ -204,7 +205,7 @@ function(_hkp_pack_producer)
                     "${_kw}, which names a rocKE toolchain this build does not have.")
             endif()
         endforeach()
-        set(_tool_env "")
+        _hkp_op_schema_registry_env(_tool_env)
         if(ARG_PACK_JOBS)
             list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
         endif()
@@ -253,7 +254,8 @@ function(_hkp_pack_producer)
     #
     # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
     # it when set (runtime resolution, no find_library).
-    set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
+    _hkp_op_schema_registry_env(_tool_env)
+    list(APPEND _tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
     if(ARG_PACK_JOBS)
         list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
     endif()
@@ -368,6 +370,10 @@ endfunction()
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
 #   hkp_verify_embedded_sources() and hkp_register_census_tests().
+#
+#   Every root resolves UED graph patterns against
+#   HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, which hkp_add_packaging sets. Changing
+#   that file repacks every root.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -462,6 +468,10 @@ function(hkp_wire_pack_target)
 
     string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
 
+    # A root without a nodes pattern never reads the registry, so a build with no
+    # registry file still packs it.
+    _hkp_op_schema_registry_inputs(_registry_deps)
+
     # The wipe removes the stamp along with the tree, because the stamp lives inside it.
     # So no stamp exists from the moment a pack begins until it completes: a pack that
     # dies after the wipe -- a compiler failure, a killed job, an interrupted build --
@@ -498,6 +508,7 @@ function(hkp_wire_pack_target)
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
+                ${_registry_deps}
                 ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
@@ -509,6 +520,12 @@ function(hkp_wire_pack_target)
         # Every root shares one private wheel directory. Keep a single producer:
         # parallel consumers must not clear/repopulate it while another packs.
         add_dependencies(hkp_packaging_${ARG_NAME} hkp_rocke_wheel_python_interp)
+    endif()
+    if(TARGET generate_hipdnn_op_schema_registry)
+        # The registry is an output of that target's custom command in another
+        # directory. A file-level DEPENDS does not order this target after the
+        # command that regenerates it.
+        add_dependencies(hkp_packaging_${ARG_NAME} generate_hipdnn_op_schema_registry)
     endif()
     set_property(GLOBAL PROPERTY HKP_PACK_STAMP_${ARG_NAME} "${_stamp}")
 
@@ -1166,6 +1183,143 @@ packaging dormant.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_op_schema_registry()
+#   Declare HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, the op-schema registry every root
+#   resolves UED graph patterns against.
+#
+#   Configure does not fail when the registry is unavailable. Only a descriptor with a
+#   graph_match `nodes` pattern reads it; a `native` one never does, and every shipped
+#   descriptor is `native`. A registry that is empty, or that names a missing file, is
+#   reported with a STATUS line, and the first root that holds a `nodes` pattern fails
+#   with the reason (_hkp_root_probe). For an empty registry the reason is recorded in
+#   the global property HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE, which
+#   _hkp_op_schema_registry_env() forwards to every tool that resolves patterns.
+#
+#   The default is the registry that matches the hipDNN this provider builds against,
+#   since the runtime header the matcher runs on comes from that hipDNN. An installed
+#   hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported hipdnn_flatbuffers_sdk
+#   target) names its registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through
+#   its package config. An in-tree hipDNN, or a build without the target, uses the copy
+#   generated and committed beside the repository's graph schemas.
+#
+#   The default is recomputed on every configure. A cached value that equals the default
+#   the previous configure computed was never overridden, so it follows the new default
+#   when the build is reconfigured against a different hipDNN. Any other value was set
+#   by the user and is kept.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_op_schema_registry)
+    get_filename_component(_default
+        "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"
+        ABSOLUTE)
+    if(TARGET hipdnn_flatbuffers_sdk)
+        get_target_property(_flatbuffers_sdk_imported hipdnn_flatbuffers_sdk IMPORTED)
+        if(_flatbuffers_sdk_imported)
+            # The package config sets the variable only for a hipDNN built with
+            # HIPDNN_ENABLE_KERNEL_INGESTOR. Otherwise there is no registry to default to.
+            set(_default "")
+            if(DEFINED HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY)
+                set(_default "${HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY}")
+            endif()
+        else()
+            get_target_property(_flatbuffers_sdk_dir hipdnn_flatbuffers_sdk SOURCE_DIR)
+            set(_default "${_flatbuffers_sdk_dir}/op_schema_registry.json")
+        endif()
+    endif()
+    # A FILEPATH cache entry is stored with forward slashes, the INTERNAL marker below
+    # verbatim. Normalize once so the two compare equal for a native Windows path.
+    if(_default)
+        cmake_path(SET _default NORMALIZE "${_default}")
+    endif()
+
+    if(NOT DEFINED CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}
+       OR "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
+          "$CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}")
+        set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default}"
+            CACHE FILEPATH
+            "The op-schema registry JSON that UED graph_match.nodes patterns resolve \
+against when descriptors are packed. Defaults to the registry of the hipDNN the \
+provider builds against."
+            FORCE)
+    endif()
+    set(_HKP_OP_SCHEMA_REGISTRY_DEFAULT "${_default}" CACHE INTERNAL
+        "The HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY default the last configure computed.")
+
+    set_property(GLOBAL PROPERTY HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE "")
+    if(NOT HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY)
+        if(_default)
+            string(CONCAT _reason
+                "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY is empty. Set it to the "
+                "op_schema_registry.json of the hipDNN this provider builds against.")
+        else()
+            if(hipdnn_flatbuffers_sdk_DIR)
+                set(_where "hipDNN at ${hipdnn_flatbuffers_sdk_DIR}")
+            else()
+                set(_where "The installed hipDNN")
+            endif()
+            # No semicolon: the text travels in a CMake list of environment entries.
+            string(CONCAT _reason
+                "${_where} was built with HIPDNN_ENABLE_KERNEL_INGESTOR=OFF (or "
+                "predates the op-schema registry). Rebuild it or set "
+                "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY.")
+        endif()
+        set_property(GLOBAL PROPERTY HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE "${_reason}")
+        message(STATUS
+            "hkp: no op-schema registry is available, so descriptors with a "
+            "graph_match `nodes` pattern cannot be packed. ${_reason}")
+    elseif(NOT EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+        message(STATUS
+            "hkp: the op-schema registry does not exist: "
+            "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptors with a "
+            "graph_match `nodes` pattern cannot be packed until "
+            "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY names the op_schema_registry.json of "
+            "the hipDNN this provider builds against.")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_op_schema_registry_env(<out_var>)
+#   The `cmake -E env` arguments that give a process running the packer's pattern
+#   resolution the build's registry: HKP_OP_SCHEMA_REGISTRY=<path> when the registry
+#   is set. Otherwise the variable is unset, so one in the caller's environment cannot
+#   stand in for the registry the build lacks, and HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE
+#   carries the reason from _hkp_resolve_op_schema_registry() when there is one.
+#   Before that function has run there is no reason, and the packer falls back to the
+#   repository's registry.
+#
+#   Every configure-time and build-time tool that loads descriptors takes its registry
+#   from here, so no one of them reads a different registry from the pack step.
+# ---------------------------------------------------------------------------
+function(_hkp_op_schema_registry_env out_var)
+    set(_env "")
+    if(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY)
+        list(APPEND _env
+             "HKP_OP_SCHEMA_REGISTRY=${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+    else()
+        list(APPEND _env "--unset=HKP_OP_SCHEMA_REGISTRY")
+        get_property(_unavailable GLOBAL PROPERTY HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE)
+        if(_unavailable)
+            list(APPEND _env "HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE=${_unavailable}")
+        endif()
+    endif()
+    set(${out_var} "${_env}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_op_schema_registry_inputs(<out_var>)
+#   The registry as a file-level input, or empty when there is no such file. Neither a
+#   configure dependency nor a DEPENDS entry may name a file that does not exist: the
+#   generator treats it as a missing input with no rule to build it.
+# ---------------------------------------------------------------------------
+function(_hkp_op_schema_registry_inputs out_var)
+    set(_inputs "")
+    if(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY
+       AND EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+        set(_inputs "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+    endif()
+    set(${out_var} "${_inputs}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_disabled_families(<out_var>)
 #   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
 #   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
@@ -1199,8 +1353,9 @@ endfunction()
 # _hkp_root_probe(<out_shipped> <out_offered> <out_ok> <root> <arches>
 #                 <exclude_folders> <disabled_kinds>)
 #   What a pack of <root> would ship, asked of the packer: its own load_flat_input(),
-#   shipped_engines() and offered_engines(), with the same excluded folders and disabled
-#   kinds (bare kind names) the pack step gets, run under the base interpreter.
+#   shipped_engines() and offered_engines(), with the same excluded folders, disabled
+#   kinds (bare kind names) and op-schema registry (_hkp_op_schema_registry_env) the pack
+#   step gets, run under the base interpreter.
 #
 #   <out_ok> is TRUE when the packer answered. Then <out_shipped> is JSON
 #   {"<arch>": ["<engine name>", ...]}, where every arch mapping to an empty list is a
@@ -1214,10 +1369,14 @@ endfunction()
 #   When the packer cannot answer -- a malformed root, an interpreter that cannot run
 #   it -- <out_ok> is FALSE, both answers are empty, and a STATUS line carries the
 #   packer's own reason. Callers then wire the root, so the pack reports what is wrong
-#   with it.
+#   with it. A root whose `nodes` pattern needs an op-schema registry that is unavailable
+#   (_hkp_resolve_op_schema_registry), unreadable or malformed is the exception: the
+#   probe fails configure with the packer's reason, since no pack of the root can
+#   succeed until the registry is fixed. A root without such a pattern never reads the
+#   registry.
 #
-#   Every descriptor under <root> the packer reads is a configure dependency, since the
-#   answer turns on their contents.
+#   Every descriptor under <root> the packer reads is a configure dependency, as is
+#   the op-schema registry, since the answer depends on their contents.
 # ---------------------------------------------------------------------------
 # cmake-lint: disable=R0913
 function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_folders
@@ -1228,9 +1387,11 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
 
     file(GLOB_RECURSE _descriptors CONFIGURE_DEPENDS "${root}/*.json")
     _hkp_filter_inputs(_descriptors "${root}" "${_descriptors}" "${exclude_folders}")
+    _hkp_op_schema_registry_inputs(_registry_inputs)
     set_property(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors})
+        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors} ${_registry_inputs})
+    _hkp_op_schema_registry_env(_registry_env)
 
     # Each list travels as one prefixed argument, so an empty list is still an argument.
     string(REPLACE ";" "," _arch_csv "${arches}")
@@ -1238,7 +1399,7 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
     string(REPLACE ";" "," _kind_csv "${disabled_kinds}")
     set(_probe_py "import json, sys
 from hkp_pack.descriptors import load_flat_input
-from hkp_pack.errors import HkpPackError
+from hkp_pack.errors import HkpPackError, OpSchemaRegistryError
 from hkp_pack.generic_targets import GenericTargets
 from hkp_pack.pipeline import offered_engines, shipped_engines
 lists = {k: tuple(v for v in rest.split(',') if v)
@@ -1250,11 +1411,15 @@ try:
                            disabled_kinds=lists['kinds'])
     print(json.dumps({'shipped': shipped_engines(flat, lists['arches']),
                       'offered': offered_engines(flat)}))
+except OpSchemaRegistryError as exc:
+    print(exc, file=sys.stderr)
+    sys.exit(4)
 except HkpPackError as exc:
     sys.exit(str(exc))
 ")
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}"
+                ${_registry_env} --
                 "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}"
                 "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 "arches=${_arch_csv}" "folders=${_folder_csv}" "kinds=${_kind_csv}"
@@ -1262,6 +1427,14 @@ except HkpPackError as exc:
         OUTPUT_VARIABLE _out
         ERROR_VARIABLE _err_text
         OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+    if(_rc EQUAL 4)
+        string(STRIP "${_err_text}" _err_text)
+        message(FATAL_ERROR
+            "hkp: root '${root}' holds a graph_match `nodes` pattern, which resolves "
+            "against the op-schema registry, and the registry cannot be used: "
+            "${_err_text}")
+    endif()
 
     set(_answered FALSE)
     if(_rc EQUAL 0)
@@ -1669,6 +1842,8 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root)
 
+    _hkp_resolve_op_schema_registry()
+
     # One list for every root, so "every root is wired to rocKE identically" holds in
     # both modes rather than at six sites that have to agree.
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
@@ -1768,7 +1943,10 @@ endfunction()
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
 #   whose cascade runs each test once per tier with no overlap. Configuration
-#   fails when Python3_EXECUTABLE cannot import pytest.
+#   fails when Python3_EXECUTABLE cannot import pytest, the module the suite
+#   itself imports, so a missing one fails configure with a remedy instead of
+#   failing a registered test at run time. jsonschema is not required: the one
+#   test that uses it skips without it.
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
@@ -1793,7 +1971,10 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     # conftest.py reads HIPKERNELPROVIDER_ROCM_KPACK_DIR, so that is the name
     # forwarded here regardless of which variable resolved it.
     #
-    # HKP_HIPCC names the hipcc that configure found.
+    # HKP_HIPCC names the hipcc that configure found. HKP_OP_SCHEMA_REGISTRY names
+    # the registry the pack step resolves graph patterns against; when it is empty
+    # the tests use the repository's registry. The tests do not receive
+    # HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE, so they never inherit a build's lack of one.
     #
     # HKP_CMAKE_COMMAND and HKP_CMAKE_MAKE_PROGRAM name this build's own CMake
     # and build tool. The python environment tests drive real sub-configures and
@@ -1802,7 +1983,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}"
         "HKP_HIPCC=${hipcc}"
         "HKP_CMAKE_COMMAND=${CMAKE_COMMAND}"
-        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
+        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "HKP_OP_SCHEMA_REGISTRY=${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()

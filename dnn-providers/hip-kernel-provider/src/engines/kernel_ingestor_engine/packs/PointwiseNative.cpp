@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -14,11 +15,12 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -30,7 +32,6 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -44,6 +45,8 @@
  * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
  * one element, uniform dtype -- evaluated once per graph; each pack adds only an
  * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
+ * That check also re-reads the operand facts from the binding and checks operand roles
+ * against the node, because a declarative `graph_match` can replace the shared matcher.
  * Symbol names are restated here rather than shared via a header, since a descriptor
  * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
  * names, so a mismatched string is caught without becoming a compile error.
@@ -68,9 +71,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise.dispatch";
 
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
-constexpr std::string_view INPUT_A_TOKEN = "pointwise.input_a.uid";
-constexpr std::string_view INPUT_B_TOKEN = "pointwise.input_b.uid";
-constexpr std::string_view OUTPUT_TOKEN = "pointwise.output.uid";
+constexpr std::string_view INPUT_A_TOKEN = "input_a";
+constexpr std::string_view INPUT_B_TOKEN = "input_b";
+constexpr std::string_view OUTPUT_TOKEN = "output";
 
 // RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
 // Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
@@ -110,81 +113,107 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// Channel-first or channel-last stride order, the only orders compile options classify.
-bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
+/// Requires one element, a supported rank, and a channel-first or channel-last stride
+/// order. Every single-element tensor is packed, so layout comes from the published
+/// stride order, which uses the shared ordering rule for singleton axes.
+bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 {
-    try
-    {
-        static_cast<void>(core::utils::isChannelLastLayout(&tensor));
-        return true;
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    const auto rank = tryGetBoundInt(bound, tensorField(root, "rank"));
+    if(!rank || *rank < MIN_SUPPORTED_RANK || *rank > MAX_SUPPORTED_RANK)
     {
         return false;
     }
-}
-
-/// Runs on an unvalidated graph, so must be total: a caller can present a tensor the
-/// frontend would have rejected.
-bool isSingleElement(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    // isChannelLastLayout below dereferences strides unchecked; this predicate must
-    // not crash.
-    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
+    for(int64_t i = 0; i < *rank; ++i)
     {
-        return false;
-    }
-
-    // Every dim must be 1, not merely multiply to 1 -- the claim is about extent, not
-    // a product.
-    for(const auto dim : *dims)
-    {
-        if(dim != 1)
+        if(tryGetBoundInt(bound, tensorElement(root, "dims", static_cast<size_t>(i))) != 1)
         {
             return false;
         }
     }
-
-    return hasSupportedLayout(tensor);
+    const auto* order
+        = tryGetBoundValue<std::vector<int64_t>>(bound, tensorField(root, "stride_order"));
+    using hipdnn_data_sdk::utilities::TensorLayout;
+    if(order == nullptr
+       || (*rank == 4 && *order != TensorLayout::NCHW.strideOrder
+           && *order != TensorLayout::NHWC.strideOrder)
+       || (*rank == 5 && *order != TensorLayout::NCDHW.strideOrder
+           && *order != TensorLayout::NDHWC.strideOrder))
+    {
+        return false;
+    }
+    const auto* isVirtual = tryGetBoundValue<bool>(bound, tensorField(root, "virtual"));
+    const auto* runtime
+        = tryGetBoundValue<bool>(bound, tensorField(root, "is_runtime_pass_by_value"));
+    return isVirtual != nullptr && !*isVirtual && runtime != nullptr && !*runtime
+           && tryGetBoundValue<double>(bound, tensorField(root, "value_f32")) == nullptr;
 }
 
-std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
+/**
+ * @brief Checks every binding fact the dispatch relies on: one node and three supported
+ *        operands of one dtype.
+ *
+ * Reads tokens instead of the graph because a declarative `graph_match` can bind them,
+ * and that binding skips the native graph match's checks.
+ */
+bool isServableBinding(const BoundTokens& bound)
 {
-    if(context.graph.nodeCount() != 1)
+    if(tryGetBoundInt(bound, "graph.node_count") != 1 || !isSupportedOperand(bound, INPUT_A_TOKEN)
+       || !isSupportedOperand(bound, INPUT_B_TOKEN) || !isSupportedOperand(bound, OUTPUT_TOKEN))
     {
-        return std::nullopt;
+        return false;
     }
-
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes)
-    {
-        return std::nullopt;
-    }
-
-    const auto& attributes = node.attributesAs<data_objects::PointwiseAttributes>();
-    const auto* input = findTensor(context, attributes.in_0_tensor_uid());
-    if(input == nullptr)
-    {
-        return std::nullopt;
-    }
-    return input->data_type();
+    // Uniform dtype across operands; mixed precision is a different kernel.
+    const auto* dtype
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_A_TOKEN, DTYPE_FIELD));
+    const auto* inputBDtype
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_B_TOKEN, DTYPE_FIELD));
+    const auto* outputDtype
+        = tryGetBoundValue<std::string>(bound, tensorField(OUTPUT_TOKEN, DTYPE_FIELD));
+    return dtype != nullptr && inputBDtype != nullptr && outputDtype != nullptr
+           && *dtype == *inputBDtype && *dtype == *outputDtype;
 }
 
-std::string dataTypeName(data_objects::DataType dataType)
+bool publishPointwiseNode(BoundTokens& bound,
+                          const data_objects::PointwiseAttributes& attributes,
+                          data_objects::DataType computeType)
 {
-    return data_objects::EnumNameDataType(dataType);
+    const auto* operation = data_objects::EnumNamePointwiseMode(attributes.operation());
+    const auto* compute = data_objects::EnumNameDataType(computeType);
+    if(operation == nullptr || *operation == '\0' || compute == nullptr || *compute == '\0')
+    {
+        return false;
+    }
+    bound.emplace("pointwise.operation", std::string(operation));
+    bound.emplace("pointwise.compute_data_type", std::string(compute));
+    const auto publishFloat = [&bound](const char* key, flatbuffers::Optional<float> value) {
+        if(!value.has_value())
+        {
+            return true;
+        }
+        if(!std::isfinite(*value))
+        {
+            return false;
+        }
+        bound.emplace(key, static_cast<double>(*value));
+        return true;
+    };
+    if(attributes.axis_tensor_uid().has_value())
+    {
+        bound.emplace("pointwise.axis_tensor_uid", *attributes.axis_tensor_uid());
+    }
+    return publishFloat("pointwise.relu_lower_clip", attributes.relu_lower_clip())
+           && publishFloat("pointwise.relu_upper_clip", attributes.relu_upper_clip())
+           && publishFloat("pointwise.relu_lower_clip_slope", attributes.relu_lower_clip_slope())
+           && publishFloat("pointwise.swish_beta", attributes.swish_beta())
+           && publishFloat("pointwise.elu_alpha", attributes.elu_alpha())
+           && publishFloat("pointwise.softplus_beta", attributes.softplus_beta());
 }
 
 using pack_features::bindTensorFields;
 using pack_features::elementCount;
 using pack_features::movedBytes;
 
-/// The node this engine's matchers read, or nullptr if the graph isn't a single
-/// pointwise node. Shared so the operation check doesn't depend on matcher order,
-/// which the descriptor controls.
+/// Returns the node's attributes for a single-node pointwise graph, or nullptr.
 const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -193,7 +222,8 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
     }
 
     const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes)
+    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes
+       || node.attributes() == nullptr)
     {
         return nullptr;
     }
@@ -233,32 +263,16 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
         return std::nullopt;
     }
 
-    if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
-    {
-        return std::nullopt;
-    }
-
-    if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
-    {
-        return std::nullopt;
-    }
-
-    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
-    {
-        return std::nullopt;
-    }
-
-    if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
-    {
-        return std::nullopt;
-    }
-
     BoundTokens bound;
-    bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
-    bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
-    bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
+    publishGraph(bound, context.graph);
+    if(!publishTensor(bound, INPUT_A_TOKEN, inputA) || !publishTensor(bound, INPUT_B_TOKEN, inputB)
+       || !publishTensor(bound, OUTPUT_TOKEN, output)
+       || !publishPointwiseNode(
+           bound, attributes, context.graph.getNodeWrapper(0).computeDataType())
+       || !isServableBinding(bound))
+    {
+        return std::nullopt;
+    }
 
     // The validated dims and dtypes are the features a UHD ranks this op on.
     bindTensorFields(bound, INPUT_A_ROOT, *inputA);
@@ -278,7 +292,6 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
     {
         bound[std::string(BYTES_TOKEN)] = *bytes;
     }
-
     return bound;
 }
 
@@ -287,44 +300,60 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
  *
  * Listing this second matcher is the whole cost of a pack, and two packs claiming the
  * same operation would be the authoring mistake, not two packs sharing the graph check.
+ * Every pack lists it, so it also re-checks the binding the dispatch relies on. A
+ * declarative `graph_match` can admit graphs the native one refuses. It also checks
+ * operand roles: a pattern that binds `input_a` to the node's `in_1` edge passes every
+ * operand check and makes SUB compute b - a.
  */
-bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
+bool pointwiseOperationMatches(const MatchContext& context,
+                               const BoundTokens& bound,
+                               data_objects::PointwiseMode operation)
 {
-    const auto* attributes = pointwiseNode(context);
-    return attributes != nullptr && attributes->operation() == operation;
-}
-
-bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& /*bound*/)
-{
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::ADD);
-}
-
-bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& /*bound*/)
-{
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
-}
-
-bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& /*bound*/)
-{
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
-}
-
-/**
- * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
- *        Evaluated once per candidate kernel; without it an f32 graph could reach an
- *        f16 binary and return wrong numbers rather than failing.
- */
-bool pointwiseKernelMatches(const MatchContext& context,
-                            const BoundTokens& /*bound*/,
-                            const KernelDefinition& kernel)
-{
-    const auto dataType = graphDataType(context);
-    if(!dataType.has_value())
+    const auto* published = tryGetBoundValue<std::string>(bound, "pointwise.operation");
+    if(published == nullptr || *published != data_objects::EnumNamePointwiseMode(operation)
+       || !isServableBinding(bound))
     {
         return false;
     }
+    const auto* attributes = pointwiseNode(context);
+    return attributes != nullptr && attributes->in_1_tensor_uid().has_value()
+           && tryGetBoundInt(bound, INPUT_A_TOKEN) == attributes->in_0_tensor_uid()
+           && tryGetBoundInt(bound, INPUT_B_TOKEN) == *attributes->in_1_tensor_uid()
+           && tryGetBoundInt(bound, OUTPUT_TOKEN) == attributes->out_0_tensor_uid();
+}
 
-    return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
+bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& bound)
+{
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::ADD);
+}
+
+bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& bound)
+{
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::MUL);
+}
+
+bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& bound)
+{
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::SUB);
+}
+
+/**
+ * @brief Kernel-scoped applicability: accepts only kernels compiled for the binding's
+ *        dtype, and only a binding the dispatch can serve.
+ *
+ * A KDP may list this as its only criterion, and a declarative `graph_match` can admit
+ * graphs the native one refuses. So it re-checks the dispatch preconditions: one node,
+ * three single-element operands of one dtype, a supported rank and layout. Without that
+ * check a multi-element tensor reaches a kernel that writes only element 0.
+ */
+bool pointwiseKernelMatches(const MatchContext& /*context*/,
+                            const BoundTokens& bound,
+                            const KernelDefinition& kernel)
+{
+    const auto* dataType
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_A_TOKEN, DTYPE_FIELD));
+    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType
+           && isServableBinding(bound);
 }
 
 double pointwiseScore(const MatchContext& /*context*/,

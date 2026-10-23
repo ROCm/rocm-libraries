@@ -106,7 +106,7 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        REJECT_SYMBOL);
+        NativeGraphMatch{REJECT_SYMBOL});
 
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(stateManager), resolver);
@@ -496,7 +496,7 @@ TEST_P(TestIngestorConfigurationPrediction, ReturnsOnlyUniquelyAddressableConfig
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x68));
@@ -581,7 +581,7 @@ TEST(TestIngestorGenericEngine, AnUnnameableServedConfigurationIsNotPredictedAsT
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x72));
@@ -634,7 +634,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
     auto& manager = *owned;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(owned), resolver);
     StubHandle handle;
@@ -747,7 +747,7 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL,
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL},
         "",
         KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
         EngineIdentity{},
@@ -849,7 +849,7 @@ TEST(TestIngestorGenericEngine, AConfigurationDistinguishedByAStringKnobIsPredic
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), std::move(manager), resolver);
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x6A));
@@ -933,7 +933,7 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::move(ranker),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x6B));

@@ -1,0 +1,291 @@
+"""Packager side of the UED `graph_match` contract shared with the runtime loader.
+
+The fixture corpus and the JSON Schema live in the hipDNN plugin SDK. The
+runtime's gtests read the same files, so the packer and the loader agree on
+every fixture and on the schema's member lists.
+
+Each invalid fixture names, under `error`, the error it must raise, so it
+cannot pass because of an unrelated defect. The packer and the runtime share
+the wording, so both sides match the same plain substring, literally. A valid
+fixture carries no `error`.
+"""
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+from pack_helpers import GENERIC_TARGETS
+
+from hkp_pack.descriptors import (
+    GRAPH_MATCH_ARMS,
+    UED_KEYS,
+    UED_REQUIRED_KEYS,
+    load_flat_input,
+)
+from hkp_pack.errors import HkpPackError, OpSchemaRegistryError
+from hkp_pack.graph_pattern import (
+    MAX_PATTERN_NODES,
+    NODE_KEYS,
+    NODE_REQUIRED_KEYS,
+    OP_SCHEMA_REGISTRY_ENV,
+    OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_PLUGIN_SDK = _REPO_ROOT / "projects" / "hipdnn" / "plugin_sdk"
+FIXTURE_DIR = _PLUGIN_SDK / "tests" / "ingestor" / "ued_fixtures"
+SCHEMA_PATH = _PLUGIN_SDK / "schemas" / "universal_engine_descriptor.schema.json"
+
+_FIXTURES = sorted(FIXTURE_DIR.glob("*.json"))
+assert _FIXTURES, f"no UED fixtures under {FIXTURE_DIR}"
+
+
+def _read_case(fixture):
+    return json.loads(fixture.read_text(encoding="utf-8"))
+
+
+def _ued_text(case):
+    return case["ued_text"] if "ued_text" in case else json.dumps(case["ued"])
+
+
+_VALID_FIXTURES = [path for path in _FIXTURES if _read_case(path)["valid"]]
+
+_NODES_UED = {
+    "version": "1.0",
+    "id": "8a4a9d0e-4a3f-5b7c-9d1e-2f3a4b5c6d7e",
+    "name": "test_fixture:nodes",
+    "metadata": "0b1c2d3e-4f5a-5b6c-8d7e-9f0a1b2c3d4e",
+    "graph_match": {
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pointwise",
+                "op": "pointwise",
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ]
+    },
+}
+
+
+def _ued_root(tmp_path, text, metadata):
+    """A root holding one UED and the KMD its `metadata` names."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "fixture.ued.json").write_text(text, encoding="utf-8")
+    kmd = {"version": "1.0", "id": metadata, "name": "fixture", "fields": []}
+    (root / "fixture.kmd.json").write_text(json.dumps(kmd), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda path: path.stem)
+def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
+    case = _read_case(fixture)
+    text = _ued_text(case)
+    root = _ued_root(tmp_path, text, json.loads(text)["metadata"])
+
+    if case["valid"]:
+        assert "error" not in case
+        load_flat_input(root, GENERIC_TARGETS)
+    else:
+        assert case["error"]
+        with pytest.raises(HkpPackError, match=re.escape(case["error"])):
+            load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
+def test_valid_fixture_conforms_to_the_schema(fixture):
+    # Skipped on a host without jsonschema: this is the only test that needs it, so
+    # the build's configure does not require it.
+    jsonschema = pytest.importorskip("jsonschema")
+
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.Draft7Validator.check_schema(schema)
+    ued = json.loads(_ued_text(_read_case(fixture)))
+
+    jsonschema.Draft7Validator(schema).validate(ued)
+
+
+@pytest.mark.quick
+def test_schema_member_lists_equal_the_packer_constants():
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    graph_match = schema["properties"]["graph_match"]
+    node = graph_match["properties"]["nodes"]["items"]
+
+    assert set(schema["properties"]) == set(UED_KEYS)
+    assert set(schema["required"]) == set(UED_REQUIRED_KEYS)
+    assert set(graph_match["properties"]) == set(GRAPH_MATCH_ARMS)
+    assert [arm["required"] for arm in graph_match["oneOf"]] == [
+        [arm] for arm in GRAPH_MATCH_ARMS
+    ]
+    assert set(node["properties"]) == set(NODE_KEYS)
+    assert set(node["required"]) == set(NODE_REQUIRED_KEYS)
+    assert graph_match["properties"]["nodes"]["maxItems"] == MAX_PATTERN_NODES
+
+
+@pytest.mark.quick
+def test_every_schema_property_records_a_supported_added_in_version():
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    versions = schema["properties"]["version"]["enum"]
+    missing = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for name, prop in node.get("properties", {}).items():
+                if prop.get("addedInVersion") not in versions:
+                    missing.append(f"{path}/{name}")
+            for key, child in node.items():
+                walk(child, f"{path}/{key}")
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                walk(child, f"{path}/{index}")
+
+    walk(schema, "")
+    assert not missing
+
+
+@pytest.mark.quick
+def test_duplicate_json_key_names_the_key_and_the_file(tmp_path):
+    text = json.dumps(_NODES_UED)
+    duplicated = text.replace('"name": ', '"name": "test_fixture:first", "name": ', 1)
+    root = _ued_root(tmp_path, duplicated, _NODES_UED["metadata"])
+
+    with pytest.raises(HkpPackError, match="fixture.ued.json has duplicate key 'name'"):
+        load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_nan_literal_names_the_literal_and_the_file(tmp_path):
+    # Under an extension key the value is otherwise ignored, so only the
+    # literal itself, which the runtime's parser refuses, can fail the file.
+    text = json.dumps({**_NODES_UED, "x-score": float("nan")})
+    assert "NaN" in text
+    root = _ued_root(tmp_path, text, _NODES_UED["metadata"])
+
+    with pytest.raises(
+        HkpPackError, match="fixture.ued.json has non-standard literal 'NaN'"
+    ):
+        load_flat_input(root, GENERIC_TARGETS)
+
+
+def _chain(*links):
+    """A nodes UED whose nodes are (id, read variable, written variable) links."""
+    nodes = [
+        {
+            "kind": "op",
+            "id": node_id,
+            "op": "pointwise",
+            "operands": {"in_0": f"${read}"},
+            "results": {"out_0": f"${written}"},
+        }
+        for node_id, read, written in links
+    ]
+    return dict(_NODES_UED, graph_match={"nodes": nodes})
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("links", "cycle"),
+    [
+        ([("a", "x", "x")], "'a' -> 'a'"),
+        (
+            [("first", "seed", "mid"), ("b", "q", "p"), ("c", "p", "q")],
+            "'c' -> 'b' -> 'c'",
+        ),
+        (
+            [("a", "z", "x"), ("b", "x", "y"), ("c", "y", "z"), ("d", "z", "out")],
+            "'b' -> 'c' -> 'a' -> 'b'",
+        ),
+    ],
+    ids=["self-loop", "cycle-beside-an-acyclic-node", "three-cycle-with-a-tail"],
+)
+def test_a_cyclic_pattern_is_rejected_naming_the_nodes_in_the_cycle(
+    tmp_path, links, cycle
+):
+    # The cycle check precedes registry resolution, so no registry is read.
+    ued = _chain(*links)
+    root = _ued_root(tmp_path, json.dumps(ued), ued["metadata"])
+
+    with pytest.raises(HkpPackError, match="depend on each other in a cycle") as exc:
+        load_flat_input(
+            root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json"
+        )
+    assert f"pattern nodes {cycle} in UED fixture.ued.json" in str(exc.value)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("source", ["argument", "environment"])
+def test_nodes_pattern_with_missing_registry_names_its_path(
+    tmp_path, monkeypatch, source
+):
+    missing = tmp_path / "absent" / "op_schema_registry.json"
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+    kwargs = {}
+    if source == "argument":
+        kwargs["op_schema_registry"] = missing
+    else:
+        monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(missing))
+
+    with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
+        load_flat_input(root, GENERIC_TARGETS, **kwargs)
+    assert str(missing) in str(exc.value)
+
+
+@pytest.mark.quick
+def test_an_unavailable_registry_fails_a_nodes_pattern_with_the_reason(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+
+    with pytest.raises(OpSchemaRegistryError, match="hipDNN has no registry"):
+        load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_a_named_registry_wins_over_the_unavailable_reason(tmp_path, monkeypatch):
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+
+    with pytest.raises(HkpPackError, match="cannot read op-schema registry"):
+        load_flat_input(
+            root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json"
+        )
+
+
+@pytest.mark.quick
+def test_native_ued_loads_though_the_registry_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    native = dict(_NODES_UED, graph_match={"native": "hipkernel.pointwise.graph_match"})
+    root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
+
+    load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_native_ued_loads_without_a_registry(tmp_path):
+    native = dict(_NODES_UED, graph_match={"native": "hipkernel.pointwise.graph_match"})
+    root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
+
+    load_flat_input(root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json")
+
+
+@pytest.mark.quick
+def test_a_registry_with_a_malformed_edge_names_the_registry_and_the_op(tmp_path):
+    registry = tmp_path / "op_schema_registry.json"
+    entry = {
+        "operands": [{"name": "in_0", "optional": False}, {"name": "in_1"}],
+        "results": [{"name": "out_0", "optional": False}],
+    }
+    registry.write_text(json.dumps({"ops": {"pointwise": entry}}), encoding="utf-8")
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+
+    with pytest.raises(HkpPackError, match="op 'pointwise' operands must be") as exc:
+        load_flat_input(root, GENERIC_TARGETS, op_schema_registry=registry)
+    assert str(registry) in str(exc.value)

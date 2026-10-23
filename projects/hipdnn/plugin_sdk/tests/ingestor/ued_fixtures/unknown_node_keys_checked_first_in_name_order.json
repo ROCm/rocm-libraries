@@ -1,0 +1,16 @@
+{
+  "description": "A node with no 'kind' and two unknown keys, 'outputs' authored before 'inputs'. Unknown keys are checked before required keys, in name order, so both sides report 'inputs'.",
+  "valid": false,
+  "error": "unknown key 'inputs'",
+  "ued": {
+    "version": "1.0",
+    "id": "208c2d23-b35c-5147-8cee-eec99a479380",
+    "name": "ued_fixture:unknown_node_keys_checked_first_in_name_order",
+    "metadata": "e0f2fdf4-215e-5449-96d7-845b56344d8f",
+    "graph_match": {
+      "nodes": [
+        {"id": "pw", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}, "outputs": {"out_0": "$output"}, "inputs": {"in_0": "$input_a"}}
+      ]
+    }
+  }
+}

@@ -146,6 +146,16 @@ CI runs pre-commit on every pull request, so a stale header fails there.
 See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
 field-policy reference.
 
+#### Op-schema registry annotations
+
+Each `NodeAttributes` table also carries op-schema registry annotations, which name the op
+and its tensor edges for Universal Engine Descriptor (UED) patterns: `(matcher_opcode: "...")`
+on the table, and `matcher_input_tensor` or `matcher_output_tensor` plus `matcher_name` on every
+tensor-uid field. `scripts/gen_op_schema_registry.py` generates
+`op_schema_registry_generated.h` and `op_schema_registry.json` from them, and the
+`op-schema-registry-hipdnn` pre-commit hook keeps both current. See
+[Op-Schema Registry Annotations](./AddingNewOperations.md#op-schema-registry-annotations).
+
 #### Operand features
 
 `scripts/gen_node_operands.py` reads the same compiled schema to generate

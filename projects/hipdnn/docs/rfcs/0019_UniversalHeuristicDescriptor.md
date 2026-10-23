@@ -1133,7 +1133,7 @@ fields` in one direction and `UHD features ⊄ knobs` in the other.
 that read like attributes are dims: for a rank-4 SDPA tensor laid out as
 `(batch, heads, sequence, head_dim)`, batch is `$q.dims[0]`, head count `$q.dims[1]`, sequence length
 `$q.dims[2]`, and head size `$q.dims[3]`. A node's `$<node>.*` namespace carries **scalar attributes**
-only — `$sdpa_fwd.dropout_probability` and the like — so a signature that reads a size reads a dim.
+only — `$sdpa.dropout_probability` and the like — so a signature that reads a size reads a dim.
 
 **The bound set is op-specific.** Which tensors a pattern binds, and what each
 dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for

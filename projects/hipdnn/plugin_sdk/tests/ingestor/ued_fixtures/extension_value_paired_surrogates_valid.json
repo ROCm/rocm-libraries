@@ -1,0 +1,5 @@
+{
+  "description": "A string under an extension key holds a high/low surrogate escape pair, which encodes one code point and parses.",
+  "valid": true,
+  "ued_text": "{\"version\": \"1.0\", \"id\": \"4262e4ba-1e33-58b5-b46c-132a25390417\", \"name\": \"ued_fixture:extension_value_paired_surrogates_valid\", \"metadata\": \"9a9d184b-bcae-5af0-a2df-7ddfc756d90f\", \"x-value\": \"\\ud83d\\ude00\", \"graph_match\": {\"nodes\": [{\"kind\": \"op\", \"id\": \"pointwise\", \"op\": \"pointwise\", \"operands\": {\"in_0\": \"$input_a\", \"in_1\": \"$input_b\"}, \"results\": {\"out_0\": \"$output\"}}]}}"
+}

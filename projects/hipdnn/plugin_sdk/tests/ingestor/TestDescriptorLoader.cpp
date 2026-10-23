@@ -521,6 +521,16 @@ size_t countLogsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& 
     }));
 }
 
+/// A `graph_match.nodes` block with one binary pointwise node the op-schema registry resolves.
+nlohmann::json pointwisePatternNodes()
+{
+    return nlohmann::json::array({{{"kind", "op"},
+                                   {"id", "pointwise"},
+                                   {"op", "pointwise"},
+                                   {"operands", {{"in_0", "$input_a"}, {"in_1", "$input_b"}}},
+                                   {"results", {{"out_0", "$output"}}}}});
+}
+
 } // namespace
 
 TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
@@ -1684,8 +1694,12 @@ TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
     auto& engine = documentOfType(conflicted, ".ued.json");
     engine["name"] = "test:conflicted_other";
     std::ofstream(dir.path() / "second-claim.ued.json", std::ios::binary) << engine.dump(2);
+    // Later copies cannot restore a UUID invalidated by conflicting definitions.
+    writeDocument(dir.path() / "third", TestDocument{".ued.json", engine});
+    const hipdnn_test_sdk::utilities::ScopedDirectory later(uniqueDirectory("conflict_repair"));
+    writeDocument(later.path(), TestDocument{".ued.json", engine});
 
-    const auto sets = loadFrom(dir.path());
+    const auto sets = loadFromRoots({dir.path(), later.path()});
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:survivor");
@@ -1921,6 +1935,38 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".ued.json")["features_signature"]
                               = nlohmann::json::array({"tensor_core"});
                       }},
+        ViolationCase{"graph_match_not_an_object",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"] = nullptr;
+                      }},
+        ViolationCase{"graph_match_names_neither_arm",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"]
+                              = nlohmann::json::object();
+                      }},
+        ViolationCase{"graph_match_empty_native",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"] = {{"native", ""}};
+                      }},
+        ViolationCase{"graph_match_non_string_native",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"] = {{"native", 7}};
+                      }},
+        // Each arm is valid alone, so only the exactly-one-arm rule rejects this.
+        ViolationCase{"graph_match_names_both_arms",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"]
+                              = {{"native", GRAPH_SYMBOL}, {"nodes", pointwisePatternNodes()}};
+                      }},
+        // The loader compiles patterns against the op-schema registry, so an unknown opcode
+        // fails the file like any format error.
+        ViolationCase{"graph_match_pattern_names_an_unknown_opcode",
+                      [](Documents& documents) {
+                          auto nodes = pointwisePatternNodes();
+                          nodes[0]["op"] = "no_such_opcode";
+                          documentOfType(documents, ".ued.json")["graph_match"]
+                              = {{"nodes", nodes}};
+                      }},
         // A file's type comes from its filename alone. A `schema` member would be a second
         // spelling of that fact, so it is rejected outright rather than tolerated: two
         // sources of truth have no correct reading when they disagree.
@@ -2098,6 +2144,78 @@ INSTANTIATE_TEST_SUITE_P(
                               = nlohmann::json::array({"gfx942", "gfx942"});
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
+
+/// The pattern compiles while the file is read, and the state manager probe accepts the
+/// compiled form.
+TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declarative"));
+    auto documents = makeSetDocuments('1', "test:declarative");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(
+        &sets.front().set.engine.graphMatch);
+    ASSERT_NE(pattern, nullptr);
+    ASSERT_NE(*pattern, nullptr);
+    EXPECT_EQ((*pattern)->nodeCount(), 1u);
+    EXPECT_EQ((*pattern)->rootOpcodes(), std::vector<std::string>{"pointwise"});
+}
+
+TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("native_arm"));
+    auto documents = makeSetDocuments('1', "test:native_arm");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"native", "descriptorloader.native"}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto* native = std::get_if<NativeGraphMatch>(&sets.front().engine.graphMatch);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->symbol, "descriptorloader.native");
+}
+
+/// nlohmann silently keeps the last of two equal keys, so without this check the operand map
+/// would load as a valid pattern binding `in_0` to `$input_a`. The repeat is nested inside
+/// `graph_match`, so a top-level-only check would miss it.
+TEST(TestDescriptorLoader, RejectsAKeyRepeatedAnywhereInTheDocument)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("duplicate_key"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:duplicate_key");
+    auto& engine = documentOfType(broken, ".ued.json");
+    engine["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    std::string text = engine.dump();
+    const std::string operands = R"({"in_0":"$input_a")";
+    const auto at = text.find(operands);
+    ASSERT_NE(at, std::string::npos) << text;
+    text.replace(at, operands.size(), R"({"in_0":"$input_b","in_0":"$input_a")");
+    broken.erase(
+        std::remove_if(broken.begin(),
+                       broken.end(),
+                       [](const TestDocument& document) { return document.suffix == ".ued.json"; }),
+        broken.end());
+    writeDocuments(dir.path(), broken);
+    std::ofstream(dir.path() / "duplicate.ued.json", std::ios::binary) << text;
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate key 'in_0'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate.ued.json"))
+        << recorder.getRecordedLogsAsString();
+}
 
 TEST(TestDescriptorLoader, DropsOnlyThePackWhoseMatcherIsMissing)
 {
@@ -3762,6 +3880,61 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:survivor");
+}
+
+TEST(TestDescriptorLoader, MalformedGraphMatchDoesNotPoisonAnAcceptedUuid)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("body_before_uuid"));
+    auto documents = makeSetDocuments('1', "test:graph_match_survivor");
+    auto malformed = documentOfType(documents, ".ued.json");
+    malformed["graph_match"] = {{"native", ""}};
+    writeDocument(dir.path() / "a", TestDocument{".ued.json", malformed});
+    writeDocuments(dir.path() / "z", documents);
+
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
+    EXPECT_EQ(sets.front().engine.name, "test:graph_match_survivor");
+}
+
+TEST(TestDescriptorLoader, PackResolvesALaterRootUedAfterMalformedGraphMatchIsSkipped)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("body_across_roots"));
+    auto documents = makeSetDocuments('1', "test:graph_match_cross_root");
+    const auto valid = documentOfType(documents, ".ued.json");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", nlohmann::json::array()}};
+    const auto first = dir.path() / "first";
+    const auto second = dir.path() / "second";
+    writeDocuments(first, documents);
+    writeDocument(second, TestDocument{".ued.json", valid});
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(
+        std::vector<std::filesystem::path>{first, second});
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(toString(sets.front().set.engine.id), testUuid('1', ROLE_ENGINE));
+    ASSERT_EQ(sets.front().set.packs.size(), 1u);
+    EXPECT_EQ(toString(sets.front().set.packs.front().engineId), testUuid('1', ROLE_ENGINE));
+}
+
+TEST(TestDescriptorLoader, NativeAdmissionDoesNotFallBackToALaterRootUed)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("native_no_fallback"));
+    const auto first = dir.path() / "first";
+    const auto second = dir.path() / "second";
+    auto documents = makeSetDocuments('1', "test:native_no_fallback");
+    const auto later = documentOfType(documents, ".ued.json");
+    documentOfType(documents, ".ued.json")["graph_match"]
+        = {{"native", "descriptorloader.absent_native"}};
+    writeDocuments(first, documents);
+    writeDocument(second, TestDocument{".ued.json", later});
+    writeDocuments(second, makeSetDocuments('2', "test:native_fallback_sibling"));
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(
+        std::vector<std::filesystem::path>{first, second});
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().set.engine.name, "test:native_fallback_sibling");
 }
 
 /// RFC 0020 §4.3: the authored form is JSONC. Comments are the parser's business only --

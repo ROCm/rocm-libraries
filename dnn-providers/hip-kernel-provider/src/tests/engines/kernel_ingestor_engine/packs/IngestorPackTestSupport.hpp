@@ -6,8 +6,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -15,10 +18,16 @@
 #include <string_view>
 #include <utility>
 
+#include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
+
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -145,10 +154,10 @@ inline bool matchesOperation(const PackSymbols& pack,
 
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
 {
-    return kernelMatcher(pack)(context, bound, kernel);
+    const auto bound = matchesGraph(pack, context);
+    return bound.has_value() && kernelMatcher(pack)(context, *bound, kernel);
 }
 
 inline double scoreKernel(const PackSymbols& pack,
@@ -182,6 +191,20 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
         resolved.multiProcessorCount = properties.multiProcessorCount;
     }
     return resolved;
+}
+
+/// Apply changes to a graph fixture, then serialize it.
+template <typename Mutate>
+inline flatbuffers::FlatBufferBuilder transformGraph(flatbuffers::FlatBufferBuilder builder,
+                                                     Mutate mutate)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    const std::unique_ptr<data_objects::GraphT> graph(
+        data_objects::GetGraph(builder.GetBufferPointer())->UnPack());
+    mutate(*graph);
+    builder.Clear();
+    builder.Finish(data_objects::Graph::Pack(builder, graph.get()));
+    return builder;
 }
 
 /// Wraps a built graph buffer so a test reads it the way an engine does.
@@ -233,6 +256,119 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
     return kernel;
+}
+
+/// A `graph_match.nodes` pattern for one binary pointwise node. The node id matches the
+/// native attribute root, so both arms publish the same `pointwise.*` keys. @p swapInputs
+/// binds `$input_a` to the node's `in_1` edge and `$input_b` to its `in_0` edge. The
+/// registry cannot catch this authoring mistake because both are operands of the same op.
+inline nlohmann::json pointwisePattern(bool swapInputs = false)
+{
+    const auto* inputAEdge = swapInputs ? "in_1" : "in_0";
+    const auto* inputBEdge = swapInputs ? "in_0" : "in_1";
+    return nlohmann::json::array(
+        {{{"kind", "op"},
+          {"id", "pointwise"},
+          {"op", "pointwise"},
+          {"operands", {{inputAEdge, "$input_a"}, {inputBEdge, "$input_b"}}},
+          {"results", {{"out_0", "$output"}}}}});
+}
+
+/// A `graph_match.nodes` pattern for one forward convolution. The node id matches the
+/// native attribute root, so both arms publish the same `conv.*` keys. @p swapXAndW binds
+/// `$x` to the node's `w` edge and `$w` to its `x` edge. The registry cannot catch this
+/// authoring mistake because both are required operands of the same op.
+inline nlohmann::json convPattern(bool swapXAndW = false)
+{
+    const auto* xEdge = swapXAndW ? "w" : "x";
+    const auto* wEdge = swapXAndW ? "x" : "w";
+    return nlohmann::json::array({{{"kind", "op"},
+                                   {"id", "conv"},
+                                   {"op", "convolution"},
+                                   {"operands", {{xEdge, "$x"}, {wEdge, "$w"}}},
+                                   {"results", {{"y", "$y"}}}}});
+}
+
+/// Compiles @p nodes and binds @p context through it, as a UED's declarative arm does.
+inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    matchPattern(const nlohmann::json& nodes,
+                 const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    return hipdnn_plugin_sdk::ingestor::matchGraphPattern(
+        *hipdnn_plugin_sdk::ingestor::compileGraphPattern(nodes, "test pattern"), context);
+}
+
+/// Asserts @p declarative publishes exactly the tokens @p native does, with the same
+/// values, so criteria and dispatch written against the native binding work under either
+/// arm.
+///
+/// A native hook also publishes op-specific heuristic features (shape roots, flop and byte
+/// counts) that a pattern cannot derive. Tokens whose name starts with one of
+/// @p derivedPrefixes are such features and are left out of the comparison.
+inline void expectSameBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& native,
+                              const hipdnn_plugin_sdk::ingestor::BoundTokens& declarative,
+                              std::initializer_list<std::string_view> derivedPrefixes = {})
+{
+    const auto isDerived = [&](const std::string& name) {
+        for(const auto prefix : derivedPrefixes)
+        {
+            if(name.rfind(prefix, 0) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::set<std::string> nativeNames;
+    for(const auto& token : native)
+    {
+        if(!isDerived(token.first))
+        {
+            nativeNames.insert(token.first);
+        }
+    }
+    std::set<std::string> declarativeNames;
+    for(const auto& token : declarative)
+    {
+        declarativeNames.insert(token.first);
+    }
+
+    ASSERT_EQ(declarativeNames, nativeNames);
+    for(const auto& name : nativeNames)
+    {
+        EXPECT_TRUE(declarative.at(name) == native.at(name)) << name;
+    }
+}
+
+/// An operand state no pack dispatches from: a virtual tensor has no buffer, and a
+/// pass-by-value or scalar-valued tensor carries a host value. Every pack refuses each of
+/// these on every operand.
+struct UnservableOperandState
+{
+    const char* name;
+    bool isVirtual;
+    bool isRuntimePassByValue;
+    bool hasScalarValue;
+};
+
+inline constexpr std::array<UnservableOperandState, 4> UNSERVABLE_OPERAND_STATES{{
+    {"Virtual", true, false, false},
+    {"RuntimePassByValue", false, true, false},
+    {"ScalarValue", false, false, true},
+    {"RuntimePassByValueScalar", false, true, true},
+}};
+
+/// Puts @p tensor in @p state.
+inline void applyOperandState(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensor,
+                              const UnservableOperandState& state)
+{
+    tensor.virtual_ = state.isVirtual;
+    tensor.is_runtime_pass_by_value = state.isRuntimePassByValue;
+    if(state.hasScalarValue)
+    {
+        tensor.value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(2.0f));
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
