@@ -639,7 +639,7 @@ def build(spec: Spec) -> Built:
 def _build_merged(spec: Spec) -> Built:
     """The merged object: the dK/dV and dQ roles each resolved as their standalone Spec would be (policy defaults), except that the dQ
     role takes the dK/dV role's wave count (one workgroup size): BLOCK_M = 32 * num_waves, BLOCK_N and the rest from the dQ policy.
-    A ``bias`` object also launches the dBias reduce kernel.
+    A dB-storing ``bias`` object (``reduce_symbol_of``) also launches the dBias reduce kernel; a ``store_db=0`` bias row builds the dQ role without the dB store and no reduce.
     """
     from kernels.attention_bwd_cdna import (
         fmha_bwd_merged_gfx950 as mod,
@@ -1086,7 +1086,7 @@ def run(argv: list[str] | None = None) -> int:
     return 1 if failed else 0
 
 
-# The ops that ship the sweep's pinned objects, not their rebuilds (D14).
+# The ops that ship the sweep's pinned objects, not their rebuilds.
 _SHIP_PINS_OPS = ("sdpa_bwd_merged",)
 
 _REFERENCE_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_reference.csv"
@@ -1136,8 +1136,8 @@ def _record(
 ) -> dict:
     """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates.
 
-    With @p pin the row ships pinned objects (O10): a non-bias row ships ``pin.blob`` and its rebuild only
-    verifies it; a bias row (``pin`` is its merged pin, bytes unread) ships the combined rebuild. The record
+    With @p pin the row ships pinned objects: a row without a reduce symbol ships ``pin.blob`` and its rebuild only
+    verifies it; a row with one (a dB-storing bias row; ``pin`` is its merged pin, bytes unread) ships the combined rebuild. The record
     adds ``pin_sha256``, ``rebuilt_sha256`` and ``ship`` (``pin`` | ``combined``); ``sha256`` is the shipped
     bytes' and the resources are analysed from them. The R-MIR verdict is the rebuild's, and only when the
     rebuilt object is the pin (else ``not scanned``).
@@ -1239,7 +1239,7 @@ def _record(
 
 
 def _stop_reasons(records: list[dict]) -> list[str]:
-    """Why a ship-pins run ships nothing (O9): a row that did not build and has no pin to ship, or a red per-kernel gate."""
+    """Why a ship-pins run ships nothing: any ``error`` row, a row carrying the reduce kernel that did not build ``ok``, or such a row with a red per-kernel gate."""
     reasons = []
     for record in records:
         combined = bool(record["knobs"].get("reduce_symbol"))
@@ -1346,7 +1346,7 @@ def generate(
             if r.get("ship") == "pin" and r["rebuilt_sha256"] != r["pin_sha256"]
         )
         print(
-            f"shipped {shipped}; {differing} pinned row(s) rebuilt to other bytes (T2)"
+            f"shipped {shipped}; {differing} pinned row(s) rebuilt to other bytes (LLVM backend nondeterminism)"
         )
     print(f"refreshed {source_md}")
     return status["error"]

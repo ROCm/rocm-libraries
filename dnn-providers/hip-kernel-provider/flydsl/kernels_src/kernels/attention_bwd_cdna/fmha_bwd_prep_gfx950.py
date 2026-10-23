@@ -28,7 +28,6 @@ ABI (the argument names are those of `h/gate2.arg_values`, plus `O`, `LSE_ws`, `
 """
 
 import math
-import os
 
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 

@@ -19,9 +19,9 @@ record none), ``N/M byte-identical``, then one line per reference row that diffe
 * ``missing``               the generator produced no object for the row.
 
 Each line carries the kind, tile, class and whether the hash is known-flaky (rebuilds
-are nondeterministic, T2). A ``dual_object`` row that is known T2 (its hash is in the
+are nondeterministic). A ``dual_object`` row that is known nondeterministic (its hash is in the
 flaky set, or its spec is the ``dq`` causal family) is reported as ``missing`` (listed
-hash) or ``known T2 (dq-causal family)``, never red. The next line names the ops
+hash) or ``known nondeterministic (dq-causal family)``, never red. The next line names the ops
 compared and the ops with no manifest. A reference row whose op has no manifest is
 ``missing`` and red (a generator that aborted writes none); ``--only-built`` instead
 narrows ``M`` to the rows a generator built (a ``--only`` run), so absent ops are
@@ -153,12 +153,20 @@ def compare(
         if status != "ok":
             detail = record.get("detail", "")
             if status == "dual_object" and h in flaky:
-                report("missing", row, spec, f"dual_object, known T2: {detail}")
+                report(
+                    "missing",
+                    row,
+                    spec,
+                    f"dual_object, known nondeterministic: {detail}",
+                )
             elif (
                 status == "dual_object" and spec.kernel == "dq" and spec.cls == "causal"
             ):
                 report(
-                    "known T2 (dq-causal family)", row, spec, f"dual_object: {detail}"
+                    "known nondeterministic (dq-causal family)",
+                    row,
+                    spec,
+                    f"dual_object: {detail}",
                 )
             else:
                 report("missing", row, spec, f"{status}: {detail}", True)

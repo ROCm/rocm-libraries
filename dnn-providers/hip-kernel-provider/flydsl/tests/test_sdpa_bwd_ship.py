@@ -55,8 +55,11 @@ def _sha(data: bytes) -> str:
 def _rows():
     rows = instances_for(OP, ARCH)
     plain = next(i for i in rows if not i.knobs["has_bias"])
-    bias = next(i for i in rows if i.knobs["has_bias"])
-    return plain, bias
+    bias = next(i for i in rows if i.knobs["has_bias"] and i.knobs["reduce_symbol"])
+    bias_no_db = next(
+        i for i in rows if i.knobs["has_bias"] and i.knobs["store_db"] == 0
+    )
+    return plain, bias, bias_no_db
 
 
 def _described(symbol: str, params: str, **extra) -> dict:
@@ -101,24 +104,25 @@ def _gate(blob: bytes, verdict: str = "ok", pin_gate: str | None = None) -> dict
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     """A generate() whose compile returns the outcomes in `rig.outcomes` by row name, over a reference holding `PIN`."""
-    plain, bias = _rows()
+    plain, bias, bias_no_db = _rows()
     reference_dir = tmp_path / "reference"
     reference_dir.mkdir()
     (reference_dir / f"{to_spec(plain).hash()}.hsaco").write_bytes(PIN)
+    (reference_dir / f"{to_spec(bias_no_db).hash()}.hsaco").write_bytes(PIN)
     reference = {
         to_spec(i).hash(): {
             "hash": to_spec(i).hash(),
             "spec": to_spec(i).key(),
             "sha256": _sha(PIN),
         }
-        for i in (plain, bias)
+        for i in (plain, bias, bias_no_db)
     }
 
     class Rig:
         pass
 
     rig = Rig()
-    rig.plain, rig.bias = plain, bias
+    rig.plain, rig.bias, rig.bias_no_db = plain, bias, bias_no_db
     rig.reference_dir = reference_dir
     rig.out = tmp_path / "content"
     rig.outcomes = {
@@ -128,12 +132,15 @@ def rig(tmp_path, monkeypatch):
         bias.name: build.Outcome(
             "ok", COMBINED, gate=_gate(COMBINED, pin_gate="ok"), geometry=GEOMETRY
         ),
+        bias_no_db.name: build.Outcome(
+            "ok", REBUILT, gate=_gate(REBUILT), geometry=GEOMETRY
+        ),
     }
     rig.shipped_gates = []
 
     def compile_specs(specs, arch, reference_dir=None):
         assert reference_dir == rig.reference_dir
-        by_hash = {to_spec(i).hash(): i.name for i in (plain, bias)}
+        by_hash = {to_spec(i).hash(): i.name for i in (plain, bias, bias_no_db)}
         return [rig.outcomes[by_hash[s.hash()]] for s in specs]
 
     def run_gate(obj, greedy, spec, reduce_symbol="", reference_dir=None):
@@ -153,7 +160,9 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "_run_gate", run_gate)
     monkeypatch.setattr(build, "verify", verify)
     monkeypatch.setattr(build, "read_reference", lambda: reference)
-    monkeypatch.setattr(build, "instances_for", lambda op, arch: [plain, bias])
+    monkeypatch.setattr(
+        build, "instances_for", lambda op, arch: [plain, bias, bias_no_db]
+    )
     monkeypatch.setattr(build.env, "assert_flydsl_version", lambda: None)
     monkeypatch.setattr(build.env, "prepare", lambda arch: None)
     monkeypatch.setattr(build.env, "provenance", lambda arch: {"flydsl": "test"})
@@ -201,6 +210,13 @@ def test_a_pinned_row_ships_the_pin_and_a_bias_row_the_combined_rebuild(rig) -> 
     assert [a["name"] for a in bias["reduce_args"]][:2] == ["DB", "DBias"]
     assert bias["reduce_resources"]["vgpr"] == 81
 
+    # A bias row that never stores dB carries no reduce kernel: it ships its pin like a plain row.
+    no_db = records[rig.bias_no_db.name]
+    assert (op_dir / no_db["file"]).read_bytes() == PIN
+    assert no_db["ship"] == "pin"
+    assert no_db["knobs"]["reduce_symbol"] == ""
+    assert "pin_gate" not in no_db["gates"] and "reduce_args" not in no_db
+
 
 def test_a_rebuild_equal_to_the_pin_keeps_its_rmir_verdict(rig) -> None:
     rig.outcomes[rig.plain.name] = build.Outcome(
@@ -210,7 +226,9 @@ def test_a_rebuild_equal_to_the_pin_keeps_its_rmir_verdict(rig) -> None:
     plain = rig.records()[rig.plain.name]
     assert plain["gates"]["rmir"]["verdict"] == "ok"
     assert plain["rebuilt_sha256"] == plain["pin_sha256"]
-    assert rig.shipped_gates == []  # the rebuild's own gates describe the shipped bytes
+    assert (
+        f"{rig.plain.name}.hsaco" not in rig.shipped_gates
+    )  # the rebuild's own gates describe the shipped bytes
 
 
 def test_a_pin_ships_when_its_rebuild_is_a_dual_object(rig) -> None:
@@ -295,7 +313,7 @@ def test_the_merged_generator_needs_the_reference_dir(
 @pytest.fixture
 def two_kernels(monkeypatch):
     """`verify` over an object whose kernels are described by `objects`: {symbol: (describe dict, threads)}."""
-    plain, bias = _rows()
+    _, bias, _ = _rows()
     objects = {
         MERGED_SYMBOL: (_described(MERGED_SYMBOL, "merged"), 256),
         REDUCE_SYMBOL: (_described(REDUCE_SYMBOL, "dbias_reduce"), 256),

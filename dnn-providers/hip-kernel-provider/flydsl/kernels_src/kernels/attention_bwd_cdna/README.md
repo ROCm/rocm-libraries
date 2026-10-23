@@ -4,7 +4,7 @@ The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce and dSin
 
 ## Origin
 
-The FlyDSL SDPA backward sweep at commit `e196d0d` (its sources are unchanged since `8142d08`). The kernel logic is byte-for-byte the sweep's; only the headers and the import lines differ (flat module imports became `kernels.attention_bwd_cdna` package imports, and the `sys.path` insertions of the prep, dBias and dSink modules were dropped).
+The FlyDSL SDPA backward sweep at commit `e196d0d` (its sources are unchanged since `8142d08`). The kernel sources are the sweep snapshot's with three differences: the headers, the import lines (flat module imports became `kernels.attention_bwd_cdna` package imports, and the `sys.path` insertions of the prep, dBias and dSink modules were dropped), and black formatting. Two additions are deliberate: the merged launcher's optional second launch of the dBias reduce kernel (with its fast-math reset), and `_launch.kernel` on the reduce module.
 
 ## Modules
 
@@ -14,7 +14,7 @@ The FlyDSL SDPA backward sweep at commit `e196d0d` (its sources are unchanged si
 
 ## `flash_attn_utils`
 
-`gfx950_standalone.dualwave` resolves to `kernels.attention_cdna.flash_attn_utils`, the forward kernels' copy. It differs from the one the sweep built against (bias constants and `_no_keys`, generic bias and softmax paths, dual-wave scaled-score branches). Spike P compiled the sampled specs against it: none of the backward objects changed, and every non-flaky one reproduced its pinned sha256.
+`gfx950_standalone.dualwave` resolves to `kernels.attention_cdna.flash_attn_utils`, the forward kernels' copy. It differs from the one the sweep built against (bias constants and `_no_keys`, generic bias and softmax paths, dual-wave scaled-score branches). The sampled specs were compiled against it: none of the backward objects changed, and every non-flaky one reproduced its pinned sha256.
 
 ## Build nondeterminism
 

@@ -127,6 +127,22 @@ def test_tables_are_the_reference_set(tables) -> None:
     assert built.keys() == reference.keys()
 
 
+# Two pins whose objects fault (an LLVM spill miscompile) and the rebuilds that replace them.
+SUPERSEDED = {"54973b5b17b1": "dca025070b19", "acf9212f9d2b": "2314101ce9c5"}
+
+
+def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
+    tables,
+) -> None:
+    """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
+    in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
+    assert sum(len(rows) for rows in tables.values()) == 2011
+    for held in (in_tables, _reference().keys()):
+        assert len(held) == 2011
+        assert not held & SUPERSEDED.keys()
+        assert set(SUPERSEDED.values()) <= held
+
+
 def test_known_flaky_hashes_are_pinned_objects() -> None:
     with (DATA / "sdpa_bwd_known_flaky.csv").open(newline="", encoding="utf-8") as fh:
         flaky = {row["hash"]: row for row in csv.DictReader(fh)}
