@@ -426,7 +426,7 @@ int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx9
     {
         throw std::runtime_error("Loaded descriptor set yielded no applicable candidates");
     }
-    return ranked.front().getIntMetadata("block_size");
+    return ranked.front()->getIntMetadata("block_size");
 }
 
 /// `predict_engine` scorers resolve through uhd::NativeScorerRegistry, not the ScoreRegistry
