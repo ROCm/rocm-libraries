@@ -1222,7 +1222,8 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
 }
 
 // legacy BLAS implementation
-// gemm for dim and leading dims <= 600 so no int64 multiplies
+// gemm for dim and leading dims <= 600 so no int64 multiplies; accumulates in T (double stays
+// double)
 template <typename T>
 void small_gemm(hipblasOperation_t transA,
                 hipblasOperation_t transB,
@@ -1302,7 +1303,7 @@ void small_gemm(hipblasOperation_t transA,
 
                 for(int l = 0; l < k; ++l)
                 {
-                    float temp = alpha * B[j * ldb + l];
+                    T temp = alpha * B[j * ldb + l];
                     for(int i = 0; i < m; ++i)
                     {
                         C[j * ldc + i] += temp * A[l * lda + i];
@@ -1320,7 +1321,7 @@ void small_gemm(hipblasOperation_t transA,
             {
                 for(int i = 0; i < m; ++i)
                 {
-                    float temp = 0.0f;
+                    T temp = T(0);
                     for(int l = 0; l < k; ++l)
                     {
                         temp += A[i * lda + l] * B[j * ldb + l];
@@ -1364,7 +1365,7 @@ void small_gemm(hipblasOperation_t transA,
 
                 for(int l = 0; l < k; ++l)
                 {
-                    float temp = alpha * B[l * ldb + j];
+                    T temp = alpha * B[l * ldb + j];
                     for(int i = 0; i < m; ++i)
                     {
                         C[j * ldc + i] += temp * A[l * lda + i];
@@ -1382,7 +1383,7 @@ void small_gemm(hipblasOperation_t transA,
             {
                 for(int i = 0; i < m; ++i)
                 {
-                    float temp = 0.0;
+                    T temp = T(0);
                     for(int l = 0; l < k; ++l)
                     {
                         temp += A[i * lda + l] * B[l * ldb + j];
