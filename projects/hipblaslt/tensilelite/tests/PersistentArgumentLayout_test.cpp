@@ -390,22 +390,33 @@ TEST(PersistentArgumentLayout, CustomDescriptorPacksDataParallelPayloadAndReject
     EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
 }
 
-TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormalBuffer)
+TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBuffer)
 {
+    for(int layout : {1, 2})
     for(bool initialStrides : {false, true})
     for(bool pointerArray : {false, true})
     for(bool useBeta : {false, true})
-    for(size_t k : {size_t{0}, size_t{129}})
+    for(size_t k : {size_t{0}, size_t{4097}})
     for(float alpha : {0.0f, 2.5f})
     for(auto cluster : {TensileLite::dim3(1, 1, 1), TensileLite::dim3(2, 1, 1),
                         TensileLite::dim3(2, 2, 1)})
     {
-        SCOPED_TRACE(::testing::Message() << "initialStrides=" << initialStrides
+        if(layout == 2 && cluster.x == 1)
+            continue;
+        SCOPED_TRACE(::testing::Message() << "layout=" << layout << ", initialStrides=" << initialStrides
                      << ", pointerArray=" << pointerArray << ", useBeta=" << useBeta
                      << ", K=" << k << ", alpha=" << alpha
                      << ", cluster=" << cluster.x << 'x' << cluster.y);
         ContractionSolution solution;
-        configurePersistentSolution(solution, 3, 1);
+        configurePersistentSolution(solution, 3, layout);
+        solution.sizeMapping.workGroupSize = TensileLite::dim3(32, 8, 1);
+        if(layout == 2)
+        {
+            solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+            solution.sizeMapping.workspaceSizePerElemC = sizeof(float);
+            solution.customKernel.workspaceType = CustomWorkspaceType::StreamKWithReduction;
+            solution.customKernel.workspaceSizePerElemC = sizeof(float);
+        }
         solution.sizeMapping.clusterDim = cluster;
         solution.problemType.useInitialStridesAB = initialStrides;
         solution.problemType.useInitialStridesCD = initialStrides;
@@ -436,10 +447,21 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         pointer(CustomArgSemantic::AddressB);
         strides(CustomArgSemantic::StrideA0);
         strides(CustomArgSemantic::StrideB0);
+        if(layout == 2)
+            pointer(CustomArgSemantic::AddressFlags);
         scalar(CustomArgSemantic::ItersPerTile);
-        scalar(CustomArgSemantic::PersistentGrid);
+        if(layout == 1)
+            scalar(CustomArgSemantic::PersistentGrid);
+        else
+            for(auto semantic : {CustomArgSemantic::MagicNumberItersPerTile,
+                                 CustomArgSemantic::MagicShiftItersPerTile,
+                                 CustomArgSemantic::SKItersPerWG, CustomArgSemantic::SKGrid,
+                                 CustomArgSemantic::SKTilesAndSplit})
+                scalar(semantic);
         scalar(CustomArgSemantic::Alpha);
         scalar(CustomArgSemantic::Beta);
+        if(layout == 2)
+            pointer(CustomArgSemantic::AddressWorkspace);
         pointer(CustomArgSemantic::AddressD);
         pointer(CustomArgSemantic::AddressC);
         strides(CustomArgSemantic::StrideD0);
@@ -462,8 +484,11 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         problem.setBias(rocisa::DataType::Float, problem.d().sizes()[0], 521);
         problem.setUseGateResidual(true);
         problem.setGateResidual(rocisa::DataType::Float, problem.d().sizes(), {1, 521, 262144});
-        auto device = persistentDevice();
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        auto device = persistentDevice(64);
         auto inputs = persistentInputs(alpha);
+        inputs.ws = reinterpret_cast<void*>(uintptr_t{0x10000});
+        inputs.Synchronizer = reinterpret_cast<void*>(uintptr_t{0x20000});
         float sentinels[6]{};
         void const* batchA[] = {&sentinels[0]};
         void const* batchB[] = {&sentinels[1]};
@@ -488,6 +513,8 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         inputs.batchOffsetA = 0x300000005LL;
         inputs.batchOffsetB = 0x400000007LL;
         auto launch = solution.resolvePersistentSettings(problem, device);
+        if(layout == 2 && k != 0)
+            ASSERT_GT(launch.clusterSchedule.partialSlots, 0u);
         solution.customKernel.generated = true;
         auto normal = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
         solution.customKernel.generated = false;
@@ -909,6 +936,44 @@ TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
     const auto fixed = solution.resolvePersistentSettings(problem, device);
     EXPECT_EQ(fixed.grid, 1u);
     EXPECT_EQ(fixed.clusterSchedule.physicalGrid, 8u);
+}
+
+TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
+{
+    for(bool clustered : {false, true})
+    for(size_t k : {4096, 4097})
+    for(bool capability : {false, true})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, 2, 1);
+        if(!clustered)
+        {
+            solution.sizeMapping.clusterDim = {1, 1, 1};
+            solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        }
+        solution.internalArgsSupport.perTileExtraIters = capability;
+        const auto problem = clusterProblem(256, 256, k, 1);
+        const auto device = persistentDevice(8);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
+        ASSERT_EQ(active, capability && k == 4097);
+        if(!active)
+            continue;
+        const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;
+        const size_t iters = (k + 63) / 64;
+        size_t previousEnd = 0;
+        for(size_t w = 0; w < launch.grid; ++w)
+        {
+            const auto range = streamKWorkgroupIterRange(w, blocks, iters, launch.grid, true, true);
+            EXPECT_EQ(range.start, previousEnd);
+            ASSERT_GT(range.end, range.start);
+            EXPECT_EQ(range.start / iters, (range.end - 1) / iters);
+            previousEnd = range.end;
+        }
+        EXPECT_EQ(previousEnd, blocks * iters);
+    }
 }
 
 TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSplits)
