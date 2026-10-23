@@ -419,10 +419,16 @@ class StreamK(TileProcessingStrategy):
         unroll loop already advances the SRD by the scaled amount; a workgroup
         whose StreamK range starts mid-tile has to start from the same scale or
         it reads a K position 16x too close to the tile.
+
+        Only the subtile global read walks blocks this way.  The classic swizzle
+        path steps one row per K window, so scaling its start would move the
+        workgroup off its own range.
         """
         if tc not in ("A", "B"):
             return 1
         if not kernel["ProblemType"].get("SwizzleTensor%s" % tc):
+            return 1
+        if not isMxf4SubtilePath(kernel):
             return 1
         return kernel["MatrixInstM"] if tc == "A" else kernel["MatrixInstN"]
 

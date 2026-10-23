@@ -414,6 +414,47 @@ def test_r9_layout_k_matches_the_host_padding_not_swizzle_k():
     assert geom["layoutK"] < geom["swizzleK"]
 
 
+def test_r9_layout_k_differs_for_the_classic_swizzle_types_too():
+    """The two granularities also disagree for gfx942's shipped swizzle types.
+
+    graAddresses must therefore keep aligning the classic path to swizzleK: f16
+    would drop from 32 to 8 and read outside the buffer.
+    """
+    from Tensile.Common.DataType import DataType
+    from Tensile.Common.Utilities import swizzleGeometry
+
+    def geom(dtype, miInput, miK):
+        return swizzleGeometry({
+            "MIInputPerThreadA": miInput,
+            "MatrixInstM": 16,
+            "MatrixInstN": 16,
+            "MatrixInstK": miK,
+            "WavefrontSize": 64,
+            "ProblemType": {"DataTypeA": DataType(dtype)},
+        }, "A")
+
+    assert (geom("half", 4, 16)["swizzleK"], geom("half", 4, 16)["layoutK"]) == (32, 8)
+    assert (geom("float8", 8, 32)["swizzleK"], geom("float8", 8, 32)["layoutK"]) == (64, 16)
+
+
+def _streamk_kernel(**kwargs):
+    """``_kernel`` plus the markers ``isMxf4SubtilePath`` reads."""
+    from Tensile.Common.DataType import DataType
+
+    kernel = _kernel(**kwargs)
+    kernel["MatrixInstM"] = 16
+    kernel["MatrixInstN"] = 16
+    kernel["UseSubtileImpl"] = True
+    kernel["ProblemType"].update({
+        "TransposeA": True,
+        "TransposeB": False,
+        "DataTypeA": DataType("F4"),
+        "DataTypeB": DataType("F4"),
+        "DestDataType": DataType("bfloat16"),
+    })
+    return kernel
+
+
 def test_r9_stream_k_start_offset_scales_by_rows_per_block():
     """A StreamK range that starts mid-tile steps by the pre-shuffled row count.
 
@@ -423,15 +464,28 @@ def test_r9_stream_k_start_offset_scales_by_rows_per_block():
     """
     from Tensile.Components.StreamK import StreamK
 
-    kernel = _kernel(swizzleA=True)
-    kernel["MatrixInstM"] = 16
-    kernel["MatrixInstN"] = 16
+    kernel = _streamk_kernel(swizzleA=True)
 
     assert StreamK._preShuffleRows(kernel, "A") == 16
     # B is not swizzled here, and the MX scale buffers never are.
     assert StreamK._preShuffleRows(kernel, "B") == 1
     assert StreamK._preShuffleRows(kernel, "MXSA") == 1
-    assert StreamK._preShuffleRows(_kernel(), "A") == 1
+    assert StreamK._preShuffleRows(_streamk_kernel(), "A") == 1
+
+
+def test_r9_stream_k_start_offset_is_unscaled_off_the_subtile_path():
+    """Classic swizzle steps one row per K window, so its start is not scaled.
+
+    gfx942 ships f16 and f8 swizzle-A solutions that are not subtile kernels;
+    scaling their StreamK start would move them off their own range.
+    """
+    from Tensile.Components.StreamK import StreamK
+
+    for off in ("UseSubtileImpl", "TransposeA", "DataTypeA"):
+        kernel = _streamk_kernel(swizzleA=True)
+        kernel["ProblemType"].pop(off, None)
+        kernel.pop(off, None)
+        assert StreamK._preShuffleRows(kernel, "A") == 1, off
 
 
 def test_r9_padding_correction_halves_the_stride_not_the_product():

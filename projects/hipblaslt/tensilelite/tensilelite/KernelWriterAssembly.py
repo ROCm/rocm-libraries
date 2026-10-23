@@ -5789,11 +5789,14 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
-      # The stride is the pre-shuffled 16-row block stride, so it has to follow the
-      # padding the host applied when it laid the tensor out, not the per-wave
-      # swizzleK block.  They differ whenever swizzleK > one operand.
+      # On the subtile path the stride is the pre-shuffled 16-row block stride, so
+      # it has to follow the padding the host applied when it laid the tensor out,
+      # not the per-wave swizzleK block.  They differ whenever swizzleK > one
+      # operand -- 32 against 8 for gfx942 f16 -- so the classic path keeps
+      # swizzleK, which is the granularity its own host layout pads to.
+      alignK = tP["swizzleLayoutK"] if isMxf4SubtilePath(kernel) else tP["swizzleK"]
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
-      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleLayoutK"]))
+      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, alignK))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]
