@@ -214,3 +214,60 @@ def test_an_op_without_a_manifest_is_missing_and_red(tmp_path, capsys) -> None:
     assert status == 0
     assert lines[1] == "2/4 byte-identical"
     assert any("no manifest: sdpa_bwd_merged" in l for l in lines)
+
+
+def _pin_gate(verdict: str, *problems: str) -> dict:
+    return {
+        "rmir": {"verdict": "ok", "spill_findings": 0},
+        "pin_gate": {"verdict": verdict, "problems": list(problems)},
+    }
+
+
+def test_a_pinned_row_is_compared_by_its_rebuild(tmp_path, capsys) -> None:
+    """The shipped object of a ship-pins row is the pin; what differs is the rebuild, which stays reported."""
+    patch = {
+        "ship": "pin",
+        "rebuilt_sha256": _sha(b"another build"),
+        "rebuilt_resources": {**RESOURCES, "vgpr": 104},
+    }
+    status, lines = _run(_build_fixture(tmp_path, same=patch), capsys)
+    assert status == 0
+    assert lines[1] == "1/5 byte-identical"
+    assert any(l.startswith("sha differs: dkdv tile=64 cls=plain") for l in lines)
+    assert any("vgpr 104 != 100" in l for l in lines)
+
+
+def test_a_shipped_object_that_is_not_the_pin_is_red(tmp_path, capsys) -> None:
+    argv = _build_fixture(tmp_path, same={"ship": "pin", "rebuilt_sha256": ""})
+    (tmp_path / "out" / "sdpa_bwd_dkdv" / "gfx950" / "same.hsaco").write_bytes(b"x")
+    status, lines = _run(argv, capsys)
+    assert status == 1
+    assert any(l.startswith("RED shipped: dkdv tile=64 cls=plain") for l in lines)
+
+
+def test_a_combined_row_is_judged_by_its_per_kernel_gate(tmp_path, capsys) -> None:
+    status, lines = _run(
+        _build_fixture(tmp_path, byte={"ship": "combined", "gates": _pin_gate("ok")}),
+        capsys,
+    )
+    assert status == 0
+    assert lines[3] == "1 combined object(s): 1 pass the per-kernel gate"
+    assert not any(
+        "dkdv tile=64 cls=causal" in l for l in lines
+    )  # not "sha differs": it is not the pin by construction
+
+
+def test_a_combined_row_with_a_red_gate_is_red(tmp_path, capsys) -> None:
+    gates = _pin_gate(
+        "red", "reduce resource row differs from the pin bb2f7c351824: vgpr 103 != 81"
+    )
+    status, lines = _run(
+        _build_fixture(tmp_path, byte={"ship": "combined", "gates": gates}), capsys
+    )
+    assert status == 1
+    assert lines[3] == "1 combined object(s): 0 pass the per-kernel gate"
+    assert any(
+        l.startswith("RED per-kernel gate: dkdv tile=64 cls=causal")
+        and "reduce resource row differs" in l
+        for l in lines
+    )

@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from generators import _instances  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
     KERNELS,
     KNOBS,
+    NON_KEY_FIELDS,
     ROW_FIELDS,
     Spec,
     to_spec,
@@ -60,7 +62,9 @@ def test_knob_sets_agree_with_the_spec_grammar() -> None:
 
 def test_every_row_of_an_op_has_that_ops_knob_set(tables) -> None:
     for kernel in KERNELS:
-        expected = set(ROW_FIELDS) | set(KNOBS[kernel])
+        expected = (
+            set(ROW_FIELDS) | set(KNOBS[kernel]) | set(NON_KEY_FIELDS.get(kernel, ()))
+        )
         for instance in tables[f"sdpa_bwd_{kernel}"]:
             assert set(instance.knobs) == expected, instance.name
 
@@ -75,6 +79,30 @@ def test_knobs_stay_in_their_domains(tables) -> None:
             for knob in ("num_waves", "mfma_rows", "block_q", "block_m", "block_n"):
                 if knob in instance.knobs:
                     assert instance.knobs[knob] == -1 or instance.knobs[knob] > 0
+
+
+def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
+    """Only a `bias` merged object holds the dBias reduce kernel, and the field moves no name and no Spec."""
+    rows = tables["sdpa_bwd_merged"]
+    for instance in rows:
+        bias = bool(instance.knobs["has_bias"])
+        assert instance.knobs["reduce_symbol"] == (
+            "fmha_bwd_dbias_reduce_gfx950_kernel_1" if bias else ""
+        )
+        assert "reduce" not in instance.name
+        stripped = replace(
+            instance,
+            knobs={k: v for k, v in instance.knobs.items() if k != "reduce_symbol"},
+        )
+        assert to_spec(stripped) == to_spec(instance)
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 82
+    assert len(rows) == 208
+
+
+def test_only_the_merged_rows_may_carry_a_reduce_symbol(tables) -> None:
+    row = tables["sdpa_bwd_dq"][0]
+    with pytest.raises(ValueError, match="reduce_symbol"):
+        to_spec(replace(row, knobs={**row.knobs, "reduce_symbol": ""}))
 
 
 def test_rows_round_trip_through_the_spec(tables) -> None:

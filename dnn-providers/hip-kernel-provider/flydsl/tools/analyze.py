@@ -1,9 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Per-object resources (AMDGPU metadata note + ISA) and the #1087 detector.
+"""Per-kernel resources (AMDGPU metadata note + ISA) and the #1087 detector.
 
-analyze(objdir) -> dict.   Metadata: msgpack in the NT_AMDGPU_METADATA ELF note
+analyze(objdir, symbol) -> dict.   An object holds one or more kernels (the merged objects of a bias row carry the
+merged kernel and the dBias reduce); ``symbol`` names the one to analyse, and may be omitted only for a one-kernel
+object. ``function_bytes`` is a kernel's machine code by ELF symbol.   Metadata: msgpack in the NT_AMDGPU_METADATA ELF note
 (same note hkp_pack._metadata_document reads).  ISA: llvm-objdump disassembly of the hsaco, with the kernel-descriptor
 fields the CFG analysis needs (user/system SGPR counts, accum offset) decoded from .rodata (`isa_text`).
 
@@ -14,7 +16,7 @@ forward must-define dataflow over the kernel's CFG finds >=1 v_writelane whose S
 source is not defined on every path from entry.  `exposed` = the object has SGPR spills
 (sgpr_spill_count > 0): the same spill-staging chain exists and the bug could occur.
 """
-import re, struct, json, sys, os
+import contextlib, re, struct, json, subprocess, sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pathlib import Path
@@ -44,8 +46,28 @@ def amdgpu_metadata(blob: bytes) -> dict:
     raise ValueError("no NT_AMDGPU_METADATA note")
 
 
+def kernels(doc):
+    """{kernel name: its AMDGPU metadata entry} of an object's metadata document."""
+    return {k[".name"]: k for k in doc["amdhsa.kernels"]}
+
+
+def _kernel(doc, symbol):
+    """The metadata entry of @p symbol; with no symbol, of the object's only kernel."""
+    found = kernels(doc)
+    if symbol is None:
+        if len(found) != 1:
+            raise ValueError(
+                f"the object holds {len(found)} kernels {sorted(found)}; name one"
+            )
+        return next(iter(found.values()))
+    if symbol not in found:
+        raise ValueError(f"no kernel {symbol!r} in {sorted(found)}")
+    return found[symbol]
+
+
 # ---------------- ISA text from the hsaco ----------------
-def _section(blob, want):
+def _section_header(blob, want):
+    """(sh_addr, sh_offset, sh_size) of the section named @p want."""
     (shoff,) = struct.unpack_from("<Q", blob, 0x28)
     shentsize, shnum, shstrndx = struct.unpack_from("<HHH", blob, 0x3A)
     sh = lambda i: struct.unpack_from("<IIQQQQ", blob, shoff + i * shentsize)
@@ -54,20 +76,76 @@ def _section(blob, want):
         name, typ, flags, addr, o, size = sh(i)
         nm = blob[stroff + name : blob.index(b"\0", stroff + name)].decode()
         if nm == want:
-            return blob[o : o + size]
+            return addr, o, size
     raise ValueError(f"no section {want}")
 
 
-def isa_text(hsaco_path):
-    """Assembly-like text of the object: `.amdhsa_*` directives for the descriptor fields `initial_defined` and the accum offset
-    read, then the disassembly with branch targets turned into labels (parse_kernel's input).
+def _section(blob, want):
+    _, o, size = _section_header(blob, want)
+    return blob[o : o + size]
+
+
+def elf_symbols(blob):
+    """{name: (st_value, st_size)} of the object's dynamic symbols (the kernels and their `.kd` descriptors)."""
+    _, off, size = _section_header(blob, ".dynsym")
+    strtab = _section(blob, ".dynstr")
+    out = {}
+    for p in range(off, off + size, 24):
+        name, _info, _other, _shndx, value, sz = struct.unpack_from("<IBBHQQ", blob, p)
+        if name:
+            out[strtab[name : strtab.index(b"\0", name)].decode()] = (value, sz)
+    return out
+
+
+def _symbol_bytes(blob, symbol, section):
+    addr, off, _ = _section_header(blob, section)
+    value, size = elf_symbols(blob)[symbol]
+    start = off + value - addr
+    return blob[start : start + size]
+
+
+def function_bytes(blob, symbol):
+    """The machine code of kernel @p symbol: its `.text` bytes, by `st_value` / `st_size`."""
+    return _symbol_bytes(blob, symbol, ".text")
+
+
+def _rsrc(blob, symbol):
+    """(compute_pgm_rsrc3, compute_pgm_rsrc2) of the kernel descriptor of @p symbol (None: the first one, at the start of `.rodata`)."""
+    if symbol is None:
+        kd = _section(blob, ".rodata")
+    else:
+        kd = _symbol_bytes(blob, f"{symbol}.kd", ".rodata")
+    return struct.unpack_from("<I", kd, 44)[0], struct.unpack_from("<I", kd, 52)[0]
+
+
+def _disassembly(hsaco_path, symbol):
+    """llvm-objdump's disassembly of the object, restricted to @p symbol's function when one is named."""
+    llvm = os.environ.get("LLVM_BIN", "/opt/rocm/llvm/bin")
+    dis = subprocess.run(
+        [os.path.join(llvm, "llvm-objdump"), "-d", "--mcpu=gfx950", str(hsaco_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    if symbol is None:
+        return dis
+    keep, current = [], None
+    for line in dis.splitlines():
+        m = re.match(r"^[0-9a-f]{16} <([^>]*)>:", line)
+        if m:
+            current = m.group(1)
+        if current == symbol:
+            keep.append(line)
+    return "\n".join(keep)
+
+
+def isa_text(hsaco_path, symbol=None):
+    """Assembly-like text of kernel @p symbol (the object's only one when omitted): `.amdhsa_*` directives for the descriptor
+    fields `initial_defined` and the accum offset read, then the disassembly with branch targets turned into labels
+    (parse_kernel's input).
     """
     hsaco_path = Path(hsaco_path)
-    kd = _section(hsaco_path.read_bytes(), ".rodata")
-    rsrc3, rsrc2 = (
-        struct.unpack_from("<I", kd, 44)[0],
-        struct.unpack_from("<I", kd, 52)[0],
-    )
+    rsrc3, rsrc2 = _rsrc(hsaco_path.read_bytes(), symbol)
     head = [
         f".amdhsa_user_sgpr_count {(rsrc2 >> 1) & 0x1f}",
         f".amdhsa_system_sgpr_private_segment_wavefront_offset {rsrc2 & 1}",
@@ -80,15 +158,7 @@ def isa_text(hsaco_path):
         f".amdhsa_system_sgpr_workgroup_info {(rsrc2 >> 10) & 1}",
         f".amdhsa_accum_offset {((rsrc3 & 0x3f) + 1) * 4}",
     ]
-    import subprocess
-
-    llvm = os.environ.get("LLVM_BIN", "/opt/rocm/llvm/bin")
-    dis = subprocess.run(
-        [os.path.join(llvm, "llvm-objdump"), "-d", "--mcpu=gfx950", str(hsaco_path)],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    dis = _disassembly(hsaco_path, symbol)
     rows, base, targets = [], 0, set()
     for line in dis.splitlines():
         m = re.match(r"^([0-9a-f]{16}) <", line)
@@ -320,12 +390,48 @@ def occupancy(vgpr_total, lds, threads):
     return max(0, min(by_vgpr, by_lds, 8)), by_vgpr, by_lds
 
 
-def analyze(objdir):
+@contextlib.contextmanager
+def _scoped_to(u, hsaco, blob, symbol):
+    """`undefscan_issue1087` reads the first kernel of an object whole; scoped, it reads @p symbol's function and descriptor."""
+    insns, base = [], None
+    for line in _disassembly(hsaco, symbol).splitlines():
+        m = re.match(r"^([0-9a-f]{16}) <", line)
+        if m:
+            base = int(m.group(1), 16)
+            continue
+        m = u.INSN.match(line)
+        if m and base is not None:
+            op, ops, addr = m.groups()
+            tgt = u.TARGET.search(line)
+            insns.append(
+                {
+                    "pc": int(addr, 16),
+                    "op": op,
+                    "ops": ops,
+                    "target": base + int(tgt.group(1), 16) if tgt else None,
+                }
+            )
+    rsrc2 = _rsrc(blob, symbol)[1]
+    preinit = ((rsrc2 >> 1) & 0x1F) + sum((rsrc2 >> b) & 1 for b in (7, 8, 9))
+    saved = u.disassemble, u.preinit_count
+    u.disassemble, u.preinit_count = (lambda _path: insns), (lambda _path: preinit)
+    try:
+        yield
+    finally:
+        u.disassemble, u.preinit_count = saved
+
+
+def analyze(objdir, symbol=None):
+    """The resource row, #1087 facts and kernarg size of kernel @p symbol of ``<objdir>/obj.hsaco``."""
     objdir = Path(objdir)
     blob = (objdir / "obj.hsaco").read_bytes()
     doc = amdgpu_metadata(blob)
-    k = doc["amdhsa.kernels"][0]
-    text = isa_text(objdir / "obj.hsaco")
+    k = _kernel(doc, symbol)
+    if symbol is None and len(kernels(doc)) == 1:
+        scope = None  # the whole object is the one kernel
+    else:
+        scope = k[".name"]
+    text = isa_text(objdir / "obj.hsaco", scope)
     m = re.search(r"\.amdhsa_accum_offset (\d+)", text)
     accum_off = int(m.group(1)) if m else None
     vg, ag = k[".vgpr_count"], k.get(".agpr_count", 0)
@@ -364,7 +470,11 @@ def analyze(objdir):
     os.environ.setdefault("LLVM_BIN", "/opt/rocm/llvm/bin")
     import undefscan_issue1087 as u
 
-    r["tainted_buffer_accesses"] = len(u.scan(objdir / "obj.hsaco"))
+    if scope is None:
+        r["tainted_buffer_accesses"] = len(u.scan(objdir / "obj.hsaco"))
+    else:
+        with _scoped_to(u, objdir / "obj.hsaco", blob, scope):
+            r["tainted_buffer_accesses"] = len(u.scan(objdir / "obj.hsaco"))
     r["exposed_1087"] = (
         "pattern"
         if (r["undef_writelanes"] or r["tainted_buffer_accesses"])
@@ -374,4 +484,4 @@ def analyze(objdir):
 
 
 if __name__ == "__main__":
-    print(json.dumps(analyze(sys.argv[1]), indent=1))
+    print(json.dumps(analyze(*sys.argv[1:3]), indent=1))
