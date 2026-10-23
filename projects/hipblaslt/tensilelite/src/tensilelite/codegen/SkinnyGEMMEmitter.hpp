@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 // Private header of the skinny MXFP8 GEMM emitter, which implements @gemm,
-// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for GRID_3D = 1,
-// UP_ITERS = 0 and PARTIAL_STEPS = 0. The method names follow the MLIR
-// functions: the setup is in SkinnyGEMMSetup.cpp, the K loop in
-// SkinnyGEMMLoop.cpp and the epilogue in SkinnyGEMMEpilogue.cpp.
+// @run_tile and their helpers of gemm_mxfp8_skinny.mlir for GRID_3D = 1 and
+// PARTIAL_STEPS = 0, with ring scales (UP_ITERS = 0) or up-front scales. The
+// method names follow the MLIR functions: the setup is in SkinnyGEMMSetup.cpp,
+// the K loop in SkinnyGEMMLoop.cpp, the up-front scales in
+// SkinnyGEMMScales.cpp and the epilogue in SkinnyGEMMEpilogue.cpp.
 
 #ifndef ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
 #define ROCM_TENSILELITE_CODEGEN_SKINNYGEMMEMITTER_HPP
@@ -15,6 +16,7 @@
 #include <tensilelite/codegen/Registers.hpp>
 #include <tensilelite/codegen/SkinnyGEMM.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -35,6 +37,8 @@ struct SkinnyDims {
   static constexpr int chunks = 4;
 
   int bm, tn, lanesK, waves, prefetch;
+  /// UP_ITERS up-front scale entries per split, 0 for ring scales.
+  int upIters;
   /// NC = BM + TN columns per lane.
   int columns;
   /// P = BM * TN accumulators per lane.
@@ -51,14 +55,40 @@ struct SkinnyDims {
   int log2LanesK, log2ColumnGroups, log2Subgroup, log2Half, log2Ki;
   /// max(PF, 1) ring slots.
   int slots;
-  /// L = 5 * NC loads per ring slot: NC scale dwords, then 4 chunks of NC.
+  /// Whether the up-front scales go through LDS (@scales_shared): several
+  /// waves and CG < 4.
+  bool scalesShared;
+  /// R row slots of the scale load role domain: the block when shared, else
+  /// the wave.
+  int roleSlots;
+  /// Ring scale dwords per slot, NC with ring scales and 0 with up-front
+  /// scales.
+  int scaleLoads;
+  /// L loads per ring slot: the scale dwords of a ring-scale slot (scaleLoads
+  /// of them, NC), then 4 chunks of NC.
   int loadsPerSlot;
+  /// Bytes of LDS holding the shared up-front scales, UP * NC * WAVES * 256.
+  int ldsBytes;
   /// Bytes between the chunks of a lane, 16 * S.
   int chunkStride;
 };
 
 /// Returns log2 of a power of two.
 int log2Exact(int value);
+
+/// Multiplier and shift of LLVM's signed division by a positive constant.
+struct SignedMagic {
+  int32_t multiplier;
+  int shift;
+};
+
+/// Returns the magic number of the signed division by divisor >= 2.
+SignedMagic signedMagic(int32_t divisor);
+
+/// Emits quotient = dividend / divisor for a non-negative SGPR dividend and a
+/// divisor >= 2 that is not a power of two, as LLVM expands the division.
+void divideByConstant(IRBuilder &builder, RegisterRef quotient,
+                      RegisterRef dividend, int divisor);
 
 // 32-bit ALU shorthands that pick the SALU or VALU instruction from the kind
 // of dst, which must not be an AGPR. A VALU src must be a VGPR.
@@ -97,6 +127,10 @@ struct SlotContext {
   /// Whether the chunk soffsets of the refill use the hoisted chunk bases, as
   /// the loops do, or add the chunk offset to the soffset of the iteration.
   bool hoistedOffsets = true;
+  /// Physical iteration of the slot, an SGPR: the entry of the up-front scale
+  /// vector, as the vector starts at the split's first iteration. Only set
+  /// with at least 2 up-front entries.
+  std::optional<RegisterRef> vectorIndex;
 };
 
 /// Emits the GEMM kernel body.
@@ -181,12 +215,17 @@ private:
                      const ResourceScalars &resources);
   void computeTile(const SetupScalars &scalars);
   void computeRotation(const SetupScalars &scalars, RegisterRef rot);
-  LaneValues computeLaneValues(const SetupScalars &scalars);
+  LaneValues computeLaneValues();
   void computeWideBase();
   RegisterRange computeLaneBytes(RegisterRef klv);
-  RegisterRange computeScaleOffset(RegisterRef lane);
-  RegisterRange computeWideLoadBase(RegisterRef tid, RegisterRef lane);
+  RegisterRange computeRoleJ(RegisterRef tid);
+  void threadInDomain(RegisterRef dst, RegisterRef tid, RegisterRef roleJ);
+  RegisterRange computeScaleOffset(RegisterRef lane,
+                                   const std::optional<RegisterRange> &roleJ);
+  RegisterRange computeWideLoadBase(RegisterRef tid, RegisterRef lane,
+                                    const std::optional<RegisterRange> &roleJ);
   void computeAddresses(RegisterRef klv, RegisterRef lane);
+  void computeSharedAddress(RegisterRef klv, RegisterRef tid);
   void fillDataBases(const SetupScalars &scalars, LaneValues &lane);
   void fillScaleBases(const SetupScalars &scalars, const LaneValues &lane);
   void fillSelectors();
@@ -206,22 +245,38 @@ private:
   void hoistChunkBases();
   void ensureChunkBase(int chunk);
   void wrapIteration(RegisterRef dst, RegisterRef sum);
-  void issueScales(int slot, RegisterRef soffset);
+  void wrapZero(RegisterRef dst);
+  void issueScales(RegisterRef raw, RegisterRef soffset);
   void issueChunk(int slot, int chunk, RegisterRef soffset);
+  void refillOffset(const SlotContext &context, RegisterRef soffset);
   void startRefill(const SlotContext &context, RegisterRef soffset);
   void refillChunk(const SlotContext &context, int chunk, RegisterRef soffset);
   void waitForLoad(SlotLoadPosition where);
   RegisterRange gatherSlotScales(const SlotContext &context);
-  void permSlotScales(int slot, RegisterRef packed);
+  void gatherSlotScales(RegisterRef raw, RegisterRef lo, int firstOutstanding);
+  void permSlotScales(RegisterRef hi, RegisterRef lo, RegisterRef out);
   void decodeScales(RegisterRef dst, RegisterRef packed, int chunk);
   void computeChunk(const SlotContext &context, int chunk, RegisterRef scales);
   void processSlot(const SlotContext &context);
   void processStaged(const SlotContext &context, RegisterRef packed);
   void processDecodeFirst(const SlotContext &context, RegisterRange &packed);
+  void processUpFront(const SlotContext &context,
+                      std::optional<RegisterRange> &packed);
   RegisterRef dataChunk(int slot, int chunk, int column) const;
-  RegisterRef rawScale(int slot, int column) const;
+  RegisterRef rawScales(int slot) const;
   RegisterRef dataRsrc(int column) const;
   RegisterRef scaleRsrc(int column) const;
+
+  // Up-front scales (SkinnyGEMMScales.cpp).
+  void issueUpFrontScales();
+  void packScaleVectors();
+  void packPerWave();
+  void packShared();
+  void stageScalesInLds();
+  void readSharedEntry(int entry);
+  std::optional<RegisterRange> selectScales(const SlotContext &context);
+  void decodeHoistedScales();
+  int upFrontLoadsAfter(int index) const;
 
   // Epilogue (SkinnyGEMMEpilogue.cpp).
   void emitEpilogue();
@@ -262,13 +317,18 @@ private:
   // VGPRs, in allocation order: the ring first so that its tuples are
   // aligned, then the values that live through the K loop.
   RegisterRange ringData;
-  RegisterRange ringRaw;
+  std::optional<RegisterRange> ringRaw;
   RegisterRange w0;
   RegisterRange acc;
   RegisterRange dBase;
   RegisterRange sBase;
   RegisterRange selectors;
   RegisterRange addresses;
+  // Up-front scales: the thread's LDS staging address (shared only), the raw
+  // entries that pack in place, and for one entry the decoded chunk scales.
+  std::optional<RegisterRange> ldsStage;
+  std::optional<RegisterRange> scaleVector;
+  std::vector<RegisterRange> hoistedScales;
 
   // SGPRs that live through the K loop and the epilogue.
   RegisterRange sRsrc, wRsrc, sSclRsrc, wSclRsrc, dRsrc, wsRsrc;
@@ -276,7 +336,10 @@ private:
   RegisterRange dStrideS, dStrideW, wsStrideS, wsStrideW;
   RegisterRange skinnyCols, wideCols, contigS;
   RegisterRange s0;
-  RegisterRange nIterFull, fitRot, kBaseIter;
+  RegisterRange nIterFull;
+  // The rotation, absent with one up-front entry, where it is the constant 0.
+  std::optional<RegisterRange> fitRot;
+  RegisterRange kBaseIter;
   // chunkBase[0] = kBaseIter << log2KI and chunkBase[u] = chunkBase[0] + u * 16
   // * S, emitted when first needed.
   RegisterRange chunkBase;

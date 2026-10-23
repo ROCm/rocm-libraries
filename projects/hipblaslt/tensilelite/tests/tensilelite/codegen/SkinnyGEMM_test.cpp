@@ -85,11 +85,6 @@ std::string rejectionMessage(const SkinnyGEMMConfig &config) {
 }
 
 TEST(SkinnyGEMM, RejectsUnimplementedFeatures) {
-  SkinnyGEMMConfig upFront;
-  upFront.upIters = 3;
-  EXPECT_EQ(rejectionMessage(upFront),
-            "upIters > 0 (up-front scales) is not implemented yet");
-
   SkinnyGEMMConfig partial;
   partial.partialSteps = 2;
   EXPECT_EQ(rejectionMessage(partial),
@@ -120,8 +115,10 @@ TEST(SkinnyGEMM, RejectsConfigsOverTheRegisterBudget) {
             std::string::npos);
 }
 
-SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch) {
+SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch,
+                        int upIters = 0) {
   SkinnyGEMMConfig result;
+  result.upIters = upIters;
   result.bm = bm;
   result.tn = tn;
   result.lanesK = lanesK;
@@ -362,6 +359,226 @@ TEST(SkinnyGEMM, PerChunkOpOrder) {
   EXPECT_EQ(countLinesContaining(text, "buffer_load_dwordx4"), 8);
   EXPECT_EQ(countLinesContaining(text, "buffer_load_dword "), 2);
   expectLinesInOrder(text, {"v_lshrrev_b32", ", 1, ", "v_and_b32"});
+}
+
+// The mnemonic of a line with its ds offset, if any, and the other operands
+// dropped.
+std::string shape(const std::string &line) {
+  std::string mnemonic = line.substr(0, line.find(' '));
+  if (mnemonic.rfind("ds_", 0) != 0)
+    return line.rfind("s_waitcnt", 0) == 0 ? line : mnemonic;
+  std::string::size_type offset = line.find("offset:");
+  return offset == std::string::npos ? mnemonic
+                                     : mnemonic + line.substr(offset);
+}
+
+// The lines of the given mnemonics, reduced to their shape.
+std::vector<std::string> shapesOf(const std::vector<std::string> &lines,
+                                  const std::vector<std::string> &prefixes) {
+  std::vector<std::string> shapes;
+  for (const std::string &line : lines)
+    for (const std::string &prefix : prefixes)
+      if (line.rfind(prefix, 0) == 0) {
+        shapes.push_back(shape(line));
+        break;
+      }
+  return shapes;
+}
+
+// The up-front scales are one dword load per column and entry that issue
+// before every other load.
+TEST(SkinnyGEMM, UpFrontLoadsComeFirst) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 2, 5));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loads;
+  std::istringstream stream(assembly);
+  for (std::string line; std::getline(stream, line);) {
+    line = trimmed(line);
+    if (line.rfind("buffer_load", 0) == 0)
+      loads.push_back(line.substr(0, line.find(' ')));
+  }
+  constexpr int scaleLoads = 5 * 2;
+  ASSERT_GT(loads.size(), static_cast<size_t>(scaleLoads));
+  for (int i = 0; i < scaleLoads; ++i)
+    EXPECT_EQ(loads[i], "buffer_load_dword") << i;
+  EXPECT_EQ(loads[scaleLoads], "buffer_load_dwordx4");
+  // Nothing issues scales again: the prologue, loop and arms load chunks.
+  EXPECT_EQ(countLinesContaining(assembly, "buffer_load_dword "), scaleLoads);
+}
+
+// Each entry packs in sequence: the vmcnt of the fetch of a column counts the
+// later scale loads and the PF slots of the prologue (L = 8 for NC = 2), then
+// the permutes wait for the LDS operations behind them.
+TEST(SkinnyGEMM, UpFrontPerWavePackWaits) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 2, 5));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> pack =
+      linesBetween(assembly, vmcnt(25), "label_kloop_0:");
+  ASSERT_FALSE(pack.empty());
+  std::vector<std::string> expected;
+  for (int entry = 0; entry < 5; ++entry) {
+    expected.insert(expected.end(),
+                    {vmcnt(25 - 2 * entry), "ds_bpermute_b32",
+                     "ds_bpermute_b32", vmcnt(24 - 2 * entry),
+                     "ds_bpermute_b32", "ds_bpermute_b32", lgkmcnt(2),
+                     "v_perm_b32", lgkmcnt(0), "v_perm_b32"});
+  }
+  EXPECT_EQ(shapesOf(pack, {"s_waitcnt", "ds_bpermute_b32", "v_perm_b32"}),
+            expected);
+}
+
+// The block stages the raw dwords in LDS, each write waiting only for its own
+// load, publishes them with a barrier that leaves the prologue loads in
+// flight, and every wave reads the two dwords of its entries back.
+TEST(SkinnyGEMM, UpFrontSharedPackOrderAndWaits) {
+  std::string assembly = emitted(config(1, 1, 64, 4, 2, 2));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> pack =
+      linesBetween(assembly, vmcnt(19), "label_kloop_0:");
+  ASSERT_FALSE(pack.empty());
+  std::vector<std::string> expected = {vmcnt(19),  "ds_write_b32offset:0",
+                                       vmcnt(18),  "ds_write_b32offset:1024",
+                                       vmcnt(17),  "ds_write_b32offset:2048",
+                                       vmcnt(16),  "ds_write_b32offset:3072",
+                                       lgkmcnt(0), "s_barrier"};
+  for (int entry = 0; entry < 2; ++entry) {
+    std::string first = std::to_string(entry * 2048);
+    std::string second = std::to_string(entry * 2048 + 1024);
+    std::string hiFirst = std::to_string(entry * 2048 + 64);
+    std::string hiSecond = std::to_string(entry * 2048 + 1088);
+    expected.insert(
+        expected.end(),
+        {"ds_read_b32offset:" + first, "ds_read_b32offset:" + hiFirst,
+         "ds_read_b32offset:" + second, "ds_read_b32offset:" + hiSecond,
+         lgkmcnt(2), "v_perm_b32", lgkmcnt(0), "v_perm_b32"});
+  }
+  EXPECT_EQ(shapesOf(pack, {"s_waitcnt", "ds_write_b32", "ds_read_b32",
+                            "s_barrier", "v_perm_b32"}),
+            expected);
+}
+
+// The mask of each entry dies after its sweep: one compare and one 64-bit
+// select per entry, then a v_cndmask_b32 per column, and the loop neither
+// loads scales nor permutes lanes.
+TEST(SkinnyGEMM, UpFrontSelectChainIsEntryOuter) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 2, 5));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loop =
+      linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  std::vector<std::string> chain;
+  for (const std::string &line : loop) {
+    if (line.rfind("s_cmp_eq_i32", 0) == 0)
+      chain.push_back(line.substr(line.rfind(',') + 2));
+    else if (line.rfind("s_cselect_b64 vcc, -1, 0", 0) == 0)
+      chain.push_back("select");
+    else if (line.rfind("v_cndmask_b32", 0) == 0)
+      chain.push_back("cndmask");
+  }
+  std::vector<std::string> expected;
+  for (int slot = 0; slot < 2; ++slot)
+    for (int entry = 1; entry < 5; ++entry)
+      expected.insert(expected.end(),
+                      {std::to_string(entry), "select", "cndmask", "cndmask"});
+  EXPECT_EQ(chain, expected);
+  std::string text = joined(loop);
+  EXPECT_EQ(countLinesContaining(text, "ds_bpermute_b32"), 0);
+  EXPECT_EQ(countLinesContaining(text, "buffer_load_dword "), 0);
+}
+
+TEST(SkinnyGEMM, UpFrontLoopWaits) {
+  // Every chunk of the loop waits for its two columns behind the next slot:
+  // L = 8 loads per slot and one more slot in flight, so 15 and 14.
+  std::string shared = emitted(config(1, 1, 64, 4, 2, 2));
+  SCOPED_TRACE("assembly:\n" + shared);
+  std::vector<std::string> loop =
+      linesBetween(shared, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  std::vector<std::string> expected;
+  for (int chunk = 0; chunk < 8; ++chunk)
+    expected.insert(expected.end(), {vmcnt(15), vmcnt(14)});
+  EXPECT_EQ(waitsOf(loop), expected);
+
+  // Without a ring the loads of an iteration, 4 chunks of 4 columns, count
+  // down to zero.
+  std::string noPrefetch = emitted(config(2, 2, 16, 1, 0, 4));
+  SCOPED_TRACE("assembly:\n" + noPrefetch);
+  loop = linesBetween(noPrefetch,
+                      "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  expected.clear();
+  for (int load = 15; load >= 0; --load)
+    expected.push_back(vmcnt(load));
+  EXPECT_EQ(waitsOf(loop), expected);
+}
+
+std::string ldsSegmentSize(const SkinnyGEMMConfig &config) {
+  return ".group_segment_fixed_size: " +
+         std::to_string(config.upIters * (config.bm + config.tn) *
+                        config.waves * 256);
+}
+
+// Only shared scales use LDS: UP * NC * WAVES * 256 bytes.
+TEST(SkinnyGEMM, UpFrontLdsSize) {
+  SkinnyGEMMConfig single = config(1, 1, 64, 4, 2, 2);
+  EXPECT_NE(emitted(single).find(".group_segment_fixed_size: 4096"),
+            std::string::npos);
+  EXPECT_NE(emitted(config(2, 2, 64, 2, 1, 3))
+                .find(ldsSegmentSize(config(2, 2, 64, 2, 1, 3))),
+            std::string::npos);
+  for (const SkinnyGEMMConfig &unshared :
+       {config(1, 1, 16, 4, 3, 5), config(1, 1, 64, 1, 1, 3),
+        config(1, 1, 64, 4, 2, 0)}) {
+    std::string assembly = emitted(unshared);
+    EXPECT_NE(assembly.find(".group_segment_fixed_size: 0"), std::string::npos);
+    EXPECT_EQ(assembly.find("ds_write_b32"), std::string::npos);
+  }
+
+  // 11 * 4 * 16 * 256 bytes exceed the 160 KiB of the target.
+  std::string message = rejectionMessage(config(2, 2, 64, 16, 1, 11));
+  EXPECT_NE(message.find("config exceeds the LDS budget: "), std::string::npos);
+}
+
+// The rotation of up-front scales is modulo the literal UP_ITERS, a mask for a
+// power of two, LLVM's magic division otherwise and nothing for one entry.
+TEST(SkinnyGEMM, UpFrontRotationModulusIsUpIters) {
+  auto masksBy = [](const std::string &assembly, std::string_view mask) {
+    std::istringstream stream(assembly);
+    for (std::string line; std::getline(stream, line);) {
+      line = trimmed(line);
+      if (line.rfind("s_and_b32", 0) == 0 && line.size() > mask.size() &&
+          line.compare(line.size() - mask.size(), mask.size(), mask) == 0)
+        return true;
+    }
+    return false;
+  };
+  std::string ring = emitted(config(1, 1, 64, 4, 2));
+  EXPECT_NE(ring.find("v_rcp_iflag_f32"), std::string::npos);
+
+  std::string two = emitted(config(1, 1, 64, 4, 2, 2));
+  EXPECT_EQ(two.find("v_rcp_iflag_f32"), std::string::npos);
+  EXPECT_TRUE(masksBy(two, ", 1"));
+
+  std::string four = emitted(config(1, 1, 16, 1, 2, 4));
+  EXPECT_TRUE(masksBy(four, ", 3"));
+
+  std::string five = emitted(config(1, 1, 16, 1, 2, 5));
+  EXPECT_EQ(five.find("v_rcp_iflag_f32"), std::string::npos);
+  EXPECT_EQ(countLinesContaining(five, "s_mul_hi_i32"), 1);
+  EXPECT_NE(five.find("1717986919"), std::string::npos);
+
+  // One entry has no rotation, and its scales are decoded before the loop.
+  std::string one = emitted(config(1, 1, 64, 4, 1, 1));
+  SCOPED_TRACE("assembly:\n" + one);
+  EXPECT_EQ(one.find("v_rcp_iflag_f32"), std::string::npos);
+  EXPECT_EQ(countLinesContaining(one, "s_mul_hi_i32"), 0);
+  EXPECT_FALSE(masksBy(one, ", 0"));
+  std::vector<std::string> loop =
+      linesBetween(one, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  EXPECT_EQ(countLinesContaining(joined(loop), ", 23, "), 0);
+  // Chunk 0 of the two columns is the only decode that shifts by 23.
+  EXPECT_EQ(countLinesContaining(one, ", 23, "), 2);
 }
 
 // Counts the v_nop that precede each DPP add of the reduction of a single

@@ -57,9 +57,6 @@ namespace {
 
 // The reference's features that are not emitted yet.
 void requireImplemented(const SkinnyGEMMConfig &config) {
-  if (config.upIters > 0)
-    throw std::invalid_argument(
-        "upIters > 0 (up-front scales) is not implemented yet");
   if (config.partialSteps != 0)
     throw std::invalid_argument(
         "partialSteps != 0 (partial K steps) is not implemented yet");
@@ -107,7 +104,14 @@ std::string emitSkinnyGEMM(const Target &target,
                            const SkinnyGEMMConfig &config) {
   validate(config);
   requireImplemented(config);
+  detail::SkinnyDims dims(config);
+  if (dims.ldsBytes > target.maxLdsSize())
+    throw std::invalid_argument(
+        "config exceeds the LDS budget: " + std::to_string(dims.ldsBytes) +
+        " bytes of " + std::to_string(target.maxLdsSize()));
   Kernel kernel(target, skinnyGEMMKernelName(config), 64 * config.waves);
+  if (dims.scalesShared)
+    kernel.setLdsSize(dims.ldsBytes);
   // The workgroup ids are the tile (tx, ty) and the split kz.
   kernel.enableWorkgroupIds(true, true);
   detail::SkinnyArguments arguments = declareArguments(kernel.signature());

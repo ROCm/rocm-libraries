@@ -16,50 +16,12 @@
 #include "instruction/mem.hpp"
 
 #include <algorithm>
-#include <cstdint>
 
 namespace rocm::tensilelite::codegen::detail {
 
 namespace {
 
 constexpr int exponentMask = 0x7F800000;
-
-// Multiplier and shift of LLVM's signed division by a positive constant.
-struct SignedMagic {
-  int32_t multiplier;
-  int shift;
-};
-
-// Hacker's Delight, signed magic numbers for a divisor d >= 2.
-SignedMagic signedMagic(int32_t d) {
-  constexpr uint32_t two31 = 0x80000000u;
-  uint32_t ad = static_cast<uint32_t>(d);
-  uint32_t t = two31;
-  uint32_t anc = t - 1 - t % ad;
-  int p = 31;
-  uint32_t q1 = two31 / anc;
-  uint32_t r1 = two31 - q1 * anc;
-  uint32_t q2 = two31 / ad;
-  uint32_t r2 = two31 - q2 * ad;
-  uint32_t delta = 0;
-  do {
-    ++p;
-    q1 *= 2;
-    r1 *= 2;
-    if (r1 >= anc) {
-      ++q1;
-      r1 -= anc;
-    }
-    q2 *= 2;
-    r2 *= 2;
-    if (r2 >= ad) {
-      ++q2;
-      r2 -= ad;
-    }
-    delta = ad - r2;
-  } while (q1 < delta || (q1 == delta && r1 == 0));
-  return {static_cast<int32_t>(q2 + 1), p - 32};
-}
 
 rocisa::MUBUFModifiers offen() { return rocisa::MUBUFModifiers(true, 0); }
 
@@ -71,8 +33,8 @@ RegisterRef SkinnyGEMMEmitter::dataChunk(int slot, int chunk,
   return ringData.ref(index, 4);
 }
 
-RegisterRef SkinnyGEMMEmitter::rawScale(int slot, int column) const {
-  return ringRaw.ref(slot * dims.columns + column);
+RegisterRef SkinnyGEMMEmitter::rawScales(int slot) const {
+  return ringRaw->ref(slot * dims.columns, dims.columns);
 }
 
 RegisterRef SkinnyGEMMEmitter::dataRsrc(int column) const {
@@ -84,13 +46,19 @@ RegisterRef SkinnyGEMMEmitter::scaleRsrc(int column) const {
 }
 
 void SkinnyGEMMEmitter::runTile() {
+  if (dims.upIters > 0)
+    issueUpFrontScales();
   if (dims.prefetch == 0)
     runNoPrefetchLoop();
   else
     runPrefetchedLoop();
-  // The ring is dead, so the epilogue reuses its registers.
+  // The ring and the scale vector are dead, so the epilogue reuses their
+  // registers.
   ringData.release();
-  ringRaw.release();
+  if (ringRaw)
+    ringRaw->release();
+  scaleVector.reset();
+  hoistedScales.clear();
 }
 
 // dst = sum >= NIfull ? sum - NIfull : sum, the physical iteration of a
@@ -101,6 +69,15 @@ void SkinnyGEMMEmitter::wrapIteration(RegisterRef dst, RegisterRef sum) {
   builder.create<rocisa::SCmpGeU32>(sum.container(), nIterFull.container());
   builder.create<rocisa::SCSelectB32>(dst.container(), wrapped.container(),
                                       sum.container());
+}
+
+// dst = the wrapped physical iteration of the logical iteration 0 without
+// rotation.
+void SkinnyGEMMEmitter::wrapZero(RegisterRef dst) {
+  RegisterRange wrapped = sgpr();
+  builder.subi32(wrapped.ref(), 0, nIterFull.ref());
+  builder.create<rocisa::SCmpLeU32>(nIterFull.container(), 0);
+  builder.create<rocisa::SCSelectB32>(dst.container(), wrapped.container(), 0);
 }
 
 // chunkBase[u] = (kBaseIter << log2KI) + u * 16 * S, the part of the chunk
@@ -122,9 +99,11 @@ void SkinnyGEMMEmitter::hoistChunkBases() {
     ensureChunkBase(chunk);
 }
 
-void SkinnyGEMMEmitter::issueScales(int slot, RegisterRef soffset) {
+// Loads the scale dword of every column of the iteration at soffset into the
+// NC registers of raw.
+void SkinnyGEMMEmitter::issueScales(RegisterRef raw, RegisterRef soffset) {
   for (int c = 0; c < dims.columns; ++c) {
-    RegisterRef dst = rawScale(slot, c);
+    RegisterRef dst = raw.slice(c);
     builder.create<rocisa::BufferLoadB32>(dst.container(), sBase.sub(c),
                                           scaleRsrc(c).container(),
                                           soffset.container(), offen());
@@ -144,13 +123,21 @@ void SkinnyGEMMEmitter::issueChunk(int slot, int chunk, RegisterRef soffset) {
   }
 }
 
-// Issues the scales of the refill iteration with the soffset of the
-// iteration, (kBaseIter + iteration) << log2KI, which chunk 0 reuses.
-void SkinnyGEMMEmitter::startRefill(const SlotContext &context,
-                                    RegisterRef soffset) {
+// soffset = (kBaseIter + iteration) << log2KI for the refill iteration, which
+// chunk 0 uses as its own.
+void SkinnyGEMMEmitter::refillOffset(const SlotContext &context,
+                                     RegisterRef soffset) {
   builder.addi32(soffset, kBaseIter.ref(), *context.refillIteration);
   shiftLeft(builder, soffset, soffset, dims.log2Ki);
-  issueScales(context.slot, soffset);
+}
+
+// Computes the offset of the refill iteration and issues its ring scales;
+// up-front scales are loaded once, before the loop.
+void SkinnyGEMMEmitter::startRefill(const SlotContext &context,
+                                    RegisterRef soffset) {
+  refillOffset(context, soffset);
+  if (dims.upIters == 0)
+    issueScales(rawScales(context.slot), soffset);
 }
 
 // Chunk u >= 1 is at chunkBase[u] + (iteration << log2KI) in the loops, whose
@@ -184,31 +171,42 @@ void SkinnyGEMMEmitter::waitForLoad(SlotLoadPosition where) {
 }
 
 // Fetches the two scale dwords of every column from the lanes that hold them
-// with ds_bpermute_b32: the first goes to a new register, the second over the
-// raw dword, which is dead once both permutes have issued.
+// with ds_bpermute_b32: the first goes to lo, the second over the raw dword,
+// which is dead once both permutes have issued. The raw dword of the first
+// column has firstOutstanding vector loads issued after it.
+void SkinnyGEMMEmitter::gatherSlotScales(RegisterRef raw, RegisterRef lo,
+                                         int firstOutstanding) {
+  for (int c = 0; c < dims.columns; ++c) {
+    int outstanding = firstOutstanding - c;
+    builder.createWaitCnt(WaitCounts{
+        .vectorLoads = std::min(outstanding, kernel.target().maxVmcnt())});
+    RegisterRef dword = raw.slice(c);
+    builder.create<rocisa::DSBPermuteB32>(lo.slice(c).container(),
+                                          addresses.sub(0), dword.container());
+    builder.create<rocisa::DSBPermuteB32>(dword.container(), addresses.sub(1),
+                                          dword.container());
+  }
+}
+
 RegisterRange SkinnyGEMMEmitter::gatherSlotScales(const SlotContext &context) {
   RegisterRange packed = vgpr(dims.columns);
-  for (int c = 0; c < dims.columns; ++c) {
-    RegisterRef raw = rawScale(context.slot, c);
-    waitForLoad({c, context.groupsAfter, 0});
-    builder.create<rocisa::DSBPermuteB32>(packed.sub(c), addresses.sub(0),
-                                          raw.container());
-    builder.create<rocisa::DSBPermuteB32>(raw.container(), addresses.sub(1),
-                                          raw.container());
-  }
+  int firstOutstanding =
+      loadsIssuedAfter(dims, {0, context.groupsAfter, /*ownRefill=*/0});
+  gatherSlotScales(rawScales(context.slot), packed.ref(), firstOutstanding);
   return packed;
 }
 
 // Packs the two dwords of every column into one whose byte u is the scale of
 // chunk u. Permute c is the (NC - 1 - c)-th newest of the 2 * NC in flight.
-void SkinnyGEMMEmitter::permSlotScales(int slot, RegisterRef packed) {
+void SkinnyGEMMEmitter::permSlotScales(RegisterRef hi, RegisterRef lo,
+                                       RegisterRef out) {
   for (int c = 0; c < dims.columns; ++c) {
     int outstanding = 2 * (dims.columns - 1 - c);
     builder.createWaitCnt(
         WaitCounts{.lds = std::min(outstanding, kernel.target().maxLgkmcnt())});
     builder.create<rocisa::VPermB32>(
-        packed.slice(c).container(), rawScale(slot, c).container(),
-        packed.slice(c).container(), selector(c).container());
+        out.slice(c).container(), hi.slice(c).container(),
+        lo.slice(c).container(), selector(c).container());
   }
 }
 
@@ -235,7 +233,7 @@ void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
                                      RegisterRef scales) {
   RegisterRange pairs = vgpr(dims.columns);
   int ownRefill =
-      context.refillIteration ? dims.columns + chunk * dims.columns : 0;
+      context.refillIteration ? dims.scaleLoads + chunk * dims.columns : 0;
   for (int dword = 0; dword < 4; ++dword) {
     for (int word = 0; word < 2; ++word) {
       std::optional<rocisa::VOP3PModifiers> highWord;
@@ -243,7 +241,7 @@ void SkinnyGEMMEmitter::computeChunk(const SlotContext &context, int chunk,
         highWord = rocisa::VOP3PModifiers({1, 0, 0});
       for (int c = 0; c < dims.columns; ++c) {
         if (dword == 0 && word == 0)
-          waitForLoad({dims.columns + chunk * dims.columns + c,
+          waitForLoad({dims.scaleLoads + chunk * dims.columns + c,
                        context.groupsAfter, ownRefill});
         builder.create<rocisa::VCvtScalePkFP8toBF16>(
             pairs.sub(c),
@@ -302,23 +300,63 @@ void SkinnyGEMMEmitter::processDecodeFirst(const SlotContext &context,
   }
 }
 
+// Up-front schedule: per chunk decode its scale, compute and refill the
+// chunk; the scales are not refilled. The last chunk decodes over the packed
+// dwords, which no chunk reads afterwards. Without packed dwords (one entry)
+// the decoded scales were hoisted out of the loop.
+void SkinnyGEMMEmitter::processUpFront(const SlotContext &context,
+                                       std::optional<RegisterRange> &packed) {
+  RegisterRange soffset = sgpr();
+  for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk) {
+    std::optional<RegisterRange> decoded;
+    RegisterRef scales;
+    if (!packed) {
+      scales = hoistedScales[chunk].ref();
+    } else if (chunk == SkinnyDims::chunks - 1) {
+      decodeScales(packed->ref(), packed->ref(), chunk);
+      scales = packed->ref();
+    } else {
+      decoded = vgpr(dims.columns);
+      decodeScales(decoded->ref(), packed->ref(), chunk);
+      scales = decoded->ref();
+    }
+    computeChunk(context, chunk, scales);
+    if (!context.refillIteration)
+      continue;
+    if (chunk == 0)
+      refillOffset(context, soffset.ref());
+    refillChunk(context, chunk, soffset.ref());
+  }
+}
+
 void SkinnyGEMMEmitter::processSlot(const SlotContext &context) {
+  if (dims.upIters > 0) {
+    std::optional<RegisterRange> packed = selectScales(context);
+    processUpFront(context, packed);
+    return;
+  }
   RegisterRange packed = gatherSlotScales(context);
-  permSlotScales(context.slot, packed.ref());
+  permSlotScales(rawScales(context.slot), packed.ref(), packed.ref());
   if (dims.prefetch == 0)
-    ringRaw.release();
+    ringRaw->release();
   if (dims.prefetch >= 2)
     processDecodeFirst(context, packed);
   else
     processStaged(context, packed.ref());
 }
 
-// PF = 0: each iteration issues its scales and chunks, then consumes them.
+// PF = 0: each iteration issues its chunks, and its scales with ring scales,
+// then consumes them.
 void SkinnyGEMMEmitter::runNoPrefetchLoop() {
+  if (dims.upIters > 0)
+    packScaleVectors();
+  if (dims.upIters == 1)
+    decodeHoistedScales();
   hoistChunkBases();
   // Nothing of the ring is loop carried, so the raw scales live only from the
   // loads of an iteration to its permutes.
-  ringRaw.release();
+  if (ringRaw)
+    ringRaw->release();
   RegisterRange iteration = sgpr();
   std::shared_ptr<rocisa::Label> body = builder.createLabel("kloop");
   std::shared_ptr<rocisa::Label> exit = builder.createLabel("kloop_end");
@@ -326,16 +364,30 @@ void SkinnyGEMMEmitter::runNoPrefetchLoop() {
   builder.movb32(iteration.ref(), 0);
   builder.create<rocisa::SCBranchSCC0>(exit->getLabelName());
   builder.insert(body);
-  ringRaw = vgpr(dims.columns);
+  if (ringRaw)
+    ringRaw = vgpr(dims.columns);
   RegisterRange physical = sgpr();
-  builder.addi32(physical.ref(), iteration.ref(), fitRot.ref());
-  wrapIteration(physical.ref(), physical.ref());
+  if (fitRot) {
+    builder.addi32(physical.ref(), iteration.ref(), fitRot->ref());
+    wrapIteration(physical.ref(), physical.ref());
+  } else {
+    wrapIteration(physical.ref(), iteration.ref());
+  }
+  // The select precedes the loads so that its VALU work hides their latency.
+  std::optional<RegisterRange> packed;
+  if (dims.upIters > 0)
+    packed =
+        selectScales(SlotContext{0, 0, std::nullopt, true, physical.ref()});
   RegisterRange soffset = sgpr();
   SlotContext loads{0, 0, physical.ref()};
   startRefill(loads, soffset.ref());
   for (int chunk = 0; chunk < SkinnyDims::chunks; ++chunk)
     refillChunk(loads, chunk, soffset.ref());
-  processSlot(SlotContext{0, 0, std::nullopt});
+  SlotContext consume{0, 0, std::nullopt};
+  if (dims.upIters > 0)
+    processUpFront(consume, packed);
+  else
+    processSlot(consume);
   builder.addi32(iteration.ref(), iteration.ref(), 1);
   builder.create<rocisa::SCmpLtI32>(iteration.container(),
                                     nIterFull.container());
@@ -345,8 +397,12 @@ void SkinnyGEMMEmitter::runNoPrefetchLoop() {
 
 void SkinnyGEMMEmitter::runPrefetchedLoop() {
   emitPrologue();
+  if (dims.upIters > 0)
+    packScaleVectors();
   RegisterRange steadyEnd = sgpr();
   computeSteadyEnd(steadyEnd.ref());
+  if (dims.upIters == 1)
+    decodeHoistedScales();
   emitSteadyLoop(steadyEnd.ref());
   emitRemainderArms(steadyEnd.ref());
 }
@@ -368,13 +424,16 @@ void SkinnyGEMMEmitter::emitPrologue() {
   bool hoisted = dims.prefetch >= 4;
   for (int slot = 0; slot < dims.prefetch; ++slot) {
     RegisterRange physical = sgpr();
-    if (slot == 0) {
-      wrapIteration(physical.ref(), fitRot.ref());
-    } else {
+    if (slot > 0) {
       builder.create<rocisa::SMinU32>(physical.container(),
                                       lastIteration->container(), slot);
-      builder.addi32(physical.ref(), physical.ref(), fitRot.ref());
+      if (fitRot)
+        builder.addi32(physical.ref(), physical.ref(), fitRot->ref());
       wrapIteration(physical.ref(), physical.ref());
+    } else if (fitRot) {
+      wrapIteration(physical.ref(), fitRot->ref());
+    } else {
+      wrapZero(physical.ref());
     }
     SlotContext context{slot, 0, physical.ref(), hoisted};
     RegisterRange soffset = sgpr();
@@ -398,18 +457,7 @@ void SkinnyGEMMEmitter::computeSteadyEnd(RegisterRef steadyEnd) {
     shiftLeft(builder, steadyEnd, steadyEnd, log2Pf);
     builder.addi32(steadyEnd, steadyEnd, -pf);
   } else {
-    // LLVM's expansion of the signed division by the constant.
-    SignedMagic magic = signedMagic(pf);
-    RegisterRange sign = sgpr();
-    builder.create<rocisa::SMulHII32>(steadyEnd.container(),
-                                      nIterFull.container(), magic.multiplier);
-    if (magic.multiplier < 0)
-      builder.addi32(steadyEnd, steadyEnd, nIterFull.ref());
-    if (magic.shift > 0)
-      builder.create<rocisa::SAShiftRightI32>(
-          steadyEnd.container(), magic.shift, steadyEnd.container());
-    shiftRight(builder, sign.ref(), steadyEnd, 31);
-    builder.addi32(steadyEnd, steadyEnd, sign.ref());
+    divideByConstant(builder, steadyEnd, nIterFull.ref(), pf);
     builder.muli32(steadyEnd, steadyEnd, pf);
     builder.addi32(steadyEnd, steadyEnd, -pf);
   }
@@ -418,14 +466,27 @@ void SkinnyGEMMEmitter::computeSteadyEnd(RegisterRef steadyEnd) {
 }
 
 // The loop body is unrolled over the slots, so every slot index is a
-// constant. Slot p refills with the iteration it0 + PF + p.
+// constant. Slot p refills with the iteration it0 + PF + p and, with several
+// up-front entries, selects the scales of the physical iteration it0 + p. The
+// bases fold the rotation: refillBase[p] = fitRot + PF + p and physBase[p] =
+// fitRot + p. Without rotation they are the literals.
 void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
   int pf = dims.prefetch;
-  RegisterRange refillBase = sgpr(pf);
-  builder.addi32(refillBase.ref(0), fitRot.ref(), pf);
+  bool vectorized = dims.upIters >= 2;
+  std::optional<RegisterRange> refillBase;
+  std::optional<RegisterRange> physBase;
+  if (fitRot) {
+    refillBase = sgpr(pf);
+    builder.addi32(refillBase->ref(0), fitRot->ref(), pf);
+  }
   hoistChunkBases();
-  for (int slot = 1; slot < pf; ++slot)
-    builder.addi32(refillBase.ref(slot), fitRot.ref(), pf + slot);
+  if (vectorized)
+    physBase = sgpr(pf);
+  for (int slot = 1; fitRot && slot < pf; ++slot) {
+    builder.addi32(refillBase->ref(slot), fitRot->ref(), pf + slot);
+    if (vectorized)
+      builder.addi32(physBase->ref(slot), fitRot->ref(), slot);
+  }
   RegisterRange iteration = sgpr();
   std::shared_ptr<rocisa::Label> body = builder.createLabel("kloop");
   std::shared_ptr<rocisa::Label> exit = builder.createLabel("kloop_end");
@@ -435,9 +496,23 @@ void SkinnyGEMMEmitter::emitSteadyLoop(RegisterRef steadyEnd) {
   builder.insert(body);
   for (int slot = 0; slot < pf; ++slot) {
     RegisterRange refill = sgpr();
-    builder.addi32(refill.ref(), iteration.ref(), refillBase.ref(slot));
+    if (refillBase)
+      builder.addi32(refill.ref(), iteration.ref(), refillBase->ref(slot));
+    else
+      builder.addi32(refill.ref(), iteration.ref(), pf + slot);
     wrapIteration(refill.ref(), refill.ref());
-    processSlot(SlotContext{slot, pf - 1, refill.ref()});
+    SlotContext context{slot, pf - 1, refill.ref()};
+    std::optional<RegisterRange> physical;
+    if (vectorized) {
+      physical = sgpr();
+      if (slot == 0)
+        builder.addi32(physical->ref(), fitRot->ref(), iteration.ref());
+      else
+        builder.addi32(physical->ref(), iteration.ref(), physBase->ref(slot));
+      wrapIteration(physical->ref(), physical->ref());
+      context.vectorIndex = physical->ref();
+    }
+    processSlot(context);
   }
   builder.addi32(iteration.ref(), iteration.ref(), pf);
   builder.create<rocisa::SCmpLtI32>(iteration.container(),
@@ -458,28 +533,46 @@ void SkinnyGEMMEmitter::emitRemainderArms(RegisterRef steadyEnd) {
 // Iteration i of the arm uses ring slot i mod PF and refills it only when
 // iteration i + PF exists. Of the loads issued after the slot's group, the
 // PF - 1 - i initial groups and the refills of the earlier iterations remain.
+// With several up-front entries it also selects the scales of its physical
+// iteration, which is the refill iteration of i - PF from i = PF on.
 void SkinnyGEMMEmitter::emitRemainderArm(RegisterRef left,
                                          RegisterRef steadyEnd, int remaining) {
   int pf = dims.prefetch;
+  bool vectorized = dims.upIters >= 2;
   std::shared_ptr<rocisa::Label> next = builder.createLabel("arm_end");
   builder.create<rocisa::SCmpEQI32>(left.container(), remaining);
   builder.create<rocisa::SCBranchSCC0>(next->getLabelName());
   // The logical iteration of a refill is fitRot + steadyEnd + i + PF.
-  std::optional<RegisterRange> refillBase;
+  std::optional<RegisterRange> base;
+  std::vector<RegisterRange> keptRefills;
   for (int i = 0; i < remaining; ++i) {
     int refilled = std::clamp(remaining - pf, 0, i);
     SlotContext context{i % pf, pf - 1 + refilled - i, std::nullopt, false};
     RegisterRange refill = sgpr();
-    if (i + pf < remaining) {
-      if (!refillBase) {
-        refillBase = sgpr();
-        builder.addi32(refillBase->ref(), fitRot.ref(), steadyEnd);
-      }
-      builder.addi32(refill.ref(), refillBase->ref(), i + pf);
+    bool hasRefill = i + pf < remaining;
+    if (!base && fitRot && (vectorized || hasRefill)) {
+      base = sgpr();
+      builder.addi32(base->ref(), fitRot->ref(), steadyEnd);
+    }
+    RegisterRef baseRef = base ? base->ref() : steadyEnd;
+    if (hasRefill) {
+      builder.addi32(refill.ref(), baseRef, i + pf);
       wrapIteration(refill.ref(), refill.ref());
       context.refillIteration = refill.ref();
     }
+    std::optional<RegisterRange> physical;
+    if (vectorized && i >= pf) {
+      context.vectorIndex = keptRefills[i - pf].ref();
+    } else if (vectorized) {
+      physical = sgpr();
+      if (i > 0)
+        builder.addi32(physical->ref(), baseRef, i);
+      wrapIteration(physical->ref(), i > 0 ? physical->ref() : baseRef);
+      context.vectorIndex = physical->ref();
+    }
     processSlot(context);
+    if (vectorized && hasRefill)
+      keptRefills.push_back(std::move(refill));
   }
   builder.insert(next);
 }

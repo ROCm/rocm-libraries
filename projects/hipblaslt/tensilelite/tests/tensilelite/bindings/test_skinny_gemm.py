@@ -78,7 +78,6 @@ def test_kernel_name(knobs, expected):
 
 
 UNIMPLEMENTED_FEATURES = [
-    ({"upIters": 1}, "upIters"),
     ({"partialSteps": 1}, "partialSteps"),
     ({"grid3d": False}, "grid3d"),
     ({"group": 2}, "group"),
@@ -1963,6 +1962,37 @@ def test_gemm_mxfp8_skinny_up_scales(
         blocks=B,
         group=GROUP,
         xcds=XCDS,
+        up_scales=1,
+    )
+
+
+# Not from the driver: up-front scales through LDS in shapes that no driver row
+# covers. (BM, TN, LANES_K, WAVES, PF, M, N, K, SPK).
+SHARED_SCALES_PARAMS = [
+    (1, 1, 64, 3, 1, 1, 2000, 8192, 8192),  # R = 3 is not a power of two.
+    (1, 1, 64, 3, 1, 2000, 1, 8192, 8192),  # R = 3, path B.
+    (1, 1, 64, 4, 0, 1, 5120, 8192, 8192),  # PF=0 with shared scales.
+    (1, 1, 64, 2, 4, 1, 1024, 16384, 16384),  # PF=4 with shared scales.
+    # UP = 5, NC = 4, WAVES = 16: 80 KiB of LDS, so the ds offsets exceed 65535.
+    (2, 2, 64, 16, 1, 4, 2000, 20480, 20480),
+]
+
+
+@pytest.mark.parametrize("BM,TN,LANES_K,WAVES,PF,M,N,K,SPK", SHARED_SCALES_PARAMS)
+def test_gemm_mxfp8_skinny_shared_up_scales(BM, TN, LANES_K, WAVES, PF, M, N, K, SPK):
+    """The scales shared through LDS give the reference result for block sizes
+    with a non-power-of-two role domain, both paths, every ring depth and LDS
+    offsets beyond the ds offset field."""
+    run(
+        M,
+        N,
+        K,
+        spk=SPK,
+        bm=BM,
+        tn=TN,
+        lanes_k=LANES_K,
+        waves=WAVES,
+        pf=PF,
         up_scales=1,
     )
 
