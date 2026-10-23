@@ -210,8 +210,8 @@ void testing_spsort_csc_bad_arg(const Arguments& arg)
         expect_batch_status(1, 0, 0, 2, 0, safe_size, rocsparse_status_success);
 
         // Different batch counts.
-        expect_batch_status(1, safe_size + 1, 0, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
-        expect_batch_status(1, 0, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
+        expect_batch_status(3, safe_size + 1, 0, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
+        expect_batch_status(3, 0, safe_size, 2, safe_size + 1, safe_size, rocsparse_status_invalid_value);
         expect_batch_status(2, safe_size + 1, safe_size, 3, safe_size + 1, safe_size, rocsparse_status_invalid_value);
         expect_batch_status(2, safe_size + 1, safe_size, 1, 0, 0, rocsparse_status_invalid_value);
 

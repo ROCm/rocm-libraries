@@ -93,6 +93,8 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
+    case HIP_R_4I:
+        return "R_4I";
     case HIP_R_32I:
         return "R_32I";
     case HIP_C_32F:
@@ -136,6 +138,8 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_R_4I:
+        return "i4_r";
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
@@ -339,6 +343,30 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_UE5M3";
     case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
         return "Block_16_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        return "Block_32_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        return "Block_64_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        return "Block_128_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        return "Block_32_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        return "Block_64_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        return "Block_128_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        return "Block_32_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        return "Block_64_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        return "Block_128_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        return "Block_32_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        return "Block_64_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        return "Block_128_F16_ZP";
     default:
         return "Invalid";
     }

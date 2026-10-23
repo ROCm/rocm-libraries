@@ -361,8 +361,18 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
 
     ctx->c0 = rocke_b_const_i32(b, 0);
     ctx->c_wave = rocke_b_const_i32(b, ctx->WAVE);
-    ctx->c_cpg = rocke_b_const_i32(b, ctx->p.cpg);
-    ctx->c_kpg = rocke_b_const_i32(b, ctx->p.kpg);
+    if(spec->runtime_channels)
+    {
+        /* Per-group channel counts from the kernargs, computed once:
+         * total_c = groups * cpg, total_k = groups * kpg. */
+        ctx->c_cpg = rocke_b_div(b, ctx->params.p_total_c, ctx->params.p_groups);
+        ctx->c_kpg = rocke_b_div(b, ctx->params.p_total_k, ctx->params.p_groups);
+    }
+    else
+    {
+        ctx->c_cpg = rocke_b_const_i32(b, ctx->p.cpg);
+        ctx->c_kpg = rocke_b_const_i32(b, ctx->p.kpg);
+    }
     ctx->c_half_bytes = rocke_b_const_i32(b, 2);
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     ctx->c_H = ctx->params.p_Hi;
@@ -385,8 +395,31 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     ctx->by = rocke_b_block_id_y(b);
     ctx->bz = rocke_b_block_id_z(b);
 
-    ctx->c_n_k_tiles = rocke_b_const_i32(b, ctx->n_k_tiles);
-    ctx->c_n_c_tiles = rocke_b_const_i32(b, ctx->n_c_tiles);
+    if(spec->runtime_channels)
+    {
+        /* n_k_tiles = ceil(kpg / block_k), n_c_tiles = ceil(cpg / block_c) from
+         * the runtime channel counts. Sequenced through locals to pin Python's
+         * left-to-right SSA order. */
+        int block_k = rocke_direct_conv_wgrad_block_k(spec);
+        int block_c = rocke_direct_conv_wgrad_block_c(spec);
+        {
+            rocke_value_t* c_round = rocke_b_const_i32(b, block_k - 1);
+            rocke_value_t* sum = rocke_b_add(b, ctx->c_kpg, c_round);
+            rocke_value_t* c_blk = rocke_b_const_i32(b, block_k);
+            ctx->c_n_k_tiles = rocke_b_div(b, sum, c_blk);
+        }
+        {
+            rocke_value_t* c_round = rocke_b_const_i32(b, block_c - 1);
+            rocke_value_t* sum = rocke_b_add(b, ctx->c_cpg, c_round);
+            rocke_value_t* c_blk = rocke_b_const_i32(b, block_c);
+            ctx->c_n_c_tiles = rocke_b_div(b, sum, c_blk);
+        }
+    }
+    else
+    {
+        ctx->c_n_k_tiles = rocke_b_const_i32(b, ctx->n_k_tiles);
+        ctx->c_n_c_tiles = rocke_b_const_i32(b, ctx->n_c_tiles);
+    }
     /* AOT: the wo-tile count follows the runtime output width.
      *   n_wo_tiles = ceil(Wo / WO_BLOCK);  n_q_blocks = ceil(n_wo_tiles / WAVES_Q)
      * Sequenced through locals to pin Python's left-to-right SSA order. */
@@ -498,7 +531,30 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     }
     /* dW[total_k, KH, KW, cpg]: every stride is a product of build-time
      * extents, so it stays a static descriptor. total_k is only a length,
-     * which offset() never reads -- the emitted IR does not depend on groups. */
+     * which offset() never reads -- the emitted IR does not depend on groups.
+     * With runtime channels the strides scale with the runtime cpg instead:
+     * [KH*KW*cpg, KW*cpg, cpg, 1]. */
+    if(spec->runtime_channels)
+    {
+        static const char* const dw_coords[4] = {"k", "r", "s", "c"};
+        rocke_value_t* strides[4];
+        rocke_dynamic_tensor_descriptor_t* dw_dyn;
+        {
+            rocke_value_t* c_khkw = rocke_b_const_i32(b, ctx->KH * ctx->KW);
+            strides[0] = rocke_b_mul(b, ctx->c_cpg, c_khkw);
+        }
+        {
+            rocke_value_t* c_kw = rocke_b_const_i32(b, ctx->KW);
+            strides[1] = rocke_b_mul(b, ctx->c_cpg, c_kw);
+        }
+        strides[2] = ctx->c_cpg;
+        strides[3] = rocke_b_const_i32(b, 1);
+        dw_dyn = rocke_tensor_descriptor_naive_dynamic(b, "D", dw_coords, 4, strides);
+        if(!dw_dyn)
+            return false;
+        ctx->dw_desc = &dw_dyn->base;
+    }
+    else
     {
         static const char* const dw_coords[4] = {"k", "r", "s", "c"};
         int lengths[4];

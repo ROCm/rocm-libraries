@@ -24,6 +24,8 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "convolution_wrw_attributes_generated.h"
 #include "custom_op_attributes_generated.h"
 #include "data_types_generated.h"
+#include "gdn_attributes_generated.h"
+#include "kda_attributes_generated.h"
 #include "layernorm_attributes_generated.h"
 #include "layernorm_backward_attributes_generated.h"
 #include "matmul_attributes_generated.h"
@@ -88,11 +90,13 @@ enum class NodeAttributes : uint8_t {
   ResampleBwdAttributes = 21,
   MoeGroupedMatmulAttributes = 22,
   MoeGroupedMatmulBwdAttributes = 23,
+  GdnAttributes = 24,
+  KdaAttributes = 25,
   MIN = NONE,
-  MAX = MoeGroupedMatmulBwdAttributes
+  MAX = KdaAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[24] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[26] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -117,13 +121,15 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[24] {
     NodeAttributes::LayernormBackwardAttributes,
     NodeAttributes::ResampleBwdAttributes,
     NodeAttributes::MoeGroupedMatmulAttributes,
-    NodeAttributes::MoeGroupedMatmulBwdAttributes
+    NodeAttributes::MoeGroupedMatmulBwdAttributes,
+    NodeAttributes::GdnAttributes,
+    NodeAttributes::KdaAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[25] = {
+  static const char * const names[27] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -148,13 +154,15 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ResampleBwdAttributes",
     "MoeGroupedMatmulAttributes",
     "MoeGroupedMatmulBwdAttributes",
+    "GdnAttributes",
+    "KdaAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::MoeGroupedMatmulBwdAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::KdaAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -255,6 +263,14 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Moe
   static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulBwdAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::GdnAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::GdnAttributes;
+};
+
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::KdaAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::KdaAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -349,6 +365,14 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulBwdAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::GdnAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::KdaAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -565,6 +589,22 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::MoeGroupedMatmulBwdAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *AsGdnAttributes() {
+    return type == NodeAttributes::GdnAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *AsGdnAttributes() const {
+    return type == NodeAttributes::GdnAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *AsKdaAttributes() {
+    return type == NodeAttributes::KdaAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *AsKdaAttributes() const {
+    return type == NodeAttributes::KdaAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -665,6 +705,14 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::GdnAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::KdaAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -863,6 +911,12 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *attributes_as_MoeGroupedMatmulBwdAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *attributes_as_GdnAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *>(attributes()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *attributes_as_KdaAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -971,6 +1025,14 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAt
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes>() const {
   return attributes_as_MoeGroupedMatmulBwdAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::GdnAttributes>() const {
+  return attributes_as_GdnAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::KdaAttributes>() const {
+  return attributes_as_KdaAttributes();
 }
 
 struct NodeBuilder {
@@ -1497,6 +1559,14 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::GdnAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case NodeAttributes::KdaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1608,6 +1678,14 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::GdnAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case NodeAttributes::KdaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1707,6 +1785,14 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value);
       return CreateMoeGroupedMatmulBwdAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::GdnAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(value);
+      return CreateGdnAttributes(_fbb, ptr, _rehasher).Union();
+    }
+    case NodeAttributes::KdaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value);
+      return CreateKdaAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1803,6 +1889,14 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::GdnAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::KdaAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(u.value));
       break;
     }
     default:
@@ -1924,6 +2018,16 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::GdnAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::GdnAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::KdaAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::KdaAttributesT *>(value);
       delete ptr;
       break;
     }

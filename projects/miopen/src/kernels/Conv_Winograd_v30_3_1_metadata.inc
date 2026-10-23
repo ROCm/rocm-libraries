@@ -148,7 +148,21 @@ __dx10_clamp = 0
 
 .rodata
 .p2align 6
-.if (.amdgcn.gfx_generation_number == 11)
+.if (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7)
+.amdhsa_kernel \kernel_name
+    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
+    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
+    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
+    .amdhsa_system_sgpr_workgroup_id_x       __sgpr_workgroup_id_x
+    .amdhsa_system_sgpr_workgroup_id_y       __sgpr_workgroup_id_y
+    .amdhsa_system_sgpr_workgroup_id_z       __sgpr_workgroup_id_y
+    .amdhsa_system_vgpr_workitem_id          __vgpr_workitem_id
+    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
+    .amdhsa_reserve_vcc                      __sgpr_reserve_vcc_default
+    .amdhsa_wavefront_size32                 0
+.end_amdhsa_kernel
+.elseif (.amdgcn.gfx_generation_number == 11)
 .amdhsa_kernel \kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]

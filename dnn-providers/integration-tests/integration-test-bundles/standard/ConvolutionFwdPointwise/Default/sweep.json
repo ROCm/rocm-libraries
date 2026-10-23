@@ -1,0 +1,8573 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a62ff5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/22",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_22"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_fd0730",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/6",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_6"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/8",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_8"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_bc6e99",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/22",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_22"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_a4427b",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/122",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_122"
+      }
+    },
+    {
+      "id": "2_4_7_7_bfp16_nchw_dil2x2_postpad1x1_prepad1x1_7fca4e",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/66",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_66"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_5baf74",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/9",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_9"
+      }
+    },
+    {
+      "id": "1_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2968fe",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/0",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_2d24d5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/106",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_106"
+      }
+    },
+    {
+      "id": "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_2ba9c1",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/41",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_41"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_b454fd",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/81",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_81"
+      }
+    },
+    {
+      "id": "2_8_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_2925ba",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/129",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_129"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_064c42",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/16",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_16"
+      }
+    },
+    {
+      "id": "1_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_8fc8a8",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/72",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_72"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_7896d6",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/80",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_80"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_1e9c0b",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/26",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_26"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c1a710",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/1",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_1"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_f969cb",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              72,
+              24,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/130",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_130"
+      }
+    },
+    {
+      "id": "2_4_7_7_bfp16_nhwc_dil2x2_postpad1x1_prepad1x1",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/34",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_34"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_4b8f50",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/4",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_4"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c61350",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/4",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_4"
+      }
+    },
+    {
+      "id": "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/0",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_0"
+      }
+    },
+    {
+      "id": "2_4_7_7_fp32_nchw_dil2x2_postpad1x1_prepad1x1",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/16",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_16"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_517e68",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/22",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_22"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/8",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_8"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/0",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_0"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/14",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_14"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/26",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_26"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/18",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_18"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              72,
+              24,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/32",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_32"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_e2cb87",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/24",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_24"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_0c5561",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/4",
+        "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_4"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nhwc_dil2x2_postpad2x2_prepad2x2_4298e2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/105",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_105"
+      }
+    },
+    {
+      "id": "2_8_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_069ff5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/130",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_130"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5b0a0e",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/26",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_26"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nchw_dil2x2_postpad2x2_prepad2x2_a1bcaa",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/32",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_32"
+      }
+    },
+    {
+      "id": "8_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0_f564c9",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/42",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_42"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_5e806f",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              128,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/49",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_49"
+      }
+    },
+    {
+      "id": "2_8_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_f03b93",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/57",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_57"
+      }
+    },
+    {
+      "id": "1_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_6f1505",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/74",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_74"
+      }
+    },
+    {
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_30f10b",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/80",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_80"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad0x0_prepad0x0_24e40d",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/10",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_10"
+      }
+    },
+    {
+      "id": "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_69e25f",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/114",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_114"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_d41e9b",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/121",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_121"
+      }
+    },
+    {
+      "id": "2_4_7_7_fp16_nhwc_dil2x2_postpad1x1_prepad1x1_47886f",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/137",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_137"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_5154b9",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/25",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_25"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nchw_dil2x2_postpad2x2_prepad2x2_319274",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/32",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_32"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_c50028",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              128,
+              8,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/48",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_48"
+      }
+    },
+    {
+      "id": "2_8_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_854cf1",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/57",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_57"
+      }
+    },
+    {
+      "id": "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_e3cf27",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/74",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_74"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_156537",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/88",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_88"
+      }
+    },
+    {
+      "id": "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_e8f421",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/113",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_113"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9d87b2",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/120",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_120"
+      }
+    },
+    {
+      "id": "2_4_7_7_fp32_nhwc_dil2x2_postpad1x1_prepad1x1_215c11",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/136",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_136"
+      }
+    },
+    {
+      "id": "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/40",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_40"
+      }
+    },
+    {
+      "id": "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_7a5239",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/56",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_56"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_831598",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/8",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_8"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_718a7c",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/82",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_82"
+      }
+    },
+    {
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_9db7fe",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/97",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_97"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0827b4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              72,
+              24,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/128",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_128"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_33fa68",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/18",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_18"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_d730f4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/24",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_24"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_37f944",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/72",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_72"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c5df8a",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/9",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_9"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_68cb1e",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/90",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_90"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_feb463",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/97",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_97"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_1aa394",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/106",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_106"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_19c0d5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/16",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_16"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_7b765f",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/2",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_26fe50",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/33",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_33"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_18011a",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/58",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_58"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_cdf85b",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/81",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_81"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0f4496",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/96",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_96"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_3de4a8",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2,
+            2
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/25",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_25"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2_7882a5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/32",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_32"
+      }
+    },
+    {
+      "id": "2_8_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_7d17e5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              216,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/57",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_57"
+      }
+    },
+    {
+      "id": "1_16_16_16_16_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_2cfbdd",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/74",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_74"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0_053c0e",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/80",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_80"
+      }
+    },
+    {
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0964b4",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              432,
+              1,
+              144,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1,
+            1
+          ],
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/89",
+        "operation": "Full/IntegrationGpuConvFwdBiasActiv3dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_89"
+      }
+    }
+  ]
+}

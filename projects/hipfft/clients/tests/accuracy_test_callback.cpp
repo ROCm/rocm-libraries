@@ -107,7 +107,6 @@ const static std::vector<size_t> callback_batch_range = {2};
 
 auto transform_types = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
-#ifdef __HIP__
 INSTANTIATE_TEST_SUITE_P(callback_no_offset,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
@@ -143,7 +142,6 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                                                                   false,
                                                                   callbacks_full)),
                          accuracy_test::TestName);
-#endif
 
 // one of the obvious use cases for callbacks is to implement result
 // scaling manually, so use the same sizes to test rocFFT's own

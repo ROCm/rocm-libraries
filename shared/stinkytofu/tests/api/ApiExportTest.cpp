@@ -85,7 +85,6 @@
 #include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
-#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
@@ -263,7 +262,6 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
     EXPECT_NE(createGfx1250HazardPass(), nullptr);
-    EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
     EXPECT_NE(createStinkyUnreachableBlockElimPass(), nullptr);

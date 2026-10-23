@@ -38,7 +38,7 @@ Implementation (`helpers/compile.py`):
 ```text
 1. optimize_kernel(kernel) if optimize_ir         # passes (constant fold + CSE + DCE)
 2. print_ir(kernel) if capture_ir_text            # MLIR-style debug dump
-3. lower_kernel_to_llvm(kernel)                   # AMDGPU LLVM IR text
+3. lower_kernel_to_llvm(kernel, arch=arch)        # AMDGPU LLVM IR text
 4. build_hsaco_from_llvm_ir(llvm_text, isa=...)  # libamd_comgr
 5. return KernelArtifact(kernel, ir_text, llvm_text, hsaco, timings, pass_stats, isa)
 ```
@@ -65,7 +65,9 @@ elementwise / reduce / norm / transpose:                    ~5-15 ms
 
 ## LLVM Lowering Details
 
-Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef) -> str`.
+Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef, *, arch: str,
+llvm_flavor: Optional[str] = None) -> str`. `arch` is required: there is no default target,
+and omitting it raises.
 
 `_Lowerer` walks regions and emits LLVM IR text:
 
@@ -169,7 +171,7 @@ amd_comgr_action_data_get_data(EXECUTABLE)           # extract bytes
 Libraries are loaded from the default ROCm library locations or the dynamic
 linker search path. The HSACO bytes returned are ready for `hipModuleLoadData`.
 
-`ComgrTimings(bc, relocatable, executable)` returns per-stage seconds; `compile_kernel` converts to ms in the artifact.
+`ComgrTimings(bc, link, relocatable, executable)` returns per-stage seconds (`link` is 0.0 for a single module); `compile_kernel` converts to ms in the artifact.
 
 ## HIP Debug Lowering
 

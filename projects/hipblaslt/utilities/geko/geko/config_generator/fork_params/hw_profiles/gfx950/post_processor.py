@@ -205,8 +205,8 @@ def load_CMS_groups(
     MIBlockM), matching the loop below.
     """
     try:
-        from Tensile.Components.CustomSchedule import query_cms_kernels
-        from Tensile.Common.ValidParameters import validParameters
+        from tensilelite.Components.CustomSchedule import query_cms_kernels
+        from tensilelite.Common.ValidParameters import validParameters
     except ImportError:
         import sys
         import os
@@ -226,11 +226,11 @@ def load_CMS_groups(
         
         if tensilelite_path:
             sys.path.insert(0, tensilelite_path)
-            from Tensile.Components.CustomSchedule import query_cms_kernels
-            from Tensile.Common.ValidParameters import validParameters
+            from tensilelite.Components.CustomSchedule import query_cms_kernels
+            from tensilelite.Common.ValidParameters import validParameters
         else:
             raise ImportError(
-                "Tensile not found. Could not locate tensilelite directory "
+                "tensilelite not found. Could not locate tensilelite directory "
                 "in parent directories of this file."
             )
     
@@ -292,7 +292,8 @@ SUBTILE_ACTIVE_PARAMS = frozenset({
     "DepthU",
     "WorkGroupMapping",
     "WorkGroupMappingXCC",
-    "StreamK",
+    "TileProcessingStrategy",
+    "WorkAssignment",
     "NonTemporalA",
     "NonTemporalB",
     "NonTemporalC",
@@ -384,8 +385,9 @@ class GFX950SubtilePostProcessor(BasePostProcessor):
             "DepthU": [fixed_DU],
             "WorkGroupMapping": [0],
             "WorkGroupMappingXCC": [-1],
-            "StreamKXCCMapping": [0],
-            "StreamK": [3],
+            "PersistentXCCMapping": [0],
+            "TileProcessingStrategy": ["StreamK"],
+            "WorkAssignment": ["StaticGrid"],
             "UseSubtileImpl": [True],
             "UseCustomMainLoopSchedule": [0],
             "PrefetchGlobalRead": [0, 1, 2],

@@ -64,7 +64,7 @@ class GuardRejected(ExpandError):
 def magic_division_constants(divisor: int) -> tuple:
     """`(multiplier_i32, shift)` for a strength-reduced unsigned `n // divisor`.
 
-    The canonical mirror of `helpers/transforms.py::calculate_magic_numbers` plus
+    The canonical mirror of `helpers/magic_division.py::calculate_magic_numbers` plus
     `do_magic_division`'s two's-complement wrap (itself a port of CK Tile's
     `magic_division32_bit_range`). Kernels bake these two integers in as
     `const_i32` operands of `(umul_hi(n, M) + n) >> s`, so a recipe that wants to

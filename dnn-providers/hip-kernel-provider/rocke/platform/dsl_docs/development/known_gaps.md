@@ -18,7 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -98,6 +100,76 @@ families in `cpp/bindings/prove_parity_binding.py`.
 gfx11 `s_waitcnt` *layout*, exactly as in Python's `Gfx1250Backend`. The gfx1250
 57-bit SRD is deferred; the waitcnt layout is unreachable because
 `emits_legacy_s_waitcnt` is false. Both are faithful mirrors, not C++-side debt.
+`s_buffer_prefetch_data` consumes a `buffer_rsrc` value and so carries the same
+word3 placeholder; it is a hint, so a wrong word3 loses the prefetch rather
+than the result. `isa_features/data_prefetch_verify.py` passes on a gfx1250
+device with exact results, so `has_scalar_data_prefetch` and
+`has_global_prefetch` are set for gfx1250. The run shows only that results are
+unchanged; it does not show that a prefetch reached the cache.
+
+**Workgroup clusters are device-verified through the Python runtime.** The five
+`gpu.cluster_*` reads and `tile.cluster_barrier` lower identically in both
+engines and `isa_features/cluster_ids_verify.py` pins their ISA. The
+`cluster_dims` kernel attr lowers to `"amdgpu-cluster-dims"` in both engines and
+reaches the code-object `.cluster_dims` metadata. On a gfx1250 device, both
+functional checks pass through `Runtime.launch(..., cluster=)`: a plain launch
+behaves as a 1x1x1 cluster (ids 0, max ids 0, `cluster_size` 1), and a 2x2x1
+cluster launch reports the ids the host reference derives from the launch
+shape. `has_cluster_launch` is set for gfx1250. Other limits:
+
+- Only the Python `Runtime.launch` path has run on a device.
+  `LaunchConfig.cluster` and the portable-IR plan's `cluster` are covered by
+  host-side tests only. The hipDNN provider does not launch clustered kernels.
+- The probe runs `cluster_barrier` and the kernel completes, but no check
+  depends on its ordering.
+
+- `hip_module.Runtime.launch` checks the cluster shape and grid divisibility,
+  but not that the shape matches the kernel's `.cluster_dims`; only
+  `KernelLauncher` and the portable-IR plan compare the two.
+- No launch path checks uniform work-group size, LDS, or occupancy against the
+  cluster; a cluster that cannot be co-scheduled is left to the driver.
+- `lower_hip.py` ignores `cluster_dims`, so the HIP-source path cannot express a
+  clustered kernel.
+- The C JSON importer and recipe VM reject a malformed int-list kernel attr, an
+  array under any tag other than `"l"`, and a `cluster_dims` without the `"l"`
+  tag. Other non-array values under a list key (`agpr_alloc` as a string) keep
+  their own tag, and the recipe VM still ignores non-int scalar kernel attrs.
+- Only the combined `s.cluster.barrier` is exposed; split cluster arrive/wait on
+  barrier id -3 is deferred, because only one wave per workgroup may signal it.
+
+**Cluster multicast loads have no production user.** `tile.cluster_load`
+(b32/b64/b128) and `tile.cluster_load_async_to_lds` (b8/b32/b64/b128) lower
+identically in both engines, and `isa_features/multicast_verify.py` pins their
+ISA. Its three functional runs (multicast groups of 1, 2, and 4 workgroups in a
+4x1x1 cluster) pass on a gfx1250 device, which confirms the mask semantics and
+the async-to-LDS delivery, so `has_multicast_load` is set for gfx1250. No
+gfx1250 instance uses multicast yet. The ops check the mask type but not that
+it is wave-uniform or that it selects only workgroups inside the launched
+cluster; both are left to the caller.
+
+**TDM has a descriptor builder but no production user.**
+`IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
+D# groups, and `isa_features/tdm_verify.py` runs a real global -> LDS -> global
+round trip with a padded row pitch. That round trip passes on a gfx1250 device,
+so `has_tdm` is set for gfx1250, but no gfx1250 instance uses TDM yet. Other
+limits:
+
+- Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
+  rank, gather, or iteration.
+- The multicast `workgroup_mask` is packed but never launched.
+- LDS padding is exposed only through the raw `pad_interval` and
+  `pad_amount` fields.
+
+**The block-scaled GEMM prefetch flag is correctness-verified only.**
+`BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch
+ops. Its LLVM and flag-on/flag-off ISA are pinned by
+`tests/core/test_gfx1250_prefetch_users.py` and
+`isa_features/prefetch_users_verify.py`. On a gfx1250 device the flag-on
+kernels match the reference and the flag-off kernels bit for bit on the
+`wmma`, `wmma_scale`, and `wmma_scale16` paths, and `gemm/block_scaled_gemm_verify.py
+--prefetch` passes every scale case. No run has measured the effect on
+performance, so the flag stays opt-in rather than following
+`has_scalar_data_prefetch`.
 
 ---
 
@@ -127,6 +199,48 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 | `gemm_epilogue.cpp` | Heterogeneous-dtype `_storage_dtype` `ValueError` text. | No public `_storage_dtype` validator exists in a shared header. Emit-path call sites only need the resolved IR type (dtypes already validated upstream by `ck_gemm_storage_dtype` in `gemm_spec.cpp`), so IR is byte-identical; only the heterogeneous-reject *message* is deferred until a shared validator lands. |
 | `deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
 | `deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
+
+---
+
+## 5. Library attention — additive bias (Python engine only)
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, gfx950 tiled 2D / 3D split-KV instances
+
+The gfx950 unified tiled 2D and 3D split-KV kernels accept `use_additive_bias`
+in the Python engine only (`library/kernels/common/_attention_additive_bias.py`).
+With the flag off (the default) nothing is emitted, so every bias-off kernel is
+byte-identical and the gate is unaffected. With it on, the C++ engine has no
+equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
+cannot request bias either, so Python and C++ selection agree on every problem
+the provider can express.
+
+| Area | What's missing | Why blocked / what unblocks it |
+|---|---|---|
+| Problem and spec structs | `use_additive_bias` on the unified problem and the gfx950 tiled 2D / 3D spec structs, with the spec validator's rejections (mask-limit, invariant hoist, mask-once, non-transposed 32x32, grouped-kv2, register-PV, strided KV). | Scoped out of the Python feature change. Unblocked by adding the field to the public instance headers and mirroring the validators. |
+| Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
+| Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
+| Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+
+---
+
+## 6. gfx942 MLA prefill — Python-only kernel builder
+
+**Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
+
+The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
+spec, or dispatch selector; it is built and selected in Python only. This
+follows the gfx942/gfx950 `attention_dense` family, which also ships without a
+C++ builder mirror.
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every MLA golden case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1`
+(`library/tests/test_attention_ir_cpp_parity.py::test_mla_prefill_ir_cpp_python_byte_identity`).
+The Python IR itself is pinned by the MLA IR golden through `check_golden`
+(`library/tests/test_mla_prefill_gfx942_golden.py`).
+
+**What unblocks a C++ twin:** a decision to restore per-family C++ builder
+mirrors; until then, keep emission changes gated by the two tests above.
 
 ---
 

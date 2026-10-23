@@ -339,6 +339,18 @@ hipsolverDn<type>sytrs()
 ---------------------------------------------------
 .. doxygenfunction:: hipsolverDnXsytrs
 
+.. _dense_trtri_bufferSize:
+
+hipsolverDn<type>trtri_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXtrtri_bufferSize
+
+.. _dense_trtri:
+
+hipsolverDn<type>trtri()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXtrtri
+
 
 
 .. _dense_leastsqr:

@@ -46,7 +46,7 @@ from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
 from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from .SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -73,6 +73,7 @@ _CACHE_FIELDS = {
     "InternalSupportParams": "internalSupportParams",
     "CustomKernelWildcard": "customKernelWildcard",
 }
+_KERNEL_NAMING_VERSION = 2
 
 # Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
 # --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
@@ -123,7 +124,9 @@ _CACHE_KEY_LEN = 12
 
 def _cacheDataMatches(cacheData, benchmarkStep):
     """Check if cached data matches the current benchmark step parameters."""
-    return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
+    return cacheData.get("KernelNamingVersion") == _KERNEL_NAMING_VERSION and all(
+        cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()
+    )
 
 
 def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
@@ -152,6 +155,7 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs):
     hand the wrong machine code to silicon that cannot run it.
     """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    cacheFields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
@@ -494,7 +498,6 @@ def writeBenchmarkFiles(
 
     kernels = []
     kernelHelperObjs = []
-    kernelNames = set()
     kernelHelperNames = set()
 
     # get unique kernels and kernel helpers
@@ -502,10 +505,7 @@ def writeBenchmarkFiles(
         for solution in tqdm(solutions, "Finding unique solutions"):
             solutionKernels = solution.getKernels()
             for kernel in solutionKernels:
-                kName = getKeyNoInternalArgs(kernel, debugConfig.splitGSU)
-                if kName not in kernelNames:
-                    kernels.append(kernel)
-                    kernelNames.add(kName)
+                kernels.append(kernel)
 
             solutionHelperKernels = initHelperKernelObjects(solution,
                                                             KernelHelperEnum.All,
@@ -645,7 +645,11 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
-    groupName = "{}_{:02d}".format(str(benchmarkProcess.problemType), problemSizeGroupIdx)
+    # outerBenchmarkIdx keeps two BenchmarkProblems that share a problem type
+    # from writing the same directory. The second used to skip or overwrite
+    # the first, so exact-size custom kernels never reached library logic.
+    groupName = "{}_{:02d}_{:02d}".format(
+        str(benchmarkProcess.problemType), outerBenchmarkIdx, problemSizeGroupIdx)
     groupNamePath = benchmarkProblemsPath / groupName
     ensurePath(groupNamePath / "Data")
 
@@ -761,6 +765,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 with timing_context("python_write_cache"):
                     cachePath = os.path.join(cacheDir, "cache.yaml")
                     cacheData = {
+                        "KernelNamingVersion": _KERNEL_NAMING_VERSION,
                         "CodeObjectFiles": codeObjectFiles,
                         "LibraryFile": libraryFileRel,
                         "ConstantParams": benchmarkStep.constantParams,
@@ -959,13 +964,15 @@ def main(
 
             # using a suffix to check the csv version (for later addFromCSV())
             csvSuffix = "_CSVWinner" if globalParameters["CSVExportWinner"] else ""
-            # results files will be named
-            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
+            # results files will be named. outerIdx is part of the name so a
+            # later BenchmarkProblem with the same type does not skip the file
+            # written for an earlier exact-size custom kernel.
+            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.csv" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.yaml" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.gsp" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
 
             # skip if possible
             if globalParameters["ForceRedoBenchmarkProblems"] \
@@ -1015,8 +1022,8 @@ def main(
                     if os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
             else:
-                print1("# {}_{:02d} already benchmarked; skipping." \
-                        .format(str(problemTypeObj), idx) )
+                print1("# {}_{:02d}_{:02d} already benchmarked; skipping." \
+                        .format(str(problemTypeObj), outerIdx, idx) )
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

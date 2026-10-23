@@ -14,7 +14,9 @@ def _spec(idx):
     return Tf32MmaProbeSpec(16 if idx < 5 else 32, PREPARATIONS[idx % 5])
 
 
+def main() -> int:
+    return run_emit(_spec, lambda spec, arch: build_tf32_mma_probe(spec), arch="gfx942")
+
+
 if __name__ == "__main__":
-    raise SystemExit(
-        run_emit(_spec, lambda spec, arch: build_tf32_mma_probe(spec), arch="gfx942")
-    )
+    raise SystemExit(main())

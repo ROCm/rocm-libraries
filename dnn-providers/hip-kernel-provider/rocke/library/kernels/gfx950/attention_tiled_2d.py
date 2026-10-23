@@ -40,8 +40,12 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional, Tuple
+
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -61,6 +65,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -159,6 +164,7 @@ class UnifiedAttention2DTiledSpec:
     has_softcap: bool
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # Number of wave64 warps per CTA. `BLOCK_M = num_warps * 16` rows are
     # processed per CTA, with each warp owning its own 16-row slice. The
@@ -473,8 +479,37 @@ class UnifiedAttention2DTiledSpec:
     # no-SW transposed-32x32 combo (TRANSPOSED_MASK_LIMIT). Default OFF
     # (golden-safe; the single-loop body is byte-identical).
     use_mask_phase_split: bool = False
+    # Top-left causal: the unshifted ``key_pos <= query_pos`` diagonal, with the
+    # query position local to each sequence. Default (False) keeps the paged
+    # bottom-right diagonal ``context_len = seq_len - q_len``; True pins
+    # ``context_len = 0`` so every bound derived from it (per-element mask, tile
+    # skip, peel split, sliding window, ALiBi/qq-bias offsets) follows.
+    causal_top_left: bool = False
+    # Right bound of the attention band: key ``k`` is visible to the query at
+    # diagonal position ``d`` iff ``k <= d + right_bound``. 0 (default) is causal,
+    # R > 0 lets a query see R keys ahead of its diagonal, -1 is unbounded (no
+    # upper bound: with ``sliding_window == 0`` that is full attention). ``d`` is
+    # ``context_len + query_pos`` and ``sliding_window`` still bounds ``d - k``, so
+    # ``(sliding_window, right_bound)`` is the cuDNN ``(left, right)`` band relative
+    # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
+    # QQ-bias, whose offsets are defined on the causal diagonal.
+    right_bound: int = 0
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
+            raise ValueError(
+                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                "(their offsets are defined on the causal diagonal)"
+            )
         if self.num_warps not in (1, 2, 4, 8):
             raise ValueError(
                 f"num_warps must be 1, 2, 4, or 8 (got {self.num_warps}). "
@@ -541,14 +576,32 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "transposed softmax VALU opts require no sliding window"
                 )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
+            if (
+                self.has_softcap
+                or self.use_alibi
+                or self.use_qq_bias
+                or self.use_additive_bias
+            ):
                 raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, or QQ bias"
+                    "transposed softmax VALU opts do not support softcap, ALiBi, "
+                    "QQ bias, or additive bias"
                 )
             if self.use_grouped_kv2_softmax:
                 raise ValueError(
                     "transposed softmax VALU opts do not support grouped_kv2"
                 )
+        # Additive bias is emitted only on the score paths the selectors route a
+        # bias problem to (16x16 and the plain transposed 32x32 path); the hoisted
+        # and mask-once query-head variants and non-transposed 32x32 are not.
+        if self.use_additive_bias and (
+            self.use_transposed_invariant_hoist
+            or self.use_transposed_mask_once
+            or (self.use_mfma_32x32 and not self.use_transposed_qk_32x32)
+        ):
+            raise ValueError(
+                "use_additive_bias does not support use_transposed_invariant_hoist, "
+                "use_transposed_mask_once, or the non-transposed 32x32 path"
+            )
         if self.use_grouped_kv2_softmax:
             if self.dtype != "bf16":
                 raise ValueError(
@@ -564,9 +617,15 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_grouped_kv2_softmax v1 requires no sliding window"
                 )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
+            if (
+                self.has_softcap
+                or self.use_alibi
+                or self.use_qq_bias
+                or self.use_additive_bias
+            ):
                 raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, or QQ bias"
+                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
+                    "QQ bias, or additive bias"
                 )
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
@@ -770,8 +829,10 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
                 )
-            if self.use_alibi or self.use_qq_bias:
-                raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
+            if self.use_alibi or self.use_qq_bias or self.use_additive_bias:
+                raise ValueError(
+                    "use_register_pv v1 does not support ALiBi, QQ bias, or additive bias"
+                )
         if self.tile_size is not None:
             if self.tile_size <= 0 or self.tile_size % self.block_size != 0:
                 raise ValueError(
@@ -828,11 +889,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -854,6 +913,13 @@ class UnifiedAttention2DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
+            "tl" if self.causal_top_left else "",
+            (
+                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+                if self.right_bound != 0
+                else ""
+            ),
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
             "mfma32" if self.use_mfma_32x32 else "",
@@ -900,8 +966,9 @@ def supports_tiled_2d(
     num_queries_per_kv: int,
     use_alibi: bool,
     use_qq_bias: bool,
-    use_fp8: bool,
-    q_dtype,
+    use_additive_bias: bool = False,
+    use_fp8: bool = False,
+    q_dtype=None,
     num_warps: int = 1,
     block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
@@ -1083,6 +1150,7 @@ def build_unified_attention_2d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     TRANSPOSED_SCALAR_STATE = spec.use_transposed_scalar_state
     TRANSPOSED_INVARIANT_HOIST = spec.use_transposed_invariant_hoist
     TRANSPOSED_MASK_ONCE = spec.use_transposed_mask_once
@@ -1228,6 +1296,9 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
@@ -1259,7 +1330,29 @@ def build_unified_attention_2d_tiled(
     q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    if spec.causal_top_left:
+        context_len = b.const_i32(0)
+    else:
+        context_len = b.sub(seq_len, cur_batch_q_len)
+
+    # Right bound of the band (see the spec field). ``_upper_ok`` is the per-score
+    # compare ``col <= d + right_bound`` (``None`` when unbounded); every site that
+    # derived a causal limit from ``context_len`` adds ``RIGHT`` the same way. All
+    # of them are identical to the pre-existing causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+
+    def _upper_lim(causal_lim):
+        return causal_lim if RIGHT <= 0 else b.add(causal_lim, b.const_i32(RIGHT))
+
+    def _upper_ok(col_abs, causal_lim):
+        if RIGHT < 0:
+            return None
+        return b.cmp_le(col_abs, _upper_lim(causal_lim))
+
+    def _band_row_mask(row_ok, upper_ok, in_prefix):
+        if upper_ok is None:
+            return b.land(row_ok, in_prefix)
+        return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -1648,8 +1741,13 @@ def build_unified_attention_2d_tiled(
 
     # ---------------- KV tile loop bounds ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    if RIGHT < 0:
+        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
+    else:
+        msp_raw = b.add(
+            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
+        )
+        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     if SLIDING_WINDOW > 0:
@@ -1661,7 +1759,10 @@ def build_unified_attention_2d_tiled(
         first_allowed_key = b.add(
             b.sub(b.add(context_len, qb_start_pos), sw_const), b.const_i32(1)
         )
-        last_allowed_key = b.add(context_len, qpos_hi)
+        if RIGHT < 0:
+            last_allowed_key = b.sub(seq_len, b.const_i32(1))
+        else:
+            last_allowed_key = _upper_lim(b.add(context_len, qpos_hi))
         tile_start_raw = b.div(first_allowed_key, b.const_i32(T))
         tile_start = b.select(
             b.cmp_lt(tile_start_raw, b.const_i32(0)), b.const_i32(0), tile_start_raw
@@ -3328,9 +3429,13 @@ def build_unified_attention_2d_tiled(
                         else st_causal_lim_iter
                     )
                     prefix_tail = b.sub(max_seq_prefix_len, b.const_i32(1))
-                    valid_tail = b.select(
-                        b.cmp_lt(causal_lim, prefix_tail), causal_lim, prefix_tail
-                    )
+                    if RIGHT < 0:
+                        valid_tail = prefix_tail
+                    else:
+                        upper_lim = _upper_lim(causal_lim)
+                        valid_tail = b.select(
+                            b.cmp_lt(upper_lim, prefix_tail), upper_lim, prefix_tail
+                        )
                     st_row_half_base = b.mul(lane_half32, b.const_i32(4))
                     # VALU reduction for the per-element mask (algebraically
                     # identical to ``land(row_ok, col_abs <= valid_tail)``):
@@ -3450,9 +3555,9 @@ def build_unified_attention_2d_tiled(
                                     TRANSPOSED_INVARIANT_HOIST or TRANSPOSED_MASK_ONCE
                                 ):
                                     causal_lim = b.add(context_len, qp_r)
-                                causal_ok = b.cmp_le(col_abs, causal_lim)
+                                causal_ok = _upper_ok(col_abs, causal_lim)
                                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                                 if SLIDING_WINDOW > 0:
                                     dist = b.sub(causal_lim, col_abs)
                                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -3497,6 +3602,26 @@ def build_unified_attention_2d_tiled(
                                     align=4,
                                 )
                                 score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                            if USE_ADDITIVE_BIAS:
+                                # additive_bias[seq_idx*batch_stride + q_head*head_stride
+                                #               + qp_r*sq_stride + col_abs]
+                                # stride=0 broadcasts that dimension. The head is
+                                # the per-row *query* head (GQA-correct; the spec
+                                # rejects bias with the hoist / mask-once variants,
+                                # so ``qh_r`` is always set here). Under ``m_ok``,
+                                # padding rows and tail columns (col_abs >= seq_len)
+                                # load element 0 instead of an out-of-range index.
+                                score = add_additive_bias(
+                                    b,
+                                    score,
+                                    additive_bias,
+                                    seq_idx=seq_idx,
+                                    q_head=qh_r,
+                                    q_row=qp_r,
+                                    col=col_abs,
+                                    mask=m_ok,
+                                    rcp_ln2=rcp_ln2,
+                                )
                             st_scores[(group_idx, n, reg)] = score
                             st_local_max = b.fmax(st_local_max, score)
                 st_remote_max = b.warp_shuffle_xor(st_local_max, 32)
@@ -3685,9 +3810,9 @@ def build_unified_attention_2d_tiled(
                 causal_lim = hoist_causal_lim[reg]
                 for n in range(QK_N_TILES):
                     col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
-                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -3760,9 +3885,9 @@ def build_unified_attention_2d_tiled(
                         b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
                         lane_col,
                     )
-                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -3806,6 +3931,20 @@ def build_unified_attention_2d_tiled(
                             align=4,
                         )
                         score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                    if USE_ADDITIVE_BIAS:
+                        # Per-row query head; ``m_ok`` guards the load (see
+                        # the transposed path above).
+                        score = add_additive_bias(
+                            b,
+                            score,
+                            additive_bias,
+                            seq_idx=seq_idx,
+                            q_head=hoist_qh_r[reg],
+                            q_row=qp_r,
+                            col=col_abs,
+                            mask=m_ok,
+                            rcp_ln2=rcp_ln2,
+                        )
                     masked[(n, reg)] = score
 
             # ---- per-row max via cross-lane butterfly ----
@@ -4320,12 +4459,20 @@ def build_unified_attention_2d_tiled(
         #   split = min((min_causal_lim+1)//T, max_seq_prefix_len//T)
         # clamped to [tile_start, tile_end]. Phase 1 (tile_start..split) elides
         # the mask; phase 2 (split..tile_end) is the masked boundary.
-        min_causal_lim = b.add(context_len, qb_start_pos)
-        full_by_causal = b.div(b.add(min_causal_lim, b.const_i32(1)), b.const_i32(T))
-        full_by_prefix = b.div(max_seq_prefix_len, b.const_i32(T))
-        split_raw = b.select(
-            b.cmp_lt(full_by_causal, full_by_prefix), full_by_causal, full_by_prefix
-        )
+        if RIGHT < 0:
+            # no upper bound: only the prefix ends a full tile
+            split_raw = b.div(max_seq_prefix_len, b.const_i32(T))
+        else:
+            min_causal_lim = _upper_lim(b.add(context_len, qb_start_pos))
+            full_by_causal = b.div(
+                b.add(min_causal_lim, b.const_i32(1)), b.const_i32(T)
+            )
+            full_by_prefix = b.div(max_seq_prefix_len, b.const_i32(T))
+            split_raw = b.select(
+                b.cmp_lt(full_by_causal, full_by_prefix),
+                full_by_causal,
+                full_by_prefix,
+            )
         # clamp into [tile_start, tile_end]
         split_lo = b.select(b.cmp_lt(split_raw, tile_start), tile_start, split_raw)
         split = b.select(b.cmp_lt(split_lo, tile_end), split_lo, tile_end)
@@ -4602,3 +4749,38 @@ def build_unified_attention_2d_tiled(
             b.sync()
 
     return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d``.
+
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The
+    gfx950 predicate accepts the gfx942 pipeline flags without keying admission
+    on them; the ones the spec carries are forwarded anyway so a later rule on
+    them judges the spec, not the defaults. ``use_mfma_32x32x8``,
+    ``use_conflict_free_v_store``, ``use_k_sliced_ring`` and ``use_d256_fast`` are
+    not gfx950 spec fields.
+    """
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+    )

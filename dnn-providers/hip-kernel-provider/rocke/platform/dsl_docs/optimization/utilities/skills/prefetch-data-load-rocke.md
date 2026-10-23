@@ -187,6 +187,28 @@ spec = GemmSpec(
 - Better overlaps with MFMA execution
 - **Requirement:** ROCm 6.1+ and gfx950 ISA support
 
+### LDS DMA and the backend's conservative waits
+
+`buffer_load ... lds` (gfx942 too, one dword per lane) completes on `vmcnt`.
+Unless it can prove otherwise, the backend (SIInsertWaitcnts) assumes any
+later LDS read may alias an in-flight LDS DMA and inserts `s_waitcnt vmcnt(0)`
+before it. That serialises the DMA latency into compute, and it defeats
+spreading DMA issue between MFMAs: every read after a DMA waits for it.
+
+rocke pools LDS allocations into one global, so the backend cannot tell
+buffers apart on its own. Set the kernel attribute
+`b.kernel.attrs["lds_alias_scopes"] = True` and both lowering engines attach
+`!alias.scope` / `!noalias` metadata to `smem_load_vN`, `smem_store_vN` and
+`async_buffer_load_lds_addr` (the DMA's destination is traced through
+`smem_addr_of` / `smem_ptr_add`). Each allocation gets its own scope and is
+`noalias` only against allocations whose pooled byte ranges are disjoint, so
+liveness-shared bytes stay "may alias". A read then waits only for DMA into its
+own allocation -- e.g. the slot being computed on, not the slot being filled.
+The attribute assumes `smem_ptr_add` offsets stay inside the base allocation.
+
+On llvm23, `buffer_load_lds_async` with `asyncmark` / `wait_asyncmark` is the
+other way out: async DMA is synchronised only by the explicit marks.
+
 ## Register Budget
 
 Prefetch stages consume **arch_vgpr** (architectural VGPRs) for buffering:

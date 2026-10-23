@@ -481,6 +481,47 @@ namespace
         expectPolicy(readSize(), policies[0]);
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, OmittedTemporalHintsKeepLegacyNonTemporal)
+    {
+        size.erase("temporalHintA");
+        size.erase("temporalHintB");
+        size.erase("hasTemporalHint");
+        size["nonTemporalA"] = object(4);
+        size["nonTemporalB"] = object(0);
+
+        auto decoded = readSize();
+        EXPECT_EQ(decoded.temporalHintA, 0);
+        EXPECT_EQ(decoded.temporalHintB, 0);
+        EXPECT_FALSE(decoded.hasTemporalHint);
+        EXPECT_EQ(decoded.nonTemporalA, 4);
+        EXPECT_EQ(decoded.cacheHintA(), 4);
+        EXPECT_EQ(decoded.cacheHintB(), 0);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, TemporalHintsRoundTripAndOverrideLegacy)
+    {
+        size["hasTemporalHint"] = object(true);
+        size["temporalHintA"]   = object(3);
+        size["temporalHintB"]   = object(1);
+        size["nonTemporalA"]    = object(0);
+        size["nonTemporalB"]    = object(4);
+
+        auto decoded = readSize();
+        EXPECT_TRUE(decoded.hasTemporalHint);
+        EXPECT_EQ(decoded.temporalHintA, 3);
+        EXPECT_EQ(decoded.temporalHintB, 1);
+        EXPECT_EQ(decoded.cacheHintA(), 4);
+        EXPECT_EQ(decoded.cacheHintB(), 4);
+
+        size       = output(decoded);
+        auto again = readSize();
+        EXPECT_TRUE(again.hasTemporalHint);
+        EXPECT_EQ(again.temporalHintA, 3);
+        EXPECT_EQ(again.temporalHintB, 1);
+        EXPECT_EQ(again.cacheHintA(), 4);
+        EXPECT_EQ(again.cacheHintB(), 4);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, ConflictingMixedSelectorsAreRejected)
     {
         for(const auto& old : policies)

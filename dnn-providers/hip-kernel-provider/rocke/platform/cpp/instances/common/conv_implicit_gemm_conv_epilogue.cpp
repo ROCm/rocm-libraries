@@ -178,6 +178,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* Under group_merge the N coord *is* the merged group index and every one
+     * of its Gm values is a real output at a consecutive NHWC channel -- there
+     * is no diagonal to gather here, because the mask was spent on the B load.
+     * The caller passes the merged group base and N bound; the store itself is
+     * untouched and dense. */
     rocke_direct_epilogue_t epi;
 
     epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
@@ -251,6 +256,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* group_merge does not reach here: the gate is MFMA-only (wave_size 64). */
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
     int mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
     const char* dtype_d = spec->dtype_d;
@@ -405,6 +411,13 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
+    /* This is the epilogue group_merge actually ships on (the validator rejects
+     * `default` once the merged store vector exceeds 1). Merging is a strictly
+     * better fit for it than CK's arrangement: because the diagonal mask was
+     * spent on the B load, all Gm N-lanes hold real outputs at consecutive
+     * stride-1 output channels, so the LDS-staged wide store is fully dense. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
     int max_store_vec;
     if(spec->has_vector_size_c)
     {
@@ -413,8 +426,15 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     else
     {
         /* Mirror Python default_vector_sizes(cpg, kpg, dtype_d)[2] (depends only on kpg):
-         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8). */
-        int kpg = rocke_conv_problem_kpg(p);
+         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8).
+         *
+         * The merged problem here is the store-side half of the win: merged kpg
+         * is Gm, so this goes from 1 to min(Gm, 8). It must agree with the
+         * identical computation in the validator (the build glue's default
+         * epilogue gate), which is why both read the merged problem -- if they
+         * diverge the validator admits a spec whose epilogue it would have
+         * rejected. */
+        int kpg = rocke_conv_problem_kpg(&merged);
         bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
         if(is_fp32_d)
             max_store_vec = (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
@@ -501,6 +521,9 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                    ctx->extra_context,
                                    ctx->ov->user);
     }
+    /* The store's N bound is Python's c_N_bound: kpg, or kpg*Gm == Gm under
+     * merge (the true kpg, 1 on depthwise, would clamp away Gm-1 of every Gm
+     * real outputs). */
     /* elif spec.epilogue == "cshuffle": */
     else if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
     {
@@ -516,7 +539,7 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           ctx->D_desc,
                                           ctx->d_k_out_group_base,
                                           ctx->p_M,
-                                          ctx->p_kpg);
+                                          ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)
@@ -537,7 +560,7 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                              ctx->D_desc,
                                              ctx->d_k_out_group_base,
                                              ctx->p_M,
-                                             ctx->p_kpg);
+                                             ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     /* else: */
     else
@@ -553,6 +576,6 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                         ctx->D_desc,
                                         ctx->d_k_out_group_base,
                                         ctx->p_M,
-                                        ctx->p_kpg);
+                                        ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
 }

@@ -65,6 +65,30 @@ endif()
 
 get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
 
+# ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
+# built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
+# checker resolves nm at runtime (prefers llvm-nm, falls back to nm) from PATH, and python3 is
+# likewise taken from PATH at ctest time -- the build-stage interpreter and the build-tree llvm-nm
+# do not exist when the packaged tests run on a separate machine. find_package/find_program here
+# are only configure-time existence gates, not paths baked into the test command. The whole check
+# is POSIX/ELF-only: on Windows the DLL export set is driven by __declspec and there is no version
+# script, so it is skipped there (matching library/src/hiptensor.map's guard).
+if(NOT WIN32)
+    find_package(Python3 3.9 COMPONENTS Interpreter)
+    find_program(HIPTENSOR_NM_EXECUTABLE NAMES llvm-nm nm)
+    if(Python3_Interpreter_FOUND AND HIPTENSOR_NM_EXECUTABLE)
+        # Stage the checker into the build tree so neither the build-tree test nor the install
+        # rule depends on PROJECT_SOURCE_DIR at ctest time. Test packages ship binaries without
+        # the source tree (e.g. TheRock's artifact-hiptensor.toml publishes only bin/**), so a
+        # path into scripts/ under the source dir would not exist when the packaged tests run.
+        set(HIPTENSOR_ABI_CHECKER_SRC "${PROJECT_SOURCE_DIR}/scripts/check_exported_symbols.py")
+        set(HIPTENSOR_ABI_CHECKER "${CMAKE_CURRENT_BINARY_DIR}/abi/check_exported_symbols.py")
+        configure_file("${HIPTENSOR_ABI_CHECKER_SRC}" "${HIPTENSOR_ABI_CHECKER}" COPYONLY)
+    else()
+        message(STATUS "abi_exported_symbols test disabled (need Python3 interpreter and nm/llvm-nm)")
+    endif()
+endif()
+
 # Setup a test manifest
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
@@ -200,10 +224,13 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
+    # hiptensor::host_reference supplies the CPU reference + data-type helpers that are no
+    # longer exported from libhiptensor.so (hidden-visibility baseline). It must precede
+    # hiptensor::hiptensor so those symbols resolve from the static copy, not the .so.
     if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::host_reference hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::host_reference hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
                               "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
     endif()
 
@@ -283,10 +310,12 @@ function(add_hiptensor_unit_test)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
+    # See add_hiptensor_test: host_reference must precede hiptensor so the now-hidden CPU
+    # reference / data-type helper symbols resolve from the static copy, not the .so.
     if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::host_reference hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::host_reference hiptensor::hiptensor hiptensor_llvm GTest::gtest "-L${HIPTENSOR_CLANG_ROOT}/lib"
                               "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     endif()
     target_include_directories(${BINARY_NAME} PRIVATE
@@ -350,6 +379,15 @@ add_subdirectory(00_unit)
 add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
+
+# Build-tree ABI export-surface test (host-only). Asserts the just-built shared library exports
+# nothing beyond the public allowlist. $<TARGET_FILE:hiptensor> expands to the versioned .so.
+if(HIPTENSOR_ABI_CHECKER)
+    add_test(
+        NAME abi_exported_symbols
+        COMMAND python3 ${HIPTENSOR_ABI_CHECKER} $<TARGET_FILE:hiptensor>)
+    set_tests_properties(abi_exported_symbols PROPERTIES LABELS "symbol-visibility")
+endif()
 
 # Test entries for the install-tree category filters.
 #
@@ -555,6 +593,12 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         foreach(_hiptensor_host IN LISTS _HIPTENSOR_HOST_TESTS)
             _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
         endforeach()
+        if(HIPTENSOR_ABI_CHECKER)
+            # Resolve python3/nm from PATH at ctest time: the build-stage interpreter and the
+            # build-tree llvm-nm do not exist when the packaged tests run on a separate machine.
+            _hiptensor_emit_test("abi_exported_symbols ${_hiptensor_suffix}"
+                "python3 abi/check_exported_symbols.py ../../${CMAKE_INSTALL_LIBDIR}/libhiptensor.so")
+        endif()
     endif()
 
     foreach(_hiptensor_dev IN LISTS _HIPTENSOR_DEVICE_TESTS)
@@ -707,6 +751,16 @@ rocm_install(
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
 )
+
+# Install the ABI checker alongside the install-tree test fragment so the
+# "abi_exported_symbols <tier>" entry resolves `abi/check_exported_symbols.py`.
+if(HIPTENSOR_ABI_CHECKER)
+    rocm_install(
+        PROGRAMS "${HIPTENSOR_ABI_CHECKER}"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/abi"
+        COMPONENT tests
+    )
+endif()
 
 # Install the config subtrees so the validation / ffm / bench entries' `-y` paths
 # resolve at ctest runtime. The on-disk config layout mirrors the install

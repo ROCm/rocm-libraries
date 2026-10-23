@@ -60,7 +60,7 @@ Python-driven C++ lowering receives the Python-resolved flavor explicitly. Stand
 
 **Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` calls `_assert_ir_flavor_matches_lib`, which compares the recognized IR datalayout `p8` generation with the generation selected from loaded compiler evidence. `p8:128:128:128:48` is `P8_INDEXED` (llvm22/llvm23); `p8:128:128` is `P8_PLAIN` (llvm20). A known mismatch in either direction raises `ComgrError` with compiler provenance and corrective guidance. The check is independent of emission overrides: selecting a flavor does not change the compiler consuming the IR. Unavailable compiler-version evidence raises `ComgrError` before creating IR compiler inputs, even with an emission override or an unrecognized input datalayout. With known compiler evidence, matching generations pass this guard and an unrecognized input layout leaves layout validation to COMGR. This Python runtime guard applies to IR from either lowering engine when compiled through that path. It checks the p8 generation, not every DataLayout field or intrinsic signature.
 
-Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22` / `LLVM_FLAVOR_LLVM23`). All three constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` (and to `_INTRINSIC_DECLS_LLVM23_OVERRIDES` if LLVM 23 differs again — it currently just copies the llvm22 table), and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples). Prefer `_is_modern_flavor(self._flavor)` over naming flavors in the branch: `test_no_hand_rolled_flavor_membership_lists` rejects a literal listing two or more flavor constants, because that is the shape that silently left `llvm23` out.
+Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22` / `LLVM_FLAVOR_LLVM23`). All three constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` (and to `_INTRINSIC_DECLS_LLVM23_OVERRIDES` if LLVM 23 differs again — it currently just copies the llvm22 table), and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples). Prefer `_is_modern_flavor(self._flavor)` over naming flavors in the branch: `test_no_hand_rolled_flavor_membership_lists` rejects a literal listing two or more flavor constants, because that is the shape that silently left `llvm23` out.
 
 The committed golden (`tests/golden/rocke_representative_ir_sha256.json`) holds one sub-document per flavor and `check_golden` verifies **all** of them from any host, so an llvm23 hash cannot go stale just because CI runs on ROCm 7.2. The comparator lives in `core/ir_golden.py` and takes its flavor list straight from `LLVM_FLAVORS`, so adding a flavor fails every golden that uses it (this one and the library's gfx942 `attention_dense` fixture) until they are re-blessed, with no golden-test edit.
 
@@ -77,17 +77,9 @@ Verified mappings:
 - pointers: `ptr addrspace(1)` (`global`), `ptr addrspace(3)` (`lds`), `ptr` otherwise.
 - vectors: `<N x elem>`.
 - SmemType: lowers to `ptr addrspace(3)` for value-level usage.
-- scalars: `i1`, `i8`, `i32`, `i64`, `f16`, `bf16`, `f32`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
+- scalars: `i1`, `i8` (also `u8`), `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`, `f64`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
 
-If you add a new dtype, check:
-
-- scalar LLVM type mapping in `_llvm_type`;
-- vector mapping if `<N x T>` is needed;
-- pointer / address-space handling;
-- load and store ops;
-- cast / pack / unpack;
-- MFMA atom support (and `MFMA_F16_ATOMS` catalog or new catalog);
-- manifest dtype parsing and reference verification.
+To add a dtype, follow [Adding a dtype](../development/extending.md#54-adding-a-dtype).
 
 ## Address Spaces
 

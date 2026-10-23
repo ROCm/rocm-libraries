@@ -121,7 +121,7 @@ def measure_occupancy_hip(
     or a .co.raw file is missing, a warning is printed and the original
     occupancy is kept for the affected kernels.
     """
-    from Tensile.SolutionStructs.Naming import getKernelNameMin
+    from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
     if not HIP_AVAILABLE:
         warnings.warn(

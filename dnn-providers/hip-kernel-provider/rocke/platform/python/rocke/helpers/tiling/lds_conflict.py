@@ -99,8 +99,8 @@ custom access patterns). Every function that could emit a mislabeled artifact GA
                                    arch with no corpus. Run before trusting any number.
   simulate(accesses, arch)         write-port model over an address map -> {IDX,BC,productive,c/a}.
   simulate_hist(hists, footprint)  the authoritative per-(half-wave,phase) predictor.
-  addr_map(desc, strides)          bit-exact (lane,reg)->element-address map from the REAL emit.
-  store_datum(desc, tile_free)     shared (acc, vw, datum{(lane,ph)->(K,free,dword,bank)}) builder.
+  addr_map(desc, tensor)           bit-exact (lane,reg)->element index + positions, by the verbs' helper.
+  store_datum(desc, tile_free)     shared (acc, vw, datum{(lane,ph)->(row,col,dword,bank)}) builder.
   collision_lanes(datum)           lanes piling on a bank in a served group (the located conflict).
   predict_pad_sweep / is_conflict_free / recommend_pad / conflict_free_bank_of  the stripe rule.
   gate(sim, measured)              HARD assert sim==HW; RAISES ConflictModelError on mismatch.
@@ -490,56 +490,104 @@ class NumBuilder:
         return int(a) << int(b)
 
 
-def access_width(tile_desc, strides, dtype_name, lds_swizzle):
-    """The vw the emit would choose for this LDS access (drives the per-access dword count)."""
-    from rocke.helpers.tiling.emit import _contiguous_run, _swizzle_vw
+def access_width(tile_desc, tensor, lds_swizzle):
+    """The vector width the LDS verbs choose for this access (drives the per-access dword count):
+    the verbs' own contiguous-run rule over the LDS ``tensor`` descriptor, capped by a swizzle's
+    granularity exactly as :func:`~rocke.helpers.tiling.emit.load_fragment` and
+    :func:`~rocke.helpers.tiling.emit.store_fragment` cap it."""
+    from rocke.helpers.tiling.descriptors import make_window
+    from rocke.helpers.tiling.emit import _align_of, _contiguous_run, _swizzle_vw
 
-    _ALIGN = 2 if dtype_name == "f16" else 4
-
-    class _Win:
-        bounds = None
-
-        class tensor:
-            pass
-
-    _Win.tensor.strides = strides
-    _Win.tensor.dtype = type("dt", (), {"name": dtype_name})
-    # is_lds=True: this models the descriptor's INTRINSIC contiguous-run width; the global
-    # fully-in-bounds clip gate is a runtime-window concern (needs lengths, which this width model
-    # does not carry) and does not apply to the LDS access this records.
-    vw = _contiguous_run(tile_desc, _Win, _Win.tensor.dtype, is_lds=True)
+    window = make_window(tensor, (0,) * tensor.rank)
+    vw = _contiguous_run(tile_desc, window, tensor.dtype, is_lds=True)
     if lds_swizzle:
-        vw = _swizzle_vw(lds_swizzle, vw, _ALIGN)
+        vw = _swizzle_vw(lds_swizzle, vw, _align_of(tensor.dtype))
     return vw
 
 
-def addr_map(tile_desc, strides, *, origin, n_lanes, dtype_name, lds_swizzle):
-    """Return (accesses, vw). Each access = one (lane, register-run) wide op:
-        {lane, reg0, vw, base}   where base is the element address of the run start.
+def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
+    """Return (accesses, vw). Each access is one (lane, register-run) wide op:
+        {lane, reg0, vw, base, element_positions}
+    ``base`` is the element index of the run start and ``element_positions`` the per-axis positions
+    of the run's ``vw`` elements, in memory order (element ``i`` sits at ``base + i``).
 
-    The emit issues one wide op per `vw` registers from reg0 (store_fragment loop
-    `for register in range(0, regcount, vw)`), writing `vw` CONSECUTIVE elems from the base
-    position. Bit-identical to what the kernel emits -- no re-derivation of the encoding math.
+    The index is computed by the LDS verbs' own helpers (the lane base index plus each run's
+    compile-time offset, or the swizzled positions linearised), evaluated over plain ints by
+    :class:`NumBuilder`, so the map is the address the kernel emits for ``tensor`` at ``origin`` --
+    there is no second formula to drift. The emit issues one wide op per ``vw`` registers from
+    ``reg0``; the run lies on the descriptor's stride-1 axis, so its elements are consecutive.
+    The positions are carried rather than decoded from the index, which is only possible for one
+    stride order.
     """
+    from rocke.helpers.tiling.descriptors import make_window
     from rocke.helpers.tiling.emit import (
+        _check_builtin_swizzle,
+        _lane_base_index,
+        _lds_index,
+        _register_positions,
         _swizzle_lds_positions,
-        emit_tensor_coordinates,
     )
 
-    vw = access_width(tile_desc, strides, dtype_name, lds_swizzle)
-    regcount = tile_desc.register_count
+    if lds_swizzle is True:
+        _check_builtin_swizzle(tensor)
+    window = make_window(tensor, tuple(origin))
+    vw = access_width(tile_desc, tensor, lds_swizzle)
+    swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
+    # The run's elements step along the innermost register axis, which the contiguous-run rule only
+    # widens when it is the stride-1 axis (a run of one element never steps).
+    run_axis = tile_desc.layout.register_to_rh_major[-1] - 1 if vw > 1 else None
+    # A swizzle sees every tensor axis's position, leading axes (their origins) first, as in
+    # _lds_index; the carried positions are the tile axes'.
+    leading = list(origin[: tensor.rank - len(tile_desc.shape)])
     accesses = []
-    swz = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
     for lane in range(n_lanes):
         nb = NumBuilder(lane)
-        for reg0 in range(0, regcount, vw):
-            coords = emit_tensor_coordinates(nb, tile_desc.layout, lane, reg0)
-            positions = [origin[ax] + coords[ax] for ax in range(len(coords))]
+        base_positions, base_index = _lane_base_index(nb, window, tile_desc, lane)
+        for reg0 in range(0, tile_desc.register_count, vw):
+            positions = _register_positions(nb, tile_desc, base_positions, reg0)
             if lds_swizzle:
-                positions = swz(nb, positions)
-            base = sum(positions[ax] * strides[ax] for ax in range(len(positions)))
-            accesses.append({"lane": lane, "reg0": reg0, "vw": vw, "base": base})
+                positions = swizzle(nb, leading + positions)[len(leading) :]
+            index = _lds_index(
+                nb,
+                window,
+                tile_desc,
+                lane,
+                reg0,
+                lds_swizzle,
+                None if lds_swizzle else base_index,
+            )
+            accesses.append(
+                {
+                    "lane": lane,
+                    "reg0": reg0,
+                    "vw": vw,
+                    "base": index,
+                    "element_positions": tuple(
+                        tuple(
+                            p + i if axis == run_axis else p
+                            for axis, p in enumerate(positions)
+                        )
+                        for i in range(vw)
+                    ),
+                }
+            )
     return accesses, vw
+
+
+def _datum_tensor(verb, tile_desc, strides, dtype_name, origin, n_lanes):
+    """The rank-2 LDS descriptor a (row, column) bank-conflict picture addresses: the caller's
+    ``strides`` and dtype, with lengths covering every position the access reaches (LDS accesses are
+    unclipped, so the lengths never change an address)."""
+    from rocke.core.ir import Type
+    from rocke.helpers.tiling.descriptors import make_tensor_desc
+
+    if len(strides) != 2:
+        raise ValueError(
+            f"{verb}: the (row, column) bank-conflict picture needs a rank-2 LDS descriptor -- "
+            f"strides {tuple(strides)} have rank {len(strides)}"
+        )
+    lengths = desc_extents(tile_desc, n_lanes, origin)
+    return make_tensor_desc(lengths, tuple(strides), Type(dtype_name))
 
 
 def desc_extents(tile_desc, n_lanes, origin=(0, 0)):
@@ -548,9 +596,8 @@ def desc_extents(tile_desc, n_lanes, origin=(0, 0)):
     Used to bound a fragment against its window PER AXIS. A product check (`rows*cols == elems`) is
     NOT sufficient: compensating per-axis errors cancel (a 32x16 descriptor "fits" a 16x32 window by
     element count while addressing rows that do not exist), and it says nothing about the LDS
-    allocation, whose accesses are UNCLIPPED by design (see emit.py: "LDS loads are unclipped (the
-    buffer is exactly sized)") -- so an out-of-range LDS index is not masked, it reads another
-    workgroup's memory."""
+    allocation, whose accesses are UNCLIPPED by design (see emit.py: LDS loads are unclipped) -- so an
+    out-of-range LDS index is not masked, it reads another workgroup's memory."""
     from rocke.helpers.tiling.emit import emit_tensor_coordinates
 
     ext = None
@@ -645,6 +692,7 @@ def build_probe(
     """
     from rocke.core.ir import I32, IRBuilder, PtrType
     from rocke.helpers.tiling import (
+        lds_element_span,
         load_fragment,
         make_fragment,
         make_tensor_desc,
@@ -689,8 +737,12 @@ def build_probe(
 
     band_td = make_tensor_desc((coop_free, tile_k), (tile_k, 1), dt)
     stride = tile_free + lds_pad
-    lds = b.smem_alloc(dt, [tile_k, stride], name_hint="lds_probe")
     lds_td = make_tensor_desc((tile_k, tile_free), (stride, 1), dt)
+    # The LDS buffer is flat and sized from its descriptor (and the swizzle's reach): the descriptor
+    # is the layout.
+    lds = b.smem_alloc(
+        lds_td.dtype, [lds_element_span(lds_td, swz)], name_hint="lds_probe"
+    )
 
     def _load_band():
         return load_fragment(
@@ -1042,19 +1094,23 @@ def store_datum(
 ):
     """The single source of the per-slot access picture, shared by the simulator driver, the renderer,
     and the orchestrators so they can never diverge. Returns (acc, vw, datum) where
-    `datum[(lane, phase)] = (K, free, dword, bank)` for each dword-phase the lane touches.
+    `datum[(lane, phase)] = (row, column, dword, bank)` for each dword-phase the lane touches, where
+    (row, column) are the positions on the descriptor's axes 0 and 1 of the dword's first element --
+    (K, free) for the (K, free) buffers the probes stage.
 
     NOTE: despite the name this is DIRECTION-AGNOSTIC -- it is a pure address map, and a read's map is
     built the same way (see `read_datum`). Only the SERIALIZATION rule differs between store and read,
     and that rule lives in `simulate`/`served_phase`, not here."""
     a = arch_lds(arch)
     per_dword = 4 // dtype_bytes_of(dtype_name)
+    tensor = _datum_tensor(
+        "store_datum", store_desc, strides, dtype_name, origin, a.WAVE
+    )
     acc, vw = addr_map(
         store_desc,
-        strides,
+        tensor,
         origin=origin,
         n_lanes=a.WAVE,
-        dtype_name=dtype_name,
         lds_swizzle=lds_swizzle,
     )
     datum = {}
@@ -1063,19 +1119,17 @@ def store_datum(
     # Restarting the phase index at 0 per run made instruction 1 OVERWRITE instruction 0's entries, so
     # every consumer of this map (`_locate_collision`, the 3-panel renderer) silently analyzed the LAST
     # instruction while claiming to show the store. Identical numbering for a single-run descriptor.
+    # A sub-dword access (vw < per_dword, e.g. an f16 store narrowed to one element by an odd outer
+    # stride) still touches one dword, as `_dwords` counts it.
+    dwords_per_access = max(1, vw // per_dword)
     next_phase = defaultdict(int)
     for ac in sorted(acc, key=lambda x: (x["lane"], x["reg0"])):
         d0 = ac["base"] // per_dword
         ph0 = next_phase[ac["lane"]]
-        next_phase[ac["lane"]] += vw // per_dword
-        for i in range(vw // per_dword):
-            elem = ac["base"] + per_dword * i
-            datum[(ac["lane"], ph0 + i)] = (
-                elem // strides[0],
-                elem % strides[0],
-                d0 + i,
-                (d0 + i) % a.NB,
-            )
+        next_phase[ac["lane"]] += dwords_per_access
+        for i in range(dwords_per_access):
+            row, column = ac["element_positions"][per_dword * i]
+            datum[(ac["lane"], ph0 + i)] = (row, column, d0 + i, (d0 + i) % a.NB)
     return acc, vw, datum
 
 
@@ -1395,13 +1449,12 @@ def read_datum(read_desc, tile_free, arch, strides, dtype_name, *, origin, lds_s
     """
     a = arch_lds(arch)
     per_dword = 4 // dtype_bytes_of(dtype_name)
-    row_stride = strides[0]
+    tensor = _datum_tensor("read_datum", read_desc, strides, dtype_name, origin, a.WAVE)
     acc, vw = addr_map(
         read_desc,
-        strides,
+        tensor,
         origin=origin,
         n_lanes=a.WAVE,
-        dtype_name=dtype_name,
         lds_swizzle=lds_swizzle,
     )
     per_lane = defaultdict(list)
@@ -1422,11 +1475,11 @@ def read_datum(read_desc, tile_free, arch, strides, dtype_name, *, origin, lds_s
                     # counting per-element runs would report 2x the phases the hardware
                     # issues and halve the per-instruction footprint. The ISA is the truth.
                 seen.add(d)
-                # Decode with the ROW STRIDE, not tile_free: LDS holds (K, free) at
-                # `elem = K*stride + free`, so a padded row (stride = tile_free + lds_pad) decodes to
-                # the wrong K and free if tile_free is used. Only the renderer reads these two fields,
-                # which is why it went unnoticed -- the cost path discards them.
-                datum[(lane, ph)] = (elem // row_stride, elem % row_stride, d, d % a.NB)
+                # The element's carried positions, not a decode of its index: a decode by the row
+                # stride holds for one stride order only. Only the renderer reads these two fields;
+                # the cost path discards them.
+                row, column = r["element_positions"][i]
+                datum[(lane, ph)] = (row, column, d, d % a.NB)
                 ph += 1
     # A lane that legitimately re-reads a dword in a later instruction loses that phase to the dedup,
     # so its phase indices shift and `(lane, ph)` stops meaning the same instruction/phase across

@@ -46,8 +46,8 @@ cmake --install build
 
 This installs headers under `<prefix>/include/hipccl/<component>` (e.g.
 `/opt/rocm/include/hipccl/thrust`, `/opt/rocm/include/hipccl/rocprim`) and uses
-one unified `HIPCCL_VERSION` (currently a placeholder `0.1.0`, see
-`CMakeLists.txt`) for all of rocprim/hipcub/rocthrust.
+one `HIPCCL_VERSION` (`3.0.0`, see `CMakeLists.txt`) for the hipCCL package
+itself; rocprim/hipcub/rocthrust keep their own component versions.
 
 To build a single component instead, use the matching preset (`rocprim`,
 `hipcub`, `rocthrust`) or set `HIPCCL_BUILD_ROCPRIM`/`HIPCCL_BUILD_HIPCUB`/
@@ -63,10 +63,9 @@ what's left to do.
 
 - **libhipcxx build integration**: present in-tree, not yet buildable/testable
   from the root `CMakeLists.txt`.
-- **Unified versioning**: `VERSION_STRING` is forced to `HIPCCL_VERSION` for
-  rocprim/hipcub/rocthrust via a CACHE-variable override (each of their
-  `CMakeLists.txt` was given a small guard for this). libhipcxx's own versioning
-  has not been looked at.
+- **Versioning**: `HIPCCL_VERSION` versions only the hipCCL umbrella package.
+  rocprim/hipcub/rocthrust keep their own `VERSION_STRING`. libhipcxx's own
+  versioning has not been looked at.
 - **Unified packaging**: done - see [`../README.md`](../README.md#hipccl3-unified-build-versioning-and-packaging)
   for how the single `hipccl` CPack package and the `find_package(hipccl)`
   CMake config work. License aggregation there is still a best-effort

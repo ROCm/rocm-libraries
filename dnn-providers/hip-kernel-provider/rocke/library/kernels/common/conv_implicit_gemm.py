@@ -127,14 +127,30 @@ def _sync_load_vecs(spec: "ImplicitGemmConvSpec") -> Tuple[int, int]:
     invariant holds (e.g. when tile_n is small relative to block_size). Shared
     by the builder and :func:`is_valid_spec`, which rejects an explicit width
     that breaks that invariant.
+
+    Under ``group_merge`` the defaults come from the *merged* problem: on
+    depthwise that reads (Gm, Gm) instead of (1, 1), so A's default goes from 1
+    to min(Gm, 8) -- the merged A tile really does address Gm consecutive NHWC
+    channels, because the merged group's ``c_in_group`` axis *is* the group
+    index and NHWC stores groups contiguously. B is the exception, see below.
     """
-    p = spec.problem
+    p = spec.merged_problem
     _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
         p.cpg, p.kpg, spec.data.dtype_a
     )
     _tile_vec = _choose_load_vec(spec)
     _def_vec_a = min(_def_vec_a, _tile_vec)
     _def_vec_b = min(_def_vec_b, _tile_vec)
+    if spec.group_merge > 1:
+        # B does NOT widen under merge, and taking the (Gm, Gm) default above
+        # would be actively wrong. The merged B tile is only 1/Gm dense: along
+        # the reduction axis consecutive ``k_gemm`` differ in the merged group
+        # ``g_k``, and all but the diagonal one are masked off. A vector load
+        # would fetch a whole run under a single predicate, so it cannot express
+        # a per-element mask -- it would either drop the one valid element or
+        # keep Gm-1 invalid ones. Weights are negligible for depthwise (K*Y*X
+        # elements against N*H*W*C of activations), so scalar B costs nothing.
+        _def_vec_b = 1
     load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
     load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
     return load_vec_a, load_vec_b
@@ -279,6 +295,39 @@ class ImplicitGemmConvSpec:
     # block_size + num_load_waves * wave_size. Ignored for all other pipelines.
     num_load_waves: int = 4
 
+    # Number of conv groups a single workgroup computes ("Gm"; CK calls it
+    # NumGroupsToMerge). 1 is grid-per-group, the historical behaviour.
+    #
+    # A depthwise group has cpg == kpg == 1, so its per-group forward GEMM is
+    # (N*Ho*Wo) x 1 x (Y*X) over single channels of an NHWC tensor. The free
+    # axis (GEMM-N = kpg) is one element wide and the stride-1 axis (c) sits
+    # *inside* the reduction, so both the A load and the D store degenerate to
+    # one element and every MFMA wastes all but one of its N lanes.
+    #
+    # Merging Gm adjacent groups makes the group index the fastest-varying
+    # factor of GEMM-N and GEMM-K:
+    #
+    #     M      = N*Ho*Wo          (unchanged -- the group does NOT go on M)
+    #     N_gemm = Gm               (the GEMM-N index *is* the merged group g_n)
+    #     K_gemm = Y*X*Gm           (decodes to (y, x, g_k), g_k innermost)
+    #
+    # A then reads ``in[n][hi][wi][gm_grp*Gm + k % Gm]`` -- a run of Gm
+    # consecutive NHWC channels -- and D writes ``out[n][ho][wo][gm_grp*Gm +
+    # g_n]``, likewise contiguous. Only the diagonal ``g_k == g_n`` is real
+    # work; the mask rides on the **B (weight) load**, where an invalid element
+    # becomes the loader's OOB sentinel and the buffer resource returns a
+    # hardware zero. So the off-diagonal costs no memory traffic and the store
+    # needs no mask at all -- unlike wgrad (and CK), whose merged output is a
+    # diagonal gather. This is why fwd puts Gm on N and K rather than copying
+    # wgrad's "Gm on M and N".
+    #
+    # Total MFMA issue is unchanged vs Gm == 1: grid.z shrinks by Gm exactly as
+    # K_gemm grows by Gm. The redundant MACs land in the previously idle N lanes.
+    #
+    # Default 1 emits no merge-specific IR and keeps the kernel name. (The
+    # cshuffle store width derived from kpg is a separate Gm=1 change.)
+    group_merge: int = 1
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -312,6 +361,46 @@ class ImplicitGemmConvSpec:
             self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
+    # ---- group merging (Gm) ----
+    #
+    # ``problem.M`` / ``problem.N_gemm`` / ``problem.K_gemm`` stay the TRUE
+    # per-group dims: they size the tensors, which do not merge. The ``grid_*``
+    # properties below are the dims the *tile* covers. At group_merge == 1 the
+    # two are equal, which is what keeps the default path byte-identical.
+
+    @property
+    def merged_problem(self) -> ConvProblem:
+        """``problem`` with Gm groups folded into one.
+
+        ``cpg``/``kpg`` are derived as ``C // groups`` / ``K // groups``, so
+        dividing the group count multiplies both -- and nothing else moves.
+        That is the whole trick: every consumer that asks the problem how wide
+        a channel run is then sees ``Gm`` instead of 1.
+        """
+        if self.group_merge <= 1:
+            return self.problem
+        return dc_replace(self.problem, groups=self.problem.groups // self.group_merge)
+
+    @property
+    def grid_M(self) -> int:
+        # GEMM-M the tile covers: N*Ho*Wo, unchanged by merging.
+        return self.merged_problem.M
+
+    @property
+    def grid_N_gemm(self) -> int:
+        # GEMM-N the tile covers: kpg*Gm (== Gm on depthwise).
+        return self.merged_problem.N_gemm
+
+    @property
+    def grid_K_gemm(self) -> int:
+        # GEMM-K the tile reduces over: [Z*]Y*X*cpg*Gm.
+        return self.merged_problem.K_gemm
+
+    @property
+    def grid_groups(self) -> int:
+        # Conv groups actually launched; gridDim.z is grid_groups.
+        return self.problem.groups // max(1, self.group_merge)
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -331,6 +420,10 @@ class ImplicitGemmConvSpec:
                 # that would otherwise share the plain kernel's name. Only
                 # tagged when set, so every other kernel keeps its name.
                 "unroll": self.unroll_k,
+                # Gm changes the emitted body, so it must reach the symbol:
+                # without it two degrees collide on one name and the compile
+                # cache hands the second the first's binary.
+                f"gm{self.group_merge}": self.group_merge > 1,
             },
         )
 
@@ -378,6 +471,9 @@ class ImplicitGemmConvSpec:
                 "acc_epilogue clamp_min must be <= clamp_max "
                 f"(got {self.acc_epilogue.clamp_min} > {self.acc_epilogue.clamp_max})"
             )
+        _gm_ok, _gm_why = fwd_group_merge_available(self)
+        if not _gm_ok:
+            raise ValueError(_gm_why)
 
     def effective_lds_layout(self) -> LdsLayout:
         if self.lds_layout is not None:
@@ -407,6 +503,104 @@ class ImplicitGemmConvSpec:
 
         vec_c = _vec(C)
         return vec_c, vec_c, _vec(K)
+
+
+# ---------------------------------------------------------------------
+# Group merging (Gm)
+# ---------------------------------------------------------------------
+
+# Group-merge degrees the merged-tile index math is written for. Powers of two
+# keep the group split (``kg & (Gm-1)``, ``kg >> log2(Gm)``) and the diagonal
+# test to a mask, a shift and a compare; CK constrains its own Gm to the same
+# set (its xor transform runs with ApplyModulo=false, which requires it).
+_GROUP_MERGE_DEGREES = (2, 4, 8, 16, 32, 64)
+
+
+def fwd_group_merge_available(
+    spec: ImplicitGemmConvSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec.group_merge``.
+
+    Single source of truth for :meth:`ImplicitGemmConvSpec.validate` and
+    :func:`is_valid_spec`. Two copies of a wgrad gate is exactly how the
+    dispatcher came to hand the builder a spec the builder then rejected (see
+    :func:`~.conv_implicit_gemm_wgrad.wgrad_group_merge_available`), so both
+    delegate here rather than re-deriving.
+    """
+    gm = spec.group_merge
+    if gm == 1:
+        return True, "ok"
+    if gm not in _GROUP_MERGE_DEGREES:
+        return False, (
+            f"group_merge must be 1 or one of {_GROUP_MERGE_DEGREES}; got {gm}"
+        )
+    p = spec.problem
+    if p.groups % gm != 0:
+        return False, (
+            f"group_merge {gm} does not divide groups {p.groups}: a workgroup "
+            f"would own a partial group"
+        )
+    if p.cpg != 1 or p.kpg != 1:
+        return False, (
+            f"group_merge is implemented for depthwise only (cpg == kpg == 1); "
+            f"got cpg={p.cpg} kpg={p.kpg}. Wider groups need the merged group "
+            f"index to ride alongside a real channel index on both N and K, "
+            f"which is not covered, so it is gated off."
+        )
+    if spec.wave_size != 64:
+        return False, (
+            f"group_merge is MFMA-only (wave_size 64); got wave_size="
+            f"{spec.wave_size}"
+        )
+    if spec.async_dma:
+        return False, (
+            "group_merge is incompatible with async_dma=True: AsyncTileLoader "
+            "takes no load_vec and its predicate is chunk-granular (>= 1 dword), "
+            "so it cannot express the per-element diagonal mask the merged B "
+            "load needs"
+        )
+    if spec.vector_size_b not in (None, 1):
+        # The builder forces B scalar under merge (the merged B tile is 1/Gm
+        # dense and the mask is per-element). Rejecting here rather than
+        # silently overriding keeps the spec an honest description of the
+        # emitted kernel -- a spec that says vec_b=8 and emits vec_b=1 makes
+        # every sweep row and every ISA review a lie.
+        return False, (
+            f"group_merge forces a scalar B load; got vector_size_b="
+            f"{spec.vector_size_b}. Leave it None (or 1)."
+        )
+    # The merged A load and D store both run over exactly Gm consecutive NHWC
+    # channels -- a build-time extent, so an explicit width can be checked
+    # here rather than per problem. A width that does not divide Gm straddles
+    # the merged run: the A load crosses into the next filter tap and the
+    # store fails the epilogue's whole-vector bound and is dropped.
+    for _name, _vec in (("a", spec.vector_size_a), ("c", spec.vector_size_c)):
+        if _vec is not None and gm % _vec != 0:
+            return False, (
+                f"vector_size_{_name}={_vec} does not divide group_merge {gm}: "
+                f"the merged channel run is Gm wide"
+            )
+    if p.is_pointwise:
+        return False, (
+            "group_merge is not implemented for the pointwise (1x1) fast path: "
+            "it builds its bounds predicate from scratch and has no slot for "
+            "the diagonal term"
+        )
+    if p.is_3d:
+        return False, (
+            "group_merge is not implemented for 3-D convolution: the merged "
+            "addressing lives in the 2-D split address form, and the 3-D "
+            "descriptor path has no slot for the merged channel decode or the "
+            "diagonal mask"
+        )
+    # The merged GEMM-N must fit one tile, or a tile would straddle group pairs
+    # the diagonal mask cannot separate. Mirrors CK's GemmN <= NPerBlock gate.
+    if spec.grid_N_gemm > spec.tile_n:
+        return False, (
+            f"merged GEMM-N {spec.grid_N_gemm} (kpg*{gm}) exceeds tile_n "
+            f"{spec.tile_n}"
+        )
+    return True, "ok"
 
 
 # ---------------------------------------------------------------------
@@ -479,13 +673,24 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"(hardware cap) on {arch}"
         )
 
+    _gm_ok, _gm_why = fwd_group_merge_available(spec, arch)
+    if not _gm_ok:
+        return False, _gm_why
+
     # Check global store vector size and disable default epilogue for
     # vec_size_c > 1 — whether set explicitly or auto-derived from kpg.
+    #
+    # Read the *merged* problem: under group_merge the store runs over kpg*Gm
+    # consecutive output channels, so a depthwise spec that looks scalar here
+    # (kpg == 1) really stores Gm-wide. Using spec.problem would make this rule
+    # never fire on exactly the specs merging exists for, and the validator
+    # would then disagree with the emitter about which epilogue is legal.
+    _merged = spec.merged_problem
     _eff_vec_c = (
         spec.vector_size_c
         if spec.vector_size_c is not None
         else ImplicitGemmConvSpec.default_vector_sizes(
-            spec.problem.cpg, spec.problem.kpg, spec.data.dtype_d
+            _merged.cpg, _merged.kpg, spec.data.dtype_d
         )[2]
     )
     _is_wmma_arch = target.wave_size == 32
@@ -589,7 +794,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         # pass.
         _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
         _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
-        _k_iters = (spec.problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        # Merged K_gemm is Gm x larger, so reading spec.problem here would
+        # under-count by exactly Gm and admit specs over the compile-time limit.
+        _k_iters = (spec.grid_K_gemm + spec.tile_k - 1) // spec.tile_k
         _wmma_cost = _k_iters * _mfmas_m * _mfmas_n
         _WMMA_COST_LIMIT = 512
         if _wmma_cost > _WMMA_COST_LIMIT:
@@ -720,11 +927,15 @@ def implicit_gemm_conv_grid(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int]:
     from ``blockIdx.z``). ``groups == 1`` gives the historical 2-D grid with a
     trivial ``z = 1``. When ``tile_n > kpg`` (e.g. cardinality-grouped g32/cpg8)
     ``gn == 1`` and the surplus N lanes are masked by the epilogue bound check.
+
+    Under ``group_merge > 1`` one workgroup owns ``Gm`` conv groups, so ``z``
+    shrinks by ``Gm`` and ``x`` is taken over the *merged* GEMM N. Computing
+    either from the true problem would launch ``Gm x`` redundant workgroups all
+    writing the same output.
     """
-    p = spec.problem
-    gm = (p.M + spec.tile_m - 1) // spec.tile_m
-    gn = (p.N_gemm + spec.tile_n - 1) // spec.tile_n
-    return (gn, gm, p.groups)
+    gm = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
+    gn = (spec.grid_N_gemm + spec.tile_n - 1) // spec.tile_n
+    return (gn, gm, spec.grid_groups)
 
 
 # ---------------------------------------------------------------------
@@ -890,6 +1101,24 @@ def _build_implicit_gemm_conv_impl(
     if not ok:
         raise ValueError(f"invalid conv_igemm spec for {arch}: {why}")
     p = spec.problem
+    # Group merging (Gm). The kernargs describe the TRUE problem -- the host
+    # packs them from the tensors, which do not merge -- so every merged extent
+    # the tile covers is derived in-kernel from the build-time degree. Merging
+    # is depthwise-only (``fwd_group_merge_available``), so the merged per-group
+    # channel run is exactly Gm: ``cpg*Gm`` and ``kpg*Gm`` fold to the constant
+    # ``c_gm`` and only the reduction extent (``K_gemm*Gm``) stays a runtime
+    # product. At ``group_merge == 1`` none of this is emitted.
+    merged = spec.group_merge > 1
+    p_load = spec.merged_problem
+    if merged and a_mhw_index_fn is not None:
+        # The merged A/B addressing lives in the split address form below; the
+        # descriptor-DAG path a caller-supplied (n, ho, wo) decode forces has no
+        # slot for the merged channel decode or the diagonal mask. (3-D, the
+        # other descriptor-DAG path, is rejected by fwd_group_merge_available.)
+        raise ValueError(
+            "group_merge is not implemented with an a_mhw_index_fn override: "
+            "it needs the 2-D split address form"
+        )
     ir_dtype_a = _ir_dtype(spec.data.dtype_a)
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
@@ -1020,7 +1249,25 @@ def _build_implicit_gemm_conv_impl(
 
     c0 = b.const_i32(0)
     c_block_k = b.const_i32(block_k)
-    c_K_gemm = p_K_gemm  # runtime Value (was b.const_i32(p.K_gemm))
+    if merged:
+        # Gm and its power-of-two split constants, materialised once. Gm is a
+        # power of two (enforced by the gate), so splitting the merged
+        # reduction index into its (filter position, merged group) parts is a
+        # shift and a mask rather than a division. Not just cheaper: div/mod
+        # lower to *signed* ops, and the compiler cannot see that k >= 0, so
+        # it would emit the sign-correction sequence for a quantity that is
+        # non-negative by construction.
+        c_gm = b.const_i32(spec.group_merge)
+        c_gm_mask = b.const_i32(spec.group_merge - 1)
+        c_gm_shift = b.const_i32(spec.group_merge.bit_length() - 1)
+    # Merged: [Z*]Y*X*Gm. The kernargs describe the TRUE problem (K_gemm is
+    # [Z*]Y*X on depthwise), so the merged reduction is scaled in-kernel by the
+    # build-time degree. The loop must cover it or Gm-1 of every Gm group pairs
+    # never get their diagonal iteration.
+    if merged:
+        c_K_gemm = b.mul(p_K_gemm, c_gm)
+    else:
+        c_K_gemm = p_K_gemm  # runtime Value (was b.const_i32(p.K_gemm))
 
     # Grid: (block_n_idx, block_m_idx, 1). We follow gemm_universal:
     # block.x indexes N tile, block.y indexes M tile.
@@ -1059,10 +1306,18 @@ def _build_implicit_gemm_conv_impl(
     # selects A's input-channel slab (via the descriptor's ``group`` coord) and
     # the absolute output-filter base ``k_out = g*kpg + n`` for B and D. For
     # groups == 1 nothing is emitted, keeping the kernel byte-identical.
-    grouped = p.groups > 1
+    #
+    # Under merge "group" means *merged* group: grid.z runs 0..groups/Gm and
+    # the base advances by kpg*Gm == Gm output channels. The grouped path stays
+    # engaged even when Gm == groups (one merged group): an AOT binary serves
+    # every group count Gm divides, so the build-time problem's count cannot
+    # decide whether block_id_z is needed.
+    grouped = p.groups > 1 or merged
     if grouped:
         group_idx = b.block_id_z()
-        k_out_group_base = b.mul(group_idx, p_kpg)
+        # Merged: the base advances by the merged kpg, which is Gm exactly
+        # (depthwise only), so it is the build-time constant, not p_kpg.
+        k_out_group_base = b.mul(group_idx, c_gm if merged else p_kpg)
     else:
         group_idx = None
         k_out_group_base = None
@@ -1198,6 +1453,44 @@ def _build_implicit_gemm_conv_impl(
             return a_offset_split(b_, m_val, k_val)
         return A_desc.offset(b_, m=m_val, k=k_val, **_a_group_kw)
 
+    def b_descriptor_merged(b_: IRBuilder, row: Value, col: Value):
+        """B load for ``group_merge > 1``: split k_gemm, mask the off-diagonal.
+
+        The merged GEMM indexes ``n`` by the merged group ``g_n`` and ``k`` by
+        ``(y, x, g_k)`` with ``g_k`` innermost. Only ``g_k == g_n`` is real
+        work; every other (n, k) pair is a redundant MAC that must contribute
+        zero.
+
+        Putting that mask *here* -- on the weight load -- rather than on the
+        store is the one substantive departure from CK Tile, and it is what
+        makes this arrangement cheap. An invalid element is handed to the
+        loader as ``valid = False``, which routes it to the buffer descriptor's
+        OOB sentinel offset, and the hardware returns a zero without issuing
+        any memory traffic. A zero weight makes the redundant MAC a no-op, so
+        the accumulator is correct with no masking in the epilogue at all --
+        and the store stays a dense contiguous run of Gm real outputs. CK, which
+        puts the merged group on M and N, has to gather a diagonal out of its C
+        tile instead, which is why its Gm=32 instance ships VectorSizeC = 1.
+        """
+        # g_n: which merged group this tile column owns. Self-bounding -- for
+        # row >= Gm the diagonal is false for every k, so no N-axis clamp is
+        # needed here (the epilogue still bounds the store).
+        g_n = b_.add(block_n_off_v, row)
+        kg = b_.add(k_off_capture[0], col)
+        y, x, g_k = k_decode(b_, kg)
+        # k_out is the ABSOLUTE output filter index into the physical weight
+        # tensor: merged_group * Gm + g_n.
+        k_out = b_.add(k_out_group_base, g_n)
+        # The weight tensor is physical and does not merge: on depthwise it
+        # really is W[K][Y][X][1], so the channel term is always 0 and the
+        # offset is the filter row plus the (y, x) tap.
+        off = b_.add(
+            b_.add(b_.mul(k_out, p_B_stride_k), mul_u24(b_, y, p_B_stride_y)),
+            mul_u24(b_, x, p_B_stride_x),
+        )
+        diag = b_.cmp_eq(g_k, g_n)
+        return off, b_.land(b_.cmp_lt(y, p_Y), diag)
+
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_out = b_.add(block_n_off_v, row)
         if grouped:
@@ -1212,6 +1505,13 @@ def _build_implicit_gemm_conv_impl(
         if split_ab:
             return b_offset_split(b_, k_out, kg)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
+
+    if spec.group_merge > 1:
+        # Swap once, here, rather than at the four consumer sites below: the
+        # two closures are interchangeable by signature, and a per-site
+        # conditional is how one of them (e.g. the wavelet path at the bottom)
+        # quietly keeps the unmerged loader.
+        b_descriptor = b_descriptor_merged
 
     # `k_off_capture` lets the closures pick up the current k0 from
     # the K-loop body without recompiling the loaders per iteration.
@@ -1293,10 +1593,29 @@ def _build_implicit_gemm_conv_impl(
         # One filter row / column step in A's offset.
         a_ystep = b.mul(p_dH, s_hi)
         a_xstep = b.mul(p_dW, s_wi)
-        a_group_base = b.mul(group_idx, p_cpg) if grouped else None
+        # Merged: the A channel slab is the merged group's, Gm channels wide.
+        a_group_base = b.mul(group_idx, c_gm if merged else p_cpg) if grouped else None
 
     def k_decode(b_: IRBuilder, k_val: Value) -> Tuple[Value, Value, Value]:
-        """k -> (y, x, c) through the runtime magic pairs for cpg and X."""
+        """k -> (y, x, c) through the runtime magic pairs for cpg and X.
+
+        Under ``group_merge`` the innermost field of k is the merged group
+        (the merged per-group channel run is Gm wide), split off with a shift
+        and a mask; ``c`` is then the in-merge group index, which is both A's
+        channel within the merged slab and the diagonal coordinate of B.
+        """
+        if merged:
+            q_c = b_.lshr(k_val, c_gm_shift)
+            c = b_.land(k_val, c_gm_mask)
+            y, x = magic_divmod(
+                b_,
+                q_c,
+                params["p_magic_k_X_mult"],
+                params["p_magic_k_X_shift"],
+                p_X,
+                u24=True,
+            )
+            return y, x, c
         q_c, c = magic_divmod(
             b_,
             k_val,
@@ -1642,20 +1961,38 @@ def _build_implicit_gemm_conv_impl(
         D_desc = make_d_descriptor_dynamic(b, params, is_3d=p.is_3d)
         # Grouped conv: the per-warp N coord is within-group (n_val < kpg);
         # recover the absolute N[D]HWK output filter k_out = g*kpg + n_val.
-        _k_out_grp_base = b.mul(b.block_id_z(), p_kpg) if p.groups > 1 else None
+        # Merged: g is the merged group and the merged kpg is Gm, so the same
+        # expression yields k_out = merged_group*Gm + g_n.
+        _k_out_grp_base = (
+            b.mul(b.block_id_z(), c_gm if merged else p_kpg) if grouped else None
+        )
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             k_out = n_val if _k_out_grp_base is None else b_.add(_k_out_grp_base, n_val)
             return D_desc.offset(b_, m=m_val, k_out=k_out)
+
+    # The GEMM-N extent the tile covers: kpg, or kpg*Gm == Gm under merge. The
+    # true kpg (1 on depthwise) would clamp away Gm-1 of every Gm real outputs
+    # -- silently, as a wrong answer rather than a crash.
+    c_N_bound = c_gm if merged else p_kpg
+    # The cshuffle store width when the spec leaves it open: the widest power of
+    # two dividing the per-group output channel run, the same width
+    # ``is_valid_spec`` derives (and the C++ engine emits). Under merge that run
+    # is the merged kpg, Gm. A fixed width wider than the run would fail the
+    # epilogue's whole-vector bound check and drop the outputs it covers.
+    if spec.vector_size_c is not None:
+        _max_store_vec = spec.vector_size_c
+    else:
+        _max_store_vec = ImplicitGemmConvSpec.default_vector_sizes(
+            p_load.cpg, p_load.kpg, spec.data.dtype_d
+        )[2]
 
     def _emit_fwd_epilogue(final_accs_in):
         """Store the accumulators through ``d_addr`` with runtime bounds."""
         if spec.epilogue == "cshuffle":
             cshuffle_kwargs = {
                 "out_dtype": spec.data.dtype_d,
-                "max_store_vec": (
-                    spec.vector_size_c if spec.vector_size_c is not None else 8
-                ),
+                "max_store_vec": _max_store_vec,
                 "no_alias": spec.cshuffle_no_alias,
             }
             if op.family == "wmma":
@@ -1673,7 +2010,7 @@ def _build_implicit_gemm_conv_impl(
                 accs=final_accs_in,
                 addr_fn=d_addr,
                 d_rsrc=d_rsrc,
-                bounds=(p_M, p_kpg),
+                bounds=(p_M, c_N_bound),
             )
         elif op.family == "wmma":
             # RDNA/WMMA keeps the explicit per-warp/lane decomposition; it
@@ -1692,7 +2029,7 @@ def _build_implicit_gemm_conv_impl(
                 c0,
                 addr_fn=d_addr,
                 p_M=p_M,
-                p_kpg=p_kpg,
+                p_kpg=c_N_bound,
             )
         else:
             DirectEpilogue(
@@ -1702,7 +2039,7 @@ def _build_implicit_gemm_conv_impl(
                 accs=final_accs_in,
                 addr_fn=d_addr,
                 d_rsrc=d_rsrc,
-                bounds=(p_M, p_kpg),
+                bounds=(p_M, c_N_bound),
             )
 
     if spec.pipeline == "wavelet":
@@ -1801,7 +2138,7 @@ def _build_implicit_gemm_conv_impl(
             n_math_warps=n_math_warps,
             math_block_size=spec.block_size,
             k_lo=c0,
-            k_hi=p_K_gemm,
+            k_hi=c_K_gemm,
             block_k=block_k,
             A_smem=A_smem,
             B_smem=B_smem,
@@ -1849,7 +2186,7 @@ def _build_implicit_gemm_conv_impl(
         emit_load_phase(c0, A_smem, B_smem)
         b.sync()
 
-        for_op = b.scf_for_iter(c0, p_K_gemm, c_2block_k, accs, iv_name="k_unroll")
+        for_op = b.scf_for_iter(c0, c_K_gemm, c_2block_k, accs, iv_name="k_unroll")
         with for_op as (k_unroll, iter_accs):
             k_odd = b.add(k_unroll, c_block_k)
             k_nxt_pair = b.add(k_unroll, c_2block_k)
@@ -1903,7 +2240,7 @@ def _build_implicit_gemm_conv_impl(
 
         final_accs = pipeline.run_ping_pong_dynamic(
             b,
-            k_extent=p_K_gemm,
+            k_extent=c_K_gemm,
             block_k=block_k,
             # The kernel's own c0, not the helper's default fresh const 0: the
             # C++ k-loop driver passes ctx->c0, and the builder does not dedupe
