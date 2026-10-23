@@ -93,6 +93,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     // both carry it, so it cancels in O = o_acc/l; LSE and the sink seed undo it explicitly.
     static constexpr index_t kPShift     = kQuantized ? 8 : 0;
     static constexpr float kPScaleFactor = kQuantized ? 256.0f : 1.0f;
+    // fp8 double-buffer mainloop keeps only its two RAW barriers: each drains this wave's LDS
+    // reads first, so the V-ready barrier also frees the K buffer gemm0 read, and the K-ready
+    // barrier frees the V buffer gemm1 read. The separate WAR barriers go.
+    static constexpr bool kMergedWarBarriers = is_any_of<KDataType, fp8_t, bf8_t>::value;
 
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
@@ -211,6 +215,56 @@ struct BlockFmhaPipelineQRKSVSTdm
         else
         {
             block_tile_reduce_sync(tensor, reduce, bool_constant<false>{});
+        }
+    }
+
+    // Row sum as a pairwise tree over each row's columns in thread-buffer order. The leaves
+    // pair neighbours inside the PK8 cast groups, so P is read in the order it is produced
+    // (a chain split interleaved exp2 across groups and scattered them), and the
+    // independent pairs replace the serial add chain and can dual-issue.
+    template <typename Tensor>
+    CK_TILE_DEVICE static auto ReduceRowSumLocal(const Tensor& values)
+    {
+        constexpr auto spans            = Tensor::get_distributed_spans();
+        constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
+        if constexpr(local_columns > 1 && (local_columns & (local_columns - 1)) == 0)
+        {
+            constexpr auto columns =
+                make_naive_tensor_descriptor_packed(sequence_to_tuple_of_number(spans[I1].impl_));
+            constexpr auto distribution = make_static_tile_distribution(
+                ck_tile::detail::make_reduce_tile_distribution_encoding(
+                    Tensor::get_tile_distribution().get_static_tile_distribution_encoding(),
+                    sequence<1>{}));
+            auto sums = make_static_distributed_tensor<SMPLComputeDataType>(distribution);
+            constexpr index_t levels = [] {
+                index_t n = 0;
+                for(index_t w = local_columns; w > 1; w /= 2)
+                    ++n;
+                return n;
+            }();
+            sweep_tile_span(spans[I0], [&](auto row) {
+                thread_buffer<SMPLComputeDataType, local_columns> partial;
+                sweep_tile_span(spans[I1], [&](auto col) {
+                    constexpr index_t offset  = columns.calculate_offset(col.impl_);
+                    partial(number<offset>{}) = values[make_tuple(row, col)];
+                });
+                // In place: level k writes entry i from entries 2i and 2i+1, never below i.
+                static_for<0, levels, 1>{}([&](auto k) {
+                    constexpr index_t width = local_columns >> (decltype(k)::value + 1);
+                    static_for<0, width, 1>{}([&](auto i) {
+                        constexpr index_t j = decltype(i)::value;
+                        partial(i) = partial[number<2 * j>{}] + partial[number<2 * j + 1>{}];
+                    });
+                });
+                sums(make_tuple(row)) = partial[number<0>{}];
+            });
+            return sums;
+        }
+        else
+        {
+            const auto f_sum = [](auto a, auto b) { return a + b; };
+            return block_tile_reduce<SMPLComputeDataType>(
+                values, sequence<1>{}, f_sum, SMPLComputeDataType{0});
         }
     }
 
@@ -1129,8 +1183,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
+            auto rowsum_p = ReduceRowSumLocal(p_compute); // rowsum(Pcompute{j})
             ReduceRowSync(rowsum_p, f_sum);
 
             int32_t p_scale = 0;
@@ -1655,8 +1708,31 @@ struct BlockFmhaPipelineQRKSVSTdm
             const index_t kv_tile_start            = kv_tile_start_of(i_total_loops);
             [[maybe_unused]] const auto kv_descale = next_kv_descale;
 
+            // Prefetch K into the buffer gemm0 of this call reads; callers free it first.
+            auto prefetch_k = [&]() {
+                // K's sink->normal window jump (prefill path). K is prefetched 2
+                // loop-iterations ahead of consumption (ptrk0/ptrk1 ping-pong -- the write
+                // below feeds i_total_loops+2, not i_total_loops+1 like V/bias), so the
+                // jump must fire 2 iterations before the first normal tile is consumed,
+                // i.e. at i_total_loops == num_sink_loop - 2, not num_sink_loop - 1. When
+                // num_sink_loop == 1 there is no such iteration (it would be -1); that
+                // case is instead handled in the prologue, see the comment there.
+                if constexpr(kHasSink)
+                {
+                    if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
+                    {
+                        move_tile_window(k_dram_window,
+                                         {physical_seqlen_k_start - sink_seq_end, 0});
+                    }
+                }
+                move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+                LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+            };
+
             // move V tile windows
-            block_sync_lds<k_lds_insts>();
+            if constexpr(!kMergedWarBarriers)
+                block_sync_lds<k_lds_insts>();
             // Sink->normal window jump for V must happen before this prefetch: V is
             // prefetched here for use one mainloop() call later (ping-pong LDS), so
             // applying the jump after the prefetch (as done for K/bias below) would
@@ -1883,7 +1959,16 @@ struct BlockFmhaPipelineQRKSVSTdm
             // above. TENSORcnt retires in issue order (CDNA5 ISA 6241), so <2> retires
             // exactly the oldest -- last iteration's V, what load_tile_transpose reads.
             // <1> also drained its K, which is not read until a PV gemm later.
-            s_wait_tensorcnt_barrier<2>();
+            if constexpr(kMergedWarBarriers)
+            {
+                // dscnt 0: gemm0's K reads are done in every wave past this barrier.
+                s_wait_tensorcnt_barrier<2, 0>();
+                prefetch_k();
+            }
+            else
+            {
+                s_wait_tensorcnt_barrier<2>();
+            }
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -2045,8 +2130,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 else
                 {
-                    auto sum = block_tile_reduce<SMPLComputeDataType>(
-                        p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                    auto sum = ReduceRowSumLocal(p_compute);
                     ReduceRowSync(sum, f_sum);
                     return sum;
                 }
@@ -2106,24 +2190,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 next_kv_descale = load_tile_descale(i_total_loops + 1);
             }
 
-            block_sync_lds<v_lds_insts>();
-            // K's sink->normal window jump (prefill path). K is prefetched 2
-            // loop-iterations ahead of consumption (ptrk0/ptrk1 ping-pong -- the write
-            // below feeds i_total_loops+2, not i_total_loops+1 like V/bias), so the
-            // jump must fire 2 iterations before the first normal tile is consumed,
-            // i.e. at i_total_loops == num_sink_loop - 2, not num_sink_loop - 1. When
-            // num_sink_loop == 1 there is no such iteration (it would be -1); that
-            // case is instead handled in the prologue, see the comment there.
-            if constexpr(kHasSink)
+            if constexpr(!kMergedWarBarriers)
             {
-                if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
-                {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                }
+                block_sync_lds<v_lds_insts>();
+                prefetch_k();
             }
-            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
-            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -2182,8 +2253,9 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // Mirrors the V wait: in flight are last iteration's K then this one's V and
-            // K, so <2> retires that K -- exactly what load_tile below reads.
-            s_wait_tensorcnt_barrier<2>();
+            // K, so <2> retires that K -- exactly what load_tile below reads. Merged: dscnt
+            // 0 also retires gemm1's V reads, which frees the V buffer for the next call.
+            s_wait_tensorcnt_barrier<2, kMergedWarBarriers ? 0 : waitcnt_arg::kMaxLgkmCnt>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
