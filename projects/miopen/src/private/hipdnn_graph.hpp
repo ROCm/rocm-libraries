@@ -20,8 +20,9 @@
 #include <unordered_map>
 #include <vector>
 
-// Declared rather than included so that wrapper.cpp and routing.cpp, which only
-// need the first half of this header, do not pull in the hipDNN frontend.
+// Declared rather than included so that the wrapper's stub files and routing.cpp,
+// which only need the first half of this header, do not pull in the hipDNN
+// frontend.
 namespace hipdnn_frontend {
 namespace graph {
 class Graph;
@@ -45,18 +46,25 @@ bool IsAvailable();
 void ReleaseHandle(miopenHandle_t handle) noexcept;
 
 // Replacement text for miopenGetErrorString when the last wrapped call on this
-// thread was forwarded and failed with `status`, or null otherwise. The text is
-// fixed per status and lives for the whole process, like MIOpen's own strings,
-// so a caller may keep the pointer. The failure's reason, when recorded, goes to
-// stderr instead.
-//
-// This exists so a forwarded failure is distinguishable from the same status
-// raised by MIOpen itself, without adding a public symbol to do it.
+// thread was forwarded and failed with `status`, or null otherwise. This keeps a
+// forwarded failure distinguishable from the same status raised by MIOpen,
+// without a new public symbol. The text is fixed per status and lives for the
+// whole process, like MIOpen's own strings, so a caller may keep the pointer.
+// The failure's reason, when recorded, goes to stderr instead.
 const char* PrefixedErrorString(miopenStatus_t status, const char* nativeMessage) noexcept;
 
 // Every stub that MIOpen serves calls this, so a later MIOpen failure with the
 // same status is not reported as forwarded.
 void ClearForwardedFailure() noexcept;
+
+// The hipDNN path for every entry point that has no forwarding of its own yet;
+// each is swapped for a real implementation as it lands. Until then, an entry
+// point added to the forwarding set fails loudly here instead of silently
+// running MIOpen. Inline because every translation unit with stubs needs it.
+inline miopenStatus_t ForwardingNotImplemented(const char* /*entryPoint*/)
+{
+    return miopenStatusNotImplemented;
+}
 
 // One value per kind of graph the wrapper builds. Kept in one list so that the
 // values stay distinct as operations are added: it is the first element of

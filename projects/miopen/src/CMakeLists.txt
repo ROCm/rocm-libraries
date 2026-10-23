@@ -905,8 +905,10 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
 
-    # Public wrapper library. src/private/wrapper.cpp defines extern "C"
-    # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
+    # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
+    # <miopen/miopen.h> by script/generate_wrapper_sources.py) and
+    # src/private/wrapper.cpp (the stubs that do more than pass a call through)
+    # define an extern "C" stub for every MIOPEN_EXPORT entry point in the header,
     # each routing through src/private/routing.cpp to either hipDNN or its
     # renamed _impl symbol in MIOpen_private. PUBLIC linkage
     # propagates the implementation's include directories and link interface to
@@ -915,6 +917,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # libMIOpen_private.so.
     add_library(MIOpen
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/wrapper_passthrough.cpp
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
@@ -952,17 +955,17 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${CMAKE_BINARY_DIR}/include)
 
     # The wrapper's only dependency is the private library, so every symbol it
-    # references must resolve at link time. This turns "new API added, stub
-    # written, rename #define forgotten" from a runtime failure into a link
-    # error -- the exported symbol set is unchanged in that case, so the
-    # public-ABI gate cannot catch it.
+    # references must resolve at link time. This turns "new API added, generated
+    # files not regenerated" from a runtime failure into a link error -- the
+    # exported symbol set is unchanged in that case, so the public-ABI gate
+    # cannot catch it.
     if(NOT WIN32 AND NOT APPLE)
         target_link_options(MIOpen PRIVATE "LINKER:--no-undefined")
     endif()
 
-    # The hand-maintained forwarding code is the part of this change most in
-    # need of automated checking, and clang_tidy_check() below runs against the
-    # implementation target only.
+    # The forwarding code, generated stubs included, is the part of this change
+    # most in need of automated checking, and clang_tidy_check() below runs
+    # against the implementation target only.
     clang_tidy_check(MIOpen)
 
     # The generated public export header (miopen_generate_export_header below)

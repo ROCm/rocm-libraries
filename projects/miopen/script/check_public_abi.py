@@ -32,20 +32,20 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
   4. libMIOpen_private IS in DT_NEEDED, and libhipdnn_backend is NOT: the
      wrapper opens the backend on first use, so a machine without hipDNN must
      still be able to load libMIOpen.so.
-  5. Every excluded symbol is genuinely absent from the installed public header
-     (``--public-header``), so the exclusion file cannot be used to silence a
-     red gate by quietly dropping a real miopen.h entry point.
+  5. No excluded symbol is declared in the installed public header
+     (``--public-header``), so the exclusion file cannot hide a real miopen.h
+     entry point.
   6. Every excluded symbol is still exported, un-suffixed, from the private
-     library (``--private-lib``), so the carve-out cannot delete a symbol from
+     library (``--private-lib``), so the carve-out cannot drop a symbol from
      the whole installed surface.
-  7. With ``--private-lib``, the two libraries are co-versioned: their SONAME
-     majors agree and the wrapper's DT_NEEDED entry names that same major, so a
+  7. With ``--private-lib``, the libraries are co-versioned: their SONAME majors
+     agree and the wrapper's DT_NEEDED entry names that same major, so the
      wrapper cannot bind to an implementation it was not built against.
   8. With ``--private-lib``, every ``miopenFoo_impl`` the private library
-     exports has a matching ``miopenFoo`` on the wrapper. A renamed private
-     entry point with no wrapper stub is unreachable through libMIOpen.so.
+     exports has a matching ``miopenFoo`` on the wrapper; otherwise it is
+     unreachable through libMIOpen.so.
   9. Optionally (``--needed-baseline``), the full DT_NEEDED list matches a
-     committed baseline. Opt-in because the list names ROCm soversions and the
+     committed baseline. Opt-in because it names ROCm soversions and the
      platform's loader, so it changes with routine ROCm updates.
 
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
@@ -54,48 +54,40 @@ installed header outside the private include directory. The installed headers
 are the public contract; a rename that leaks into one makes a consumer compile
 against a name only the private library carries.
 
-``check-headers`` -- a source-only cross-check of the five hand-maintained
-artifacts of the split. It needs no build, no GPU and no flag-on configuration,
-so unlike the two gates above it can run in a lint lane on every PR:
+``check-headers`` -- a source-only cross-check. It needs no build, no GPU and no
+flag-on configuration, so unlike the two gates above it can run in a lint lane
+on every PR. It covers only what generation cannot replace.
+script/generate_wrapper_sources.py writes the rename headers, miopen_impl.h, the
+provider's rename mirror and the pass-through stubs in wrapper_passthrough.cpp
+from include/miopen/miopen.h, and its --check mode is the gate for all of them,
+signatures included. What is left here:
 
-  1. include/miopen/miopen.h        -- the public contract (MIOPEN_EXPORT decls)
-  2. src/private/miopen_impl.h      -- the matching _impl declarations
-  3. src/private/miopen_private_rename.h -- the compile-time rename
-  4. src/private/wrapper.cpp        -- the forwarding stubs
-  5. the hipDNN provider's MiopenApiPrivateRename.hpp -- the provider's mirror
-     of (3), force-included when it links the private library
+  1. The stubs in src/private/wrapper.cpp, the few with logic of their own. Each
+     must forward to its own _impl symbol and nothing else.
 
-Every public entry point must appear in all five, the wrapper stub's signature
-must match miopen.h, the _impl declaration's signature must match it too (modulo
-the suffix), and each stub must forward to its own _impl symbol and nothing
-else. No artifact may carry an entry the public header does not.
+     Each must also open with a dispatch macro -- MIOPEN_WRAPPER_DISPATCH or
+     MIOPEN_WRAPPER_FORWARD -- naming itself. The macro's runtime assert cannot
+     cover this: it is compiled out under NDEBUG, never fires for a stub nothing
+     calls, and a stub missing the macro has no assert at all. Such a stub can
+     never route to hipDNN, and nobody notices until the entry point joins the
+     forwarding set and keeps running MIOpen anyway.
 
-Each stub must also open with a dispatch macro -- MIOPEN_WRAPPER_DISPATCH or
-MIOPEN_WRAPPER_FORWARD -- naming itself. The macro's own runtime assert cannot
-cover this: it is compiled out under NDEBUG, it never fires for a stub nothing
-calls, and a stub missing the macro entirely has no assert to fire at all. Such
-a stub silently loses the ability to ever route to hipDNN, which is invisible
-until the entry point joins the forwarding set and keeps running MIOpen anyway.
+  2. The three miopenConvolution*GetWorkSpaceSizeRange entry points. These are
+     exported with MIOPEN_EXPORT but never declared in miopen.h, so the
+     generator does not see them. Their definitions in src/convolution_api.cpp
+     are the reference, and the declaration in the hipDNN provider's
+     MiopenApi.hpp must match it. MIOpen's own callers share the declaration in
+     src/include/miopen/miopen_internal.h, which the compiler checks against the
+     definitions. The provider cannot include MIOpen's internal headers, so its
+     copy stays by hand and stays checked here.
 
-The provider mirror lives in a sibling project that a MIOpen-only checkout does
-not ship, so it is the one artifact that can be skipped. It is skipped only once
+The provider's header lives in a sibling project that a MIOpen-only checkout does
+not ship, so it is the one input that can be skipped. It is skipped only once
 git confirms the commit under test does not track it -- being absent from a
 sparse working tree is not enough, or CI, which checks out only the subtrees a
 PR touches, would report a green gate on unchecked drift.
 
-``check-headers`` additionally cross-checks the three
-miopenConvolution*GetWorkSpaceSizeRange entry points. These are exported with
-MIOPEN_EXPORT but never declared in miopen.h, so every consumer forward-declares
-them by hand and none of the five artifacts above covers them. Their definitions
-in src/convolution_api.cpp are the reference; the declarations in the gtest that
-exercises them and in the hipDNN provider's MiopenApi.hpp must match it. The
-provider header is located and skipped on the same terms as the mirror.
-
-This is the only check in this script that can see *signature* drift. It matters
-because the _impl entry points have C linkage: the wrapper's stub definitions are
-compiler-checked against miopen.h, and the private library's _impl definitions
-are the miopen.h declarations with a macro applied, but nothing compiles
-miopen_impl.h against the definitions it describes. A divergence there links
+The Range declarations have C linkage, so a divergence from the definitions links
 cleanly and corrupts arguments at runtime. The symbol-set gates above cannot see
 it -- the exported names are unchanged.
 
@@ -103,11 +95,9 @@ Deliberately NOT verified: struct/enum layout, behaviour, exported symbols
 outside the ``miopen[A-Z]`` C API convention (including the mangled
 ``_ZN6miopen...`` internals that the driver, gtests and CK plugins link
 against), symbol addresses/sizes, and dynamic-symbol ordering. ``check`` and
-``check-wrapper`` additionally do not verify signatures; that is what
-``check-headers`` is for. Signature comparison is textual after normalisation,
-not semantic: it will not resolve a typedef, so two spellings of the same
-underlying type read as a mismatch. That is the intended bias -- these files
-are meant to be copies of one another.
+``check-wrapper`` additionally do not verify signatures; the generator's
+``--check`` and ``check-headers`` do. Signature comparison is textual, not
+semantic: typedefs are not resolved, by design.
 
 ``compare-pair`` diffs two ``dump`` outputs and reports a content hash for
 information only; a content hash is build-path dependent and is never gated.
@@ -134,10 +124,9 @@ HIPDNN_BACKEND_PREFIX = "libhipdnn_backend"
 PUBLIC_API_RE = re.compile(r"^miopen[A-Z]")
 IMPL_RE = re.compile(r"^miopen[A-Za-z0-9_]*_impl$")
 
-# Directories, relative to the staged include tree, that may legitimately spell
-# entry points by their private names. Nothing stages the private declarations
-# today; the exemption is here so adding such an install rule later does not mean
-# rediscovering why this check started failing.
+# Directories, relative to the staged include tree, that may spell entry points
+# by their private names. Nothing stages private declarations today; this is
+# here for a future install rule.
 PRIVATE_INCLUDE_DIRS = ("miopen/private",)
 
 # Where MIOpen stages its public headers, relative to the staged include tree.
@@ -155,10 +144,9 @@ class AbiError(Exception):
 # --------------------------------------------------------------------------
 # Minimal ELF reader
 #
-# Parsing the ELF directly rather than shelling out to nm/readelf keeps this
-# script runnable anywhere Python is (including a Windows host inspecting a
-# Linux build artifact), and removes the locale-collation and pipeline-exit-code
-# hazards that a shell implementation has.
+# Parsed directly instead of via nm/readelf, so the script runs anywhere Python
+# does (including a Windows host inspecting a Linux build artifact) and avoids
+# the locale-collation and pipeline-exit-code hazards of a shell implementation.
 # --------------------------------------------------------------------------
 
 SHT_DYNSYM = 11
@@ -341,22 +329,11 @@ BASELINE_REMEDY = """
 If this change to the public C API is intentional, regenerate the baseline with:
   projects/miopen/script/check_public_abi.py dump-symbols <lib> \\
       -o projects/miopen/test/public_abi/public_symbols.baseline
-and update src/private/miopen_private_rename.h + src/private/miopen_impl.h to match.
+and rerun projects/miopen/script/generate_wrapper_sources.py to regenerate the
+wrapper's derived files from miopen.h.
 A baseline change is an ABI change and requires API review -- do not regenerate
 the baseline just to turn this gate green.""".rstrip()
 
-
-HEADERS_REMEDY = """
-Every public entry point must be spelled identically in all five places:
-  include/miopen/miopen.h              MIOPEN_EXPORT <ret> miopenFoo(<params>);
-  src/private/miopen_impl.h            extern "C" <ret> miopenFoo_impl(<params>);
-  src/private/miopen_private_rename.h  #define miopenFoo miopenFoo_impl
-  src/private/wrapper.cpp              extern "C" <ret> miopenFoo(<params>)
-                                       { return miopenFoo_impl(<args>); }
-  <repo>/dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp
-                                       #define miopenFoo miopenFoo_impl
-Update the private files and the provider's mirror to match the public header.
-Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
 
 DISPATCH_REMEDY = """
 Every stub in src/private/wrapper.cpp must open with exactly one dispatch macro,
@@ -379,14 +356,15 @@ the macro's assert needs the macro to be there, and is compiled out under NDEBUG
 in any case.""".rstrip()
 
 RANGE_REMEDY = """
-Each miopenConvolution*GetWorkSpaceSizeRange entry point is spelled by hand in
-three places, because it is exported without being declared in miopen.h:
+Each miopenConvolution*GetWorkSpaceSizeRange entry point is exported without
+being declared in miopen.h, so the provider spells it by hand:
   src/convolution_api.cpp                      the definition (the reference)
-  test/gtest/conv_workspace_size_range.cpp     local extern "C" declaration
   <repo>/dnn-providers/miopen-provider/MiopenApi.hpp
                                                local extern "C" declaration
-Update the two declarations to match the definition. These have C linkage, so a
-divergence links cleanly and corrupts arguments at run time.""".rstrip()
+Update the declaration to match the definition. It has C linkage, so a
+divergence links cleanly and corrupts arguments at run time. MIOpen's own
+callers use the declaration in src/include/miopen/miopen_internal.h, which the
+compiler checks.""".rstrip()
 
 INSTALLED_HEADERS_REMEDY = """
 An installed header names an entry point by its private spelling. The installed
@@ -410,27 +388,26 @@ from a clean directory rather than adjusting a version to match.""".rstrip()
 SUPERSET_REMEDY = """
 The private library exports a renamed entry point that the wrapper does not
 re-export under its public name, so nothing outside libMIOpen_private.so can
-call it. Add the missing stub to src/private/wrapper.cpp -- and its declaration
-to src/private/miopen_impl.h and its #define to
-src/private/miopen_private_rename.h -- or, if the entry point is deliberately
-private, remove it from the rename set so it keeps its original name.""".rstrip()
+call it. Only entry points declared in miopen.h are renamed, and the wrapper's
+stubs are generated from the same declarations, so the generated files are
+stale: rerun projects/miopen/script/generate_wrapper_sources.py.""".rstrip()
 
 PROVIDER_REMEDY = """
---require-provider was passed, so the provider's copies must be readable rather
-than skipped. Make dnn-providers/miopen-provider part of the tree being checked:
+--require-provider was passed, so the provider's MiopenApi.hpp must be readable
+rather than skipped. Make dnn-providers/miopen-provider part of the tree being checked:
 in a sparse checkout, add that directory to the checkout's path list. Drop
 --require-provider only for a tree that genuinely has no provider, such as a
 MIOpen-only checkout or a source tarball -- not to get past this message.""".rstrip()
 
-# The hipDNN provider's copies, relative to the repository root (the MIOpen
-# source root's grandparent in the monorepo layout).
-PROVIDER_RENAME_RELPATH = "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp"
+# The hipDNN provider's hand-written declarations, relative to the repository
+# root (the MIOpen source root's grandparent in the monorepo layout).
 PROVIDER_API_RELPATH = "dnn-providers/miopen-provider/MiopenApi.hpp"
 
 # Exported with MIOPEN_EXPORT from src/convolution_api.cpp, absent from
-# miopen.h, and so declared by hand wherever they are called. Listed explicitly
-# rather than discovered from the definitions so that dropping a declaration
-# from a consumer fails the check instead of shrinking the comparison set.
+# miopen.h, and so declared by hand in the provider, which cannot include
+# MIOpen's internal headers. Listed explicitly rather than discovered from the
+# definitions so that dropping a declaration from a consumer fails the check
+# instead of shrinking the comparison set.
 RANGE_ENTRY_POINTS = frozenset(
     {
         "miopenConvolutionForwardGetWorkSpaceSizeRange",
@@ -440,10 +417,10 @@ RANGE_ENTRY_POINTS = frozenset(
 )
 
 # Stubs that must NOT carry a dispatch macro, and why. MIOPEN_WRAPPER_DISPATCH
-# returns forward_to_hipdnn's miopenStatus_t, so a stub returning anything else
-# cannot host it. Exemptions are checked in both directions: an exempt stub that
-# grows the macro fails here rather than failing to compile somewhere less
-# obvious.
+# returns ForwardingNotImplemented's miopenStatus_t, so a stub returning anything
+# else cannot host it. Exemptions are checked in both directions: an exempt
+# stub that grows the macro fails here rather than failing to compile somewhere
+# less obvious.
 DISPATCH_EXEMPT = {
     "miopenGetErrorString": "returns const char*, not miopenStatus_t",
 }
@@ -452,30 +429,21 @@ DISPATCH_EXEMPT = {
 # --------------------------------------------------------------------------
 # Minimal C declaration parser.
 #
-# Parsing these files textually rather than invoking a compiler keeps this
-# check free of any build, toolchain or GPU dependency, so it can run in a lint
-# lane on every PR. The cost is that the comparison is textual: the parser
-# reduces a prototype to a return type plus a list of parameter types with the
-# parameter names dropped, and compares those strings. It does not resolve
-# typedefs, so two spellings of the same underlying type read as a mismatch.
-# That bias is deliberate -- the private files are meant to be transcriptions of
-# the public header, so an intentional divergence in spelling is itself worth a
-# human look.
+# Reading the files as text instead of invoking a compiler keeps this check free
+# of any build, toolchain or GPU dependency, so it can run in a lint lane on
+# every PR. A prototype is reduced to its return type and parameter types (names
+# dropped) and compared as strings. Typedefs are not resolved, so two spellings
+# of one type read as a mismatch. That is deliberate: the provider's declarations
+# should be transcriptions of the definitions, so a different spelling deserves
+# a human look.
 #
-# Two constructs the parser cannot handle are function-pointer parameters and
-# array parameters. Neither occurs in miopen.h today (function-pointer types are
-# introduced via typedef and passed by that name). A declaration that fails to
-# parse raises rather than being skipped, so adding one produces a loud failure
-# here instead of a silent coverage hole.
+# Function-pointer and array parameters cannot be parsed; none occur in the range
+# entry points. A declaration that fails to parse raises instead of being
+# skipped, so adding one fails loudly rather than leaving a silent coverage hole.
 # --------------------------------------------------------------------------
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
-EXPORT_ANCHOR_RE = re.compile(r"\bMIOPEN_EXPORT\b")
-EXTERN_C_ANCHOR_RE = re.compile(r'\bextern\s+"C"(?!\s*\{)')
-RENAME_RE = re.compile(
-    r"^[ \t]*#[ \t]*define[ \t]+(miopen[A-Za-z0-9_]*)[ \t]+(\S+)[ \t]*$", re.M
-)
 WRAPPER_DEF_RE = re.compile(
     r'\bextern\s+"C"\s+(?P<decl>[^;{}]*?)\s*\{(?P<body>[^{}]*)\}', re.S
 )
@@ -483,13 +451,12 @@ DECL_RE = re.compile(
     r"(?P<ret>.*?)(?P<name>miopen[A-Za-z0-9_]*)\s*\((?P<params>[^()]*)\)"
 )
 IMPL_CALL_RE = re.compile(r"\b(miopen[A-Za-z0-9_]*_impl)\s*\(")
-# Both dispatch macros are matched by one pattern, and only as far as the entry
-# point token: MIOPEN_WRAPPER_FORWARD's second argument is an arbitrary call
-# expression with parentheses of its own, which a regex has no business chasing.
-# Matching both names together is also what reports a stub carrying one of each,
-# which reads as two dispatch macros on one stub. Each macro keeps its own arity,
-# so a DISPATCH given a second argument (a FORWARD half-converted, or the reverse)
-# does not count as a dispatch and the stub is reported.
+# One pattern matches both dispatch macros, and only as far as the entry point
+# token: FORWARD's second argument is an arbitrary call expression with its own
+# parentheses, which a regex should not chase. Matching both together reports a
+# stub carrying one of each as two dispatch macros. Each macro keeps its own
+# arity, so a DISPATCH given a second argument (a half-converted FORWARD, or the
+# reverse) does not count and the stub is reported.
 DISPATCH_RE = re.compile(
     r"\bMIOPEN_WRAPPER_(?:"
     r"DISPATCH\s*\(\s*(?P<dispatch>[A-Za-z_][A-Za-z0-9_]*)\s*\)"
@@ -503,11 +470,10 @@ RANGE_DECL_RE = re.compile(
     r"\b(?P<name>miopen[A-Za-z0-9_]*GetWorkSpaceSizeRange)\s*"
     r"\((?P<params>[^()]*)\)\s*(?=[;{])"
 )
-# Characters that can precede a declarator's return type at file scope. A call
-# site is preceded by one of these too, but with nothing between it and the
-# name, which is how the two are told apart. '=' is in the set so that an
-# assignment from a call (`auto r = miopenFoo(...)`) leaves nothing before the
-# name either.
+# Characters that can precede a declarator's return type. A call site is also
+# preceded by one, but with nothing between it and the name, which is how the two
+# are told apart. '=' is included so that `auto r = miopenFoo(...)` leaves
+# nothing before the name either.
 DECLARATOR_STOPS = ";{}(),="
 # Tokens that can end a statement but never a return type. Without these, a
 # call in statement position (`return miopenFoo(...)`) would read as a
@@ -569,14 +535,12 @@ def split_params(params: str) -> list[str]:
 
 
 def drop_top_level_const(type_text: str) -> str:
-    """Remove a top-level const, which does not participate in type identity.
+    """Remove a top-level const, which is not part of the parameter's type.
 
-    ``const float`` and ``float`` are the same parameter type, as are
-    ``void* const`` and ``void*``: a const on the parameter object itself is
-    ignored when the compiler matches declarations. A const *below* the top
-    level is part of the type and must be kept, so ``const void*`` -- a pointer
-    to const -- is left alone. The distinction is positional: a const after the
-    last ``*``, or a leading const on a type with no ``*`` at all, is top level.
+    ``const float`` and ``float`` are the same type, as are ``void* const`` and
+    ``void*``. A const below the top level is part of the type, so ``const
+    void*`` (a pointer to const) is kept. A const after the last ``*``, or a
+    leading const on a type with no ``*``, is top level.
     """
     text = re.sub(r"\bconst\b\s*$", "", type_text).strip()
     if "*" not in text:
@@ -618,35 +582,14 @@ def render_signature(sig: tuple[str, ...]) -> str:
     return f"{sig[0]}({', '.join(sig[1:])})"
 
 
-def parse_declarations(
-    source: str, anchor: re.Pattern[str], what: str
-) -> dict[str, tuple[str, ...]]:
-    """Collect every miopen* prototype introduced by ``anchor``, keyed by name."""
-    text = strip_comments(source)
-    out: dict[str, tuple[str, ...]] = {}
-    for match in anchor.finditer(text):
-        end = text.find(";", match.end())
-        if end < 0:
-            raise AbiError(f"unterminated declaration in {what}")
-        decl = text[match.end() : end]
-        if "{" in decl:
-            raise AbiError(f"unexpected block after declaration anchor in {what}")
-        name, sig = parse_prototype(decl, what)
-        if name in out:
-            raise AbiError(f"duplicate declaration of {name} in {what}")
-        out[name] = sig
-    return out
-
-
 def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]:
     """Collect the range entry points declared or defined in one source file.
 
-    Unlike the five rename artifacts these are not introduced by an anchor that
-    marks a declaration: they appear inside an ``extern "C" { ... }`` block in
-    the consumers and as ``MIOPEN_EXPORT extern "C"`` definitions in the
-    library, and the consumers also *call* them. Matches are therefore found by
-    name, and a call is rejected by the absence of a return type between the
-    name and the punctuation that precedes it.
+    No anchor marks them as declarations: they sit in an ``extern "C" { ... }``
+    block in the provider and are ``MIOPEN_EXPORT extern "C"`` definitions in
+    the library, and the provider also *calls* them. Matches are therefore found
+    by name, and a call is rejected because no return type sits between the name
+    and the punctuation before it.
     """
     text = strip_comments(source)
     out: dict[str, tuple[str, ...]] = {}
@@ -695,17 +638,6 @@ def parse_wrapper(
     return protos, forwards, dispatches
 
 
-def parse_renames(source: str, what: str = "rename header") -> dict[str, str]:
-    """Collect a rename header's #defines, folding backslash continuations."""
-    text = strip_comments(source.replace("\\\n", " "))
-    out: dict[str, str] = {}
-    for name, target in RENAME_RE.findall(text):
-        if name in out:
-            raise AbiError(f"duplicate #define of {name} in {what}")
-        out[name] = target
-    return out
-
-
 def run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
     """Run git against `repo_root`, immune to an ambient git environment.
 
@@ -725,18 +657,17 @@ def run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
 def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> tuple[bool, str]:
     """Say why git could not produce HEAD:<rel>, and whether that is fatal.
 
-    These causes are not interchangeable. A path the commit does not carry is a
-    legitimately absent artifact and skipping it costs nothing. A path the commit
-    *does* carry whose blob git cannot materialize -- a blobless clone whose
-    promisor fetch failed -- is a broken checkout in which this gate would
-    otherwise stop checking a file that is under test, and go green doing it.
-    That one is fatal: the drift this gate exists to catch links cleanly and
-    corrupts arguments at run time, so a broken checkout must be repaired and
-    the job rerun, not quietly narrowed. Returns (fatal, reason).
+    A path the commit does not carry is legitimately absent, and skipping it
+    costs nothing. A path the commit *does* carry but whose blob git cannot
+    produce (a blobless clone whose promisor fetch failed) is a broken checkout:
+    skipping it would let this gate go green on a file under test, and the drift
+    it catches links cleanly and corrupts arguments at run time. That case is
+    fatal, so the checkout must be repaired and the job rerun.
 
-    Only the case git positively confirms is escalated. If ls-tree cannot answer
-    -- it errors, or git is gone -- the cause is ambiguous and stays a skip,
-    because a false failure on every tarball build would be its own outage.
+    Only a case git positively confirms is escalated. If ls-tree cannot answer
+    (it errors, or git is gone) the cause is ambiguous and stays a skip, because
+    a false failure on every tarball build would be its own outage.
+    Returns (fatal, reason).
     """
     text = stderr.decode("utf-8", "replace").lower()
     if "not a git repository" in text:
@@ -762,16 +693,14 @@ def read_tracked_source(
     """Read a file that a sparse checkout may not have materialized.
 
     CI checks out only the subtrees a PR touches, so a file this check compares
-    can be missing from the working tree while still being part of the commit
-    under test -- the provider's copies for a MIOpen-only PR, MIOpen's own
-    sources for a provider-only PR. Skipping on "not on disk" alone would let
-    this gate go green on precisely the drift it exists to catch, so a missing
-    file is only treated as genuinely absent once git confirms the commit does
-    not track it. Returns None in that case, and the caller skips the check,
-    recording why in ``reasons`` so the skip line can name the actual cause.
-    Raises AbiError instead when git confirms the commit *does* track the file
-    and still cannot produce it, which is a broken checkout rather than an
-    absent artifact.
+    can be missing from the working tree yet still be part of the commit under
+    test (the provider's files for a MIOpen-only PR, MIOpen's for a
+    provider-only PR). Skipping on "not on disk" alone would let the gate go
+    green on exactly the drift it exists to catch, so a missing file counts as
+    absent only once git confirms the commit does not track it. Then this
+    returns None, and the caller skips the check, recording the cause in
+    ``reasons``. If git says the commit *does* track the file but cannot produce
+    it, that is a broken checkout and this raises AbiError.
     """
     if path.is_file():
         return path.read_text(encoding="utf-8")
@@ -965,9 +894,9 @@ def check_coversioned(wrapper: Elf, private: Elf) -> bool:
         )
         return True
 
-    # Print all three observed strings unconditionally: which one is the odd
-    # one out is the whole diagnosis, and a message naming only the mismatched
-    # pair sends the reader looking in the wrong place.
+    # Print all three strings: which one is the odd one out is the whole
+    # diagnosis, and naming only the mismatched pair would point the reader at
+    # the wrong place.
     print("FAIL: wrapper and private library are not co-versioned:")
     print(f"  wrapper SONAME:            {wrapper_soname or '(none)'}")
     print(f"  private SONAME:            {private_soname or '(none)'}")
@@ -985,9 +914,9 @@ def check_impl_superset(wrapper: Elf, private: Elf) -> bool:
     set of renamed entry points.
     """
     renamed = impl_symbols(private)
-    # An empty set satisfies every comparison below, reporting success having
-    # compared nothing. Guarded here rather than in impl_symbols() because
-    # check_no_impl() reads an empty set as its passing case.
+    # An empty set would pass every comparison below having compared nothing.
+    # Guarded here, not in impl_symbols(), because check_no_impl() treats an
+    # empty set as a pass.
     if not renamed:
         raise AbiError(
             f"no miopen*_impl symbols exported from {private.path} -- "
@@ -995,8 +924,7 @@ def check_impl_superset(wrapper: Elf, private: Elf) -> bool:
             "not applied?)"
         )
     exported = wrapper.defined_dynamic_functions()
-    # Report the public spelling -- that is the name the missing stub would
-    # carry, and the one the reader will grep for.
+    # Report the public spelling: it is the name the missing stub would carry.
     missing = sorted(
         sym[: -len("_impl")] for sym in renamed if sym[: -len("_impl")] not in exported
     )
@@ -1020,13 +948,12 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
     """No installed header may name an entry point by its private spelling.
 
     ``exempt`` holds directories, relative to ``include_dir``, that legitimately
-    carry the private declarations. Exempting by directory rather than by file
-    name keeps a leak into a similarly-named header elsewhere in the tree from
-    slipping through.
+    carry the private declarations. Exempting by directory, not file name, keeps
+    a leak into a similarly-named header elsewhere from slipping through.
 
-    Only header files are read. Anything else staged here is not something a
-    consumer compiles against, and counting it as scanned would overstate what
-    the reported number covers.
+    Only header files are read: anything else staged here is not something a
+    consumer compiles against, and counting it would overstate what the reported
+    number covers.
     """
     root = Path(include_dir)
     if not root.is_dir():
@@ -1050,17 +977,17 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
             scanned_public += 1
         text = path.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):
-            # Match on whole identifiers via the same pattern the symbol checks
-            # use, so a name that merely contains '_impl' -- ck_impl_interface,
-            # say -- is not mistaken for a renamed entry point.
+            # Match whole identifiers with the symbol checks' pattern, so a name
+            # that merely contains '_impl' (ck_impl_interface) is not mistaken
+            # for a renamed entry point.
             for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line):
                 if IMPL_RE.match(word):
                     offenders.append((path, lineno, word))
 
-    # Nothing scanned is not a clean tree, it is a tree this never looked at.
-    # Nothing else guards the staged include tree, so a vacuous pass is
-    # undetectable. Only MIOpen's own headers count: a prefix shared with other
-    # packages would otherwise pass having never read one of them.
+    # Nothing scanned is a tree this never looked at, not a clean one, and
+    # nothing else guards the staged include tree. Only MIOpen's own headers
+    # count: a prefix shared with other packages would otherwise pass without
+    # reading a single MIOpen header.
     if scanned_public == 0:
         raise AbiError(
             f"no headers found under {public_root} -- nothing was checked "
@@ -1074,18 +1001,6 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
     for path, lineno, word in offenders:
         print(f"  {path}:{lineno}: {word}")
     print(INSTALLED_HEADERS_REMEDY)
-    return False
-
-
-def check_entry_point_set(public: set[str], other: set[str], what: str) -> bool:
-    if public == other:
-        print(f"PASS: {what} covers exactly the {len(public)} miopen.h entry points")
-        return True
-    print(f"FAIL: {what} does not match the miopen.h entry point set")
-    for sym in sorted(public - other):
-        print(f"  - declared in miopen.h, absent from {what}: {sym}")
-    for sym in sorted(other - public):
-        print(f"  + present in {what}, not declared in miopen.h: {sym}")
     return False
 
 
@@ -1116,39 +1031,6 @@ def check_range_entry_point_set(found: dict[str, tuple[str, ...]], what: str) ->
         print(f"  - missing from {what}: {sym}")
     for sym in sorted(set(found) - RANGE_ENTRY_POINTS):
         print(f"  + present in {what}, not a known range entry point: {sym}")
-    return False
-
-
-def check_rename_targets(renames: dict[str, str]) -> bool:
-    bad = {n: t for n, t in sorted(renames.items()) if t != f"{n}_impl"}
-    if not bad:
-        print(f"PASS: all {len(renames)} renames map miopenFoo to miopenFoo_impl")
-        return True
-    print("FAIL: renames point at the wrong symbol -- calls would be misrouted:")
-    for name, target in bad.items():
-        print(f"  {name} -> {target} (expected {name}_impl)")
-    return False
-
-
-def check_provider_rename_mirror(lib: dict[str, str], provider: dict[str, str]) -> bool:
-    """The provider's force-included rename header must mirror the library's.
-
-    The hipDNN miopen-provider links libMIOpen_private.so and force-includes its
-    own copy of the rename set so its public-name calls bind the _impl entry
-    points. If the two copies diverge, a flag-on provider build fails to link --
-    an undefined _impl symbol, or a public name that no longer resolves.
-    """
-    if lib == provider:
-        print(f"PASS: provider rename header mirrors the {len(lib)} library renames")
-        return True
-    print("FAIL: the provider rename header has drifted from the library's")
-    for name in sorted(set(lib) - set(provider)):
-        print(f"  - in the library, missing from the provider: {name}")
-    for name in sorted(set(provider) - set(lib)):
-        print(f"  + in the provider, missing from the library: {name}")
-    for name in sorted(set(lib) & set(provider)):
-        if lib[name] != provider[name]:
-            print(f"  ~ {name}: library -> {lib[name]}, provider -> {provider[name]}")
     return False
 
 
@@ -1333,17 +1215,6 @@ def cmd_check_headers(args) -> int:
         return read_tracked_source(repo_root / default_rel, repo_root, reasons)
 
     miopen_rel = root.relative_to(repo_root).as_posix()
-    public_source = resolve(
-        args.public_header, f"{miopen_rel}/include/miopen/miopen.h", "miopen.h"
-    )
-    impl_source = resolve(
-        args.impl_header, f"{miopen_rel}/src/private/miopen_impl.h", "miopen_impl.h"
-    )
-    rename_source = resolve(
-        args.rename_header,
-        f"{miopen_rel}/src/private/miopen_private_rename.h",
-        "miopen_private_rename.h",
-    )
     wrapper_source = resolve(
         args.wrapper, f"{miopen_rel}/src/private/wrapper.cpp", "wrapper.cpp"
     )
@@ -1352,33 +1223,20 @@ def cmd_check_headers(args) -> int:
         f"{miopen_rel}/src/convolution_api.cpp",
         "convolution_api.cpp",
     )
-    range_test_source = resolve(
-        args.range_test,
-        f"{miopen_rel}/test/gtest/conv_workspace_size_range.cpp",
-        "conv_workspace_size_range.cpp",
-    )
-    provider_source = resolve(
-        args.provider_rename, PROVIDER_RENAME_RELPATH, "provider rename header"
-    )
     provider_api_source = resolve(
         args.provider_api, PROVIDER_API_RELPATH, "MiopenApi.hpp"
     )
 
-    # A checkout that does not carry projects/miopen -- a provider-only PR,
-    # whose pre-commit lane materializes only the projects its diff touches --
-    # has no reference for this check to compare the provider against, so it is
-    # not a finding. Reaching here means git confirmed the commit does not carry
-    # the file, so it is absent rather than unreadable: a checkout that carries
+    # A checkout without projects/miopen (a provider-only PR, whose pre-commit
+    # lane materializes only the projects its diff touches) has nothing to
+    # compare the provider against, which is not a finding. Reaching here means
+    # git confirmed the commit does not carry the file; a checkout that carries
     # it but cannot produce it has already failed hard above. Absence is never
-    # itself the drift the gate catches, since drift is a content mismatch
-    # between files that are all part of the commit.
+    # drift itself, since drift is a content mismatch between files that are all
+    # part of the commit.
     miopen_sources = {
-        f"{miopen_rel}/include/miopen/miopen.h": public_source,
-        f"{miopen_rel}/src/private/miopen_impl.h": impl_source,
-        f"{miopen_rel}/src/private/miopen_private_rename.h": rename_source,
         f"{miopen_rel}/src/private/wrapper.cpp": wrapper_source,
         f"{miopen_rel}/src/convolution_api.cpp": range_defs_source,
-        f"{miopen_rel}/test/gtest/conv_workspace_size_range.cpp": range_test_source,
     }
     missing = sorted(rel for rel, source in miopen_sources.items() if source is None)
     if missing:
@@ -1390,68 +1248,31 @@ def cmd_check_headers(args) -> int:
             print(f"  {rel}: {reasons.get(rel, 'unreadable')}")
         return 0
 
-    public = parse_declarations(public_source, EXPORT_ANCHOR_RE, "miopen.h")
-    if not public:
-        raise AbiError("no MIOPEN_EXPORT declarations found in miopen.h")
-    impl = parse_declarations(impl_source, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
-    renames = parse_renames(rename_source)
-    wrapper, forwards, dispatches = parse_wrapper(wrapper_source)
-
-    # The private declarations carry the suffix; strip it so every comparison
-    # below is against the public header under one common set of names. An
-    # unsuffixed declaration is a defect, not something to silently rekey.
-    unsuffixed = sorted(n for n in impl if not n.endswith("_impl"))
-    if unsuffixed:
-        print("FAIL: miopen_impl.h declares entry points without the _impl suffix:")
-        for name in unsuffixed:
-            print(f"  {name}")
-    impl = {n[: -len("_impl")]: sig for n, sig in impl.items() if n.endswith("_impl")}
-
-    ok = not unsuffixed
-    ok &= check_entry_point_set(set(public), set(impl), "miopen_impl.h")
-    ok &= check_prototypes(public, impl, "miopen_impl.h")
-    ok &= check_entry_point_set(set(public), set(renames), "miopen_private_rename.h")
-    ok &= check_rename_targets(renames)
-    ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
-    ok &= check_prototypes(public, wrapper, "wrapper.cpp")
-    ok &= check_wrapper_forwards(forwards)
-    # Kept out of ``ok`` until the remedies are printed: a routing defect is not
-    # the five-artifact drift HEADERS_REMEDY talks about and has its own fix.
+    _wrapper, forwards, dispatches = parse_wrapper(wrapper_source)
+    ok = check_wrapper_forwards(forwards)
+    # Kept out of ``ok`` until the remedy is printed: a routing defect has its
+    # own fix.
     dispatch_ok = check_wrapper_dispatch(dispatches)
-    provider_missing = False
-    if provider_source is None:
-        provider_missing = args.require_provider
-        print(
-            f"{'FAIL' if provider_missing else 'SKIP'}: provider rename header is"
-            f" not part of this tree ({PROVIDER_RENAME_RELPATH}:"
-            f" {reasons.get(PROVIDER_RENAME_RELPATH, 'unreadable')})"
-        )
-    else:
-        provider_renames = parse_renames(provider_source, "provider rename header")
-        ok &= check_provider_rename_mirror(renames, provider_renames)
-    headers_ok = ok
 
-    # The range entry points are a separate family: exported but undeclared in
-    # miopen.h, so their reference is the definition rather than the header.
+    # The range entry points are exported but undeclared in miopen.h, so their
+    # reference is the definition rather than the header.
     definitions = parse_range_prototypes(range_defs_source, "convolution_api.cpp")
     range_ok = check_range_entry_point_set(definitions, "convolution_api.cpp")
-    consumers = [("conv_workspace_size_range.cpp", range_test_source)]
+    provider_missing = False
     if provider_api_source is None:
-        provider_missing |= args.require_provider
+        provider_missing = args.require_provider
         print(
-            f"{'FAIL' if args.require_provider else 'SKIP'}:"
+            f"{'FAIL' if provider_missing else 'SKIP'}:"
             f" {PROVIDER_API_RELPATH} is not part of this tree"
             f" ({reasons.get(PROVIDER_API_RELPATH, 'unreadable')})"
         )
     else:
-        consumers.append(("MiopenApi.hpp", provider_api_source))
-    for what, source in consumers:
-        declared = parse_range_prototypes(source, what)
-        range_ok &= check_range_entry_point_set(declared, what)
-        range_ok &= check_prototypes(definitions, declared, what, "convolution_api.cpp")
+        declared = parse_range_prototypes(provider_api_source, "MiopenApi.hpp")
+        range_ok &= check_range_entry_point_set(declared, "MiopenApi.hpp")
+        range_ok &= check_prototypes(
+            definitions, declared, "MiopenApi.hpp", "convolution_api.cpp"
+        )
 
-    if not headers_ok:
-        print(HEADERS_REMEDY)
     if not dispatch_ok:
         print(DISPATCH_REMEDY)
     if not range_ok:
@@ -1515,7 +1336,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "check-headers",
-        help="cross-check the hand-maintained split sources (no build needed)",
+        help="check the hand-written wrapper stubs and the provider's range "
+        "declarations (no build needed)",
     )
     p.add_argument(
         "--source-root",
@@ -1525,23 +1347,13 @@ def build_parser() -> argparse.ArgumentParser:
         "skipped only when git confirms the commit tracks none of them "
         "(default: the tree containing this script)",
     )
-    p.add_argument("--public-header", help="override path to include/miopen/miopen.h")
-    p.add_argument("--impl-header", help="override path to src/private/miopen_impl.h")
-    p.add_argument(
-        "--rename-header", help="override path to src/private/miopen_private_rename.h"
-    )
     p.add_argument("--wrapper", help="override path to src/private/wrapper.cpp")
-    p.add_argument(
-        "--provider-rename",
-        help="override path to the hipDNN provider's MiopenApiPrivateRename.hpp, "
-        "which must then exist; by default it is located relative to the "
-        "repository root, read from HEAD when the checkout is sparse, and "
-        "skipped only when git confirms the commit does not track it",
-    )
     p.add_argument(
         "--provider-api",
         help="override path to the hipDNN provider's MiopenApi.hpp, which must "
-        "then exist; located and skipped on the same terms as --provider-rename",
+        "then exist; by default it is located relative to the repository root, "
+        "read from HEAD when the checkout is sparse, and skipped only when git "
+        "confirms the commit does not track it",
     )
     p.add_argument(
         "--range-definitions",
@@ -1549,15 +1361,11 @@ def build_parser() -> argparse.ArgumentParser:
         "miopenConvolution*GetWorkSpaceSizeRange entry points",
     )
     p.add_argument(
-        "--range-test",
-        help="override path to test/gtest/conv_workspace_size_range.cpp",
-    )
-    p.add_argument(
         "--require-provider",
         action="store_true",
-        help="fail instead of skipping when the provider's two copies cannot be "
-        "read, so that a tree which does not include them cannot report a pass "
-        "for files it never opened; pass this wherever the provider is expected "
+        help="fail instead of skipping when the provider's MiopenApi.hpp cannot "
+        "be read, so that a tree which does not include it cannot report a pass "
+        "for a file it never opened; pass this wherever the provider is expected "
         "to be present, such as a monorepo CI lane",
     )
     p.set_defaults(func=cmd_check_headers)

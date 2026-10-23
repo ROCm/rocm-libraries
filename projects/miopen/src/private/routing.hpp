@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 //
 // Runtime dispatch seam for the MIOpen public wrapper. The stubs in
-// src/private/wrapper.cpp use it to decide whether a public call goes to the
-// MIOpen implementation (the _impl symbols in libMIOpen_private.so) or is
-// forwarded to hipDNN. A call is forwarded only when MIOPEN_HIPDNN_FORWARDING
-// enables forwarding AND the entry point is in the compile-time forwarding set.
+// src/private/wrapper.cpp and src/private/wrapper_passthrough.cpp use it to
+// decide whether a public call goes to the MIOpen implementation (the _impl
+// symbols in libMIOpen_private.so) or is forwarded to hipDNN. A call is
+// forwarded only when MIOPEN_HIPDNN_FORWARDING enables forwarding AND the entry
+// point is in the compile-time forwarding set.
 //
 // ParseForwardingMode/IsInForwardingSet/ResolveRoute take every input
 // explicitly (even the diagnostics stream) so tests can exercise both routes
@@ -257,6 +258,8 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 //         return miopenCreate_impl(handle);
 //     }
 //
-// Requires a `forward_to_hipdnn(const char*)` returning the enclosing function's
-// return type to be in scope; wrapper.cpp defines it.
-#define MIOPEN_WRAPPER_DISPATCH(fn) MIOPEN_WRAPPER_FORWARD(fn, forward_to_hipdnn(#fn))
+// The hipDNN route is hipdnn::ForwardingNotImplemented until an operation has
+// its own forwarding function, so the enclosing function must return
+// miopenStatus_t. Requires hipdnn_graph.hpp, like MIOPEN_WRAPPER_FORWARD.
+#define MIOPEN_WRAPPER_DISPATCH(fn) \
+    MIOPEN_WRAPPER_FORWARD(fn, ::miopen::wrapper::hipdnn::ForwardingNotImplemented(#fn))

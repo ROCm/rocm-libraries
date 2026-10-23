@@ -5,19 +5,19 @@
 
 The declaration parser is the only thing standing between the range entry
 points and a divergence that links cleanly and corrupts arguments at run time,
-so it is worth testing against inputs it is expected to reject as well as ones
-it is expected to accept. Running the check against a tree that is already
-correct only ever exercises the passing path.
+so it is tested against inputs it must reject as well as ones it must accept.
+Running the check against a tree that is already correct only exercises the
+passing path.
 
 The binary checks are covered the same way, against a stand-in that answers the
-three questions those checks ask of a shared object. That stand-in deliberately
-does not exercise the ELF parser itself: the parser reads a real libMIOpen.so on
-every packaging build, so it is continuously covered by construction, whereas
-the conditions the checks are meant to catch -- a stale half of a build, an
-entry point renamed with no stub -- appear in no tree that is working.
+three questions they ask of a shared object. It deliberately skips the ELF
+parser: that reads a real libMIOpen.so on every packaging build, so it is
+covered by construction, whereas the conditions the checks exist to catch (a
+stale half of a build, an entry point renamed with no stub) appear in no working
+tree.
 
-Everything here works on string fixtures and stand-ins, so no build, toolchain
-or GPU is needed and the module runs in a lint lane:
+Everything works on string fixtures and stand-ins, so no build, toolchain or GPU
+is needed and the module runs in a lint lane:
 
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
@@ -28,9 +28,9 @@ from pathlib import Path
 
 import pytest
 
-# Colocated with the script under test. pytest's default import mode already
-# puts this directory on sys.path; do it explicitly so the module also runs
-# under a bare `python -m pytest` from any working directory.
+# pytest's default import mode already puts this directory on sys.path; doing it
+# explicitly keeps the module runnable under a bare `python -m pytest` from any
+# directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_public_abi as abi  # noqa: E402
@@ -200,13 +200,12 @@ def test_unknown_range_symbol_is_reported(capsys):
 def test_declarator_at_the_very_start_of_a_file_is_not_silently_dropped(capsys):
     """The parser needs a boundary before a declarator; the miss must be loud.
 
-    A definition with nothing at all before it has no preceding ';', '}' or
-    '{' to mark where its return type begins, so the parser does not recognise
-    it. No real source is written that way -- both consumers open with
-    `extern "C" {` and the library file with its includes -- but the point of
-    this gate is that nothing it fails to read passes quietly. The entry point
-    set check is what makes that true, so pin it here rather than the parser
-    result: an unrecognised definition leaves the set short and fails.
+    A definition with nothing before it has no preceding ';', '}' or '{' to mark
+    where its return type begins, so the parser does not recognise it. No real
+    source is written that way (both consumers open with `extern "C" {`, the
+    library file with its includes), but nothing the gate fails to read may pass
+    quietly. The entry point set check guarantees that, so pin it rather than
+    the parser result: an unrecognised definition leaves the set short and fails.
     """
     found = abi.parse_range_prototypes(definition(FWD), "convolution_api.cpp")
     assert not abi.check_range_entry_point_set(found, "convolution_api.cpp")
@@ -258,63 +257,6 @@ def test_commented_out_declaration_is_ignored():
     source += f"\n// {declaration('miopenConvolutionStaleGetWorkSpaceSizeRange')}\n"
     source += f"/* {declaration('miopenConvolutionOlderGetWorkSpaceSizeRange')} */\n"
     assert set(abi.parse_range_prototypes(source, "consumer.cpp")) == {FWD, BWD, WRW}
-
-
-# --------------------------------------------------------------------------
-# The rename headers and the provider's mirror of them
-# --------------------------------------------------------------------------
-
-
-RENAME_HEADER = """
-#pragma once
-#define miopenCreate miopenCreate_impl
-#define miopenDestroy miopenDestroy_impl
-"""
-
-
-def test_parse_renames_reads_defines():
-    assert abi.parse_renames(RENAME_HEADER) == {
-        "miopenCreate": "miopenCreate_impl",
-        "miopenDestroy": "miopenDestroy_impl",
-    }
-
-
-def test_duplicate_rename_raises():
-    with pytest.raises(abi.AbiError, match="miopenCreate"):
-        abi.parse_renames(RENAME_HEADER + "#define miopenCreate miopenCreate_impl\n")
-
-
-def test_rename_to_wrong_target_is_reported(capsys):
-    renames = abi.parse_renames(
-        RENAME_HEADER + "#define miopenGetVersion miopenCreate_impl\n"
-    )
-    assert not abi.check_rename_targets(renames)
-    out = capsys.readouterr().out
-    assert "FAIL" in out
-    assert "miopenGetVersion -> miopenCreate_impl" in out
-
-
-def test_provider_mirror_matches(capsys):
-    renames = abi.parse_renames(RENAME_HEADER)
-    assert abi.check_provider_rename_mirror(renames, dict(renames))
-    assert "PASS" in capsys.readouterr().out
-
-
-def test_provider_mirror_missing_entry_is_reported(capsys):
-    lib = abi.parse_renames(RENAME_HEADER)
-    provider = {k: v for k, v in lib.items() if k != "miopenDestroy"}
-    assert not abi.check_provider_rename_mirror(lib, provider)
-    out = capsys.readouterr().out
-    assert "- in the library, missing from the provider: miopenDestroy" in out
-
-
-def test_provider_mirror_divergent_target_is_reported(capsys):
-    lib = abi.parse_renames(RENAME_HEADER)
-    provider = dict(lib, miopenCreate="miopenCreate_private")
-    assert not abi.check_provider_rename_mirror(lib, provider)
-    out = capsys.readouterr().out
-    assert "~ miopenCreate" in out
-    assert "miopenCreate_private" in out
 
 
 # --------------------------------------------------------------------------
@@ -526,12 +468,12 @@ def test_read_tracked_source_rejects_paths_outside_the_root(tmp_path):
     assert "outside the repository root" in "".join(reasons.values())
 
 
-# run_git() is the script's single shell-out, so the cases below are built by
-# replacing it rather than by standing up a real repository. An earlier version did
-# the latter, and `git init` in a temporary directory turned out to be unsafe here:
-# git exports GIT_DIR into the hooks it runs and GIT_DIR outranks -C, so under the
-# pre-commit hook these tests run from, the init reached the surrounding repository
-# and left it marked bare, which refuses every later commit.
+# run_git() is the script's single shell-out, so these cases replace it instead of
+# standing up a real repository. `git init` in a temporary directory is unsafe
+# here: git exports GIT_DIR into the hooks it runs and GIT_DIR outranks -C, so
+# under the pre-commit hook these tests run from, the init reached the
+# surrounding repository and left it marked bare, which refuses every later
+# commit.
 
 
 def _completed(returncode=0, stdout=b"", stderr=b""):
@@ -1039,3 +981,111 @@ def test_check_installed_headers_fails_on_a_leak(tmp_path):
 
 def test_check_installed_headers_that_cannot_run_exits_2(tmp_path):
     assert abi.main(["check-installed-headers", str(tmp_path / "missing")]) == 2
+
+
+# --------------------------------------------------------------------------
+# The check-headers command
+#
+# It checks two things: the hand-written stubs in wrapper.cpp, and the
+# provider's declarations of the range entry points against the library's
+# definitions.
+# --------------------------------------------------------------------------
+
+
+def headers_inputs(tmp_path, wrapper=None, provider_decls=None):
+    """Write the three inputs and return the flags that point `check-headers` at them."""
+    wrapper_path = tmp_path / "wrapper.cpp"
+    wrapper_path.write_text(
+        wrapper
+        or wrapper_source(
+            stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
+        )
+    )
+    definitions = tmp_path / "convolution_api.cpp"
+    definitions.write_text(DEFINITIONS_SOURCE)
+    flags = [
+        "--wrapper",
+        str(wrapper_path),
+        "--range-definitions",
+        str(definitions),
+    ]
+    if provider_decls is not False:
+        provider = tmp_path / "MiopenApi.hpp"
+        provider.write_text(provider_decls or CONSUMER_SOURCE)
+        flags += ["--provider-api", str(provider)]
+    return flags
+
+
+def run_check_headers(tmp_path, flags, *extra):
+    # Not inside a repository, so a file that is not on disk reads as absent.
+    root = tmp_path / "projects" / "miopen"
+    root.mkdir(parents=True, exist_ok=True)
+    return abi.main(["check-headers", "--source-root", str(root), *flags, *extra])
+
+
+def test_check_headers_passes_consistent_inputs(tmp_path, capsys):
+    flags = headers_inputs(tmp_path)
+    assert run_check_headers(tmp_path, flags, "--require-provider") == 0
+    assert "header consistency check: PASS" in capsys.readouterr().out
+
+
+def test_check_headers_fails_on_a_stub_calling_the_wrong_impl(tmp_path, capsys):
+    wrapper = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);").replace(
+            "miopenCreate_impl", "miopenDestroy_impl"
+        )
+    )
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, wrapper=wrapper)) == 1
+    assert "miopenCreate calls miopenDestroy_impl" in capsys.readouterr().out
+
+
+def test_check_headers_fails_on_a_stub_without_a_dispatch_macro(tmp_path, capsys):
+    wrapper = wrapper_source(stub("miopenCreate", ""))
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, wrapper=wrapper)) == 1
+    out = capsys.readouterr().out
+    assert "miopenCreate has no MIOPEN_WRAPPER_DISPATCH" in out
+    assert "Every stub in src/private/wrapper.cpp must open" in out
+
+
+def test_check_headers_fails_on_provider_range_drift(tmp_path, capsys):
+    drifted = consumer(
+        declaration(FWD, UNNAMED_PARAMS.replace("size_t*,\n", "int*,\n", 1)),
+        declaration(BWD),
+        declaration(WRW),
+    )
+    flags = headers_inputs(tmp_path, provider_decls=drifted)
+    assert run_check_headers(tmp_path, flags) == 1
+    out = capsys.readouterr().out
+    assert "MiopenApi.hpp prototypes have drifted" in out
+    assert "src/include/miopen/miopen_internal.h" in out
+
+
+def test_check_headers_no_longer_reads_the_generated_files(tmp_path):
+    """The generator covers the rename headers, miopen_impl.h and miopen.h."""
+    for removed in (
+        "--public-header",
+        "--impl-header",
+        "--rename-header",
+        "--range-test",
+        "--provider-rename",
+    ):
+        with pytest.raises(SystemExit):
+            abi.main(["check-headers", removed, "x"])
+
+
+def test_check_headers_skips_an_absent_provider_unless_it_is_required(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        abi,
+        "run_git",
+        lambda repo_root, *args: _completed(128, stderr=b"fatal: not a git repository"),
+    )
+    flags = headers_inputs(tmp_path, provider_decls=False)
+    assert run_check_headers(tmp_path, flags) == 0
+    assert "SKIP:" in capsys.readouterr().out
+
+    assert run_check_headers(tmp_path, flags, "--require-provider") == 1
+    out = capsys.readouterr().out
+    assert "FAIL:" in out
+    assert "--require-provider was passed" in out

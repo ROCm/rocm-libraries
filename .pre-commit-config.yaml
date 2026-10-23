@@ -195,25 +195,53 @@ repos:
         args: [--multiline]
         files: ^projects/hipblaslt/.*conftest\.py$
 
+      # What the generator below cannot replace: the few hand-written stubs in
+      # wrapper.cpp, and the provider's hand-written declarations of the
+      # GetWorkSpaceSizeRange entry points.
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers
         language: python
-        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
+        files: ^(projects/miopen/src/(private/wrapper\.cpp|convolution_api\.cpp)|dnn-providers/miopen-provider/MiopenApi\.hpp)$
         pass_filenames: false
 
-      # The check above is the only one that can see signature drift in the
-      # split, and it reads C declarations with a hand-rolled parser rather
-      # than a compiler. These are that parser's own tests. They work on string
+      # The wrapper's derived files are generated from include/miopen/miopen.h;
+      # this catches a hand edit or a stale file. The generator formats with the
+      # clang-format release pinned for the clang-format hook above and refuses
+      # any other, because releases wrap lines differently. That version is
+      # written three times in this file: the clang-format hook's rev and the
+      # additional_dependencies of the two hooks below. Bump all three together;
+      # the generator fails loudly if they disagree.
+      - id: miopen-wrapper-sources
+        name: MIOpen wrapper sources match miopen.h
+        entry: python projects/miopen/script/generate_wrapper_sources.py --check
+        language: python
+        additional_dependencies: ["clang-format==18.1.4"]
+        files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$
+        pass_filenames: false
+
+      # Rewrites those files. Manual only, so it never runs in CI; run it with
+      #   pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files
+      # to get the pinned clang-format without installing it yourself.
+      - id: miopen-wrapper-sources-regenerate
+        name: Regenerate MIOpen wrapper sources from miopen.h
+        entry: python projects/miopen/script/generate_wrapper_sources.py
+        language: python
+        additional_dependencies: ["clang-format==18.1.4"]
+        stages: [manual]
+        pass_filenames: false
+
+      # The checks above read C declarations with hand-rolled parsers rather
+      # than a compiler. These are those parsers' own tests. They work on string
       # fixtures, so they run here -- where pre-commit provides pytest in an
       # isolated environment -- rather than in the MIOpen component CI job,
       # which installs no Python packages.
       - id: miopen-public-private-header-check-tests
         name: MIOpen public/private header check self-tests
-        entry: python -m pytest projects/miopen/script/test_check_public_abi.py -q
+        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_generate_wrapper_sources.py -q
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi)\.py$
+        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync
