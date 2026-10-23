@@ -63,6 +63,7 @@ from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantZeroPointA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
+from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -405,6 +406,8 @@ class StateValues:
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
+  # DirectToVgprDot2A: A register set the current global read and dequant target.
+  dot2DtvASet: int                       = 0
   numReadsPerIterMetadata: int           = 0
   localReadDoCntA: int                   = 0
   localReadDoCntMXSA: int                = 0
@@ -3755,7 +3758,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # isSecondBuf case, use second set
     vregSetIdxGR = 0
     vregSetIdxMFMA = 0
-    isDTVAB = kernel["DirectToVgprA"] or kernel["DirectToVgprB"]
+    isDTVAB = kernel["DirectToVgprA"] or kernel["DirectToVgprB"] or dot2DtvADoubleBuffered(kernel)
     if isDTVAB:
       if isNGLL:
         if NLLindex == 0 and NLLnum == 2:
@@ -3765,6 +3768,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           vregSetIdxGR = 1
       # for MFMA, use opposite side
       vregSetIdxMFMA = 1 - vregSetIdxGR
+    self.states.dot2DtvASet = vregSetIdxGR
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
     # initialize SubTileIdx
@@ -4275,7 +4279,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             postShiftK.add(item)
         macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll, postShiftK = postShiftK))
       else:
-        macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
+        macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True, unrollIdx=u))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
@@ -4497,8 +4501,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if self.states.dcpTokenGate:
         self._dcpAdvanceTokens("Tensor")
 
+    if dot2DtvADoubleBuffered(kernel):
+      self.states.dot2DtvASet = 1 if isDTVGRSecondBuf else 0
     g2lBufIdx1st = 0
-    if grBA==True or (kernel["DirectToVgpr%s"%tc1] and isDTVGRSecondBuf):
+    if grBA==True or ((kernel["DirectToVgpr%s"%tc1] or (tc1 == "A" and dot2DtvADoubleBuffered(kernel))) and isDTVGRSecondBuf):
       # use second buffer
       g2lBufIdx1st = 1
     self.codes.globalReadA = self.globalReadDo(kernel, 1, tensorParameters1st, unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx1st, tPM=tPM)
@@ -4526,7 +4532,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     else:
       self.codes.globalReadMXSB = StructuredModule()
     g2lBufIdx2nd = 0
-    if grBA==True or (kernel["DirectToVgpr%s"%tc2] and isDTVGRSecondBuf):
+    if grBA==True or ((kernel["DirectToVgpr%s"%tc2] or (tc2 == "A" and dot2DtvADoubleBuffered(kernel))) and isDTVGRSecondBuf):
       # use second buffer
       g2lBufIdx2nd = 1
     self.codes.globalReadB = self.globalReadDo(kernel, 1, tensorParameters2nd, unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx2nd, tPM=tPM)
@@ -5176,7 +5182,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         else:
           macIterCode.add(mfmaIter)
       else:
-        macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
+        macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True, unrollIdx=u))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
@@ -6037,7 +6043,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(skipGL2Label)
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1
-    isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
+    isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"] or dot2DtvADoubleBuffered(kernel))
     isULSGRO = kernel["UnrollLoopSwapGlobalReadOrder"] == 1
     # DTLA+DTLB+PGR2 case, NGLL code is same and no need to genenerate even/odd NGLL
     isULSGROForNGLL = isULSGRO and (not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"]>=2))
@@ -8382,7 +8388,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.a.numVgprG2LAllocated += numVgprG2LAllocatedLocal
         self.states.a.numVgprG2LTailloopAllocated += numVgprG2LAllocatedLocal
       # double numVgprG2L if DirectToVgpr is enabled
-      if kernel["DirectToVgprA"]:
+      if kernel["DirectToVgprA"] or dot2DtvADoubleBuffered(kernel):
         self.states.a.numVgprG2L *= 2
         self.states.a.numVgprG2LAllocated *= 2
         bpeA = tensorParametersA["bpe"]
@@ -10451,7 +10457,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         numA = kernel["InnerUnroll"]*(kernel["ThreadTile0"] // kernel["VectorWidthA"]) // tensorParametersA["localReadInstruction"].numOffsets
         numB = kernel["InnerUnroll"]*(kernel["ThreadTile1"] // kernel["VectorWidthB"]) // tensorParametersB["localReadInstruction"].numOffsets
 
-    if not kernel["DirectToVgprA"]:
+    if not (kernel["DirectToVgprA"] or kernel["DirectToVgprDot2A"]):
       self.states.numReadsPerIterA = numA
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.numReadsPerIterMXSA = numMXSA

@@ -541,6 +541,7 @@ defaultBenchmarkCommonParameters = [
     {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
+    {"DirectToVgprDot2A": [False]},
     {"DirectToVgprMXSA": [False]},
     {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},

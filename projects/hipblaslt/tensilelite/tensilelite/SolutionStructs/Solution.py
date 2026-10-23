@@ -86,6 +86,7 @@ from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from .Validators.BlockDequant import validateBlockDequantCombination
+from .Validators.DirectToVgprDot2 import validateDirectToVgprDot2A
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -4210,7 +4211,7 @@ class Solution(collections.abc.Mapping):
         if state["DirectToLdsB"]:
           ldsPadB = removeLdsPadLogicForDTL('B', ldsPadB)
         # set ldsPadA,B=0 for DirectToVgpr
-        if state["DirectToVgprA"]:
+        if state["DirectToVgprA"] or state["DirectToVgprDot2A"]:
           ldsPadA = 0
         if state["DirectToVgprB"]:
           ldsPadB = 0
@@ -4415,7 +4416,7 @@ class Solution(collections.abc.Mapping):
         tc = mxTc.replace("MXS", "")
         if ("MXS" in mxTc) and (state["ProblemType"]["MXBlock%s"%tc] == 0):
           return (0, 0)
-        if state["DirectToVgpr%s"%mxTc]:
+        if state["DirectToVgpr%s"%mxTc] or (mxTc == "A" and state["DirectToVgprDot2A"]):
           return (0, 0)
 
         bpe = state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
@@ -7239,6 +7240,8 @@ class Solution(collections.abc.Mapping):
     # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
     # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
     if not validateBlockDequantCombination(state, printRejectionReason):
+      return
+    if not validateDirectToVgprDot2A(state, printRejectionReason):
       return
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])

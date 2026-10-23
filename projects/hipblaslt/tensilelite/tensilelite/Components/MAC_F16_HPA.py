@@ -40,7 +40,7 @@ class FMA_F16_HPA_DOT2(MAC):
               "UseDotInstruction": True,
              }
 
-    def __call__(self, writer, tPA, tPB, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll, unrollIdx=None):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_HPA_DOT2")
@@ -71,7 +71,10 @@ class FMA_F16_HPA_DOT2(MAC):
                     vars["cIdxExpr"] = "%d+%d" % (vars["block0"], vars["block1"]*vars["ThreadTile0"])
                     cidx = eval(vars["cIdxExpr"])
                     cStr = "ValuC+{cIdxExpr}".format_map(vars)
-                    aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
+                    if kernel["DirectToVgprDot2A"]:
+                        aStr = writer.dot2DirectToVgprAReg(kernel, vars["blockA"], unrollIdx)
+                    else:
+                        aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
                     bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
                     if instruction == VDot2F32F16:
                         module.add(instruction(dst=vgpr(cStr), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr), \
