@@ -5,10 +5,17 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Handle.hpp"
@@ -85,6 +92,44 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 /// @see packs/FlydslSdpaCdnaDecodeNative.cpp
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
+
+/// @see packs/FlydslSdpaBwdMergedNative.cpp
+void registerFlydslSdpaBwdMergedSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaBwdMergedModuleCache();
+
+/// What one launch of the merged SDPA backward engine hands the device, resolved without
+/// touching it. FOR TESTS ONLY: the product launches through the dispatch handler, and this
+/// is the same argument computation, so a test can read the kernarg images, grids and
+/// workspace offsets a launch would use.
+struct FlydslSdpaBwdMergedLaunchDump
+{
+    /// The merged kernel's arguments, each at its natural offset, and its launch.
+    std::vector<unsigned char> kernarg;
+    std::array<unsigned int, 3> grid{};
+    unsigned int block = 0;
+    /// Set when the graph's dBias is broadcast: the reduce kernel's symbol, arguments and launch.
+    bool reduces = false;
+    std::string reduceSymbol;
+    std::vector<unsigned char> reduceKernarg;
+    std::array<unsigned int, 3> reduceGrid{};
+    unsigned int reduceBlock = 0;
+    size_t workspaceBytes = 0;
+    /// Set when the seed and offset are written into the workspace ahead of the launch: either
+    /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
+    /// seedCopiedFromDevice, by copying the 4 bytes of each 32-bit device tensor.
+    bool seedUploaded = false;
+    bool seedCopiedFromDevice = false;
+    std::vector<uint32_t> seedWords;
+};
+
+/// The launch of @p kernel on the graph of @p context, over @p buffers (by tensor uid) and a
+/// workspace that starts at @p workspace; the address is only offset into, never dereferenced.
+/// @throws HipdnnPluginException with the status prepare() or launch() would throw.
+FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const std::vector<hipdnnPluginDeviceBuffer_t>& buffers,
+    void* workspace);
 
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
