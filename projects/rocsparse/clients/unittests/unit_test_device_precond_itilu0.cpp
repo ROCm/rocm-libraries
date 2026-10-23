@@ -206,7 +206,7 @@ namespace
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
             // The history is what the compute call reported, each residual norm is a finite
             // non-negative number, the iteration reduced the residual, and a stopping run
-            // that ended early reached the requested tolerance.
+            // ended early on one of the library's stopping rules.
             EXPECT_EQ(niter, nmaxiter);
             ASSERT_GE(niter, 1);
             ASSERT_LE(niter, nmaxiter_in);
@@ -218,8 +218,23 @@ namespace
             EXPECT_LT(log[2 * niter - 1], log[niter]);
             if(is_stopping(options))
             {
+                // The drivers stop either on the tolerance or on stagnation: after more than
+                // 4 sweeps, when the relative change of the residual is below 1e-5 (float)
+                // or 1e-15 (double) and the residual is below a limit that depends on the
+                // driver: < 1e-5 for async_inplace (and default), <= 10 * tol for the x
+                // drivers behind async_split, sync_split and sync_split_fusion.
                 EXPECT_LT(nmaxiter, nmaxiter_in);
-                EXPECT_LE(log[2 * niter - 1], tol);
+                const real_of<T> last    = log[2 * niter - 1];
+                const real_of<T> delta   = std::abs(last - log[2 * niter - 2]);
+                const real_of<T> inc     = std::is_same_v<real_of<T>, float> ? 1.0e-5f : 1.0e-15;
+                const bool       inplace = alg == rocsparse_itilu0_alg_default
+                                     || alg == rocsparse_itilu0_alg_async_inplace;
+                const bool stagnated
+                    = niter > 4
+                      && (inplace ? (delta < inc * last && static_cast<double>(last) < 1.0e-5)
+                                  : (delta <= inc * last && last <= tol * 10));
+                EXPECT_TRUE(last <= tol || stagnated)
+                    << "residual " << last << " after " << niter << " sweeps";
             }
         }
     }
