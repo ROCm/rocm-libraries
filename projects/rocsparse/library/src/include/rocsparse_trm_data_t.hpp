@@ -61,6 +61,7 @@ namespace rocsparse
                                    rocsparse::pivot_info_t*  pivot_info,
                                    void*                     temp_buffer);
 
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     rocsparse_status gtrm_analysis_transpose_free(rocsparse_handle          handle,
                                                   int64_t                   m,
                                                   int64_t                   nnz,
@@ -72,6 +73,7 @@ namespace rocsparse
                                                   rocsparse::trm_info_t*    info,
                                                   rocsparse::pivot_info_t*  pivot_info,
                                                   void*                     temp_buffer);
+#endif
 }
 
 namespace rocsparse
@@ -168,6 +170,7 @@ namespace rocsparse
             rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
             // Perform analysis
 
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
             if(this->m_transpose_free && trans != rocsparse_operation_none)
             {
                 THROW_IF_ROCSPARSE_ERROR(
@@ -184,6 +187,7 @@ namespace rocsparse
                                                             temp_buffer));
                 return trm_info;
             }
+#endif
 
             THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
                                                               trans,
