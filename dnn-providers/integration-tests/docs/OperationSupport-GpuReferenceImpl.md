@@ -149,17 +149,18 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
 | Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
 | FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
 | Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | Not supported |
+| ALiBi | Not supported | Not supported |
+| `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Paged KV cache, block-sparse attention | Not supported | Not supported |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
 The ragged plan requires the RFC-0014 `[B, S, H, D]` token-major layout with a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its Q/K/V/O tensors has a `ragged_offset`; a
 partly ragged node is rejected there instead of running as dense. The harness records the
-dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
+dense-path FP8 gap in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
 
 ## Validators
@@ -194,7 +195,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; no ragged) | Yes (dense incl. variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | No |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |

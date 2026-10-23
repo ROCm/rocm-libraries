@@ -90,8 +90,22 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     long long kvHeadK = h / (args.numHeads / args.numHeadsK);
     long long kvHeadV = h / (args.numHeads / args.numHeadsV);
 
-    // Sliding-window offset (matches CpuFpReferenceSdpa Step 3).
-    long long windowOffset = args.topLeftAlignment ? 0 : (args.seqKv - args.seqQ);
+    // Padding (cuDNN): this batch's valid lengths. Lengths outside [0, padded length] are an
+    // invalid graph that the CPU reference rejects; the kernel cannot throw, so it clamps.
+    auto liveLength = [](const int* lens, long long stride, long long batchIdx, long long full) {
+        if(lens == nullptr)
+        {
+            return full;
+        }
+        long long len = static_cast<long long>(lens[batchIdx * stride]);
+        return len < 0 ? 0 : (len > full ? full : len);
+    };
+    const long long liveQ = liveLength(args.seqLenQ, args.seqLenQStride, b, args.seqQ);
+    const long long liveKv = liveLength(args.seqLenKv, args.seqLenKvStride, b, args.seqKv);
+
+    // Sliding-window offset (matches CpuFpReferenceSdpa Step 3): bottom-right alignment uses the
+    // batch's valid lengths.
+    long long windowOffset = args.topLeftAlignment ? 0 : (liveKv - liveQ);
 
     // Negative infinity sentinel for masked scores. INFINITY (a <math.h> macro)
     // is unavailable under HipRTC's self-contained preinclude, so use the clang
@@ -150,9 +164,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         return s;
     };
 
-    // PASS 1: numerically stable softmax maximum.
+    // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
     COMPUTE_TYPE maxVal = negInf;
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         if(s > maxVal)
@@ -169,9 +183,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     // row has exactly one writer and there is no contention.
     long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
 
-    // Fully-masked row: probabilities are all zero, so the output is zero.
-    // Matches CpuFpReferenceSdpa (avoids a 0/0 NaN from a sumExp==0 guard).
-    if(maxVal == negInf)
+    // Fully-masked row, or a padded query row past liveQ: probabilities are all zero, so the
+    // output is zero and LSE is -inf. Matches CpuFpReferenceSdpa (avoids a 0/0 NaN).
+    if(sq >= liveQ || maxVal == negInf)
     {
         o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
         // CPU writes maxVal + log(sumExp) = -inf + log(0) = -inf for masked rows.
@@ -184,7 +198,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // PASS 2: softmax denominator.
     COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         // COMPUTE_TYPE is float (enforced by the static_assert above), so expf is the
@@ -197,7 +211,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     // softmax probability before P@V, matching matrix-core SDPA kernels that
     // materialize P in bf16 before the second matmul.
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
-    for(long long skv = 0; skv < args.seqKv; ++skv)
+    for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;

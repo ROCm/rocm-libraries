@@ -46,6 +46,11 @@ struct SdpaFwdArgs
     float scale;
     long long leftBound, rightBound;
     int topLeftAlignment;
+    // Optional padding (cuDNN seq_len_q / seq_len_kv): one INT32 per batch, read at
+    // b * stride. nullptr means every batch uses the full seqQ / seqKv.
+    const int* seqLenQ;
+    const int* seqLenKv;
+    long long seqLenQStride, seqLenKvStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

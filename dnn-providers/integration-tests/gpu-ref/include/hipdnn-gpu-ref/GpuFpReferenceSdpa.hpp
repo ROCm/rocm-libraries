@@ -92,7 +92,9 @@ public:
         int64_t rightBound = -1,
         bool topLeftAlignment = true,
         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT)
+        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
@@ -144,6 +146,33 @@ public:
             lseStrides = lse->strides();
         }
 
+        // Padding (cuDNN seq_len_q / seq_len_kv): one INT32 per batch, both or neither.
+        if((seqLenQ == nullptr) != (seqLenKv == nullptr))
+        {
+            throw std::invalid_argument(
+                "GpuFpReferenceSdpa: seqLenQ and seqLenKv must be given together");
+        }
+        const int32_t* seqLenQPtr = nullptr;
+        const int32_t* seqLenKvPtr = nullptr;
+        int64_t seqLenQStride = 0;
+        int64_t seqLenKvStride = 0;
+        if(seqLenQ != nullptr)
+        {
+            for(auto* len : {seqLenQ, seqLenKv})
+            {
+                if(static_cast<int64_t>(len->elementCount()) != batch || len->dims().empty()
+                   || len->dims()[0] != batch)
+                {
+                    throw std::invalid_argument(
+                        "GpuFpReferenceSdpa: seq_len tensors must hold one value per batch");
+                }
+            }
+            seqLenQPtr = static_cast<const int32_t*>(seqLenQ->memory().deviceData());
+            seqLenKvPtr = static_cast<const int32_t*>(seqLenKv->memory().deviceData());
+            seqLenQStride = seqLenQ->strides()[0];
+            seqLenKvStride = seqLenKv->strides()[0];
+        }
+
         launchSdpaFwd(q.memory().deviceData(),
                       k.memory().deviceData(),
                       v.memory().deviceData(),
@@ -169,7 +198,11 @@ public:
                       leftBound,
                       rightBound,
                       topLeftAlignment,
-                      defines);
+                      defines,
+                      seqLenQPtr,
+                      seqLenKvPtr,
+                      seqLenQStride,
+                      seqLenKvStride);
 
         o.memory().markDeviceModified();
         if(lse != nullptr)
@@ -258,7 +291,11 @@ private:
                               int64_t leftBound,
                               int64_t rightBound,
                               bool topLeftAlignment,
-                              const std::vector<std::string>& defines);
+                              const std::vector<std::string>& defines,
+                              const int32_t* seqLenQPtr = nullptr,
+                              const int32_t* seqLenKvPtr = nullptr,
+                              int64_t seqLenQStride = 0,
+                              int64_t seqLenKvStride = 0);
 };
 
 } // namespace hipdnn_gpu_ref
