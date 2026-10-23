@@ -819,6 +819,7 @@ namespace
         bool                      unsupported = false;
         rocsparse_singularity     singularity = rocsparse_singularity_none;
         int64_t                   singularity_position = -1;
+        int64_t                   zero_pivot_position  = -1;
     };
 
     bool
@@ -896,8 +897,14 @@ namespace
                   rocsparse_status_success);
         EXPECT_EQ(singularity, o.singularity);
         EXPECT_EQ(position, o.singularity_position);
-        const rocsparse_status st = query(rocsparse_sptrsv_output_zero_pivot_position, &position);
-        EXPECT_TRUE(st == rocsparse_status_success || st == rocsparse_status_zero_pivot);
+        // The header documents only success, but for a singular matrix the zero pivot
+        // query returns rocsparse_status_zero_pivot: rocsparse_sptrsv_get_output passes
+        // the status of csrsv_zero_pivot through.
+        position = -2;
+        EXPECT_EQ(query(rocsparse_sptrsv_output_zero_pivot_position, &position),
+                  o.zero_pivot_position < 0 ? rocsparse_status_success
+                                            : rocsparse_status_zero_pivot);
+        EXPECT_EQ(position, o.zero_pivot_position);
         return true;
     }
 
@@ -1012,6 +1019,7 @@ namespace
         o.alpha                = &alpha;
         o.singularity          = rocsparse_singularity_symbolic;
         o.singularity_position = 1;
+        o.zero_pivot_position  = 1;
         EXPECT_TRUE(run_sptrsv(handle, A.d, x.d, y.d, o));
     }
 
