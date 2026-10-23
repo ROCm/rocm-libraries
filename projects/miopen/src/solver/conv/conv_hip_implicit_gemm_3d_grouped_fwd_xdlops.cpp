@@ -582,8 +582,9 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id, config.UseTF32());
+    // perf-db stores only kernel_id; recompute TF32 from the problem with the same tf32->fp32
+    // availability fallback the config build used (see GetSolutionTf32Aware).
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

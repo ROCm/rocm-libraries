@@ -5,6 +5,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
+### Resolved Issues
+* [Conv] Fixed TF32 grouped convolutions silently running in FP32 (~2x slower) when the perf config
+  came from the perf-db or a heuristic instead of an in-process search; TF32 is now recovered from
+  the problem at solution-build time, with a fallback to FP32 where no TF32 instance exists.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
