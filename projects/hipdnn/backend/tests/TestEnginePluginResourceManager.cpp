@@ -2003,6 +2003,57 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     }
 }
 
+// A plugin that loads fine but throws when asked which engines apply to a graph
+// (e.g. an engine's applicability check finds no solver) must not take the other
+// plugins' engines down with it. ROCm/rocm-libraries#14266.
+TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSkipsPluginThatThrows)
+{
+    const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();
+    const std::shared_ptr<MockEnginePlugin> goodPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{badPlugin, goodPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+
+    auto badHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xbad);
+    EXPECT_CALL(*badPlugin, name()).WillRepeatedly(::testing::Return("BadPlugin"));
+    EXPECT_CALL(*badPlugin, createHandle()).WillOnce(::testing::Return(badHandle));
+    EXPECT_CALL(*badPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*badPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*badPlugin, destroyHandle(badHandle));
+    EXPECT_CALL(*badPlugin, getApplicableEngineIds(badHandle, testing::_))
+        .WillRepeatedly(
+            ::testing::Throw(HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "no applicable solver")));
+
+    auto goodHandle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0xcafe);
+    EXPECT_CALL(*goodPlugin, createHandle()).WillOnce(::testing::Return(goodHandle));
+    EXPECT_CALL(*goodPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{200}));
+    EXPECT_CALL(*goodPlugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*goodPlugin, destroyHandle(goodHandle));
+    EXPECT_CALL(*goodPlugin, getApplicableEngineIds(goodHandle, testing::_))
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{200}));
+
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillRepeatedly(::testing::Return(fakeSerializedData));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        std::vector<int64_t> engineIds;
+        EXPECT_NO_THROW(engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc));
+        EXPECT_EQ(engineIds, std::vector<int64_t>{200});
+    }
+}
+
 TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
