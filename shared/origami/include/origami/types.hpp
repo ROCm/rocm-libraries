@@ -550,6 +550,12 @@ struct config_t {
   /// Whether output D is accessed with cache-flags (streaming/non-temporal).
   int cache_hints_d = 0;
 
+  /// Filled by memoize_non_temporal_availability() when the candidate list is
+  /// built. True when this macro tile has a non-temporal read of that operand
+  /// in the list. rank_configs() reads these and does not rescan.
+  bool non_temporal_a_available = false;
+  bool non_temporal_b_available = false;
+
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;

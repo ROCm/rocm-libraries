@@ -1885,7 +1885,9 @@ def _run_nongrouped_spec(
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_nongrouped import (
+        DirectSplitReduceSpec,
         build_direct_conv_nongrouped,
+        build_direct_conv_split_reduce,
         is_valid_nongrouped_spec,
     )
     from rocke.runtime import synchronize_and_release
@@ -1919,38 +1921,67 @@ def _run_nongrouped_spec(
     rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
+    # A split-C kernel writes fp32 partial sums into a workspace that a second
+    # pass folds into D. The workspace is poisoned (NaN bytes) so a slab the
+    # conv pass fails to write shows up in the output.
+    split = spec.split_c > 1
+    WS_dev = rt.alloc(spec.workspace_bytes) if split else None
+    if split:
+        rt.memset(WS_dev, 0xFF, spec.workspace_bytes)
+    bufs = [A_dev, B_dev, D_dev] + ([WS_dev] if split else [])
 
+    sig = conv_direct_args_signature(p.dtype)
     try:
         launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=conv_direct_args_signature(p.dtype),
+            hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
         )
+        if split:
+            red_spec = DirectSplitReduceSpec(dtype=p.dtype, split_c=spec.split_c)
+            red = compile_kernel(build_direct_conv_split_reduce(red_spec), arch=arch)
+            reducer = KernelLauncher(
+                hsaco=red.hsaco, kernel_name=red.kernel_name, signature=sig
+            )
     except HipError as e:
-        rt.free(A_dev)
-        rt.free(B_dev)
-        rt.free(D_dev)
+        for buf in bufs:
+            rt.free(buf)
         return False, f"kernel load failed: {e}"
 
+    args = ConvArgs.from_problem(p)
+    conv_out, conv_out_bytes = (
+        (WS_dev, spec.workspace_bytes) if split else (D_dev, D_t.nbytes)
+    )
     launcher(
-        ConvArgs.from_problem(p).to_launch_values(
+        args.to_launch_values(
             int(A_dev),
             int(B_dev),
-            int(D_dev),
+            int(conv_out),
             A_t.nbytes,
             B_t.nbytes,
-            D_t.nbytes,
+            conv_out_bytes,
         ),
         config=LaunchConfig(
             grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
         ),
     )
+    if split:
+        reducer(
+            args.to_launch_values(
+                int(WS_dev),
+                int(B_dev),
+                int(D_dev),
+                spec.workspace_bytes,
+                B_t.nbytes,
+                D_t.nbytes,
+            ),
+            config=LaunchConfig(
+                grid=red_spec.grid(p), block=(red_spec.threads, 1, 1), fence=True
+            ),
+        )
 
     D_cpu = torch.empty_like(D_t)
     rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
-    rt.free(A_dev)
-    rt.free(B_dev)
-    rt.free(D_dev)
+    for buf in bufs:
+        rt.free(buf)
     synchronize_and_release(0)
 
     diff = (D_cpu.float() - ref.float().cpu()).abs()
@@ -2042,6 +2073,232 @@ class TestDirectConvNongroupedCorrectness(unittest.TestCase):
                 self.assertTrue(passed, f"FAIL {shape} on {GPU_ARCH}: {reason}")
 
 
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvSplitGroupedCorrectness(unittest.TestCase):
+    """The split-C (fp32 workspace + reduce pass) and grouped / group-merged
+    (block-diagonal weights) modes of the LDS-halo kernel."""
+
+    def _check(self, cases):
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        for name, prob, knobs in cases:
+            spec = _fit_nongrouped_to_arch(
+                DirectNongroupedConvSpec(
+                    problem=DirectConvProblem(**prob), iglp=0, **knobs
+                ),
+                GPU_ARCH,
+            )
+            with self.subTest(case=name):
+                passed, reason = _run_nongrouped_spec(GPU_ARCH, spec, name)
+                self.assertTrue(passed, f"FAIL {name} on {GPU_ARCH}: {reason}")
+
+    def test_split_c(self):
+        dense = dict(groups=1, KH=3, KW=3, PAD=1)
+        self._check(
+            [
+                # 7x7 map, one chunk per split.
+                (
+                    "sc8_7x7",
+                    dict(
+                        N=1, H=7, W=7, cpg=256, kpg=64, stride=1, dtype="bf16", **dense
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=16,
+                        tile_k=32,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        split_c=8,
+                    ),
+                ),
+                # Stride 2, a 12-row tile, partial K tile.
+                (
+                    "sc4_s2_th12",
+                    dict(
+                        N=2,
+                        H=24,
+                        W=24,
+                        cpg=128,
+                        kpg=96,
+                        stride=2,
+                        dtype="fp16",
+                        **dense,
+                    ),
+                    dict(
+                        tile_h=12,
+                        tile_w=16,
+                        tile_k=64,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        split_c=4,
+                    ),
+                ),
+                # 10 chunks over 4 splits (2/3/2/3), double-buffered, partial
+                # spatial tiles, no swizzle.
+                (
+                    "sc4_uneven_db",
+                    dict(
+                        N=3, H=9, W=13, cpg=320, kpg=64, stride=1, dtype="bf16", **dense
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=16,
+                        tile_k=32,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        split_c=4,
+                        double_buffer=True,
+                        chiplet_swizzle=False,
+                    ),
+                ),
+            ]
+        )
+
+    def test_grouped(self):
+        g = dict(KH=3, KW=3, PAD=1)
+        self._check(
+            [
+                (
+                    "g32_c4_gm8",
+                    dict(
+                        N=2,
+                        H=20,
+                        W=24,
+                        groups=32,
+                        cpg=4,
+                        kpg=4,
+                        stride=1,
+                        dtype="bf16",
+                        **g,
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=32,
+                        tile_k=32,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        grouped=True,
+                        group_merge=8,
+                    ),
+                ),
+                (
+                    "g16_c8_gm4_s2",
+                    dict(
+                        N=2,
+                        H=30,
+                        W=34,
+                        groups=16,
+                        cpg=8,
+                        kpg=8,
+                        stride=2,
+                        dtype="fp16",
+                        **g,
+                    ),
+                    dict(
+                        tile_h=4,
+                        tile_w=32,
+                        tile_k=32,
+                        ck=16,
+                        waves_m=1,
+                        waves_n=2,
+                        atom="32x32x16",
+                        grouped=True,
+                        group_merge=4,
+                    ),
+                ),
+                (
+                    "g4_c32_gm1",
+                    dict(
+                        N=2,
+                        H=17,
+                        W=40,
+                        groups=4,
+                        cpg=32,
+                        kpg=32,
+                        stride=1,
+                        dtype="fp16",
+                        **g,
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=32,
+                        tile_k=32,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        grouped=True,
+                        group_merge=1,
+                    ),
+                ),
+                # cpg 12: fragments straddle groups at offsets that are not a
+                # multiple of 8.
+                (
+                    "g8_c12_gm4",
+                    dict(
+                        N=1,
+                        H=12,
+                        W=16,
+                        groups=8,
+                        cpg=12,
+                        kpg=12,
+                        stride=1,
+                        dtype="bf16",
+                        **g,
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=16,
+                        tile_k=48,
+                        ck=16,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x16",
+                        grouped=True,
+                        group_merge=4,
+                    ),
+                ),
+                # Grouped and split together, double-buffered.
+                (
+                    "g8_c64_gm2_sc2",
+                    dict(
+                        N=1,
+                        H=10,
+                        W=12,
+                        groups=8,
+                        cpg=64,
+                        kpg=32,
+                        stride=1,
+                        dtype="bf16",
+                        **g,
+                    ),
+                    dict(
+                        tile_h=8,
+                        tile_w=16,
+                        tile_k=64,
+                        ck=32,
+                        waves_m=1,
+                        waves_n=4,
+                        atom="16x16x32",
+                        grouped=True,
+                        group_merge=2,
+                        split_c=2,
+                        double_buffer=True,
+                    ),
+                ),
+            ]
+        )
+
+
 class TestDirectConvNongroupedValidation(unittest.TestCase):
     """Non-grouped validation that does not require a GPU."""
 
@@ -2059,6 +2316,19 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
         p = self._problem(groups=4, cpg=16, kpg=16)
         with self.assertRaises(ValueError):
             DirectNongroupedConvSpec(problem=p).validate()
+
+    def test_grouped_without_groups_rejected(self):
+        """grouped=True needs a positive group count: 0 and negative multiples
+        of group_merge pass the divisibility check alone."""
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        for groups, group_merge in ((0, 1), (0, 2), (-4, 2)):
+            p = self._problem(groups=groups, cpg=8, kpg=8)
+            with self.subTest(groups=groups, group_merge=group_merge):
+                with self.assertRaisesRegex(ValueError, "groups >= 1"):
+                    DirectNongroupedConvSpec(
+                        problem=p, grouped=True, group_merge=group_merge
+                    ).validate()
 
     def test_oversized_accumulator_rejected(self):
         """A tile needing more than 256 accumulator registers must not build.
@@ -2134,8 +2404,9 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
             for tw in tile_w_candidates(wo, at):
                 self.assertEqual(wo % tw, 0, f"Wo={wo} atom={at} tw={tw}")
         # 40 is not a multiple of 32, so the 32-wide atom falls back to its
-        # least-wasteful width rather than returning nothing.
-        self.assertEqual(tile_w_candidates(40, 32), [32])
+        # least-wasteful widths (32 and 64 both compute 64 columns) rather than
+        # returning nothing.
+        self.assertEqual(tile_w_candidates(40, 32), [32, 64])
 
     def test_specs_are_unique_and_valid(self):
         from kernels.common.conv_direct_nongrouped import (
@@ -2265,18 +2536,45 @@ _WGRAD_CONFIGS = [
 ]
 
 
+# Runtime-channel wgrad: per-group channel counts the AOT cache must serve
+# from one binary per knob set.
+_WGRAD_RTC_SHAPES: List[_Shape] = [
+    _Shape("wg_rtc_c24k24", N=2, H=12, W=40, groups=1, cpg=24, kpg=24),
+    _Shape("wg_rtc_c48k192", N=2, H=10, W=20, groups=1, cpg=48, kpg=192),
+    _Shape("wg_rtc_c64k256", N=2, H=8, W=12, groups=1, cpg=64, kpg=256),
+    _Shape("wg_rtc_g4_c64", N=2, H=7, W=14, groups=4, cpg=64, kpg=64),
+    _Shape("wg_rtc_g32_c16", N=2, H=7, W=7, groups=32, cpg=16, kpg=16),
+    _Shape("wg_rtc_c40k24_pad0", N=1, H=9, W=33, groups=2, cpg=40, kpg=24, PAD=0),
+]
+
+# (waves_k, waves_c, waves_q, mfma_k, ho_per_block): single wave, a K/C/Q
+# split with a three-tile C block, and the widest C block a cache entry has.
+_WGRAD_RTC_CONFIGS = [
+    (1, 1, 1, 32, 4),
+    (2, 3, 2, 32, 3),
+    (1, 4, 1, 32, 30),
+]
+
+
 def _run_wgrad_one(
     arch: str,
     shape: _Shape,
     dtype: str = "fp16",
     cfg: Tuple[int, int, int, int, int] = (1, 1, 1, 32, 4),
+    runtime_channels: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify the direct wgrad kernel.
 
     ``cfg`` is (waves_k, waves_c, waves_q, mfma_k, ho_per_block).
 
+    With ``runtime_channels`` the kernel is built the way the AOT cache builds
+    it -- on a probe problem with other channel counts, group count and image
+    size -- and launched on ``shape``, so the binary has to take every channel
+    count it uses from the kernargs.
+
     Returns ``(passed, reason)``.
     """
+    from dataclasses import replace
     import torch
 
     from rocke import compile_kernel
@@ -2318,14 +2616,21 @@ def _run_wgrad_one(
         waves_q=waves_q,
         mfma_k=mfma_k,
         ho_per_block=hpb,
+        runtime_channels=runtime_channels,
     )
 
     ok, reason = is_valid_wgrad_spec(spec, arch=arch)
     if not ok:
         return False, f"skip invalid spec: {reason}"
 
+    build_spec = spec
+    if runtime_channels:
+        build_spec = replace(
+            spec,
+            problem=replace(p, N=1, H=64, W=64, groups=1, cpg=256, kpg=256),
+        )
     try:
-        kernel = build_direct_conv_wgrad(spec, arch=arch)
+        kernel = build_direct_conv_wgrad(build_spec, arch=arch)
     except ValueError as e:
         return False, f"build failed: {e}"
 
@@ -2416,7 +2721,7 @@ def _run_wgrad_one(
     print(
         f"  PASS  {shape.id}  {arch}  {dtype}  "
         f"wk={waves_k} wc={waves_c} wq={waves_q} mk={mfma_k} hpb={hpb}  "
-        f"rel_err={rel_err:.2e}",
+        f"rtc={int(runtime_channels)}  rel_err={rel_err:.2e}",
         flush=True,
     )
     return True, ""
@@ -2432,8 +2737,10 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
         # never quietly stand in for a pass the way the arch gate once let it.
         self._ran = 0
 
-    def _run_wgrad(self, shape: _Shape, dtype: str = "fp16", cfg=None) -> None:
-        kwargs = {"dtype": dtype}
+    def _run_wgrad(
+        self, shape: _Shape, dtype: str = "fp16", cfg=None, runtime_channels=False
+    ) -> None:
+        kwargs = {"dtype": dtype, "runtime_channels": runtime_channels}
         if cfg is not None:
             kwargs["cfg"] = cfg
         passed, reason = _run_wgrad_one(GPU_ARCH, shape, **kwargs)
@@ -2493,6 +2800,281 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
                     with self.subTest(shape=s.id, dtype=dtype, cfg=cfg):
                         self._run_wgrad(s, dtype=dtype, cfg=cfg)
         self._assert_ran()
+
+    def test_wgrad_runtime_channels(self):
+        """Runtime channel counts: a binary built on a cpg=kpg=256 probe, as the
+        AOT cache builds it, launched on other cpg/kpg and group counts --
+        ragged channel tiles, cpg != kpg and grouped problems included."""
+        for dtype in ("fp16", "bf16"):
+            for s in _WGRAD_RTC_SHAPES:
+                for cfg in _WGRAD_RTC_CONFIGS:
+                    with self.subTest(shape=s.id, dtype=dtype, cfg=cfg):
+                        self._run_wgrad(s, dtype=dtype, cfg=cfg, runtime_channels=True)
+        self._assert_ran()
+
+
+# ---------------------------------------------------------------------------
+# MFMA dgrad pipeline (transpose -> reorganize -> forward on the transposed
+# problem), baked and with runtime channels.
+#
+# A runtime-channel binary is built once per knob set on the first problem of
+# its list and launched, unchanged, on every problem: they share its K-atom and
+# M-tile counts but differ in N, H, W, groups and the exact cpg/kpg (dense,
+# grouped, partial K-atoms and M-tiles) -- what the AOT cache does.
+# ---------------------------------------------------------------------------
+
+# (label, fprop knobs, fold_k32, [(N, H, W, groups, cpg, kpg), ...])
+_MFMA_DGRAD_RTC_CASES = [
+    (
+        "plain_loop",
+        dict(block_q=32, block_groups=1, block_h=8),
+        False,
+        [(2, 14, 14, 1, 24, 24), (1, 9, 20, 3, 20, 28), (2, 11, 17, 2, 32, 20)],
+    ),
+    (
+        "wk4_preload",
+        dict(block_groups=1, block_h=8, waves_k=4),
+        False,
+        [(1, 12, 18, 1, 48, 192), (2, 7, 9, 1, 36, 180)],
+    ),
+    (
+        "wk2_k32",
+        dict(block_groups=1, block_h=16, waves_k=2),
+        True,
+        [(1, 12, 18, 1, 48, 192), (2, 9, 13, 2, 44, 192)],
+    ),
+    (
+        "wq2_rk",
+        dict(block_q=32, block_groups=1, waves_q=2, runtime_k_loop=True),
+        False,
+        [(2, 10, 21, 1, 20, 48), (2, 10, 21, 2, 20, 40), (1, 13, 34, 4, 32, 36)],
+    ),
+    (
+        "bg2_plain_loop",
+        dict(block_groups=2, block_h=8),
+        False,
+        [(2, 14, 14, 4, 16, 16), (1, 9, 9, 8, 12, 12)],
+    ),
+]
+
+
+def _launch_cfg(spec):
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+    from rocke.runtime.launcher import LaunchConfig
+
+    grid, block = direct_launch_geometry(spec)
+    return LaunchConfig(grid=grid, block=block, fence=True)
+
+
+def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
+    """Run (transpose[, reorganize], fprop) on ``problem``; returns rel_err."""
+    import torch
+
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_direct_grouped import (
+        DIRECT_WEIGHT_TRANSFORM_RTC_ARGS,
+        DirectReorganizeWeightsSpec,
+        DirectTransposeWeightsDgradSpec,
+        direct_dgrad_coalesced_workspace_bytes,
+        direct_dgrad_workspace_bytes,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher
+
+    p = problem
+    rtc = fprop_spec.runtime_channels
+    coalesced = fprop_spec.waves_k > 1 or fprop_spec.runtime_k_loop
+    elem = "bf16" if dtype == "bf16" else "f16"
+    xform_sig = [
+        {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
+        {"name": "D", "type": f"ptr<{elem}, global>", "size_bytes": 8},
+        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
+    ]
+    if rtc:
+        xform_sig += [
+            {"name": n, "type": "i32", "size_bytes": 4}
+            for n in DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
+        ]
+    scalars = {"p_cpg": p.cpg, "p_kpg": p.kpg} if rtc else {}
+
+    torch.manual_seed(7)
+    _td = _torch_dtype(dtype)
+    dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_td).uniform_(-0.5, 0.5)
+    W = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_td).uniform_(-0.5, 0.5)
+    dX = torch.zeros(p.N, p.H, p.W, p.total_c, dtype=_td)
+    ref = (
+        torch.nn.functional.conv_transpose2d(
+            dY.permute(0, 3, 1, 2).float(),
+            W.permute(0, 3, 1, 2).float(),
+            padding=p.PAD,
+            groups=p.groups,
+        )
+        .permute(0, 2, 3, 1)
+        .contiguous()
+    )
+
+    rt = Runtime()
+    ws_t_bytes = direct_dgrad_workspace_bytes(p)
+    ws_coa_bytes = direct_dgrad_coalesced_workspace_bytes(
+        p, fold_k32=fprop_spec.fold_k32
+    )
+    bufs = {
+        "dy": rt.alloc(dY.nbytes),
+        "w": rt.alloc(W.nbytes),
+        "dx": rt.alloc(dX.nbytes),
+        "ws_t": rt.alloc(ws_t_bytes),
+        "ws_coa": rt.alloc(ws_coa_bytes),
+    }
+    rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
+    rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
+    rt.memset(bufs["dx"], 0, dX.nbytes)
+    # Garbage in the workspaces: a correct pipeline overwrites what it reads.
+    rt.memset(bufs["ws_t"], 0x7F, ws_t_bytes)
+    rt.memset(bufs["ws_coa"], 0x7F, ws_coa_bytes)
+
+    t_art, r_art, f_art = kernels
+    t_spec = DirectTransposeWeightsDgradSpec(problem=p, runtime_channels=rtc)
+    KernelLauncher(
+        hsaco=t_art.hsaco, kernel_name=t_art.kernel_name, signature=xform_sig
+    )(
+        {
+            "A": bufs["w"],
+            "D": bufs["ws_t"],
+            "A_bytes": W.nbytes,
+            "D_bytes": ws_t_bytes,
+            **scalars,
+        },
+        config=_launch_cfg(t_spec),
+    )
+    weights = "ws_t"
+    if coalesced:
+        r_spec = DirectReorganizeWeightsSpec(
+            problem=p, fold_k32=fprop_spec.fold_k32, runtime_channels=rtc
+        )
+        KernelLauncher(
+            hsaco=r_art.hsaco, kernel_name=r_art.kernel_name, signature=xform_sig
+        )(
+            {
+                "A": bufs["ws_t"],
+                "D": bufs["ws_coa"],
+                "A_bytes": ws_t_bytes,
+                "D_bytes": ws_coa_bytes,
+                **scalars,
+            },
+            config=_launch_cfg(r_spec),
+        )
+        weights = "ws_coa"
+    sizes = {
+        "dy": dY.nbytes,
+        "dx": dX.nbytes,
+        "ws_t": ws_t_bytes,
+        "ws_coa": ws_coa_bytes,
+    }
+    values = ConvArgs.from_problem(fprop_spec.problem).to_launch_values(
+        bufs["dy"], bufs[weights], bufs["dx"], sizes["dy"], sizes[weights], sizes["dx"]
+    )
+    KernelLauncher(
+        hsaco=f_art.hsaco,
+        kernel_name=f_art.kernel_name,
+        signature=conv_direct_args_signature(dtype),
+    )(values, config=_launch_cfg(fprop_spec))
+
+    out = torch.empty_like(dX)
+    rt.memcpy_d2h(_u8(out), bufs["dx"], dX.nbytes)
+    for ptr in bufs.values():
+        rt.free(ptr)
+    synchronize_and_release(0)
+    diff = (out.float() - ref.float()).abs().max()
+    return float(diff / ref.float().abs().max().clamp(min=1.0))
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
+    """The MFMA dgrad pipeline end to end, against conv_transpose2d."""
+
+    def _check(self, label, knobs, fold_k32, shapes, dtype, runtime_channels):
+        from rocke import compile_kernel
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectReorganizeWeightsSpec,
+            DirectTransposeWeightsDgradSpec,
+            build_direct_conv,
+            build_direct_reorganize_weights,
+            build_direct_transpose_weights_dgrad,
+            make_dgrad_fprop_spec,
+        )
+
+        if fold_k32 and GPU_ARCH != "gfx950":
+            self.skipTest("fold_k32 needs the 16x16x32 atom")
+
+        def fprop_spec_for(problem):
+            spec = replace(make_dgrad_fprop_spec(problem, **knobs), fold_k32=fold_k32)
+            if runtime_channels:
+                spec = replace(
+                    spec,
+                    runtime_channels=True,
+                    k_atoms=spec.problem_k_atoms(),
+                    m_tiles=spec.problem_m_tiles(),
+                )
+            return spec
+
+        def build(problem):
+            spec = fprop_spec_for(problem)
+            return (
+                compile_kernel(
+                    build_direct_transpose_weights_dgrad(
+                        DirectTransposeWeightsDgradSpec(
+                            problem=problem, runtime_channels=runtime_channels
+                        ),
+                        arch=GPU_ARCH,
+                    ),
+                    arch=GPU_ARCH,
+                ),
+                compile_kernel(
+                    build_direct_reorganize_weights(
+                        DirectReorganizeWeightsSpec(
+                            problem=problem,
+                            fold_k32=fold_k32,
+                            runtime_channels=runtime_channels,
+                        ),
+                        arch=GPU_ARCH,
+                    ),
+                    arch=GPU_ARCH,
+                ),
+                compile_kernel(build_direct_conv(spec, arch=GPU_ARCH), arch=GPU_ARCH),
+            )
+
+        kernels = None
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
+        for N, H, W, groups, cpg, kpg in shapes:
+            problem = DirectConvProblem(
+                N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
+            )
+            spec = fprop_spec_for(problem)
+            if kernels is None or not runtime_channels:
+                kernels = build(problem)
+            with self.subTest(case=label, dtype=dtype, shape=problem.short()):
+                rel_err = _run_mfma_dgrad_pipeline(
+                    GPU_ARCH, problem, spec, kernels, dtype
+                )
+                self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
+
+    def test_mfma_dgrad_baked(self):
+        for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+            # One baked binary per shape: the first of each case. Each case
+            # opens with a shape the baked reorganize pass serves: one group
+            # (it offsets the W_T column by the group) and, where the weights
+            # are reorganized, whole K-atoms (it leaves the workspace tail of
+            # a partial one unwritten).
+            self._check(label, knobs, fold_k32, shapes[:1], "fp16", False)
+
+    def test_mfma_dgrad_runtime_channels(self):
+        for dtype in ("fp16", "bf16"):
+            for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+                self._check(label, knobs, fold_k32, shapes, dtype, True)
 
 
 if __name__ == "__main__":

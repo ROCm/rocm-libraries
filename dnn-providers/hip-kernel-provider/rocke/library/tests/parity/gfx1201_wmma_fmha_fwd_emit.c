@@ -2,11 +2,15 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1201_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1201
- * (RDNA4 / Navi 48) WMMA FMHA forward parity harness. Same 6 sampled
- * WmmaFmhaFwdSpec configs as the gfx1151 harness, but built and lowered at
- * arch=gfx1201 (flavor AUTO) so the RDNA4 split-K WMMA attention path
- * (wmma_gfx12_f32_16x16x16_f16 atom, <8 x half> fragments) is byte-compared
- * against the Python emitter gfx1201_wmma_fmha_fwd_emit.py.
+ * (RDNA4) WMMA FMHA forward parity harness. The first 12 of the gfx1151
+ * harness's sampled WmmaFmhaFwdSpec configs, built and lowered at
+ * arch=gfx1201 (flavor AUTO) so the RDNA4 split-K WMMA attention path is
+ * byte-compared against the Python emitter gfx1201_wmma_fmha_fwd_emit.py.
+ * Configs 0-5 cover the fp16 atom (wmma_gfx12_f32_16x16x16_f16, <8 x half>
+ * fragments); configs 6-11 repeat the same six specs as bf16, which covers the
+ * bf16 atom (wmma_gfx12_f32_16x16x16_bf16, <8 x i16> fragments) -- including
+ * bf16 crossed with v_lds_stage (config 11), the one knob whose LDS allocation,
+ * stores and loads are typed by dtype.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,47 +27,42 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
 
+    /* Configs 6-11 repeat 0-5 as bf16, the same mapping the gfx1151 harness uses. */
+    if(idx >= 6 && idx < 12)
+    {
+        spec->dtype = "bf16";
+        idx -= 6;
+    }
+
     switch(idx)
     {
     case 0: /* H64, HQ4, HK0 (MHA), NONE, v_lds=False */
         spec->head_size = 64;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 1: /* H128, HQ8, HK0 (MHA), NONE, v_lds=False */
         spec->head_size = 128;
-        spec->num_query_heads = 8;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 2: /* H64, HQ4, HK0 (MHA), CAUSAL, v_lds=False */
         spec->head_size = 64;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
         spec->v_lds_stage = false;
         break;
     case 3: /* H256, HQ8, HK2 (GQA), NONE, v_lds=False */
         spec->head_size = 256;
-        spec->num_query_heads = 8;
-        spec->num_kv_heads = 2;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = false;
         break;
     case 4: /* H128, HQ4, HK4, CAUSAL, v_lds=False */
         spec->head_size = 128;
-        spec->num_query_heads = 4;
-        spec->num_kv_heads = 4;
         spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
         spec->v_lds_stage = false;
         break;
     case 5: /* H64, HQ6, HK0 (MHA), NONE, v_lds=True */
         spec->head_size = 64;
-        spec->num_query_heads = 6;
-        spec->num_kv_heads = 0;
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = true;
         break;
@@ -77,7 +76,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..11>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
