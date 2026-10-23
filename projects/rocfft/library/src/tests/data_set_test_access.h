@@ -33,6 +33,10 @@ struct data_set_test_access
     {
         data_set.reorder_length_axes(order);
     }
+    static void set_embedding(data_set_t& data_set, const std::vector<size_t>& embedding)
+    {
+        data_set.embedding = embedding;
+    }
     static void clear(data_set_t& data_set)
     {
         data_set.clear();
