@@ -218,7 +218,12 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
     return sol, capsys.readouterr().out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+# `_derive` builds an MX-F4 problem off UseLoopModel.  AB_first needs BOTH, so it cannot derive
+# here at all -- its walk is asserted by test_ab_first_walk, which is where the row's behaviour is.
+_ROWS_ON_THIS_PROBLEM = sorted(set(TDM_FUSE_GROUPING) - {4})
+
+
+@pytest.mark.parametrize("fuse", _ROWS_ON_THIS_PROBLEM)
 def test_solution_accepts_each_grouping_at_equal_pair(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse)
@@ -233,7 +238,7 @@ def test_solution_accepts_paired_at_divergent_pair(
     assert sol.get("Valid") is True, out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+@pytest.mark.parametrize("fuse", _ROWS_ON_THIS_PROBLEM)
 def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, StaggerU=32)
     assert sol.get("Valid") is True, out
@@ -258,8 +263,6 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
          "TDMFuse=2 requires NumWaves=4 for its 2/1/1 split"),
         (2, {"MatrixInstruction": [16, 16, 128, 1, 1, 2, 16, 2, 1], "WorkGroup": [32, 2, 1]},
          "got 2"),
-        (1, {"ProblemType": _NO_MX_ON_B},
-         "TDMFuse=1 requires MX scales on both tensors"),
         (2, {"ProblemType": _NO_MX_ON_B},
          "TDMFuse=2 requires MX scales on both tensors"),
         (1, {"ProblemType": {"Sparse": 1}},
@@ -279,6 +282,16 @@ def test_solution_rejects_outside_the_grouping(
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
     assert sol.get("Valid") is False
     assert clause in out
+
+
+def test_fuse_one_without_a_scale_to_pair_is_unfused_not_a_refusal(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """TDMFuse=1 asks each data tensor to carry its own scale.  With a scale on one side only
+    there is nothing to pair, so the row degrades to `unfused` -- no fuse, not a rejection."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, ProblemType=_NO_MX_ON_B)
+    assert sol.get("Valid") is True, out
+    assert tdmGrouping(sol._state).name == "unfused"
+    assert tdmFusePaired(sol._state) is False
 
 
 @pytest.mark.parametrize("fuse, predicate", [
@@ -307,7 +320,7 @@ def ks(fuse=3, **over):
     return state
 
 
-@pytest.mark.parametrize("fuse", [-3, -1, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize("fuse", [-3, -1, 5, 6, 7, 8])
 def test_an_unmapped_integer_raises_instead_of_resolving(fuse):
     """An integer no row claims must raise, not fall back."""
     with pytest.raises(ValueError, match="names no grouping"):
@@ -328,7 +341,9 @@ def test_valid_parameters_and_the_mapping_name_the_same_integers():
 
 
 def test_every_shipped_row_is_reachable():
-    assert set(TF.TDM_GROUPS) == set(TF.TDM_FUSE_GROUPING.values())
+    """A row is reached by a TDMFuse integer, or by `paired` degrading with no scale to pair."""
+    degraded = TF.tdmGroupingName(ks(fuse=1, ProblemType={"MXBlockA": 0, "MXBlockB": 0}))
+    assert set(TF.TDM_GROUPS) == set(TF.TDM_FUSE_GROUPING.values()) | {degraded}
     assert set(TF.TDM_GROUPS) == set(TF._GROUPING_ACCEPTED)
 
 
@@ -369,13 +384,20 @@ def test_four_waves_is_accepted_and_shares_a_mx_entry():
 
 
 @pytest.mark.parametrize("overrides", [
-    {"TDMInst": 1}, {"TDMSplit": True}, {"UseSubtileImpl": True},
+    {"TDMInst": 1}, {"UseSubtileImpl": True},
     {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}},
     {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}},
 ])
 def test_b_mx_inherits_every_a_mx_precondition(overrides):
     assert TF.tdmGroupingAccepted(ks(**overrides)) is False
     assert TF.tdmGroupingAccepted(ks(fuse=2, **overrides)) is False
+
+
+def test_a_split_is_not_a_grouping_precondition():
+    """`TDMSplitA`/`TDMSplitB` are PER OPERAND, so a split cannot decline a row on its own.
+    Whether a group's members agree on a region count is Solution.py's rule, asked per group."""
+    assert TF.tdmGroupingAccepted(ks(TDMSplit=True)) is True
+    assert TF.tdmGroupingAccepted(ks(fuse=2, TDMSplit=True)) is True
 
 
 @pytest.mark.parametrize("name, expected", [
@@ -654,3 +676,34 @@ def _incrementText(state):
     mod = w.tdmSetupIncrementWaveSeparated(
         state, {"tensorChar": "A"}, {"tensorChar": "B"})
     return str(mod)
+
+
+# --- AB_first (TDMFuse=4): region 0 fused, every later region one member at a time -------------
+
+_AB_FIRST = {"NumWaves": 4, "TDMInst": 3, "MIWaveTile": [2, 2],
+             "TDMSplit": [2, 2, 1, 1], "TDMSplitA": 1, "TDMSplitB": 1}
+
+
+def _walk(fuse, loopOrder):
+    """The movement steps of the A/B unit as `[(region, members)]`."""
+    from gir_fixtures import BF16_NT_KMN_PLR0, theta
+    from Tensile.LoopModel.decoder import _Decoder
+    th = theta({**BF16_NT_KMN_PLR0, **_AB_FIRST, "TDMFuse": fuse, "LoopOrder": loopOrder})
+    key, members, regions = th.movement_units()[0]
+    return [(region, [m.name for m in moving])
+            for region, moving in _Decoder(th)._copy_steps(key, members, regions)]
+
+
+def test_ab_first_walk():
+    """Both tensors split in two: one cooperative load, then each region 1 on its own."""
+    assert _walk(4, "KMN") == [(0, ["A", "B"]), (1, ["A"]), (1, ["B"])]
+
+
+def test_ab_first_issues_the_earlier_read_operand_first():
+    """Which solo load leads is the loop order's answer, not the table's member order."""
+    assert _walk(4, "KNM") == [(0, ["A", "B"]), (1, ["B"]), (1, ["A"])]
+
+
+def test_the_default_row_fuses_every_region():
+    """The same split under TDMFuse=0 keeps both members on both loads."""
+    assert _walk(0, "KMN") == [(0, ["A", "B"]), (1, ["A", "B"])]

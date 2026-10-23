@@ -423,6 +423,52 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         builder.createLabel(name);
     }
 
+    struct LaterUnrollCopies {
+        StinkyInstruction* first = nullptr;
+        StinkyInstruction* second = nullptr;
+        StinkyInstruction* third = nullptr;
+        StinkyInstruction* otherPath = nullptr;
+    };
+
+    // HalfPLR / ExpandPointerSwap: several copies fall through inside one loop.
+    // A later LoopBegin is a different loop.
+    LaterUnrollCopies buildLaterUnrollCopies() {
+        LaterUnrollCopies copies;
+        appendGsu1Preheader();
+        openLoop();
+        copies.first = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+        createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+        copies.second = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+        createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/91, "label_TestLoopEnd");
+        copies.third = appendHandshake(/*loadS0=*/16, /*loadS1=*/20);
+        closeLoop();
+
+        createLabel("label_OtherPath");
+        copies.otherPath = appendHandshake(/*loadS0=*/32, /*loadS1=*/36);
+        createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_OtherPathEnd");
+        createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/94, "label_OtherPath");
+        createLabel("label_OtherPathEnd");
+        createWMMA(8, 0, 8);
+        return copies;
+    }
+
+    void expectLaterUnrollCopyHandshakes(const LaterUnrollCopies& copies) {
+        EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(copies.first))
+            << "the first trigger of the loop keeps the cluster handshake:" << blockListing(*bb);
+        EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(copies.second))
+            << "a later trigger in the same loop must not handshake again:" << blockListing(*bb);
+        EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(copies.third))
+            << "a later trigger in the same loop must not handshake again:" << blockListing(*bb);
+        EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(copies.otherPath))
+            << "a different loop still gets its own first handshake:" << blockListing(*bb);
+
+        // Rule 1 at GSU_1, Rule 3 on the first loop, Rule 3 on the other loop.
+        // Rule 2 adds the matching wait in front of the preheader load.
+        const auto [signals, waits] = clusterBarrierCounts();
+        EXPECT_EQ(signals, 3) << blockListing(*bb);
+        EXPECT_EQ(waits, 3) << blockListing(*bb);
+    }
+
     // A compare feeding the branch that consumes it, so the SCC live range stays
     // confined to the pair and does not push the pass's anchors around.
     StinkyInstruction* createGuardedBranch(GFX opcode, int sgpr, const char* target) {
@@ -539,12 +585,13 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false) {
+    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false,
+                 bool streamKMulticast = false, int pgrValue = 1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(
-            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles,
-            /*splitWaveLoop=*/splitWaveLoop);
+        auto pass =
+            createInsertClusterBarrierPass(streamKMulticast, pgrValue, rule3SignalLeadCycles,
+                                           /*splitWaveLoop=*/splitWaveLoop);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -746,6 +793,10 @@ TEST_F(InsertClusterBarrierPassTest, WorkgroupBarriersArePreserved) {
             << "the pass must not come between a workgroup barrier and its wait:"
             << blockListing(*bb);
     }
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(firstTrigger))
+        << "the first handshake of the loop keeps the cluster wait:" << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(secondTrigger))
+        << "a later handshake in the same loop does not get a cluster wait:" << blockListing(*bb);
 }
 
 // Rule 1 and Rule 2 are one mechanism read from two ends: the signal below
@@ -783,6 +834,23 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
         << blockListing(*bb);
     EXPECT_EQ(inFlightAt(indexOf(rule2Wait)), 1)
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule1PreservesSccAcrossItsNestedWaveGate) {
+    createSCmpWritingScc(/*srcSgpr=*/90);
+    appendGsu1Preheader();
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+
+    runPass();
+
+    const size_t readerIdx = indexOf(reader);
+    const StinkyInstruction* writer = lastSccWriterBefore(readerIdx);
+    ASSERT_NE(writer, nullptr);
+    const auto* comment = writer->getModifier<CommentData>();
+    ASSERT_NE(comment, nullptr);
+    EXPECT_EQ(comment->comment, "restore SCC after cluster signal")
+        << "the complete Rule 1 gate, including its nested WaveIdx gate, must preserve SCC:"
+        << blockListing(*bb);
 }
 
 TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
@@ -1032,6 +1100,36 @@ TEST_F(InsertClusterBarrierPassTest, Rule2DoesNotBorrowWaitOrJoinFromBypassedPat
     EXPECT_EQ(blockListing(*bb), once);
 }
 
+// StreamK with PGR>=2 plants s_wait_tensorcnt 0 after every cooperative load
+// group. The second run's scan stops on that wait, so it must not insert another
+// in front of it. Both triggers get one drain; only the first gets a handshake.
+TEST_F(InsertClusterBarrierPassTest, ProducerDrainSecondRunIsNoOp) {
+    appendGsu1Preheader();
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    auto countFullTensorDrains = [&] {
+        int n = 0;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* data = cast<StinkyInstruction>(&ir)->getModifier<SWaitTensorCntData>();
+            if (data != nullptr && data->tlcnt == 0) ++n;
+        }
+        return n;
+    };
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/true, /*pgrValue=*/2);
+    EXPECT_EQ(countFullTensorDrains(), 2)
+        << "each loop trigger gets one producer drain:" << blockListing(*bb);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/true, /*pgrValue=*/2);
+    EXPECT_EQ(countFullTensorDrains(), 2)
+        << "a second pass must not insert another producer drain:" << blockListing(*bb);
+}
+
 TEST_F(InsertClusterBarrierPassTest, Rule3ForwardsPastWorkgroupBarriers) {
     appendGsu1Preheader();
     openLoop();
@@ -1164,6 +1262,43 @@ TEST_F(InsertClusterBarrierPassTest, Rule3ClusterWaitIsHoistedAboveTensorDrain) 
         << blockListing(*bb);
     EXPECT_EQ(realInstBefore(trigger), drain)
         << "the hoist moves the cluster wait, not the drain:" << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalDoesNotClimbAcrossEarlierTensorRawFence) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* drain = createWaitTensorCnt(2);
+    createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* rawWait = createBarrierWait(kWorkgroupBarrierId);
+    for (int i = 0; i < 40; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/200);
+
+    StinkyInstruction* clusterCmp = findClusterWaveCmpAfter(indexOf(rawWait));
+    ASSERT_NE(clusterCmp, nullptr) << blockListing(*bb);
+    EXPECT_GT(indexOf(clusterCmp), indexOf(rawWait))
+        << "the cluster signal must start after the RAW publication fence:" << blockListing(*bb);
+    EXPECT_LT(indexOf(clusterCmp), indexOf(trigger)) << blockListing(*bb);
+
+    StinkyInstruction* clusterWait = realInstBefore(trigger);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    ASSERT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << blockListing(*bb);
+    EXPECT_LT(indexOf(drain), indexOf(clusterCmp)) << blockListing(*bb);
+
+    size_t idx = 0;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (idx > indexOf(clusterCmp) && idx < indexOf(clusterWait))
+            EXPECT_FALSE(inst->is(InstFlag::IF_WaitTensorCnt))
+                << "no tensorcnt may lie inside a cluster phase:" << blockListing(*bb);
+        ++idx;
+    }
 }
 
 // Re-running the pass must not plant a second cluster wait just because the
@@ -1545,7 +1680,37 @@ TEST_F(InsertClusterBarrierPassTest, Rule3ShorterSignalLeadStaysBeforeLiveSccRan
                                   << blockListing(*bb);
 }
 
-// The one shape the downward correction has no answer for: the live range runs
+// The range runs through the wait, so no SCC-dead placement is legal. Preservation must keep the
+// cycle-selected anchor rather than moving the signal earlier or co-locating it with the wait.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorKeepsLeadWhenSccRangeCrossesItsWait) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    for (int i = 0; i < 200; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    const auto result = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBeginAfter(loopHead), trigger, cycleMap, /*leadCycles=*/500,
+        /*maxLeadCycles=*/900, /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
+
+    auto* anchor = dyn_cast<StinkyInstruction>(result.anchor);
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_NE(cycleMap.find(anchor), cycleMap.end());
+    const int lead = static_cast<int>(cycleMap.at(trigger) - cycleMap.at(anchor));
+    EXPECT_GE(lead, 500);
+    EXPECT_LE(lead, 900);
+    EXPECT_NE(anchor, sccDef)
+        << "SCC preservation must not move the signal above a long live range";
+}
+
+// A live-in shape for which placement alone has no answer: the live range runs
 // past the wait itself, so no spot between the lead point and the wait is safe
 // and neither is the wait's own spot, which is where the search otherwise gives
 // up.
@@ -1556,14 +1721,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule3ShorterSignalLeadStaysBeforeLiveSccRan
 //     s_barrier_wait -1 / tensor_load_to_lds
 //     s_cselect_b32                <- the only reader, and it is below the wait
 //
-// The pass may not quietly settle for the wait here: the handshake it plants
-// opens with `s_cmp_eq_u32`, which would clobber the value that s_cselect_b32
-// still wants. Nor is there anywhere else to go. So this is a bug report about
-// the caller rather than a case to recover from, and a real block never gets
-// here -- a range that reaches the wait is closed by something the caller
-// already looked at. The abort is what keeps a future caller from discovering
-// that the hard way.
-TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorAbortsWhenSccIsLiveAtItsWait) {
+// The selected anchor remains inside the range; signal emission must spill and restore SCC there.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalPreservesLiveInSccAtItsWait) {
     appendGsu1Preheader();
     openLoop();
     // The climb has to get past maxLeadCycles while still standing in the range:
@@ -1586,14 +1745,30 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorAbortsWhenSccIsLiveAtItsWa
         << "trigger must be present in the estimated cycle map:" << blockListing(*bb);
     const BasicBlock::iterator segBegin = segBeginAfter(loopHead);
 
-    EXPECT_DEATH(
-        {
-            (void)cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
-                trigger, segBegin, trigger, cycleMap, /*leadCycles=*/500,
-                /*maxLeadCycles=*/900,
-                /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
-        },
-        "SCC live at the wait");
+    const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBegin, trigger, cycleMap, /*leadCycles=*/500,
+        /*maxLeadCycles=*/900, /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
+    ASSERT_NE(found.anchor, nullptr);
+
+    runPass(/*rule3SignalLeadCycles=*/500);
+    const StinkyInstruction* save = nullptr;
+    const StinkyInstruction* restore = nullptr;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        const auto* comment = inst->getModifier<CommentData>();
+        if (comment == nullptr) continue;
+        if (comment->comment == "preserve SCC across cluster signal") save = inst;
+        if (comment->comment == "restore SCC after cluster signal") restore = inst;
+    }
+    ASSERT_NE(save, nullptr);
+    ASSERT_NE(restore, nullptr);
+    ASSERT_FALSE(save->getDestRegs().empty());
+    ASSERT_FALSE(restore->getSrcRegs().empty());
+    EXPECT_FALSE(save->getDestRegs()[0].isVirtualReg());
+    EXPECT_EQ(save->getDestRegs()[0].reg.type, restore->getSrcRegs()[0].reg.type);
+    EXPECT_EQ(save->getDestRegs()[0].reg.idx, restore->getSrcRegs()[0].reg.idx)
+        << "save and restore must use the same scavenged temporary SGPR";
 }
 
 // The downward correction is allowed through one kind of wall, and this is the
@@ -2260,11 +2435,12 @@ TEST_F(InsertClusterBarrierPassTest, LoopBodyHandshakeAlwaysWaitsAtTrigger) {
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 }
 
-// The other half of the loop story: a body whose segments are all long enough
-// to hold the 500-cycle lead on their own. Every signal comes to rest between
-// its own segment's start and its wait, so no trip ever hands the next one a
-// token and the loop needs no wrapping at all -- no preheader signal, no drain
-// below the exit, no exit branch sent anywhere new.
+// The other half of the loop story: a body whose first handshake's segment is
+// long enough to hold the 500-cycle lead on its own. That signal comes to rest
+// between its segment's start and its wait, so no trip ever hands the next one
+// a token and the loop needs no wrapping at all -- no preheader signal, no drain
+// below the exit, no exit branch sent anywhere new. Later handshakes in the same
+// loop are not given a cluster barrier.
 //
 // This is the case that says what the compensation costs: everything the
 // hoisting tests assert the pass emits has to be absent here, or the pass is
@@ -2329,12 +2505,12 @@ TEST_F(InsertClusterBarrierPassTest, SegmentsLongEnoughToHoldTheLeadNeedNoLoopCo
            "around:"
         << blockListing(*bb);
 
-    // One handshake per segment, plus the Rule 1 signal at GSU_1 and the Rule 2
+    // The loop's first handshake, plus the Rule 1 signal at GSU_1 and the Rule 2
     // wait that consumes it in front of the first load.
     const auto [signals, waits] = clusterBarrierCounts();
-    EXPECT_EQ(signals, 4) << "expected one signal per segment and one at GSU_1:"
+    EXPECT_EQ(signals, 2) << "expected the loop's one handshake and one signal at GSU_1:"
                           << blockListing(*bb);
-    EXPECT_EQ(waits, 4) << "expected one wait per segment and one before the first load:"
+    EXPECT_EQ(waits, 2) << "expected the loop's one handshake and one wait before the first load:"
                         << blockListing(*bb);
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
@@ -3063,4 +3239,15 @@ TEST_F(InsertClusterBarrierPassTest, SplitWaveLoopPostsSignalOnlyOnWave0Copy) {
     EXPECT_TRUE(renamedInside) << blockListing(*bb);
     EXPECT_TRUE(renamedBranch) << blockListing(*bb);
     EXPECT_GT(findLabel("label_Inside"), -1) << "the original label stays in wave 0";
+}
+
+// HalfPLR and ExpandPointerSwap emit several copies inside one LoopBegin.
+// They fall through, and each copy has its own workgroup barrier plus
+// tensor_load. The cluster handshake goes on the first trigger of that loop.
+// A later LoopBegin (another NTAB or SIMD path, or the tail loop) still gets
+// its own first handshake.
+TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesSkipClusterHandshake) {
+    const LaterUnrollCopies copies = buildLaterUnrollCopies();
+    runPass();
+    expectLaterUnrollCopyHandshakes(copies);
 }

@@ -28,6 +28,7 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "TestHelpers.hpp"
@@ -37,6 +38,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "transforms/asm/dag/RegionDAG.hpp"
@@ -182,6 +184,78 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.dagFeatures.dsSpread = dsSpread;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
+    }
+
+    // Queue model on: wmmaQueueDepth() is `depth` only when the cover is positive.
+    void runPassWithWmmaQueue(int depth, int coverCycles) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.wmmaQueueDepth = depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = coverCycles;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    struct LoopHeadBarriers {
+        StinkyInstruction* headSignal = nullptr;
+        StinkyInstruction* headWait = nullptr;
+        StinkyInstruction* laterSignal = nullptr;
+        StinkyInstruction* laterWait = nullptr;
+    };
+
+    // Independent WMMAs, a before-only all-wave pair, ds_loads consuming its LDS token, then
+    // a later pair carrying that same token. This is the A -> ds_load -> B token chain.
+    LoopHeadBarriers buildLoopHeadBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/100 + i * 8);
+        std::tie(out.laterSignal, out.laterWait) =
+            createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        createMovableDsLoad(/*destReg=*/180, /*addrReg=*/820, /*ldsToken=*/1);
+        createWmmaScaleF8(/*destStart=*/700, /*src0Start=*/180);
+        return out;
+    }
+
+    // The first pair is after-only because its matching ds_load precedes it. The second pair is
+    // before-only, but is in the middle of the loop region and must not use the loop-head rule.
+    LoopHeadBarriers buildMidLoopBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        createMovableDsLoad(/*destReg=*/100, /*addrReg=*/800, /*ldsToken=*/9);
+        createMovableWorkgroupBarrier(bb, /*ldsToken=*/9);
+        for (int i = 0; i < 8; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/3400 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/820 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/700 + i * 16, /*src0Start=*/200 + i * 8);
+        return out;
+    }
+
+    // Make bb the header of a reachable single-BB loop. This is the shape the scheduler's
+    // LoopAnalysis uses to attach a Loop* to the ready queue.
+    void makeCurrentBlockLoopHeader() {
+        bb->addSuccessor(bb);
+    }
+
+    static int wmmaCountBefore(const BasicBlock& block, const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : block) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) return count;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return -1;
     }
 
     // Run with the tensor_load_to_lds credit-pool throttle enabled.
@@ -783,6 +857,49 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
+// A loop-carried A -> ds_load -> B token chain promotes A at wmmaQueueDepth.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierUsesWmmaQueueDepth) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_EQ(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+    EXPECT_GT(wmmaCountBefore(*bb, ir.laterSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal))
+        << scheduleOrder(*bb);
+}
+
+// Same token chain with the queue model off (cover 0 => depth 1) keeps its later estimator
+// placement rather than using the queue-depth rule.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierStaysWithEstimatorWithoutWmmaQueue) {
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithUnrollGemm();
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), 4) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal))
+        << scheduleOrder(*bb);
+}
+
+TEST_F(DAGSchedulerPassTest, BeforeOnlyBarrierWithoutLaterTokenPairDoesNotUseHeadThreshold) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildMidLoopBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
+}
+
 // A non-overlapping pair stays on one threshold and issues together.
 TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     bb->addSuccessor(bb);
@@ -1062,6 +1179,35 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
         << "DS loads should be prioritized before VALU during WMMA latency";
 }
 
+TEST_F(DAGSchedulerPassTest, GirModeledTensorLoadDoesNotCutSchedulingRegion) {
+    StinkyInstruction* independentRead = createDsReadB128InBlock(bb, arch, 0, 80);
+    independentRead->addModifier<GirActionData>(
+        GirActionData{0, 0, GirActionKind::Ds, {GirAccessData{false, 1, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* tensorLoad = createTensorLoadInBlock(bb, arch, 300, 308);
+    ASSERT_TRUE(hasSideEffect(*tensorLoad));
+    tensorLoad->addModifier<GirActionData>(
+        GirActionData{1, 0, GirActionKind::Tensor, {GirAccessData{true, 0, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* dependentRead = createDsReadB128InBlock(bb, arch, 4, 84);
+    dependentRead->addModifier<GirActionData>(
+        GirActionData{2, 0, GirActionKind::Ds, {GirAccessData{false, 0, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* independentWmma = createWmmaF32_16x16x16_bf16(100, 200);
+    ASSERT_NE(independentWmma, nullptr);
+    func->setStringMetaData(kGirFrameContractKey, "gir-frame-contract\n");
+
+    ASSERT_FALSE(hasSideEffect(*independentRead));
+    ASSERT_FALSE(hasSideEffect(*tensorLoad));
+    ASSERT_FALSE(hasSideEffect(*dependentRead));
+
+    runPassWithUnrollGemm();
+
+    const std::string order = scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, independentWmma), positionOf(*bb, independentRead)) << order;
+    EXPECT_LT(positionOf(*bb, tensorLoad), positionOf(*bb, dependentRead)) << order;
+}
+
 // ---------------------------------------------------------------------------
 // Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
@@ -1121,6 +1267,167 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
         << "hazardous ds_load must be deferred until an independent WMMA (D#100) "
            "has "
            "issued; it must not co-issue inside WMMA D#12's latency window";
+}
+
+// GIR deliberately has no physical fence in the scheduler input. A ds_load whose address is still
+// behind a VALU producer is therefore free to move, but issuing it immediately would make the final
+// InsertWaitAluPass repair the choice with a strict va_vdst. The GIR path should prefer independent
+// WMMAs until the wait either clears or becomes non-strict. Non-GIR scheduling keeps its
+// established order, and the DS load remains the fallback when no independent work exists.
+TEST_F(DAGSchedulerPassTest, GirFreeScheduleDefersDsThatWouldRequireWaitAlu) {
+    auto schedule = [&](bool girFramePipeline) {
+        am.clear();
+        func = std::make_unique<Function>(girFramePipeline ? "gir_wait_aware" : "legacy_order");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+
+        // One address VALU feeds both the first WMMA and the DS load. Once the WMMA issues, the
+        // load is legally ready but reading v400 immediately still needs va_vdst. Its destination
+        // is disjoint from every WMMA, so the older active-source overlap gate is not involved.
+        createVAddInBlock(bb, arch, /*destReg=*/400, /*src0Reg=*/401, /*src1Reg=*/402);
+        createWmmaScaleF8(/*destStart=*/50, /*src0Start=*/400);
+        StinkyInstruction* ds = createDsReadB128InBlock(bb, arch, /*destReg=*/600, /*addrReg=*/400);
+        ds->addModifier<GirActionData>(
+            GirActionData{1, 1, GirActionKind::Ds, {GirAccessData{false, 0, 1, -1, 0, 0, false}}});
+        std::vector<StinkyInstruction*> independent;
+        independent.reserve(4);
+        for (int i = 0; i < 4; ++i)
+            independent.push_back(
+                createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/300 + i * 16));
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.waitAluHoldStrictCount = 2;
+        pfc.dagFeatures.girFramePipeline = girFramePipeline;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+
+        WaitAluTracker tracker(ctx, gfx1250InsertWaitAluOptions(/*enableESM2TrackValuVsrc=*/false));
+        WaitAluNeed dsNeed;
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (!inst) continue;
+            if (inst == ds) {
+                dsNeed = tracker.query(*inst);
+                break;
+            }
+            tracker.commit(*inst);
+        }
+        const int dsPos = positionOf(*bb, ds);
+        int independentBeforeDs = 0;
+        for (StinkyInstruction* wmma : independent)
+            independentBeforeDs += positionOf(*bb, wmma) < dsPos;
+        return std::tuple{dsPos, independentBeforeDs, countStinkyInstructions(*bb), dsNeed.vaVdst,
+                          dsNeed.vmVsrc};
+    };
+
+    const auto [legacyDs, legacyWmmasBefore, legacyCount, legacyVa, legacyVm] =
+        schedule(/*girFramePipeline=*/false);
+    EXPECT_TRUE(legacyVa >= 0 || legacyVm >= 0)
+        << "the control schedule must actually require the wait this GIR policy avoids";
+
+    const auto [girDs, girWmmasBefore, girCount, girVa, girVm] =
+        schedule(/*girFramePipeline=*/true);
+    EXPECT_GT(girDs, legacyDs)
+        << "the GIR policy should defer a DS load that would otherwise require s_wait_alu";
+    EXPECT_GT(girWmmasBefore, legacyWmmasBefore)
+        << "GIR should use ready independent WMMAs to advance the scoreboard; predicted va_vdst="
+        << girVa << " vm_vsrc=" << girVm;
+    EXPECT_TRUE((girVa < 0 || girVa > 2) && (girVm < 0 || girVm > 2))
+        << "GIR may retain a weak wait to preserve refill overlap, but must age a strict wait "
+           "before issuing; predicted va_vdst="
+        << girVa << " vm_vsrc=" << girVm;
+    EXPECT_EQ(girCount, legacyCount) << "wait-aware scheduling must not drop instructions";
+}
+
+// A held GIR ds_load is a candidate-specific restriction, not a FIFO-wide one. GIR waitcnt
+// insertion runs after scheduling and derives dscnt ranks from the resulting issue order, so an
+// independent later ds_load remains free to fill the current WMMA window.
+TEST_F(DAGSchedulerPassTest, GirWaitAwareSelectionSkipsHeldDsForIndependentDs) {
+    createVAddInBlock(bb, arch, /*destReg=*/400, /*src0Reg=*/401, /*src1Reg=*/402);
+    createWmmaScaleF8(/*destStart=*/50, /*src0Start=*/400);
+
+    StinkyInstruction* held = createDsReadB128InBlock(bb, arch, /*destReg=*/600, /*addrReg=*/400);
+    held->addModifier<GirActionData>(
+        GirActionData{1, 1, GirActionKind::Ds, {GirAccessData{false, 0, 1, -1, 0, 0, false}}});
+    StinkyInstruction* independent =
+        createDsReadB128InBlock(bb, arch, /*destReg=*/620, /*addrReg=*/500);
+    independent->addModifier<GirActionData>(
+        GirActionData{2, 2, GirActionKind::Ds, {GirAccessData{false, 0, 1, -1, 0, 0, false}}});
+
+    for (int i = 0; i < 4; ++i)
+        createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/300 + i * 16);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.waitAluHoldStrictCount = 2;
+    pfc.dagFeatures.girFramePipeline = true;
+    ctx.setPassFeatureConfig(pfc);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    pass->run(*func, ctx, am);
+
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+    EXPECT_LT(positionOf(*bb, independent), positionOf(*bb, held))
+        << "a wait-free GIR ds_load must not be blocked behind a different candidate's "
+           "wait_alu hold";
+}
+
+TEST_F(DAGSchedulerPassTest, GirBackedgeAffinityBelongsToTheNextFrame) {
+    auto schedule = [&](bool girFramePipeline) {
+        am.clear();
+        func = std::make_unique<Function>(girFramePipeline ? "gir_backedge" : "flat_indices");
+        setFunctionArch(*func, arch);
+        BasicBlock* preheader = func->createBasicBlock("preheader");
+        BasicBlock* header = func->createBasicBlock("header");
+        BasicBlock* latch = func->createBasicBlock("latch");
+        func->addEdge(preheader, header);
+        func->addEdge(header, latch);
+        func->addEdge(latch, header);
+
+        auto contract = std::make_shared<GirFrameContract>();
+        contract->loaded = true;
+        contract->generations.emplace(0, GirGenerationSpec{0, 2, 0});
+        func->setStructMetaData<GirFrameContract>(kGirFrameContractKey, contract);
+
+        bb = preheader;
+        createVAddInBlock(bb, arch, /*destReg=*/200, /*src0Reg=*/500, /*src1Reg=*/501);
+        bb = header;
+        createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/200);
+
+        bb = latch;
+        StinkyInstruction* backedgeRead =
+            createDsReadB128InBlock(bb, arch, /*destReg=*/200, /*addrReg=*/400);
+        backedgeRead->addModifier<GirActionData>(GirActionData{
+            10, 10, GirActionKind::Ds, {GirAccessData{false, 0, 2, 0, 1, -1, false}}});
+        StinkyInstruction* sameFrameRead =
+            createDsReadB128InBlock(bb, arch, /*destReg=*/300, /*addrReg=*/401);
+        sameFrameRead->addModifier<GirActionData>(GirActionData{
+            20, 20, GirActionKind::Ds, {GirAccessData{false, 1, 2, 0, 0, -1, false}}});
+        createWmmaScaleF8(/*destStart=*/40, /*src0Start=*/300);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.girFramePipeline = girFramePipeline;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+
+        return std::pair{positionOf(*latch, backedgeRead), positionOf(*latch, sameFrameRead)};
+    };
+
+    const auto [flatBackedge, flatSameFrame] = schedule(/*girFramePipeline=*/false);
+    EXPECT_LT(flatBackedge, flatSameFrame)
+        << "the control must expose function-index wrap at the latch";
+
+    const auto [girBackedge, girSameFrame] = schedule(/*girFramePipeline=*/true);
+    EXPECT_LT(girSameFrame, girBackedge)
+        << "a header consumer reached through the latch backedge belongs to the next frame";
 }
 
 // ---------------------------------------------------------------------------

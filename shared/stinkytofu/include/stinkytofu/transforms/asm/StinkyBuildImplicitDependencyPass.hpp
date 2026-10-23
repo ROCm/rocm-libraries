@@ -41,12 +41,18 @@ class Pass;
  *     IF_ImplicitRead/WriteEXEC). The corresponding singleton register is
  *    added to src/dest if not already present.
  *
- * 2) RegType::LDS pseudo-registers keyed by MemTokenData token IDs:
+ * 2) Optionally, RegType::LDS pseudo-registers keyed by MemTokenData token IDs:
  *      LDS writers (tensor_load, ds_write) — token to dest (defines)
  *      LDS readers (ds_read)               — token to src  (uses)
  *      Barriers                            — token to both src and dest
  *    This creates the dependency chain:  writer → barrier → reader.
+ *
+ * With the GIR frame pipeline, (2) follows one coherent path through the GirFrame graph. Concrete
+ * storage ids along that path are scheduling-only tokens, preserving predecessor-to-successor LDS
+ * rotation; full dynamic frame reasoning remains in the GIR hazard/waitcnt passes. A split fence
+ * receives only selected-path endpoint tokens relevant to its own scheduling block.
  */
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass(
+    bool enableMemoryTokenDependencies = true);
 
 }  // namespace stinkytofu
