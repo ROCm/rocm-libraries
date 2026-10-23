@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <string>
 
 using namespace miopen_plugin;
@@ -609,10 +610,18 @@ TEST(TestMiopenUtils, LogOnMiopenFailureEvaluatesFailingCallOnce)
         return miopenStatusBadParm;
     };
 
+    // The logging macro builds its message only when ERROR logging is enabled, and the level
+    // defaults to off (HIPDNN_LOG_LEVEL). Enable it here so that a macro that re-issues the call
+    // to build the message fails this test whatever the environment and the test order.
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
     // Called bare: wrapping the logging macro in EXPECT_NO_THROW trips clang-tidy on the logger's
     // internal variable name. An unexpected exception still fails the test.
     LOG_ON_MIOPEN_FAILURE(failingCall());
     EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "MIOpen error occurred"))
+        << recorder.getRecordedLogsAsString();
 }
 
 // =============================================================================
