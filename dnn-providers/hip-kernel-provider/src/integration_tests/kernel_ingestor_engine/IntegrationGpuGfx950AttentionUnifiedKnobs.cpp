@@ -234,6 +234,22 @@ std::vector<KnobCase> knobCases2D()
             }
         }
     }
+    // Heads are baked per cell, so each head configuration is its own set of binaries. Every
+    // geometry is also forced on the Llama-3-70B prefill cell (Hq 64, Hkv 8, D 128, bf16,
+    // top-left causal at S 512), which the cycled cases above never reach.
+    for(const auto& g : GEOMETRIES_2D)
+    {
+        const Knobs knobs{{"tile_size", g.tileSize},
+                          {"num_warps", g.numWarps},
+                          {"block_m_per_warp", g.blockMPerWarp},
+                          {"use_mfma_32x32", g.useMfma32x32},
+                          {"use_transposed_qk_32x32", g.useTransposedQk32x32}};
+        cases.push_back({std::string("Unified2D_") + g.name + "_Bf16_TopLeft_Hq64Hkv8S512",
+                         ENGINE_2D,
+                         {DataType::BFLOAT16, 128, 64, 8, Mask::TOP_LEFT, 1, 512, 512},
+                         knobs,
+                         knobs});
+    }
     const auto& baseline = GEOMETRIES_2D[0];
     cases.push_back({"Unified2D_Cold_SelectsTheBaselineGeometry",
                      ENGINE_2D,
