@@ -109,6 +109,10 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 dict(pack_groups=8, tiles_k=1, waves_k=1),
                 "block_k",
             ),
+            (dict(stride=2), dict(tap_reuse=True), "tap_reuse"),
+            ({}, dict(tap_reuse=True, row_ring=True), "tap_reuse"),
+            ({}, dict(tap_reuse=True, tile_w=8), "tap_reuse"),
+            ({}, dict(tap_shift=True), "tap_shift"),
         ):
             why = fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
             self.assertIsNotNone(why, (pkw, knobs))
@@ -185,12 +189,16 @@ class TestFwdWmmaSpec(unittest.TestCase):
         for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
             for caps in caps_list:
                 # Every knob of the cell's table builds on gfx1250 (none on
-                # a wave64 arch).
-                want = len(list(_knob_grid("direct_fwd_wmma", arch, "bf16", caps)))
+                # a wave64 arch). The tap_reuse copies of the dense rows are
+                # offered to the validator, which drops the ones it cannot
+                # serve.
+                knobs = list(_knob_grid("direct_fwd_wmma", arch, "bf16", caps))
+                base = [k for k in knobs if not k.get("tap_reuse")]
                 if arch == "gfx950":
-                    self.assertEqual(want, 0)
+                    self.assertEqual(knobs, [])
                 _, jobs = _caps_jobs(arch, wave, "direct_fwd_wmma", "fwd", caps, "bf16")
-                self.assertEqual(len(jobs), want, (arch, caps))
+                self.assertGreaterEqual(len(jobs), len(base), (arch, caps))
+                self.assertLessEqual(len(jobs), len(knobs), (arch, caps))
 
     def test_spec_for_problem_filters_padding(self):
         from kernels.conv.direct_variants import direct_spec_for_problem
@@ -392,6 +400,38 @@ _CASES = (
     (dict(N=2, H=13, W=21, C=64, K=32, PAD=2, dil_w=2), dict(tiles_k=1, tiles_p=2)),
     (dict(N=2, H=13, W=11, C=64, K=32, PAD=1, dil_h=3), dict(tiles_k=1, tiles_p=2)),
     (dict(N=1, H=16, W=16, C=32, K=64, PAD=0, dil_h=2, dil_w=2), dict(tiles_k=2)),
+    # tap_reuse: B fragments reused across filter rows (whole rows per wave,
+    # 16- and 32-wide tiles, a 5x5 filter, dilation); tap_shift on top
+    # rotates them across filter columns with v_permlane16 (dilation 2 is a
+    # 2-lane rotation with 2 edge lanes).
+    (
+        dict(N=2, H=20, W=33, C=96, K=64),
+        dict(waves_k=1, waves_p=4, tiles_k=2, tiles_p=2, tap_reuse=True),
+    ),
+    (
+        dict(N=1, H=30, W=40, C=64, K=128),
+        dict(tiles_k=2, tiles_p=4, tile_w=32, prefetch=True, tap_reuse=True),
+    ),
+    (
+        dict(N=2, H=13, W=19, C=40, K=32, KH=5, PAD=2),
+        dict(tiles_k=1, tiles_p=2, tap_reuse=True, tap_shift=True),
+    ),
+    (
+        dict(N=2, H=20, W=33, C=96, K=64, dtype="fp16"),
+        dict(
+            waves_k=1,
+            waves_p=4,
+            tiles_k=2,
+            tiles_p=2,
+            prefetch=True,
+            tap_reuse=True,
+            tap_shift=True,
+        ),
+    ),
+    (
+        dict(N=1, H=21, W=37, C=64, K=64, PAD=2, dil_h=2, dil_w=2),
+        dict(tiles_k=2, tiles_p=2, tile_w=32, tap_reuse=True, tap_shift=True),
+    ),
     (
         dict(N=2, H=14, W=15, C=64, K=32, PAD=1, dil_h=3, stride=2),
         dict(tiles_k=1, tiles_p=2, tile_w=8),

@@ -84,7 +84,7 @@ from rocke.core.codegen_policy import (
     apply_codegen_policy,
     normalize_scheduler_strategy,
 )
-from rocke.core.ir import I32, IRBuilder, KernelDef, Value
+from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -161,6 +161,17 @@ class DirectFwdWmmaSpec:
     pingpong: bool = False
     # Steps (k-step, tap) per ping-pong phase: one barrier pair per group.
     pp_group: int = 1
+    # Reuse B (X) fragments across filter rows: with whole output rows per
+    # wave, the fragment of row ``t`` at filter row ``r + 1`` is the one of
+    # row ``t + 1`` at filter row ``r``. The taps of one filter column then
+    # read ``tiles_p + (KH - 1) * dil * tile_w / 16`` B fragments instead of
+    # ``KH * tiles_p`` (register reuse, no extra instructions).
+    tap_reuse: bool = False
+    # With tap_reuse: build the fragments of filter column ``s + 1`` from those
+    # of column ``s`` with an in-wave lane rotation (v_permlane16, lane l <-
+    # lane l + dil of the same 16-lane row) plus a 2-lane LDS read for the
+    # column that enters at the right edge, instead of a full LDS read.
+    tap_shift: bool = False
 
     @property
     def ring_taps(self) -> int:
@@ -309,6 +320,8 @@ class DirectFwdWmmaSpec:
             "tr" if self.tap_ring else "",
             "pp" if self.pingpong else "",
             f"pg{self.pp_group}" if self.pp_group > 1 else "",
+            "tu" if self.tap_reuse else "",
+            "tsh" if self.tap_shift else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -416,6 +429,20 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         return "row_ring / tap_ring serve unpacked tiles without split_barrier"
     if spec.row_ring and spec.tap_ring:
         return "row_ring and tap_ring are exclusive"
+    if spec.tap_reuse:
+        if spec.row_ring or spec.tap_ring:
+            return "tap_reuse needs all filter rows of a column in one weight slot"
+        if spec.pingpong:
+            return "tap_reuse is not combined with pingpong"
+        if p.stride != 1 or spec.tile_n != 1 or spec.phase_split:
+            return "tap_reuse serves stride 1, one image per block"
+        if tw % 16 or (spec.tiles_p * 16) % tw:
+            return "tap_reuse needs whole 16-pixel row pieces and whole rows per wave"
+    if spec.tap_shift:
+        if not spec.tap_reuse:
+            return "tap_shift builds on tap_reuse"
+        if p.dil_w > 15:
+            return "tap_shift rotates within a 16-lane row"
     if spec.phase_split:
         if p.stride != 2:
             return "phase_split serves stride 2 only"
@@ -438,6 +465,8 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
     vgprs = 8 * spec.tiles_k * spec.tiles_p + 8 * (spec.tiles_k + spec.tiles_p) * (
         2 if spec.prefetch else spec.pp_group
     )
+    if spec.tap_reuse:
+        vgprs += 8 * ((p.KH - 1) * p.dil_h * (tw // 16))
     if vgprs > FWD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
     try:
@@ -794,6 +823,44 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
         return b.vec_concat(lo, hi)
 
+    TU = spec.tap_reuse
+    TSH = spec.tap_shift
+    TWF = TW // 16  # 16-pixel fragments per output row
+    if TU:
+        # lane base of the wave's first fragment (px_off[tn] minus its static part)
+        px_base = px_off[0]
+        if TSH:
+            c_edge = b.const_i32(16 - DW)
+            is_edge = b.cmp_ge(l16, c_edge)
+            edge_off = b.mul(b.sub(b.smax(l16, c_edge), l16), b.const_i32(XP))
+
+    def tap_off0(ks: int, s: int) -> int:
+        return s * DW * XP + ks * WMMA_K
+
+    # v_permlane16 selectors: lane l <- lane l + DW inside each 16-lane row
+    # (lanes past the row keep their own value; the edge read replaces them).
+    _src = [min(i + DW, 15) for i in range(16)]
+    SEL_LO = sum(_src[i] << (4 * i) for i in range(8))
+    SEL_HI = sum(_src[8 + i] << (4 * i) for i in range(8))
+    SEL_LO = SEL_LO - (1 << 32) if SEL_LO & 0x80000000 else SEL_LO
+    SEL_HI = SEL_HI - (1 << 32) if SEL_HI & 0x80000000 else SEL_HI
+
+    def _shift(frag: Value, stage_base: Value, off: int) -> Value:
+        """The fragment one filter column (DW pixels) to the right: rotate each
+        dword DW lanes down its 16-lane row (v_permlane16); the last DW lanes
+        of each row read their new column from the halo. That read is issued
+        by the whole wave, but every other lane reads the address of lane
+        16 - DW (an LDS broadcast), so it moves 2 * DW distinct 32-byte runs."""
+        words = b.vec_bitcast(frag, VectorType(I32, 8))
+        lo_sel, hi_sel = b.const_i32(SEL_LO), b.const_i32(SEL_HI)
+        moved = [
+            b.permlane16(w, w, lo_sel, hi_sel, fi=False, bound_ctrl=False)
+            for w in (b.vec_extract(words, i) for i in range(8))
+        ]
+        out = b.vec_bitcast(b.vec_pack(moved, I32), VectorType(io_type, 16))
+        edge = _read16(stage_base, b.add(px_base, edge_off), off)
+        return b.select(is_edge, edge, out)
+
     # One step per (k-step, tap).
     steps = [
         (ks, r, s) for ks in range(CK // WMMA_K) for r in range(KH) for s in range(KW)
@@ -842,6 +909,8 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         """The WMMAs of ``st_list`` (k-step, filter row, column) from one halo
         slot and one weight slot; ``signal`` runs before the last step's."""
 
+        cache: dict = {}
+
         def _frags(st):
             ks, r, s = st
             if PS:
@@ -849,12 +918,37 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                 tap_off = a * PSTR + (r * DH * HC + j) * XP + ks * WMMA_K
             else:
                 tap_off = (r * DH * HALO_W + s * DW) * XP + ks * WMMA_K
-            bf = [_read16(halo_base, px_off[tn], tap_off) for tn in range(TN)]
+            if TU:
+                bf = []
+                for tn in range(TN):
+                    # static halo offset of this fragment relative to the
+                    # wave's first fragment (same lane base for every tn)
+                    key = (
+                        ks,
+                        s,
+                        (tn // TWF + r * DH) * HALO_W * XP + (tn % TWF) * 16 * XP,
+                    )
+                    if key not in cache:
+                        prev = (ks, s - 1, key[2]) if TSH and s > 0 else None
+                        if prev is not None and prev in cache:
+                            cache[key] = _shift(
+                                cache[prev], halo_base, key[2] + tap_off0(ks, s)
+                            )
+                        else:
+                            cache[key] = _read16(
+                                halo_base, px_base, key[2] + tap_off0(ks, s)
+                            )
+                    bf.append(cache[key])
+            else:
+                bf = [_read16(halo_base, px_off[tn], tap_off) for tn in range(TN)]
             tap = (r * KW + s) % WTAPS
             w_off = tap * BK * XP + ks * WMMA_K
             af = [_read16(wei_base, wei_off[m], w_off) for m in range(TM)]
             return af, bf
 
+        if TU:
+            # one filter column at a time: its KH rows reuse the B fragments
+            st_list = sorted(st_list, key=lambda t: (t[0], t[2], t[1]))
         accs = list(accs)
         b.s_setprio(1)
         nxt_frags = _frags(st_list[0]) if spec.prefetch else None

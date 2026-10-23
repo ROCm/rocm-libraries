@@ -1194,6 +1194,12 @@ def _knob_grid(
             )
         else:
             yield from _fwd_wmma_knobs(FWD_WMMA_KNOBS)
+            # tap_reuse copies of the dense rows it can serve (one image per
+            # block, whole rows per wave, no row ring); the validator drops
+            # the rest.
+            for knobs in _fwd_wmma_knobs(FWD_WMMA_KNOBS):
+                if knobs["tile_n"] == 1 and not knobs.get("row_ring"):
+                    yield dict(knobs, tap_reuse=True)
             for wk, wp, tk, tp, tw, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
                 knobs = dict(
                     waves_k=wk,
