@@ -1261,6 +1261,11 @@ namespace TensileLite
                     {
                         std::vector<size_t>           vec_rm;
                         const ContractionProblemGemm& problem = *ptr;
+                        // Bytes this problem alone copies per rotation, tracked alongside the
+                        // pristine-derived slot sizes so RotatingMemory can size the pool from
+                        // what getRotatingSize() will ask for rather than from the largest
+                        // problem in the run.
+                        size_t problemBytes = 0;
                         for(size_t i = 0; i < problem.tensors().size(); i++)
                         {
                             if(i > ContractionProblemGemm::TENSOR::METADATA)
@@ -1280,18 +1285,22 @@ namespace TensileLite
                             size_t const bytes = multiplyElementSize(
                                 it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
                             vec_rm.push_back(bytes);
+                            problemBytes += problem.tensors()[i].totalAllocatedBytes();
                         }
                         if(!isRMInitPost)
                         {
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(vec_rm, problemBytes);
                     }
                     else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
                     {
                         const ContractionProblemGroupedGemm& grouped = *ptr;
                         std::vector<size_t>                    vec_rm;
+                        // getRotatingSize() sums the whole group, so accumulate across gemms
+                        // to match.
+                        size_t problemBytes = 0;
                         for(auto const& problem : grouped.gemms)
                         {
                             std::vector<size_t> tmp_rm;
@@ -1314,6 +1323,7 @@ namespace TensileLite
                                 size_t const bytes = multiplyElementSize(
                                     it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
                                 tmp_rm.push_back(bytes);
+                                problemBytes += problem.tensors()[i].totalAllocatedBytes();
                             }
                             if(vec_rm.empty())
                             {
@@ -1336,7 +1346,7 @@ namespace TensileLite
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(vec_rm, problemBytes);
                     }
                 }
             }
@@ -2191,7 +2201,7 @@ namespace TensileLite
                   // prepareGPUInputs() runs once per solution, so without this
                   // the generator re-runs for every solution on identical input.
                   // Same idea as the non-MX initDescriptor check below.
-                  
+
                   bool const descriptorsUnchanged
                       = pristineData.initDescriptor.size() == 1
                         && pristineScale.initDescriptor.size() == 1
@@ -3081,10 +3091,10 @@ namespace TensileLite
                             Tensor& permuted = g_swizzleCache.at(swizzleKey);
                             ptr = copyInputBuffers(
                                 desc,
-                                p.gpuInput.valid.get(),
-                                permuted.as<void>(),
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
                                 flatToNativeElems(permuted.getDesc().flattenSize()),
-                                hipMemcpyHostToDevice);
+                                                   hipMemcpyHostToDevice);
                         }
                         else
                         {
@@ -3108,10 +3118,10 @@ namespace TensileLite
                         Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
                         ptr             = copyInputBuffers(
                             desc,
-                            p.gpuInput.valid.get(),
-                            permuted.as<void>(),
+                                               p.gpuInput.valid.get(),
+                                               permuted.as<void>(),
                             flatToNativeElems(permuted.getDesc().flattenSize()),
-                            hipMemcpyHostToDevice);
+                                               hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
                     }
                 }
