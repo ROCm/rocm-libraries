@@ -199,7 +199,7 @@ namespace
     template <typename T>
     HostCsr<T> dense_to_csr(const std::vector<T>& dense, I m, I n, I base)
     {
-        HostCsr<T> c{m, n, base, {base}, {}, {}};
+        HostCsr<T> c{m, n, static_cast<int>(base), {base}, {}, {}};
         for(I i = 0; i < m; ++i)
         {
             for(I j = 0; j < n; ++j)

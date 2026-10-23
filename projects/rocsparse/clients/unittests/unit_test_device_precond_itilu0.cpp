@@ -247,9 +247,9 @@ namespace
     template <typename T>
     struct split_matrix
     {
-        std::vector<int32_t> lptr, lind, lpos;
-        std::vector<int32_t> uptr, uind, upos;
-        std::vector<int32_t> dpos;
+        std::vector<rocsparse_int> lptr, lind, lpos;
+        std::vector<rocsparse_int> uptr, uind, upos;
+        std::vector<rocsparse_int> dpos;
 
         explicit split_matrix(const csr_matrix<T>& a)
         {
@@ -276,7 +276,7 @@ namespace
                         dpos[static_cast<size_t>(i)] = p;
                     }
                 }
-                lptr.push_back(static_cast<int32_t>(lind.size()));
+                lptr.push_back(static_cast<rocsparse_int>(lind.size()));
             }
             uptr.assign(1, 0);
             for(int32_t j = 0; j < n; ++j)
@@ -286,17 +286,17 @@ namespace
                     uind.push_back(e.first);
                     upos.push_back(e.second);
                 }
-                uptr.push_back(static_cast<int32_t>(uind.size()));
+                uptr.push_back(static_cast<rocsparse_int>(uind.size()));
             }
         }
     };
 
     template <typename T>
-    std::vector<T> gather(const std::vector<T>& v, const std::vector<int32_t>& pos)
+    std::vector<T> gather(const std::vector<T>& v, const std::vector<rocsparse_int>& pos)
     {
         std::vector<T> out;
         out.reserve(pos.size());
-        for(const int32_t p : pos)
+        for(const rocsparse_int p : pos)
             out.push_back(v[static_cast<size_t>(p)]);
         return out;
     }
@@ -315,8 +315,8 @@ namespace
                              const std::string&   what)
     {
         SCOPED_TRACE(what);
-        using I = int32_t;
-        using J = int32_t;
+        using I = rocsparse_int;
+        using J = rocsparse_int;
 
         const split_matrix<T> split(a);
         const I               m    = a.n;
@@ -328,8 +328,8 @@ namespace
         const std::vector<T> u0 = gather(a.val, split.upos);
         const std::vector<T> d0 = gather(a.val, split.dpos);
 
-        device_vector<I> dptr{a.ptr};
-        device_vector<J> dind{a.ind};
+        device_vector<I> dptr{std::vector<I>(a.ptr.begin(), a.ptr.end())};
+        device_vector<J> dind{std::vector<J>(a.ind.begin(), a.ind.end())};
         device_vector<T> dval{a.val};
         device_vector<I> dlptr{split.lptr};
         device_vector<J> dlind{split.lind};
@@ -398,7 +398,7 @@ namespace
                                                                buffer.ptr)),
                   rocsparse_status_success);
 
-        rocsparse_int    nsweeps = opt.nmaxiter;
+        J                nsweeps = opt.nmaxiter;
         const real_of<T> tol     = std::is_same_v<real_of<T>, float> ? 1.0e-6f : 1.0e-12;
         const bool       verbose = (opt.options & rocsparse_itilu0_option_verbose) != 0;
         if(verbose)
@@ -593,8 +593,8 @@ namespace
                             rocsparse_itilu0_alg alg = rocsparse_itilu0_alg_sync_split)
     {
         SCOPED_TRACE(what);
-        using I = int32_t;
-        using J = int32_t;
+        using I = rocsparse_int;
+        using J = rocsparse_int;
 
         const split_matrix<T> split(a);
         const I               m    = a.n;
@@ -602,8 +602,8 @@ namespace
         const I               lnnz = static_cast<I>(split.lind.size());
         const I               unnz = static_cast<I>(split.uind.size());
 
-        device_vector<I> dptr{a.ptr};
-        device_vector<J> dind{a.ind};
+        device_vector<I> dptr{std::vector<I>(a.ptr.begin(), a.ptr.end())};
+        device_vector<J> dind{std::vector<J>(a.ind.begin(), a.ind.end())};
         device_vector<T> dval{a.val};
         device_vector<I> dlptr{split.lptr};
         device_vector<J> dlind{split.lind};
@@ -671,8 +671,8 @@ namespace
                                                                buffer.ptr)),
                   rocsparse_status_success);
 
-        rocsparse_int nsweeps = nmaxiter;
-        const bool    verbose = (options & verbose_opt) != 0;
+        J          nsweeps = nmaxiter;
+        const bool verbose = (options & verbose_opt) != 0;
         if(verbose)
             testing::internal::CaptureStdout();
         const auto  status = rocsparse::csritilu0x_compute_impl<T, I, J>(handle,
@@ -726,8 +726,8 @@ namespace
 
     void check_extended_interface_arguments(rocsparse_handle handle, rocsparse_itilu0_alg alg)
     {
-        using I = int32_t;
-        using J = int32_t;
+        using I = rocsparse_int;
+        using J = rocsparse_int;
 
         // Tridiagonal 4 x 4 matrix with its strictly lower part by rows (L) and strictly
         // upper part by columns (U).
@@ -887,7 +887,7 @@ namespace
                                 I                    nz,
                                 const J*             lind_ptr,
                                 const J*             uind_ptr) {
-            rocsparse_int nsweeps = 5;
+            J nsweeps = 5;
             return rocsparse::csritilu0x_compute_impl<double, I, J>(
                 handle,
                 alg,
@@ -1282,8 +1282,8 @@ TEST_F(PrecondItilu0, extended_interface_rejects_invalid_arguments)
 
 TEST_F(PrecondItilu0, extended_interface_buffer_size_empty_and_unsupported_types)
 {
-    using I = int32_t;
-    using J = int32_t;
+    using I = rocsparse_int;
+    using J = rocsparse_int;
     const std::vector<I> ptr{0, 2, 5, 8, 10};
     device_vector<I>     dptr{ptr};
     device_vector<J>     dind{std::vector<J>{0, 1, 0, 1, 2, 1, 2, 3, 2, 3}};
@@ -1429,8 +1429,8 @@ TEST_F(PrecondItilu0, public_interface_sweep_kernels)
 // when computing, and the unsupported value types are refused when sizing the buffer.
 TEST_F(PrecondItilu0, extended_interface_with_the_unimplemented_algorithms)
 {
-    using I = int32_t;
-    using J = int32_t;
+    using I = rocsparse_int;
+    using J = rocsparse_int;
     const std::vector<I>  ptr{0, 2, 5, 8, 10};
     const std::vector<J>  ind{0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
     const std::vector<I>  lptr{0, 0, 1, 2, 3};
@@ -1482,7 +1482,7 @@ TEST_F(PrecondItilu0, extended_interface_with_the_unimplemented_algorithms)
                       rocsparse_status_success);
         }
 
-        rocsparse_int nsweeps = 10;
+        J nsweeps = 10;
         EXPECT_NE((rocsparse::csritilu0x_compute_impl<double, I, J>(handle,
                                                                     alg,
                                                                     0,
