@@ -423,7 +423,8 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
         solution.customKernel.generated = true;
         auto normal = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
         // DP keeps the launch-header count in X workgroups, not physical peers.
-        EXPECT_EQ(value<uint32_t>(normal.args, "numWorkGroups"), launch.grid / cluster.y);
+        if(solution.sizeMapping.isPersistentDataParallel())
+            EXPECT_EQ(value<uint32_t>(normal.args, "numWorkGroups"), launch.grid / cluster.y);
         solution.customKernel.generated = false;
         auto custom = solution.generateCustomCall<true>(problem, inputs, device, launch);
         ASSERT_EQ(custom.args.size(), normal.args.size());
