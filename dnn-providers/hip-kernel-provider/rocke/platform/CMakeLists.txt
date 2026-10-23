@@ -403,12 +403,18 @@ if(ROCKE_INSTALL_TESTS)
 
     endblock()
 
-    # The top-level developer runner is not an installed entry point, but its
-    # command-plan regression tests run in the relocated platform pytest suite.
-    # Stage a test-only copy beside those tests so they exercise the same runner
-    # without reaching back into the source checkout.
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_checks.py"
-            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    # The top-level developer runner is not part of the standalone platform
+    # component, but its command-plan regression tests run in the relocated
+    # full-repository pytest suite. Stage a test-only copy when the sibling
+    # exists; a verbatim platform-only copy must still configure and install.
+    set(_ROCKE_RUN_CHECKS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_checks.py")
+    if(EXISTS "${_ROCKE_RUN_CHECKS}")
+      install(FILES "${_ROCKE_RUN_CHECKS}"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    else()
+      message(STATUS
+              "rocKE: top-level run_checks.py not found; skipping its test-only install")
+    endif()
 
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler

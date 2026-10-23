@@ -18,7 +18,17 @@ def _runner_path() -> Path:
     for candidate in candidates:
         if candidate.is_file():
             return candidate
-    raise FileNotFoundError("run_checks.py is absent from the source and test artifact")
+    pytest.skip("top-level run_checks.py is absent from this platform-only tree")
+
+
+def test_platform_only_install_does_not_require_the_top_level_runner():
+    platform = Path(__file__).resolve().parents[2]
+    cmake = platform / "CMakeLists.txt"
+    if not cmake.is_file():
+        pytest.skip("source CMake project is absent from the installed test artifact")
+    text = cmake.read_text()
+    assert 'if(EXISTS "${_ROCKE_RUN_CHECKS}")' in text
+    assert 'install(FILES "${_ROCKE_RUN_CHECKS}"' in text
 
 
 @pytest.fixture
