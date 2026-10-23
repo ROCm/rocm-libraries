@@ -20,6 +20,7 @@ stages.
 - [Build, test, and package integration](docs/build_and_test.md).
 - [Error handling](docs/error_handling.md).
 - [Scalar metadata and dispatch](include/roc/hostnumerics/scalar_type.hpp).
+- [Native scalar conversion](include/roc/hostnumerics/scalar.hpp).
 - [Core tests and compiled usage example](tests/core_test.cpp).
 - [Logical tensor shapes](include/roc/hostnumerics/shape.hpp) and the Python
   `Shape` docstrings.
