@@ -24,11 +24,11 @@
  *
  *******************************************************************************/
 
-// Regression tests for the TF32 perf-db reuse bug: a CK grouped-conv PerformanceConfig only
-// serializes its kernel_id, so a config restored from the perf-db loses its use_tf32 flag.
-// GetSolution used to trust that (now false) flag and silently built the FP32 instance -- same
-// kernel name, FP32 math -- for a TF32 problem. The fix recomputes use_tf32 from the problem
-// (whose key already carries the _cxTF32 compute marker) at solution-build time.
+// Regression tests for the TF32 perf-db reuse bug: a CK grouped-conv PerformanceConfig serializes
+// only its kernel_id, so a config restored from the perf-db loses use_tf32. GetSolution used to
+// trust that (now false) flag and silently build the FP32 instance for a TF32 problem. The fix
+// recomputes use_tf32 from the problem at solution-build time, in all six CK grouped solvers
+// (2D/3D x fwd/bwd-data/bwd-weights); these tests cover every one of them.
 
 #include <gtest/gtest.h>
 
@@ -37,52 +37,58 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/tensor.hpp>
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <type_traits>
 
 using namespace group_conv;
 
-// ---------------------------------------------------------------------------
-// GPU: run the forward grouped CK solver with a config that has been round-tripped through the
-// perf-db serialization (which drops use_tf32), on a TF32 problem, and require the result to
-// differ from the same kernel run as strict FP32. Before the fix the DB-restored config built
-// the FP32 instance for the TF32 problem, giving a byte-identical FP32 result; after the fix
-// GetSolution recomputes use_tf32 from the problem and the TF32 kernel runs, diverging from FP32.
-// ---------------------------------------------------------------------------
-struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction::Forward>
-{
-    // compute_type must be set before the base SetUp() consumes it; do it here rather than in a
-    // constructor so the fixture needs no user-declared constructor.
-    void SetUp() override
-    {
-        compute_type = "TF32";
-        GroupConvTestFix<2u, float, Direction::Forward>::SetUp();
-    }
+namespace {
 
-    // This test runs the solver itself and does its own verification.
+template <unsigned NDIM, Direction DIR>
+struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
+{
+    using Base = GroupConvTestFix<NDIM, float, DIR>;
+    using Base::alpha;
+    using Base::beta;
+    using Base::compute_type;
+    using Base::conv_config;
+    using Base::conv_desc;
+    using Base::in_dev;
+    using Base::input;
+    using Base::out_dev;
+    using Base::output;
+    using Base::test_skipped;
+    using Base::wei_dev;
+    using Base::weights;
+    using Base::wspace;
+
+    // compute_type must be set before the base SetUp() consumes it.
+    GroupConvTF32Reuse() { compute_type = "TF32"; }
+
+    // These tests do their own verification, so suppress the base reference-conv check.
     void TearDown() override {}
 
-    void RunDbReuse()
+    // Problem built with the per-direction tensor-descriptor order the solvers expect.
+    miopen::conv::ProblemDescription MakeProblem(const miopen::ConvolutionDescriptor& cd)
     {
-        using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops;
+        if constexpr(DIR == Direction::Forward)
+            return {input.desc, weights.desc, output.desc, cd, DIR, 0, alpha, beta};
+        else
+            return {output.desc, weights.desc, input.desc, cd, DIR, 0, alpha, beta};
+    }
 
+    template <class Solver>
+    void RunReuse()
+    {
         auto& handle = get_handle();
         Solver solv{};
         auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&handle);
 
-        // conv_desc already has math_type == Default (SetUp set it for compute_type == "TF32").
-        miopen::conv::ProblemDescription problem_tf32{input.desc,
-                                                      weights.desc,
-                                                      output.desc,
-                                                      conv_desc,
-                                                      Direction::Forward,
-                                                      0 /*bias*/,
-                                                      alpha,
-                                                      beta};
+        auto problem_tf32 = MakeProblem(conv_desc); // conv_desc has math_type Default for TF32
         problem_tf32.SetupComputeType(ctx);
-
         if(!problem_tf32.UseTF32())
         {
             test_skipped = true;
@@ -94,32 +100,64 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
             GTEST_SKIP() << solv.SolverDbId() << " is not applicable: " << conv_config;
         }
 
-        // Same shape forced to strict FP32 -- the ground truth to diff against.
         auto conv_desc_fp32 = conv_desc;
         conv_desc_fp32.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
-        miopen::conv::ProblemDescription problem_fp32{input.desc,
-                                                      weights.desc,
-                                                      output.desc,
-                                                      conv_desc_fp32,
-                                                      Direction::Forward,
-                                                      0 /*bias*/,
-                                                      alpha,
-                                                      beta};
+        auto problem_fp32 = MakeProblem(conv_desc_fp32);
 
         if(solv.MayNeedWorkspace())
-        {
             wspace.resize(std::max(solv.GetWorkspaceSize(ctx, problem_tf32),
                                    solv.GetWorkspaceSize(ctx, problem_fp32)));
-        }
 
-        const miopen::ConvDataTensors tensors{
-            input.desc, in_dev.get(), weights.desc, wei_dev.get(), output.desc, out_dev.get()};
-        const auto invoke_params = miopen::conv::DataInvokeParams{
-            tensors, wspace.ptr(), wspace.size(), false, alpha, beta};
+        // Direction-specific invoke tensors and the buffer holding this direction's result. Mirrors
+        // GroupConvTestFix::DispatchSolver; its RunSolverImpl cannot be reused here because it
+        // always uses the default perf config and never reads the result back for comparison.
+        using InvokeParams = std::conditional_t<DIR == Direction::BackwardWeights,
+                                                miopen::conv::WrWInvokeParams,
+                                                miopen::conv::DataInvokeParams>;
+        const auto tensors = [&] {
+            if constexpr(DIR == Direction::Forward)
+                return miopen::ConvDataTensors{input.desc,
+                                               in_dev.get(),
+                                               weights.desc,
+                                               wei_dev.get(),
+                                               output.desc,
+                                               out_dev.get()};
+            else if constexpr(DIR == Direction::BackwardData)
+                return miopen::ConvDataTensors{output.desc,
+                                               out_dev.get(),
+                                               weights.desc,
+                                               wei_dev.get(),
+                                               input.desc,
+                                               in_dev.get()};
+            else
+                return miopen::ConvWrwTensors{output.desc,
+                                              out_dev.get(),
+                                              input.desc,
+                                              in_dev.get(),
+                                              weights.desc,
+                                              wei_dev.get()};
+        }();
+        auto& result_src = [&]() -> tensor<float>& {
+            if constexpr(DIR == Direction::Forward)
+                return output;
+            else if constexpr(DIR == Direction::BackwardData)
+                return input;
+            else
+                return weights;
+        }();
+        auto& result_dev = [&]() -> miopen::Allocator::ManageDataPtr& {
+            if constexpr(DIR == Direction::Forward)
+                return out_dev;
+            else if constexpr(DIR == Direction::BackwardData)
+                return in_dev;
+            else
+                return wei_dev;
+        }();
 
-        auto run = [&](const miopen::conv::ProblemDescription& prob,
-                       const auto& perf_cfg,
-                       tensor<float>& result) {
+        const auto invoke_params =
+            InvokeParams{tensors, wspace.ptr(), wspace.size(), false, alpha, beta};
+
+        auto run = [&](const auto& prob, const auto& perf_cfg, tensor<float>& result) {
             auto sol = solv.GetSolution(ctx, prob, perf_cfg);
             EXPECT_TRUE(sol.Succeeded());
             EXPECT_TRUE(sol.invoker_factory);
@@ -127,12 +165,11 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
                 handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
             (invoker)(handle, invoke_params);
             handle.Finish();
-            handle.ReadToVec(out_dev, result.data);
+            handle.ReadToVec(result_dev, result.data);
         };
 
-        // Heuristic config for the TF32 problem, then round-trip it through the perf-db
-        // serialization -- this keeps only kernel_id and clears use_tf32, exactly the state a
-        // config is in after a perf-db reload.
+        // Heuristic config for the TF32 problem, round-tripped through perf-db serialization: keeps
+        // kernel_id, clears use_tf32 -- exactly the state of a config after a perf-db reload.
         auto cfg = solv.GetDefaultPerformanceConfig(ctx, problem_tf32);
         std::ostringstream oss;
         cfg.Serialize(oss);
@@ -142,50 +179,42 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
         ASSERT_FALSE(restored.UseTF32())
             << "test precondition: a reloaded perf-db config must have dropped use_tf32";
 
-        tensor<float> out_tf32 = output;
+        tensor<float> out_tf32 = result_src;
         run(problem_tf32, restored, out_tf32);
-        tensor<float> out_fp32 = output;
+        tensor<float> out_fp32 = result_src;
         run(problem_fp32, restored, out_fp32);
-
-        // Pristine TF32 config (use_tf32 preserved, no db round-trip): the reference for what a
-        // genuinely-TF32 run looks like on this build.
-        tensor<float> out_tf32_ref = output;
-        run(problem_tf32, cfg, out_tf32_ref);
+        tensor<float> out_ref = result_src; // pristine TF32 config, no db round-trip
+        run(problem_tf32, cfg, out_ref);
 
         ASSERT_EQ(miopen::range_distance(out_tf32), miopen::range_distance(out_fp32));
 
-        // Some CK builds do not carry a numerically distinct TF32 grouped-fwd kernel for this
-        // instance on this device -- there TF32 and FP32 compute identically and the perf-db reuse
-        // property is unobservable. Skip rather than false-fail; the fix is still exercised on
-        // builds that do run a distinct TF32 kernel (e.g. gfx942 / ROCm >= 10.1).
-        if(miopen::rms_range(out_fp32, out_tf32_ref) <= 1e-5)
+        // Some CK builds carry no numerically distinct TF32 kernel for this instance on this
+        // device; there TF32 == FP32 and the reuse property is unobservable, so skip rather than
+        // false-fail.
+        if(miopen::rms_range(out_fp32, out_ref) <= 1e-5)
         {
             test_skipped = true;
-            GTEST_SKIP() << "CK runs TF32 grouped-fwd identically to FP32 on this device; cannot "
-                            "observe perf-db TF32 reuse";
+            GTEST_SKIP() << "CK runs TF32 identically to FP32 on this device; cannot observe reuse";
         }
 
-        // The fix: a db-restored config (use_tf32 dropped) must still run TF32 -- matching the
-        // pristine TF32 reference and diverging from FP32 -- not silently fall back to FP32.
+        // The fix: a db-restored config must still run TF32 -- matching the pristine TF32 result
+        // and diverging from FP32 -- not silently fall back to FP32.
         EXPECT_GT(miopen::rms_range(out_fp32, out_tf32), 1e-5)
-            << "perf-db-restored TF32 config produced an FP32-identical result: TF32 silently fell "
-               "back to FP32 on reuse";
-        EXPECT_LE(miopen::rms_range(out_tf32_ref, out_tf32), 1e-6)
+            << "perf-db-restored TF32 config produced an FP32-identical result";
+        EXPECT_LE(miopen::rms_range(out_ref, out_tf32), 1e-6)
             << "perf-db-restored TF32 result diverged from the pristine TF32 result";
     }
 
-    // TF32 and strict-FP32 versions of the same problem must serialize to different perf-db keys
-    // (via the _cxTF32 compute marker) so their tuned records never collide in the DB. The marker
-    // is only emitted once SetupComputeType has run against a TF32-capable device, so this runs on
-    // the GPU and skips elsewhere.
+    // TF32 and strict-FP32 versions of a problem must serialize to different perf-db keys (the
+    // _cxTF32 marker) so their tuned records never collide. The marker needs SetupComputeType on a
+    // TF32-capable device, so this is a GPU test that skips elsewhere.
     void RunKeyDistinct()
     {
         auto& handle = get_handle();
         auto ctx     = miopen::ExecutionContext{};
         ctx.SetStream(&handle);
 
-        miopen::conv::ProblemDescription problem_tf32{
-            input.desc, weights.desc, output.desc, conv_desc, Direction::Forward, 0, alpha, beta};
+        auto problem_tf32 = MakeProblem(conv_desc);
         problem_tf32.SetupComputeType(ctx);
         if(!problem_tf32.UseTF32())
         {
@@ -195,14 +224,7 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
 
         auto conv_desc_fp32 = conv_desc;
         conv_desc_fp32.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
-        miopen::conv::ProblemDescription problem_fp32{input.desc,
-                                                      weights.desc,
-                                                      output.desc,
-                                                      conv_desc_fp32,
-                                                      Direction::Forward,
-                                                      0,
-                                                      alpha,
-                                                      beta};
+        auto problem_fp32 = MakeProblem(conv_desc_fp32);
         problem_fp32.SetupComputeType(ctx);
 
         std::ostringstream key_tf32;
@@ -213,20 +235,87 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
         EXPECT_NE(key_tf32.str().find("cxTF32"), std::string::npos)
             << "TF32 problem key is missing the compute marker: " << key_tf32.str();
         EXPECT_EQ(key_fp32.str().find("cxTF32"), std::string::npos)
-            << "strict-FP32 problem key unexpectedly carries the TF32 marker: " << key_fp32.str();
+            << "strict-FP32 key unexpectedly carries the TF32 marker: " << key_fp32.str();
         EXPECT_NE(key_tf32.str(), key_fp32.str())
             << "TF32 and FP32 problems serialize to the same perf-db key; their records collide";
     }
 };
 
-TEST_P(GPU_GroupConv2DFwd_TF32Reuse_FP32, DbRestoredConfigStaysTF32) { RunDbReuse(); }
-TEST_P(GPU_GroupConv2DFwd_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
+template <unsigned NDIM>
+std::vector<GroupConvTestConfig<NDIM>> Tf32ReuseConfigs()
+{
+    if constexpr(NDIM == 2u)
+        return {{8, 256, 384, 384, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}}};
+    else
+        return {{8, 64, 64, 64, {4, 16, 16}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}};
+}
 
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_GroupConv2DFwd_TF32Reuse_FP32,
-    testing::Combine(testing::Values(GroupConvTestConfig<2u>{
-                         8, 256, 384, 384, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}}),
-                     testing::Values(1.0f),
-                     testing::Values(0.0f),
-                     testing::Values(miopenTensorNHWC)));
+template <unsigned NDIM>
+miopenTensorLayout_t Tf32ReuseLayout()
+{
+    return NDIM == 2u ? miopenTensorNHWC : miopenTensorNDHWC;
+}
+
+} // namespace
+
+#define DEFINE_TF32_REUSE_TEST(ndim, dir)                                                  \
+    struct GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32                                   \
+        : GroupConvTF32Reuse<ndim, Direction::dir>                                         \
+    {                                                                                      \
+    };                                                                                     \
+    TEST_P(GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32, DbRestoredConfigStaysTF32)       \
+    {                                                                                      \
+        RunReuse<SolverFor<ndim, Direction::dir>::type>();                                 \
+    }                                                                                      \
+    TEST_P(GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys)    \
+    {                                                                                      \
+        RunKeyDistinct();                                                                  \
+    }                                                                                      \
+    INSTANTIATE_TEST_SUITE_P(Full,                                                         \
+                             GPU_GroupConv##ndim##D_##dir##_TF32Reuse_FP32,                \
+                             testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<ndim>()), \
+                                              testing::Values(1.0f),                       \
+                                              testing::Values(0.0f),                       \
+                                              testing::Values(Tf32ReuseLayout<ndim>())))
+
+namespace {
+template <unsigned NDIM, Direction DIR>
+struct SolverFor;
+template <>
+struct SolverFor<2u, Direction::Forward>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops;
+};
+template <>
+struct SolverFor<2u, Direction::BackwardData>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops;
+};
+template <>
+struct SolverFor<2u, Direction::BackwardWeights>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops;
+};
+template <>
+struct SolverFor<3u, Direction::Forward>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops;
+};
+template <>
+struct SolverFor<3u, Direction::BackwardData>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops;
+};
+template <>
+struct SolverFor<3u, Direction::BackwardWeights>
+{
+    using type = miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops;
+};
+} // namespace
+
+DEFINE_TF32_REUSE_TEST(2, Forward);
+DEFINE_TF32_REUSE_TEST(2, BackwardData);
+DEFINE_TF32_REUSE_TEST(2, BackwardWeights);
+DEFINE_TF32_REUSE_TEST(3, Forward);
+DEFINE_TF32_REUSE_TEST(3, BackwardData);
+DEFINE_TF32_REUSE_TEST(3, BackwardWeights);
