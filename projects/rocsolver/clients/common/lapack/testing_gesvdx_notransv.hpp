@@ -1054,7 +1054,7 @@ void testing_gesvdx_notransv(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "errorv");
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "ortho");
                 rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error, max_errorv);
             }
             else

@@ -544,8 +544,8 @@ void testing_stedcj(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, std::max(max_err, max_errv));
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "ortho");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_err, max_errv);
             }
             else
             {
@@ -557,7 +557,7 @@ void testing_stedcj(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, std::max(max_err, max_errv));
+                rocsolver_bench_output(gpu_time_used, max_err, max_errv);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
