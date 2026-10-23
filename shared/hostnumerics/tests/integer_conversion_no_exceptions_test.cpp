@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <limits>
 #include <new>
-#include <roc/hostnumerics/scalar_integer_conversion.hpp>
+#include <roc/hostnumerics/scalar_conversion.hpp>
 
 void* operator new(std::size_t) {
     std::abort();
@@ -31,9 +31,13 @@ int main() {
     using namespace roc::hostnumerics;
     using namespace roc::hostnumerics::detail;
     const ScalarConversionOptions reject;
+    static_assert(noexcept(convertScalar<int8_t>(128)));
+    static_assert(noexcept(convertScalar<int8_t>(2.5, reject)));
+    static_assert(noexcept(getConvertScalar<int8_t>(128)));
     for (int input = -128; input <= 127; ++input) {
         const auto result = getConvertToInteger<int8_t>(static_cast<double>(input), reject);
         if (!result || *result != input) return 1;
+        if (convertScalar<int8_t>(static_cast<double>(input), reject) != input) return 16;
     }
     const auto outOfRange = getConvertToInteger<int8_t>(300.0, reject);
     if (outOfRange.has_value() || outOfRange.error().code != ConversionError::RoundedOutOfRange)
@@ -78,5 +82,15 @@ int main() {
     if (message(outOfRange.error()).empty() || outOfRange.error().destinationBits != 8 ||
         !outOfRange.error().signedDestination)
         return 15;
+    if (convertScalar<int8_t>(128) != -128 || convertScalar<int8_t>(300.0, saturate) != 127 ||
+        convertScalar<int8_t>(300.0, {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap}) !=
+            44 ||
+        convertScalar<int8_t>(2.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}) != 2)
+        return 17;
+    const auto checked = getConvertScalar<int8_t>(128);
+    if (checked || checked.error().code != ScalarConversionError::IntegerOutOfRange) return 18;
+    const auto checkedComplex = getConvertScalar<double>(std::complex<double>(2, 1));
+    if (checkedComplex || checkedComplex.error().code != ScalarConversionError::Nonreal) return 19;
+    if (convertScalar<std::complex<double>>(1.5) != std::complex<double>(1.5, 0.0)) return 20;
     return 0;
 }
