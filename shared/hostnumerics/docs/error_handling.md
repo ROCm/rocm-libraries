@@ -1,17 +1,12 @@
 ## Error handling
 
-HostNumerics-owned terminal errors throw one exception type, `std::runtime_error`.
-These errors mean the operation cannot continue; callers are not expected to
-catch them to recover. Recoverable support and compatibility failures use
-`Expected` results or explicit checks. Catching an exception must not select a
-fallback, retry, or successful alternative path.
-
-Reporting boundaries may catch a terminal error to report the failed operation.
-Cleanup may catch and rethrow, and workers may transport the original exception
-to the joining caller. Allocation, system, dependency and visitor errors retain
-their original types. Dispatch rejects invalid enum values before invoking the
-visitor or moving its arguments. This policy does not promise exceptions-disabled
-builds.
+HostNumerics-owned terminal errors throw `std::runtime_error`. Catch them only
+to report the failure, to clean up and rethrow, or to pass the exception from a
+worker to the thread that joins it; never to retry or fall back.
+Expected support and compatibility failures should use explicit results
+or checks. Allocation, system, dependency and visitor errors retain their
+original types. Dispatch rejects invalid enum values before invoking the visitor
+or moving its arguments. This policy does not promise exceptions-disabled builds.
 
 ## Internal C++ results
 
@@ -21,6 +16,8 @@ as an enum that names the failure. Return `detail::Unexpected(error)` for a
 failure, check `has_value()` or the boolean conversion, then read the value with
 `*`/`->` or the error with `error()`. To pass a failure on to a caller that
 expects a different value type, return `detail::Unexpected(result.error())`.
+Where a failure means the caller cannot continue, a wrapper can throw it as a
+terminal error, as `Layout::contiguous` does for `Layout::getContiguousLayout`.
 
 `Expected` is a C++20 subset of C++23 `std::expected`. `expected.hpp` explains
 why, and how it will be replaced. It is internal, with no source or ABI
@@ -31,22 +28,3 @@ move constructors and support the corresponding assignment. This keeps the
 stored value or error present even if copying a replacement throws.
 `Expected<void, E>` is not supported; add and test that specialization alongside
 the first check that needs to return only success or an error.
-
-## Layout boundaries
-
-`Layout::elementOffset` returns `detail::Expected<ptrdiff_t, detail::LayoutFailure>`
-and is `noexcept`. Rank, coordinate, and arithmetic errors retain an error code
-and numeric context. Checking an offset neither allocates nor formats diagnostics.
-The Python `element_offset` binding reports these errors as `RuntimeError` with
-the same rank, coordinate, and overflow messages.
-
-`Layout::getContiguousLayout` returns validation errors through `Expected`.
-It copies the Shape and allocates strides, so allocation errors can still throw.
-`Layout::contiguous` is a convenience boundary that reports validation errors as
-`std::runtime_error`. Both use orders listing axes from slowest to fastest, as in
-`Shape::linearIndex`.
-
-Assertions check established internal preconditions. Public checked operations
-return errors for invalid input in both debug and release builds. Returning an
-error does not require callers to choose a fallback: an outer boundary can
-report it as an exception when that operation cannot continue.

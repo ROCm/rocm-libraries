@@ -55,13 +55,15 @@ inline constexpr std::string_view message(LayoutError error) noexcept {
     return "Unknown LayoutError failure.";
 }
 
+// For CoordinateRankMismatch, value and limit are the coordinate and shape ranks.
+// For CoordinateOutOfRange, value is the coordinate on axis `dimension` and limit
+// is that axis's extent. Other errors leave these fields zero.
 struct LayoutFailure {
     LayoutError error;
     size_t dimension = 0;
     size_t value = 0;
     size_t limit = 0;
 
-    // Formatting a diagnostic can allocate, so this operation can throw.
     std::string message() const {
         switch (error) {
             case LayoutError::CoordinateRankMismatch:
@@ -78,14 +80,18 @@ struct LayoutFailure {
 };
 
 }  // namespace detail
+
 // Maps logical coordinates to element offsets using a shape, strides and a
-// starting offset. Offsets count elements.
+// starting offset. Offsets count elements. Strides may be negative or zero, so
+// offsets can be negative and distinct coordinates can share one; Layout does
+// not know the extent of the underlying storage.
 class Layout {
    public:
     Layout() = default;
     Layout(const Layout&) = default;
     Layout& operator=(const Layout&) = default;
 
+    // Moving leaves the source as a scalar with zero offset.
     Layout(Layout&& other) noexcept
         : m_shape(std::move(other.m_shape)),
           m_strides(std::move(other.m_strides)),
@@ -103,7 +109,7 @@ class Layout {
         return *this;
     }
 
-    // Requires one stride per shape dimension.
+    // Throws unless there is one stride per shape dimension.
     Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
         if (m_shape.rank() != m_strides.size())
@@ -119,8 +125,10 @@ class Layout {
         : Layout(std::move(shape), std::vector<ptrdiff_t>(strides.begin(), strides.end()), offset) {
     }
 
-    // Order lists axes from slowest to fastest, as in Shape::linearIndex.
-    // Validation failures are returned; allocating the owned metadata can throw.
+    // The result has zero offset. Order lists axes from slowest to fastest, as in
+    // Shape::linearIndex, so its last axis has unit stride. Invalid orders and
+    // extents or strides that do not fit ptrdiff_t are returned as errors;
+    // allocation can still throw.
     static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(
         const Shape& shape, std::span<const size_t> order) {
         using namespace detail;
@@ -128,7 +136,7 @@ class Layout {
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank(), -1);
-        // Mark axes in the output vector before replacing the marks with strides.
+        // Use strides to find missing or repeated axes; -1 marks an axis not yet seen.
         for (size_t axis : order) {
             if (axis >= shape.rank() || strides[axis] != -1)
                 return Unexpected(LayoutError::InvalidOrder);
@@ -156,6 +164,7 @@ class Layout {
         return getContiguousLayout(shape, order);
     }
 
+    // Throwing forms of getContiguousLayout.
     static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
         auto result = getContiguousLayout(shape, order);
         if (!result) throw std::runtime_error(std::string(message(result.error())));
@@ -200,10 +209,9 @@ class Layout {
         return m_offset;
     }
 
-    // offset + sum(indices[d] * strides[d]). Coordinate rank/range and each
-    // multiplication/addition are checked, including intermediate overflow.
-    // Failures retain numeric context without allocating or formatting a message.
-    // Negative results and overlapping mappings are permitted without storage.
+    // Returns offset + sum(indices[d] * strides[d]). Fails if indices has the wrong
+    // rank or a coordinate is out of range, or if any partial product or sum does
+    // not fit ptrdiff_t, even when a later term would bring it back in range.
     detail::Expected<ptrdiff_t, detail::LayoutFailure> elementOffset(
         std::span<const size_t> indices) const noexcept {
         using namespace detail;
@@ -231,24 +239,26 @@ class Layout {
     bool operator==(const Layout&) const noexcept = default;
 
    private:
+    // Returns value * factor if it fits ptrdiff_t. Plain multiplication would
+    // convert factor to size_t and wrap silently, and a signed product can
+    // overflow. Instead, compare unsigned magnitudes against the limit before
+    // multiplying. The magnitude of a negative factor is computed as
+    // -(factor + 1) + 1 because -PTRDIFF_MIN does not fit ptrdiff_t.
     static std::optional<ptrdiff_t> getOffsetMultiply(size_t value, ptrdiff_t factor) noexcept {
         if (value == 0 || factor == 0) return 0;
         const bool negative = factor < 0;
-        // -(factor + 1) is representable even for PTRDIFF_MIN. Add the missing one
-        // after converting to unsigned, where the full magnitude is representable.
         const uintmax_t magnitude =
             negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
-        // A negative result can have magnitude PTRDIFF_MAX + 1 (PTRDIFF_MIN).
+        // A negative product can reach PTRDIFF_MIN, one past -PTRDIFF_MAX.
         const uintmax_t limit = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) +
                                 static_cast<uintmax_t>(negative);
-        // Test against the bound before multiplying, so the product cannot wrap.
         if (static_cast<uintmax_t>(value) > limit / magnitude) return std::nullopt;
         const uintmax_t product = static_cast<uintmax_t>(value) * magnitude;
         if (!negative) return static_cast<ptrdiff_t>(product);
-        // This magnitude has no positive ptrdiff_t representation to negate.
         if (product == limit) return std::numeric_limits<ptrdiff_t>::min();
         return -static_cast<ptrdiff_t>(product);
     }
+
     static std::optional<ptrdiff_t> getOffsetAdd(ptrdiff_t left, ptrdiff_t right) noexcept {
         if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
             (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
