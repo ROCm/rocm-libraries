@@ -64,8 +64,7 @@ inline Expected<std::pair<ptrdiff_t, ptrdiff_t>, LayoutError> getElementBounds(
 }  // namespace detail
 
 // Maps logical coordinates to element offsets using a shape, strides and a
-// starting offset. Offsets count elements. The caller supplies the element type
-// and memory, and is responsible for keeping the resulting offsets in bounds.
+// starting offset. Offsets count elements.
 class Layout {
    public:
     Layout() = default;
