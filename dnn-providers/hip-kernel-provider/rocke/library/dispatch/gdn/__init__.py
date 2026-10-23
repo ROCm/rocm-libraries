@@ -43,6 +43,7 @@ from .prefill_common import (
     GDN_PREFILL_DIM_VOCABULARY,
     GdnPrefillRequest,
 )
+from .rules import out_of_scope_knobs
 
 _ARCH_MODULES = (gfx950,)
 
@@ -121,16 +122,28 @@ def dispatch_gdn_decode(
     spec = candidate.select_spec(req)
     request = pin_to_spec(req, candidate, spec)
     kernel = spec.kernel_spec
+    headline = (
+        f"selected {candidate.name} for batch {req.batch} on {req.arch}: "
+        f"tile=(nw={kernel.num_warps}, wtk={kernel.warp_threads_k}, "
+        f"bpv={kernel.blocks_per_v_dim})"
+    )
+    # A pinned knob this request cannot read is dropped, not refused (it
+    # changes no code here); say so, so a caller that logs the pin does not
+    # record a knob that did not run.
+    dropped = out_of_scope_knobs(
+        gfx950.make_spec(
+            req, (kernel.num_warps, kernel.warp_threads_k, kernel.blocks_per_v_dim)
+        ),
+        dict(req.tuning_knobs),
+    )
+    if dropped:
+        headline += f"; dropped out-of-scope tuning_knobs {list(dropped)}"
     return make_dispatch_result(
         request,
         candidate,
         spec,
         kernel_id=_kernel_id(request, candidate, spec),
-        headline=(
-            f"selected {candidate.name} for batch {req.batch} on {req.arch}: "
-            f"tile=(nw={kernel.num_warps}, wtk={kernel.warp_threads_k}, "
-            f"bpv={kernel.blocks_per_v_dim})"
-        ),
+        headline=headline,
     )
 
 

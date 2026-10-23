@@ -518,7 +518,8 @@ Every legal `waves_per_eu` is pinnable at either level, and a non-`int` one (`Tr
 `4.0`) is refused rather than read as `1`, unset or `4`. A pin resolves to exactly that
 configuration or raises `PinRefused`. A knob the request cannot read (a fused-only knob on an
 unfused request, a tile-dependent knob where its `*_applies` predicate is False) is dropped rather
-than refused; a value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
+than refused, and the result's explanation names it (`dropped out-of-scope tuning_knobs [...]`); a
+value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
 `auto`) carry a configuration across shapes. A stored `tuning_id` does not: it names the knob set
 that was canonical where it was recorded, and where scope drops one of those knobs the pin is
 refused, naming the dropped knobs. `auto` runs the selected tile's base configuration: every

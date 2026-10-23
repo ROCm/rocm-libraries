@@ -241,7 +241,9 @@ def test_tuning_id_and_knobs_round_trip():
 def test_out_of_scope_knobs_are_dropped_not_refused():
     """A ``tuning_knobs`` pin that travels to a problem where a knob changes
     no code (no fused mode, a tile without the predicate's shape) keeps
-    working: the knob is dropped, so the configuration is the base one."""
+    working: the knob is dropped, so the configuration is the base one, and
+    the result's explanation names every dropped knob so a caller that logs
+    the pin cannot record a knob that did not run."""
     plain = _req(gate_kind="gdn")
     for spec_id, knobs in (
         ("nw2_wtk16_bpv8", {"conv_once": True, "norm_gate_once": True}),
@@ -254,6 +256,32 @@ def test_out_of_scope_knobs_are_dropped_not_refused():
         base = dispatch_gdn_decode(replace(plain, spec_id=spec_id))
         assert got.spec == base.spec, (spec_id, knobs)
         assert got.spec.knobs == ()
+        note = f"dropped out-of-scope tuning_knobs {sorted(knobs)}"
+        assert any(note in line for line in got.explanation), got.explanation
+        assert not any("dropped" in line for line in base.explanation)
+
+
+def test_in_scope_knobs_are_not_reported_as_dropped():
+    """Only knobs that were dropped are named: a pin that partly applies names
+    just the dropped part, and a fully applied pin names nothing."""
+    plain = _req(gate_kind="gdn")
+    part = dispatch_gdn_decode(
+        replace(
+            plain,
+            spec_id="nw2_wtk16_bpv8",
+            tuning_knobs={"dpp_reduce": True, "conv_once": True},
+        )
+    )
+    assert dict(part.spec.knobs) == {"dpp_reduce": True}
+    assert any(
+        "dropped out-of-scope tuning_knobs ['conv_once']" in line
+        for line in part.explanation
+    ), part.explanation
+    full = dispatch_gdn_decode(
+        replace(plain, spec_id="nw2_wtk16_bpv8", tuning_knobs={"dpp_reduce": True})
+    )
+    assert dict(full.spec.knobs) == {"dpp_reduce": True}
+    assert not any("dropped" in line for line in full.explanation)
 
 
 @pytest.mark.parametrize(

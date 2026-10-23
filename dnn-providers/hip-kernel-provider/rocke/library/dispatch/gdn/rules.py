@@ -134,6 +134,21 @@ def _scoped_axes(
     return tuple(axes)
 
 
+def out_of_scope_knobs(base: GdnDecodeSpec, knobs) -> Tuple[str, ...]:
+    """The knobs in ``knobs`` that are well formed but out of scope for
+    ``base``: the ones canonicalization drops on this problem, sorted."""
+    in_scope = axis_knob_names(_axes_of(base))
+    return tuple(
+        sorted(
+            name
+            for name, value in knobs.items()
+            if name in _AXIS_VALUES
+            and value in _AXIS_VALUES[name]
+            and name not in in_scope
+        )
+    )
+
+
 @dc.dataclass(frozen=True)
 class GdnDecodeSpace(WavesPerEuSpace):
     """One registered tile's space. Scope (what a request can read) drops a
@@ -185,16 +200,7 @@ class GdnDecodeSpace(WavesPerEuSpace):
     def out_of_scope(self, base, knobs) -> Tuple[str, ...]:
         """The knobs in ``knobs`` that are well formed but out of scope for
         ``base``: the ones canonicalization drops on this problem."""
-        in_scope = axis_knob_names(self.axes(base))
-        return tuple(
-            sorted(
-                name
-                for name, value in knobs.items()
-                if name in _AXIS_VALUES
-                and value in _AXIS_VALUES[name]
-                and name not in in_scope
-            )
-        )
+        return out_of_scope_knobs(base, knobs)
 
     def canonicalize(self, base, knobs):
         # The shared kit reads an outer value of another type as the int it
