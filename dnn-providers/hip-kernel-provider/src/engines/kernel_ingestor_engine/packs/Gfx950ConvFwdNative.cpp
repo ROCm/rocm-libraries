@@ -379,8 +379,8 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
     // malformed. A scalar store then serves every graph's K / groups.
     const bool cshuffle = metadataEquals(kernel, "epilogue", std::string("cshuffle"));
     if(!cshuffle
-       && !(metadataEquals(kernel, "epilogue", std::string("default"))
-            && (build.k / build.groups) % 2 != 0))
+       && (!metadataEquals(kernel, "epilogue", std::string("default"))
+           || (build.k / build.groups) % 2 == 0))
     {
         return std::nullopt;
     }

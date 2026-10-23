@@ -536,7 +536,8 @@ inline double aotInstanceScore(const Problem& problem,
                                const LaunchGeometry& launch)
 {
     constexpr double CU_COUNT = 256.0;
-    const auto kpg = static_cast<double>(problem.k / problem.groups);
+    const int64_t kpgPerGroup = problem.k / problem.groups;
+    const auto kpg = static_cast<double>(kpgPerGroup);
     const auto useful = static_cast<double>(geometry.gemmM) * kpg;
     const auto launched = static_cast<double>(launch.gridY) * static_cast<double>(instance.tileM)
                           * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN);
@@ -859,7 +860,7 @@ inline std::optional<LaunchGeometry> depthwiseTileLaunch(const Problem& problem,
                                                          const DirectInstance& instance)
 {
     const auto& compiled = instance.compiled;
-    if(!(problem.groups == problem.c && problem.c == problem.k)
+    if(problem.groups != problem.c || problem.c != problem.k
        || !directCompiledMatches(compiled, problem) || compiled.dilationH != 1
        || compiled.dilationW != 1 || compiled.y < 1 || compiled.y > DIRECT_DEPTHWISE_MAX_FILTER
        || compiled.x < 1 || compiled.x > DIRECT_DEPTHWISE_MAX_FILTER || instance.blockW < 1
