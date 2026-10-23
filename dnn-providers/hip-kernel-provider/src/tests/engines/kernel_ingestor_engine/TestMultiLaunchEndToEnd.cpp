@@ -330,9 +330,10 @@ private:
     ScopedDirectory _tree;
 };
 
-/// The kernels @p validated offers a pointwise graph on a device of architecture @p arch.
-std::vector<KernelDefinition> keptDefinitions(const ValidatedSet<Handle>& validated,
-                                              const std::string& arch)
+/// The kernels @p validated offers a pointwise graph on a device of architecture @p arch,
+/// pointing into its state manager.
+std::vector<const KernelDefinition*> keptDefinitions(const ValidatedSet<Handle>& validated,
+                                                     const std::string& arch)
 {
     const GraphFixture fixture(buildPointwiseGraph(), devicePropertiesFor(arch));
     return validated.stateManager->unsortedDefinitions(fixture.context());
@@ -390,7 +391,7 @@ TEST(TestMultiLaunchLaunchSet, KeepsAKernelWhoseLaunchesItsHandlerLaunches)
     // a handler that declares what the kernel carries.
     const auto kept = keptDefinitions(validated[0], shard.arch);
     ASSERT_EQ(kept.size(), 1U);
-    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(kept[0]));
+    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(*kept[0]));
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "carries the launches"))
         << recorder.getRecordedLogsAsString();
 }
@@ -504,7 +505,7 @@ TEST(TestMultiLaunchEndToEnd, RunsBothLaunchesInOrderOverOneWorkspace)
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto kept = validated[0].stateManager->unsortedDefinitions(fixture.context());
     ASSERT_EQ(kept.size(), 1U);
-    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(kept[0]));
+    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(*kept[0]));
 
     const auto engine = makeEngine<Handle, Settings, Context>(
         validated[0].set, std::move(validated[0].stateManager), deviceResolver());
