@@ -234,6 +234,15 @@ private:
         return d;
     }
 
+    static void copy_guard(void* dst, const U (&guard)[PAD])
+    {
+        const hipError_t status = hipMemcpy(
+            dst, guard, sizeof(guard), memory_mode::get_hipMemcpyKind(MODE, memory_mode::host));
+        // testing_reproducibility catches the throw below without failing the test.
+        EXPECT_EQ(status, hipSuccess);
+        CHECK_HIP_THROW_ERROR(status);
+    }
+
     static T* install_guards(T* d, size_t size)
     {
         if(d != nullptr)
@@ -244,26 +253,14 @@ private:
                 init_guards(guard, PAD);
 
                 // Copy guard to device memory before allocated memory
-                CHECK_HIP_THROW_ERROR(
-                    hipMemcpy(d,
-                              guard,
-                              sizeof(guard),
-                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
-                CHECK_HIP_THROW_ERROR(
-                    hipMemcpy(d + PAD,
-                              guard,
-                              sizeof(guard),
-                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
+                copy_guard(d, guard);
+                copy_guard(d + PAD, guard);
 
                 // Point to allocated block
                 d += 2 * PAD;
 
                 // Copy guard to device memory after allocated memory
-                CHECK_HIP_THROW_ERROR(
-                    hipMemcpy(d + size,
-                              guard,
-                              sizeof(guard),
-                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
+                copy_guard(d + size, guard);
             }
         }
         return d;
