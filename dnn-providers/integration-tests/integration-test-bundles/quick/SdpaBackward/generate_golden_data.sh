@@ -272,6 +272,45 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
     echo ""
 fi
 
+# --- Discriminating bundles: Sq != Skv everywhere, per-batch lengths that differ
+# (batch 1 of the padded set has Sq > Skv, so bottom-right leaves it dead rows:
+# O = 0, LSE = -inf, zero gradients), GQA, broadcast bias with dBias, and an
+# explicit dropout mask. A reference that takes the bottom-right offset from the
+# maximum lengths, forgets to sum a GQA group, reduces dBias over the wrong axes
+# or drops dropout_scale_inv fails at least one of them. Each is cross-checked
+# against FP64 autograd at generation. Generate in isolation with:
+#   GENERATE_DISCRIMINATING=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
+    echo "=== Generating discriminating bundles ==="
+
+    PADNEQ=(--q-dims 3 2 64 64 --v-dims 3 2 96 64 --seq-lens-q 17 64 5
+            --seq-lens-kv 96 40 33 --attn-scale 0.125 --dtype bf16)
+    NEQ_GQA=(--q-dims 2 4 64 64 --v-dims 2 2 96 64 --attn-scale 0.125 --dtype bf16)
+    T=bhsd/bf16
+
+    generate_pair quick "$T/padneq_nomask" Small "${PADNEQ[@]}"
+    generate_pair quick "$T/padneq_causal_tl" Small "${PADNEQ[@]}" \
+        --right-bound 0 --diagonal-alignment top_left
+    generate_pair quick "$T/padneq_causal_br" Small "${PADNEQ[@]}" \
+        --right-bound 0 --diagonal-alignment bottom_right
+    generate_pair quick "$T/padneq_window_br" Small "${PADNEQ[@]}" \
+        --left-bound 16 --right-bound 0 --diagonal-alignment bottom_right
+    generate_pair quick "$T/neq_gqa_causal_br" Small "${NEQ_GQA[@]}" \
+        --right-bound 0 --diagonal-alignment bottom_right
+    generate_pair quick "$T/neq_gqa_dbias_heads" Small "${NEQ_GQA[@]}" \
+        --additive-mask --bias-dims 1 4 64 96 --dbias \
+        --right-bound 0 --diagonal-alignment bottom_right
+    generate_pair quick "$T/padneq_dbias_batch" Small "${PADNEQ[@]}" \
+        --additive-mask --bias-dims 3 1 64 96 --dbias
+    # Inputs in [0, 1] make D = rowsum(dO * O) as large as dP, so a wrong
+    # dropout_scale_inv changes the gradients by O(1) instead of a few percent.
+    generate_pair quick "$T/neq_gqa_dropout_causal_br" Small "${NEQ_GQA[@]}" \
+        --dropout-p 0.2 --right-bound 0 --diagonal-alignment bottom_right \
+        --min 0 --max 1
+
+    echo ""
+fi
+
 echo "=== Done ==="
 echo "Generated bundles:"
 find "$GOLDEN_ROOT" -path "*/SdpaBackward/*" \
