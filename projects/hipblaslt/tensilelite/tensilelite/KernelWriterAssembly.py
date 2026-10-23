@@ -89,6 +89,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
+from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -1770,7 +1771,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
         moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
-        if kernel["DirectToVgprA"]:
+        if kernel["DirectToVgprA"] or dot2DtvADoubleBuffered(kernel):
           # additional definition G2LA2 for swapping register sets
           moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated//2))
 
@@ -2330,7 +2331,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
 
-    if not kernel["EnableMatrixInstruction"]:
+    # DirectToVgprDot2A MACs are emitted inline (macIter).
+    if not kernel["EnableMatrixInstruction"] and not kernel["DirectToVgprDot2A"]:
       # Macro MAC
       PLR = kernel["PrefetchLocalRead"] \
         if kernel["PrefetchLocalRead"] < kernel["LoopIters"] \
@@ -7033,8 +7035,13 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["UseDotInstruction"]:
           kidx = self.vgprPool.checkOut(1, tag="lraFinalOffset_kidx") # remainder
           module.add(VAndB32(dst=vgpr(kidx), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr("Serial"), comment="kidx = Serial % NumWaveSplitK"))
-          module.add(vectorStaticMultiply(vgpr(kidx), vgpr(kidx), lrvw, tmpSgprInfo, \
-            "*= lrvw"))
+          if kernel["DirectToVgprDot2A"]:
+            # Each lane owns one contiguous K block, matching its A global load.
+            module.add(vectorStaticMultiply(vgpr(kidx), vgpr(kidx), kernel["GlobalReadVectorWidthA"], tmpSgprInfo, \
+              "*= DepthU/NumWaveSplitK"))
+          else:
+            module.add(vectorStaticMultiply(vgpr(kidx), vgpr(kidx), lrvw, tmpSgprInfo, \
+              "*= lrvw"))
           # Final offset
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(kidx), src1=vgpr(tP["gpr"]["lro"]), \
             comment="Final Offset: add padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
@@ -10016,7 +10023,15 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MAC Iteration
   ##############################################################################
-  def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False):
+  def dot2DirectToVgprAReg(self, kernel, block, u):
+    """G2LA register holding the A pair of tile row `block` for loop iteration `u`
+    under DirectToVgprDot2A: one global load per row, its K block in order."""
+    dwordsPerLoad = kernel["GlobalReadVectorWidthA"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() // self.states.bpr
+    # With two sets, the v_dot2 read the set the current global read does not target.
+    useSecond = dot2DtvADoubleBuffered(kernel) and self.states.dot2DtvASet == 0
+    return "G2LA%s+%u" % ("2" if useSecond else "", block * dwordsPerLoad + u)
+
+  def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False, unrollIdx=None):
     imod = Module("macIter_X%u_I%u"%(bufferIdx, iuiCount))
 
     # if kernel["ProblemType"]["MacDataTypeA"].isHalf():
@@ -10120,11 +10135,17 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.do["MAC"]:
       imod.add(shiftK)
-      if self.states.asmCaps["HasVgprMSB"]:
+      if self.states.asmCaps["HasVgprMSB"] or kernel["DirectToVgprDot2A"]:
+        # The DirectToVgprDot2A A operand depends on the loop iteration, so it
+        # cannot come from the per-buffer MAC macros.
+        assert not (kernel["DirectToVgprDot2A"] and (isTail or unrollIdx is None))
         component = Component.MAC.find(self)
         if not component:
           printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
-        innerModule = component(self, tPA, tPB, bufferIdx, tmpIU)
+        if kernel["DirectToVgprDot2A"]:
+          innerModule = component(self, tPA, tPB, bufferIdx, tmpIU, unrollIdx=unrollIdx)
+        else:
+          innerModule = component(self, tPA, tPB, bufferIdx, tmpIU)
         imod.add(innerModule)
       else:
         imod.add(MacroInstruction(name=instr, args=[]))
@@ -13858,17 +13879,20 @@ class KernelWriterAssembly(KernelWriter):
       g2lIdxDict = {}
       regTmpVgprBlock = None
 
-      if swapAB == 1:
+      if swapAB == 1 or (tP["isA"] and dot2DtvADoubleBuffered(kernel) and self.states.dot2DtvASet == 1):
         destVgprPrefix = "G2L%s2"%(tc)
       else:
         destVgprPrefix = "G2L%s"%(tc)
+      # DirectToVgprDot2A: A's items hold only the dequant; SIA still has to treat
+      # each as the consumer of one global load (see DOT2_DTVA_ITEM).
+      itemPrefix = DOT2_DTVA_ITEM if (tP["isA"] and kernel["DirectToVgprDot2A"]) else ""
       for perp in range(0, tP["nrp"]):
-        localWriteCode = imod.add(Module("LocalWrite%u perp=%d"%(instructionCnt,perp)))
+        localWriteCode = imod.add(Module(itemPrefix + "LocalWrite%u perp=%d"%(instructionCnt,perp)))
         lwa = "LocalWriteAddr%s"%tc  # default
 
         for para in range(0, tP["nrc"]):
           if para>=1:
-            localWriteCode = imod.add(Module("LocalWrite%u perp=%d para=%d"%(instructionCnt,perp,para)))
+            localWriteCode = imod.add(Module(itemPrefix + "LocalWrite%u perp=%d para=%d"%(instructionCnt,perp,para)))
 
           for s in range(0, max(tP["nwcv"],tP["nwpv"])//tP["nwcvpi"]):
             localWriteCVTCode = Module()
@@ -14353,7 +14377,8 @@ class KernelWriterAssembly(KernelWriter):
             writeInst.setMemToken(MemTokenData(localWriteMemToken))
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
-            if self.do["LocalWrite%s"%tc]:
+            # DirectToVgprDot2A keeps A where the conversion left it.
+            if self.do["LocalWrite%s"%tc] and not (tP["isA"] and kernel["DirectToVgprDot2A"]):
               localWriteCode.add(writeInst)
               instructionCnt += 1 if blockWidth < 8 else 2
 
@@ -14760,7 +14785,12 @@ class KernelWriterAssembly(KernelWriter):
               raise Exception(f"unsupport tc %s{tc}")
         else:
           # dot2
-          offsetInc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"] if kernel["UseDotInstruction"] else (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad)
+          if kernel["DirectToVgprDot2A"]:
+            offsetInc = self.states.lrvwUnrollA
+          elif kernel["UseDotInstruction"]:
+            offsetInc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"]
+          else:
+            offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad
         tP["localReadOffset"] += offsetInc
         module.addComment0("N/A, lro->%d" % tP["localReadOffset"])
         module.addComment0("localReadDoCntA %d localReadDoCntMXSA %d localReadDoCntB %d localReadDoCntMXSB %d localReadDoCntM %d" \
@@ -14795,6 +14825,9 @@ class KernelWriterAssembly(KernelWriter):
   # epsi = expand pointer swap index. Only used for PAP
   ##############################################################################
   def localReadDo(self, kernel, bufferIdx, iui, epsi, tP):
+
+    if tP["isA"] and kernel["DirectToVgprDot2A"]:
+      return Module("LocalReadDoA_I%s (DirectToVgprDot2A)" % iui), Module(), Module()
 
     if not self.do["LocalRead%s" % tP["tensorChar"]]:
       imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"], iui))

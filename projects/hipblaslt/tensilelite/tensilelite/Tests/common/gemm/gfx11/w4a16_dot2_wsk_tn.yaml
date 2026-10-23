@@ -310,3 +310,72 @@ BenchmarkProblems:
           - Exact: [256, 1, 1, 1024]
           - Exact: [37, 3, 1, 3072]
           - Exact: [512, 4, 1, 2048]
+  ########################################
+  # DirectToVgprDot2A: A feeds v_dot2 from its global-read registers.
+  # fp16, UnsignedBias8, symmetric, G128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [128]
+      Int4EncodingA: UnsignedBias8
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [2, 1]
+          - [2, 4]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [0, 1]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - DirectToVgprDot2A: [True]
+        # GlobalReadVectorWidthA == DepthU / NumWaveSplitK
+        - Groups:
+          - - WorkGroup: [[4, 1, 16]]
+              DepthU: [256]
+              GlobalReadVectorWidthA: [16]
+              AssertSummationElementMultiple: [256]
+            - WorkGroup: [[4, 1, 16]]
+              DepthU: [512]
+              GlobalReadVectorWidthA: [32]
+              AssertSummationElementMultiple: [512]
+            - WorkGroup: [[8, 1, 32]]
+              DepthU: [256]
+              GlobalReadVectorWidthA: [8]
+              AssertSummationElementMultiple: [256]
+            - WorkGroup: [[2, 1, 32]]
+              DepthU: [1024]
+              GlobalReadVectorWidthA: [32]
+              AssertSummationElementMultiple: [1024]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 1024]
+          - Exact: [37, 3, 1, 3072]
+          - Exact: [512, 4, 1, 2048]

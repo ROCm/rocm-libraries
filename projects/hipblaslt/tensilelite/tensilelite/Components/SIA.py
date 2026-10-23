@@ -30,6 +30,7 @@ from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSSt
 
 from ..Common import roundUp, print2
 from ..Component import SIA
+from ..SolutionStructs.Validators.DirectToVgprDot2 import countDot2DtvAItem
 
 from copy import deepcopy
 from typing import Tuple
@@ -1062,11 +1063,11 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 # Use a module to ensure these pieces stay together in the sub-iter scheduler
                 if gapIndex == itemsLWToSchedIndex:
                     if item:
-                        writesPerItem = countLocalWrite(item)
+                        writesPerItem = countLocalWrite(item) or countDot2DtvAItem(item)
                         if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                             writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                         if writesPerItem:
-                            writesPerItem = countLocalWrite(item)
+                            writesPerItem = countLocalWrite(item) or countDot2DtvAItem(item)
                             if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                                 writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                             # Split into several dsStore32

@@ -48,6 +48,7 @@ def getRequiredParametersMin() -> set:
         'CompactLoopStore',
         'DirectToVgprA',
         'DirectToVgprB',
+        'DirectToVgprDot2A',
         'DirectToVgprSparseMetadata',
         'DirectToLdsA',
         'DirectToLdsB',
