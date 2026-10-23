@@ -684,7 +684,7 @@ Integration tests validate end-to-end functionality of your plugin. They come in
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#principles).
+Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#methodology).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 

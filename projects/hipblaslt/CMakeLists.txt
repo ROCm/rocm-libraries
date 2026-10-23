@@ -381,8 +381,8 @@ target_include_directories(hipblaslt-headers
 )
 target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 
-# The measurement engine and candidate search the benchmark clients use, header-only.
-# Build tree only: nothing outside this project includes it.
+# The measurement engine and candidate search hipblaslt-bench and tune mode share,
+# header-only. Build tree only: nothing outside this project includes it.
 add_library(hipblaslt-benchmark INTERFACE)
 target_include_directories(hipblaslt-benchmark
     INTERFACE
@@ -507,6 +507,7 @@ if(HIPBLASLT_ENABLE_HOST)
         PRIVATE
             hip::device
             roc::tensilelite-host
+            $<BUILD_INTERFACE:hipblaslt-benchmark>
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
