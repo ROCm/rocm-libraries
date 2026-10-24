@@ -1,6 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+
 include(TestUtilities)
+
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA AND CK_ENABLE_FP16)
+    add_gtest_executable(test_grouped_convnd_fwd_nchw_pointwise test_grouped_convnd_fwd_nchw_pointwise.cpp)
+    target_link_libraries(test_grouped_convnd_fwd_nchw_pointwise PRIVATE utility)
+endif()
+
 
 # Helper function defined in cmake/TestUtilities.cmake to conditionally link device_conv libraries
 

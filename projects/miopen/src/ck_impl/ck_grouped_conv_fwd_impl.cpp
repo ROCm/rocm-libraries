@@ -5,9 +5,13 @@
 #include <cstdint>
 #include <string>
 #include <memory>
+#include <iterator>
+#include <type_traits>
 
 #include "ck_grouped_conv_common.hpp"
 #include "ck_grouped_conv_impl_helpers.hpp"
+#include "ck_native_pointwise_fwd_impl.hpp"
+#include "ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_nchw_pointwise_instance.hpp"
 #include <miopen/conv_solution.hpp>
 #include <miopen/solver/ck_impl_interface.hpp>
 #include <miopen/solver/ck_impl_error.hpp>
@@ -227,13 +231,29 @@ struct CKArgs
 template <typename DataType>
 bool CheckCKApplicability(const ProblemDescription& problem, bool use_tf32)
 {
+    if constexpr(std::is_same_v<DataType, ck::half_t>)
+    {
+        if(!use_tf32 && !miopen::solver::conv::NativePointwiseFwdKernels(problem).empty())
+            return true;
+    }
     return CheckCKApplicabilityCommon<DeviceOpGFwdPtrs, CKArgs, DataType>(problem, use_tf32);
 }
 
 template <typename DataType>
 std::vector<std::string> FillValidKernels(const ProblemDescription& problem, bool use_tf32)
 {
-    return FillValidKernelsCommon<DeviceOpGFwdPtrs, CKArgs, DataType>(problem, use_tf32);
+    auto kernels = FillValidKernelsCommon<DeviceOpGFwdPtrs, CKArgs, DataType>(problem, use_tf32);
+    if constexpr(std::is_same_v<DataType, ck::half_t>)
+    {
+        if(!use_tf32)
+        {
+            auto pointwise = miopen::solver::conv::NativePointwiseFwdKernels(problem);
+            kernels.insert(kernels.end(),
+                           std::make_move_iterator(pointwise.begin()),
+                           std::make_move_iterator(pointwise.end()));
+        }
+    }
+    return kernels;
 }
 
 template <typename DataType>
@@ -241,6 +261,13 @@ bool CheckIsArgSupported(const ProblemDescription& problem,
                          const std::string& kernel_id,
                          bool use_tf32)
 {
+    if(miopen::solver::conv::IsNativePointwiseFwdKernel(kernel_id))
+    {
+        if constexpr(std::is_same_v<DataType, ck::half_t>)
+            return !use_tf32 &&
+                   miopen::solver::conv::IsNativePointwiseFwdSupported(problem, kernel_id);
+        return false;
+    }
     return CheckIsArgSupportedCommon<DeviceOpGFwdPtrs, CKArgs, DataType>(
         problem, kernel_id, use_tf32);
 }
@@ -333,6 +360,15 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
         CK_IMPL_THROW_IF_NULL(ctx, CK_IMPL_STATUS_BAD_PARAM, "Null ctx");
         CK_IMPL_THROW_IF_NULL(problem, CK_IMPL_STATUS_BAD_PARAM, "Null problem");
         CK_IMPL_THROW_IF_NULL(kernel_id, CK_IMPL_STATUS_BAD_PARAM, "Null kernel_id");
+        if(miopen::solver::conv::IsNativePointwiseFwdKernel(kernel_id))
+        {
+            auto solution = use_tf32
+                                ? miopen::solver::ConvSolution{miopenStatusInvalidValue}
+                                : miopen::solver::conv::NativePointwiseFwdSolution(
+                                      *ctx, *problem, kernel_id);
+            *out_solution = new miopen::solver::ConvSolution(std::move(solution));
+            return;
+        }
 
         auto solution = MakeSolutionGroupConvImplicitGemmXdlops(
             *problem,
@@ -368,8 +404,15 @@ extern "C" ck_impl_status_t ck_impl_fwd_get_all_kernel_type_strings(CKKernelList
         auto result = std::make_unique<CKKernelListHandle>();
 
         auto ptrs = DeviceOpGFwdPtrs<float>::GetInstances();
-        result->kernels.reserve(ptrs.size());
+        std::vector<std::unique_ptr<
+            ck::tensor_operation::device::instance::DeviceNCHWPointwiseFwd>> pointwise;
+        pointwise.reserve(1);
+        ck::tensor_operation::device::instance::
+            add_device_grouped_conv2d_fwd_nchw_pointwise_f16_instances(pointwise);
+        result->kernels.reserve(ptrs.size() + pointwise.size());
         for(const auto& ptr : ptrs)
+            result->kernels.push_back(ptr->GetTypeString());
+        for(const auto& ptr : pointwise)
             result->kernels.push_back(ptr->GetTypeString());
 
         *out_handle = result.release();

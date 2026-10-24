@@ -22,6 +22,11 @@
 
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
+#include <miopen/conv/data_invoke_params.hpp>
+#include "get_handle.hpp"
+#include <algorithm>
+#include <cmath>
 #endif
 
 using miopen::solver::CKSolverType;
@@ -1193,6 +1198,111 @@ TEST(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
 
     EXPECT_EQ(&loader1, &loader2)
         << "Suffixed and bare device names should resolve to the same cached loader";
+}
+
+namespace {
+
+// Exercise the installed plugin, not a mock factory. Different C/K sizes make
+// an accidental dY/dX descriptor reversal observable in the backward path.
+template <typename T, bool Backward>
+void RunNativePointwiseConsumer(const std::string& kernel)
+{
+    const auto device = GetCurrentDeviceName();
+    if(device.find("gfx1250") != 0)
+        GTEST_SKIP() << "Native pointwise requires gfx1250";
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device);
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK plugin not installed for " << device;
+    auto& handle = get_handle();
+    const int c = Backward ? 64 : 32;
+    const int k = Backward ? 8 : 128;
+    const int h = Backward ? 32 : 64;
+    const int spatial = h * h;
+    const auto dtype = Backward ? miopenFloat : miopenHalf;
+    const miopen::TensorDescriptor xdesc(dtype, miopenTensorNCHW, {1, c, h, h});
+    const miopen::TensorDescriptor wdesc(dtype, miopenTensorNCHW, {k, c, 1, 1});
+    const miopen::TensorDescriptor ydesc(dtype, miopenTensorNCHW, {1, k, h, h});
+    const miopen::ConvolutionDescriptor conv({0, 0}, {1, 1}, {1, 1}, {0, 0}, 1);
+    const auto direction = Backward ? miopen::conv::Direction::BackwardData
+                                    : miopen::conv::Direction::Forward;
+    miopen::conv::ProblemDescription problem(Backward ? ydesc : xdesc,
+                                              wdesc,
+                                              Backward ? xdesc : ydesc,
+                                              conv,
+                                              direction);
+    auto ctx = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+    const auto solver = Backward ? CKSolverType::GrpConvBwd : CKSolverType::GrpConvFwd;
+    const auto kernels = loader.FillValidKernels(solver, problem, dtype, false);
+    ASSERT_NE(std::find(kernels.begin(), kernels.end(), kernel), kernels.end());
+    const auto selected = kernel + (Backward ? "+1" : "");
+    ASSERT_TRUE(loader.IsArgsSupported(solver, problem, selected, dtype, false));
+    EXPECT_FALSE(loader.IsArgsSupported(solver, problem, selected, dtype, true));
+    if constexpr(Backward)
+    {
+        for(const auto* suffix : {"+2", "+0", "+1+1"})
+        {
+            EXPECT_FALSE(loader.IsArgsSupported(solver, problem, kernel + suffix, dtype, false));
+            EXPECT_FALSE(loader.GetSolution(solver, ctx, problem, kernel + suffix, false).Succeeded());
+        }
+    }
+    auto solution = loader.GetSolution(solver, ctx, problem, selected, false);
+    ASSERT_TRUE(solution.Succeeded());
+    EXPECT_EQ(solution.workspace_sz, 0u);
+    ASSERT_TRUE(solution.invoker_factory);
+    const auto invoke = handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    std::vector<T> input((Backward ? k : c) * spatial);
+    std::vector<T> weights(k * c);
+    std::vector<T> output((Backward ? c : k) * spatial);
+    auto in_dev = handle.Write(input);
+    auto w_dev = handle.Write(weights);
+    auto out_dev = handle.Write(output);
+    const miopen::ConvDataTensors tensors{Backward ? ydesc : xdesc, in_dev.get(),
+                                          wdesc, w_dev.get(),
+                                          Backward ? xdesc : ydesc, out_dev.get()};
+    const miopen::conv::DataInvokeParams params{tensors, nullptr, 0, false};
+    for(int pass = 0; pass < 2; ++pass)
+    {
+        for(size_t i = 0; i < input.size(); ++i)
+            input[i] = T(float(int((i * 7 + pass * 3) % 17) - 8) / 16);
+        for(size_t i = 0; i < weights.size(); ++i)
+            weights[i] = T(float(int((i * 3 + pass * 5) % 11) - 5) / 16);
+        std::fill(output.begin(), output.end(), T(NAN));
+        // Rewrite contents without changing pointers captured by the invoker.
+        ASSERT_EQ(hipMemcpy(in_dev.get(), input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(w_dev.get(), weights.data(), weights.size() * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(out_dev.get(), output.data(), output.size() * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        invoke(handle, params);
+        handle.Finish();
+        handle.ReadToVec(out_dev, output);
+        for(int channel = 0; channel < (Backward ? c : k); ++channel)
+            for(int s = 0; s < spatial; ++s)
+            {
+                float reference = 0;
+                for(int reduction = 0; reduction < (Backward ? k : c); ++reduction)
+                {
+                    const int wi = Backward ? reduction * c + channel : channel * c + reduction;
+                    reference = std::fma(float(input[reduction * spatial + s]),
+                                         float(weights[wi]), reference);
+                }
+                // Binary fractions keep this bounded fixture exactly representable.
+                ASSERT_EQ(float(output[channel * spatial + s]), float(T(reference)))
+                    << "pass=" << pass << " channel=" << channel << " spatial=" << s;
+            }
+    }
+}
+
+} // namespace
+
+TEST(GPU_CkImplLoader_FP16, NativePointwiseForwardReusesBuffers)
+{
+    RunNativePointwiseConsumer<__half, false>("DeviceGroupedConvFwdNCHWPointwise<Wmma128x128x32>");
+}
+
+TEST(GPU_CkImplLoader_FP32, NativePointwiseBackwardReusesBuffers)
+{
+    RunNativePointwiseConsumer<float, true>("DeviceGroupedConvBwdDataNCHWPointwise<256,4>");
+    RunNativePointwiseConsumer<float, true>("DeviceGroupedConvBwdDataNCHWPointwise<256,8>");
 }
 
 #endif // MIOPEN_BACKEND_HIP

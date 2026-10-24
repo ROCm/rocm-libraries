@@ -54,7 +54,9 @@ endif()
 set(CK_IMPL_SOURCES
     ck_grouped_conv_common.cpp
     ck_grouped_conv_fwd_impl.cpp
+    ck_native_pointwise_fwd_impl.cpp
     ck_grouped_conv_bwd_impl.cpp
+    ck_native_pointwise_bwd_impl.cpp
     ck_grouped_conv_wrw_impl.cpp
     ck_grouped_conv_3d_fwd_impl.cpp
     ck_grouped_conv_3d_bwd_impl.cpp
