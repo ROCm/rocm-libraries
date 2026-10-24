@@ -112,6 +112,7 @@ def _cases():
                     num_heads=num_heads,
                     total_q=total_q,
                     num_seqs=2,
+                    max_seqlen_q=total_q // 2,
                     max_seqlen_k=max_k,
                     arch=_ARCH,
                     # 228-CU gfx942, pinned: the XCD count would otherwise come from
@@ -277,6 +278,7 @@ def test_dispatch_case_tracks_the_shipped_spec():
                 num_heads=num_heads,
                 total_q=64,
                 num_seqs=2,
+                max_seqlen_q=32,
                 max_seqlen_k=96,
                 arch=_ARCH,
                 num_cus=228,
@@ -297,6 +299,7 @@ def test_dispatch_case_tracks_the_shipped_spec():
             num_heads=128,
             total_q=64,
             num_seqs=2,
+            max_seqlen_q=32,
             max_seqlen_k=96,
             arch=_ARCH,
             num_cus=228,

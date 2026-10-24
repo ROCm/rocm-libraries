@@ -33,11 +33,25 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, List
 
-from rocke.dispatch.core import OperatorRequest, selector_matches
+from rocke.dispatch.core import (
+    KernelCandidate,
+    KernelId,
+    OperatorRequest,
+    make_kernel_id,
+    selector_matches,
+)
 from rocke.dispatch.tuning.identity import normalize_knobs
 
 FAMILY = "mla"
 MLA_ABI_VERSION = "hipkg-mla/v1"
+
+#: The one operator this family serves. Prefill and decode are *regimes* of it,
+#: not separate ops: the request states the problem (``max_seqlen_q`` among it)
+#: and the registry picks the kernel, exactly as ``AttentionRequest`` routes its
+#: decode kernels on ``seqlen_q``. Prefill and decode still get distinct
+#: selection keys, because they are distinct candidates, and distinct input
+#: contracts (see :class:`MLARequest`).
+MLA_OP = "mla_fwd"
 
 #: Features an MLA candidate may declare. ``causal`` is the bottom-right runtime
 #: mask the prefill kernel implements; ``absorbed_query`` is the unfused-projection
@@ -50,6 +64,7 @@ _POSITIVE_INT_FIELDS = (
     "num_heads",
     "total_q",
     "num_seqs",
+    "max_seqlen_q",
     "max_seqlen_k",
     "d_nope",
     "d_rope",
@@ -74,6 +89,7 @@ MLA_DIM_VOCABULARY = (
     "kv_lora_rank",
     "page_block_size",
     "total_q",
+    "max_seqlen_q",
     "max_seqlen_k",
     "num_seqs",
 )
@@ -89,14 +105,36 @@ class MLARequest(OperatorRequest):
     numbering its in-kernel binary search inverts, which a rectangular request
     cannot express for ragged inputs.
 
-    ``mla_prefill_fwd`` takes the query already projected by ``W_UQ`` and
-    RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``). Neither step is
-    in-tree; the caller applies both, and a pre-kernel for them is a follow-up.
+    ``max_seqlen_q`` picks the regime; ``absorbed_query`` states the input
+    contract the caller holds. The two contracts are not interchangeable:
+
+    * **fused** (``absorbed_query=False``) takes the query projected by
+      ``W_UQ`` and RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``)
+      plus the per-head ``W_UK``, and returns the attention output and LSE;
+    * **absorbed** (``absorbed_query=True``) takes
+      ``qa = [Q_nope @ W_UK_nopeᵀ | Q_rope]`` (``[total_q, num_heads,
+      kv_lora_rank + d_rope]``) and returns the normalized latent (before
+      ``W_UV``) and the LSE.
+
+    Prefill (``max_seqlen_q >= 2``) serves both. Decode (``max_seqlen_q ==
+    1``) serves the absorbed contract only and requires the flag, so a
+    one-query request without it is refused, not served the other contract.
+
+    Neither ``W_UQ`` nor the rotation is in-tree; the caller applies both, and
+    a pre-kernel for them is a follow-up.
+
+    ``max_seqlen_q`` cannot be derived from the other two: ``total_q ==
+    num_seqs`` also holds for a batch whose sequences carry 0 and 2 queries. A
+    decode batch may still hold sequences with no query, so ``total_q <=
+    num_seqs``. It is a precondition, not a hint: no sequence in the launched
+    batch may carry more queries. The decode kernel computes one query per
+    sequence and would leave a second one unwritten.
     """
 
     num_heads: int
     total_q: int
     num_seqs: int
+    max_seqlen_q: int
     max_seqlen_k: int
     arch: str
     d_nope: int = 128
@@ -106,16 +144,18 @@ class MLARequest(OperatorRequest):
     page_block_size: int = 16
     causal: bool = True
     # Device CU count; 0 resolves the live device's when the build box is the
-    # requested arch (see ``dispatch.mla.gfx942._resolve_num_cus``). It only
-    # picks the XCD-aware workgroup order, so a wrong value costs speed.
+    # requested arch (see :func:`resolve_num_cus`). It only picks the
+    # XCD-aware workgroup order and the decode split-KV segment count, so a
+    # wrong value costs speed.
     num_cus: int = 0
     # Blocks in the paged KV pool (``c_kv`` / ``k_rope`` first dimension).
-    # Required: the candidate refuses 0 rather than skip the 32-bit paged
-    # extent admission (``check_mla_prefill_extents``). Callers holding the
-    # tensors pass ``c_kv.shape[0]``; callers without tensors pass the pool
-    # size they would allocate. Negative is malformed.
+    # Required by prefill: its candidate refuses 0 rather than skip the 32-bit
+    # paged extent admission (``check_mla_prefill_extents``). Decode ignores
+    # it (its pages are 64-bit addressed). Callers holding the tensors pass
+    # ``c_kv.shape[0]``; callers without tensors pass the pool size they would
+    # allocate. Negative is malformed.
     num_kv_blocks: int = 0
-    op: str = "mla_prefill_fwd"
+    op: str = MLA_OP
     dtype: str = "bf16"
     algorithm: str = "auto"
     spec_id: str = "auto"
@@ -126,8 +166,9 @@ class MLARequest(OperatorRequest):
     tuning_knobs: tuple[tuple[str, Any], ...] = ()
     # Unfused head projections: the kernel takes the absorbed query
     # ``[total_q, H, kv_lora_rank + d_rope]`` and writes the normalized latent
-    # output plus the LSE (``MlaPrefillSpec.absorbed_query``). Two-heads
-    # layouts only, so an odd head count is refused.
+    # output plus the LSE. Prefill serves it in its two-heads layouts only
+    # (``MlaPrefillSpec.absorbed_query``), so an odd head count is refused;
+    # decode serves nothing else, so it requires it.
     absorbed_query: bool = False
 
     def __post_init__(self) -> None:
@@ -159,6 +200,13 @@ class MLARequest(OperatorRequest):
         coerced (which raises on ``None`` / ``"abc"`` / ``[1]``) or dropped
         (which would refuse it as a missing dim). The stand-in never reaches a
         spec: the predicate refuses the request first.
+
+        ``max_seqlen_q`` is the one dim the regimes split (decode ``<= 1``,
+        prefill ``>= 2``), so no stand-in passes both: its 1 lets the decode
+        candidate's predicate name the error for an absorbed-query request, and
+        a prefill candidate refuses it on the range. A fused request is refused
+        too, but only on capability (decode's required feature, prefill's
+        range), so its message shows the stand-in, not the mistyped value.
         """
         value = getattr(self, name)
         if type(value) is int:
@@ -177,17 +225,20 @@ class MLARequest(OperatorRequest):
             "kv_lora_rank": self._dim("kv_lora_rank"),
             "page_block_size": self._dim("page_block_size"),
             "total_q": self._dim("total_q"),
+            "max_seqlen_q": self._dim("max_seqlen_q"),
             "max_seqlen_k": self._dim("max_seqlen_k"),
             "num_seqs": self._dim("num_seqs"),
         }
 
     def features(self) -> frozenset[str]:
         active = set()
-        # ``is not False``: a non-bool ``causal`` (0, None) must pass the
-        # capability prefilter so ``_request_errors`` names the type error.
+        # ``is not False``: a non-bool flag (0, None) must pass the capability
+        # prefilter -- each is required by some candidate (prefill requires
+        # ``causal``, decode ``absorbed_query``) -- so ``_request_errors``
+        # names the type error instead of a missing feature.
         if self.causal is not False:
             active.add("causal")
-        if self.absorbed_query:
+        if self.absorbed_query is not False:
             active.add("absorbed_query")
         return frozenset(active)
 
@@ -221,13 +272,32 @@ def _request_errors(req: OperatorRequest) -> List[str]:
             errors.append(f"{name} must be positive, got {value}")
         elif name in _NONNEGATIVE_INT_FIELDS and value < 0:
             errors.append(f"{name} must be >= 0, got {value}")
+    # The regime bounds compare fields the loop above has checked; on a type
+    # error that message stands alone.
+    if all(
+        type(getattr(req, n)) is int for n in ("max_seqlen_q", "total_q", "num_seqs")
+    ):
+        if req.max_seqlen_q > req.total_q:
+            errors.append(
+                f"max_seqlen_q={req.max_seqlen_q} cannot exceed total_q={req.total_q}"
+            )
+        if req.total_q > req.max_seqlen_q * req.num_seqs:
+            errors.append(
+                f"total_q={req.total_q} exceeds max_seqlen_q={req.max_seqlen_q} x "
+                f"num_seqs={req.num_seqs}"
+            )
+    if req.op != MLA_OP:
+        errors.append(
+            f"op={req.op!r} is not served by the MLA family; it serves {MLA_OP!r} "
+            "and routes prefill vs decode on max_seqlen_q"
+        )
     if not isinstance(req.arch, str) or not req.arch.strip():
         errors.append("arch must be a non-empty architecture name")
     if not isinstance(req.tuning_id, str):
         errors.append(f"tuning_id must be a str, got {type(req.tuning_id).__name__}")
     elif (req.tuning_id.strip() or "auto") != "auto" or req.tuning_knobs:
         errors.append(
-            "MLA prefill has no tuning knobs yet: tuning_id must be 'auto' and "
+            "MLA has no tuning knobs yet: tuning_id must be 'auto' and "
             f"tuning_knobs empty, got tuning_id={req.tuning_id!r}, "
             f"tuning_knobs={req.tuning_knobs!r}"
         )
@@ -237,6 +307,13 @@ def _request_errors(req: OperatorRequest) -> List[str]:
 # Shared pin-selector: identical across families, so it lives in the dispatch
 # core and each family re-exports it under its own name.
 _selector_matches = selector_matches
+
+
+def mla_kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> KernelId:
+    """The selection identity of ``spec`` on ``candidate`` for ``req``."""
+    # One op for the family (``MLA_OP``): prefill and decode are told apart by
+    # candidate and spec, both of which are in the selection key.
+    return make_kernel_id(req, candidate, spec, op=req.op)
 
 
 def num_q_blocks_for(req: MLARequest, block_q: int) -> int:
@@ -253,13 +330,64 @@ def num_q_blocks_for(req: MLARequest, block_q: int) -> int:
     return int(req.total_q) // int(block_q) + int(req.num_seqs)
 
 
+def _live_device_is(arch: str) -> bool:
+    """Whether the build box's device is ``arch`` (base arch, target-ID
+    features ignored): only then may dispatch read a live device property, so
+    a cross-compile never takes another part's."""
+    try:
+        from rocke.runtime.hip_module import get_device_arch
+
+        return (get_device_arch() or "").split(":")[0] == arch.split(":")[0]
+    except (ImportError, OSError, RuntimeError):
+        # No HIP runtime or no device on the build box.
+        return False
+
+
+def resolve_num_cus(req: MLARequest) -> int:
+    """Device CU count, or 0 when unknown.
+
+    Taken from ``req.num_cus`` when the caller sets it, else from the live
+    device when it is the requested arch (:func:`_live_device_is`).
+    """
+    n = int(req.num_cus)
+    if n > 0:
+        return n
+    if _live_device_is(req.arch):
+        from rocke.runtime.hip_module import get_device_num_cus
+
+        return int(get_device_num_cus() or 0)
+    return 0
+
+
+def resolve_max_grid_dims(req: MLARequest) -> tuple[int, int, int]:
+    """Per-axis grid limit, in workgroups, for a launch of ``req``.
+
+    The live device's when it is the requested arch (:func:`_live_device_is`);
+    otherwise :data:`rocke.helpers.spec.MAX_GRID_DIM` on every axis, which
+    only refuses grids a larger device would have taken.
+    """
+    from rocke.helpers.spec import MAX_GRID_DIM
+
+    if _live_device_is(req.arch):
+        from rocke.runtime.hip_module import get_device_max_grid_size
+
+        dims = get_device_max_grid_size()
+        if dims is not None:
+            return dims
+    return (MAX_GRID_DIM,) * 3
+
+
 __all__ = [
     "FAMILY",
     "MLA_ABI_VERSION",
     "MLA_DIM_VOCABULARY",
     "MLA_FEATURES",
+    "MLA_OP",
     "MLARequest",
     "_request_errors",
     "_selector_matches",
+    "mla_kernel_id",
     "num_q_blocks_for",
+    "resolve_max_grid_dims",
+    "resolve_num_cus",
 ]

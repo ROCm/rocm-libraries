@@ -371,6 +371,7 @@ from .streamk import (
     streamk_start_iter,
 )
 from .spec import (
+    MAX_GRID_DIM,
     IOSpecRule,
     SignatureBuilder,
     ceil_div_grid,
@@ -674,6 +675,7 @@ __all__ = [
     "emit_preshuffleb_offset",
     "host_preshuffle_layout",
     # Spec / signature / grid
+    "MAX_GRID_DIM",
     "IOSpecRule",
     "SignatureBuilder",
     "ceil_div_grid",
