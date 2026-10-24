@@ -16,6 +16,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_bwd_weight.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm_v2.hpp"
+#include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm_nonoverlap_patch.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_ngchw_to_nhwgc.hpp"
 #include "ck/tensor_operation/gpu/device/convolution_backward_weight_specialization.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
@@ -168,7 +169,8 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeB                       = ComputeTypeA,
           index_t TransposeTransferSrcScalarPerVector = 1,
           index_t TransposeTransferDstScalarPerVector = 1,
-          bool UseLdsTranspose                        = false>
+          bool UseLdsTranspose                        = false,
+          bool UseNonOverlapPatchView                 = false>
 struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -186,6 +188,14 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<WeiElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<OutElementwiseOperation, element_wise::PassThrough>);
+    static_assert(!UseNonOverlapPatchView ||
+                  (NDimSpatial == 2 && NumGroupsToMerge == 1 &&
+                   is_NHWGC_GKYXC_NHWGK<InLayout, WeiLayout, OutLayout>() &&
+                   is_same_v<InDataType, bhalf_t> && is_same_v<WeiDataType, bhalf_t> &&
+                   is_same_v<OutDataType, bhalf_t> && is_same_v<AccDataType, float> &&
+                   is_same_v<ComputeTypeA, bhalf_t> && is_same_v<ComputeTypeB, bhalf_t> &&
+                   ConvBackwardWeightSpecialization ==
+                       ConvolutionBackwardWeightSpecialization::Default));
 
     using DeviceOp = DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3;
 
@@ -211,14 +221,23 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
 
     static constexpr auto ABK1Number = Number<ABK1>{};
 
-    static constexpr auto conv_to_gemm_transformer_v2 =
+    using ConvToGemmTransformerV2 = std::conditional_t<
+        UseNonOverlapPatchView,
+        TransformConvBwdWeightToGemmNonOverlapPatch<NDimSpatial,
+                                                   MPerBlock,
+                                                   NPerBlock,
+                                                   ABK1Number,
+                                                   KPerBlock / ABK1Number,
+                                                   NumGroupsToMerge,
+                                                   ConvBackwardWeightSpecialization>,
         TransformConvBwdWeightToGemmV2<NDimSpatial,
                                        MPerBlock,
                                        NPerBlock,
                                        ABK1Number,
                                        KPerBlock / ABK1Number,
                                        NumGroupsToMerge,
-                                       ConvBackwardWeightSpecialization>{};
+                                       ConvBackwardWeightSpecialization>>;
+    static constexpr auto conv_to_gemm_transformer_v2 = ConvToGemmTransformerV2{};
 
     static constexpr auto conv_to_gemm_transformer_v1 =
         TransformConvBwdWeightToGemm<NDimSpatial,
@@ -556,6 +575,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
               c_grid_desc_mblock_mperblock_nblock_nperblock_{},
               compute_ptr_offset_of_batch_{},
               is_packed_weight_{false},
+              is_nonoverlap_patch_{false},
               M01_{M01},
               N01_{N01},
               a_element_op_{out_element_op},
@@ -609,6 +629,50 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             }
             is_packed_weight_ &= e_g_k_c_xs_strides_transposed[1] == packed_weight_stride &&
                                  e_g_k_c_xs_strides_transposed[0] == packed_weight_stride * Conv_K_;
+            if constexpr(UseNonOverlapPatchView)
+            {
+                // This bounded zero-copy view is not im2col: require complete,
+                // packed images and patches, including image and batch strides.
+                const auto is_packed = [](const auto& lengths, const auto& strides) {
+                    constexpr long_index_t MaxElements = (long_index_t{1} << 30);
+                    if(lengths[0] != 1 || strides[2] != 1 || lengths[1] <= 0 ||
+                       lengths[2] <= 0)
+                        return false;
+                    long_index_t expected = lengths[2];
+                    for(index_t i = 4; i >= 3; --i)
+                    {
+                        if(lengths[i] <= 0 || strides[i] != expected ||
+                           expected > MaxElements / lengths[i])
+                            return false;
+                        expected *= lengths[i];
+                    }
+                    return strides[1] == expected && expected <= MaxElements / lengths[1];
+                };
+                is_nonoverlap_patch_ =
+                    Conv_G_ == 1 && Conv_C_ == 3 && is_packed_weight_ &&
+                    a_g_n_k_wos_lengths[1] == Conv_N_ &&
+                    a_g_n_k_wos_lengths[2] == Conv_K_ &&
+                    is_packed(b_g_n_c_wis_lengths, b_g_n_c_wis_strides) &&
+                    is_packed(a_g_n_k_wos_lengths, a_g_n_k_wos_strides) &&
+                    reinterpret_cast<std::uintptr_t>(p_a_grid_) %
+                            (sizeof(ADataType) * ABlockTransferSrcScalarPerVector) ==
+                        0 &&
+                    reinterpret_cast<std::uintptr_t>(p_b_grid_) %
+                            (sizeof(BDataType) * BBlockTransferSrcScalarPerVector) ==
+                        0;
+                for(index_t i = 0; i < 2; ++i)
+                {
+                    is_nonoverlap_patch_ &=
+                        filter_spatial_lengths_[i] > 1 &&
+                        conv_filter_strides[i] == filter_spatial_lengths_[i] &&
+                        conv_filter_dilations[i] == 1 && input_left_pads[i] == 0 &&
+                        input_right_pads[i] == 0 &&
+                        input_spatial_lengths_[i] ==
+                            long_index_t{output_spatial_lengths_[i]} * filter_spatial_lengths_[i];
+                }
+                if(!is_nonoverlap_patch_)
+                    return;
+            }
 
             if(split_k < 0)
             {
@@ -626,6 +690,15 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
+                // Limit auto split-K on gfx1250 to the squared per-CU occupancy.
+                // Smaller grids otherwise request excessive reduction partitions.
+                if(ck::is_gfx125_supported())
+                {
+                    const ck::index_t occupancy_k_batch_ceiling =
+                        active_workgroups_per_cu.max_occupancy_ *
+                        active_workgroups_per_cu.max_occupancy_;
+                    k_batch_ = std::min(k_batch_, occupancy_k_batch_ceiling);
+                }
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -798,6 +871,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         // for computing batch offset
         ComputePtrOffsetOfStridedBatch<I1, I1, I0> compute_ptr_offset_of_batch_;
         bool is_packed_weight_;
+        bool is_nonoverlap_patch_;
 
         index_t M01_;
         index_t N01_;
@@ -1178,6 +1252,12 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if constexpr(UseNonOverlapPatchView)
+        {
+            if(!ck::is_gfx125_supported() || !arg.is_nonoverlap_patch_)
+                return false;
+        }
+
         if(arg.stride_overflow)
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
@@ -1775,6 +1855,10 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         if constexpr(UseLdsTranspose)
         {
             str << ", LdsTranspose";
+        }
+        if constexpr(UseNonOverlapPatchView)
+        {
+            str << ", NonOverlapPatchView";
         }
             
             str << ">";

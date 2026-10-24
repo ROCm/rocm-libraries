@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 
 #include "ck/ck.hpp"
 #include "ck/host_utility/device_prop.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_two_stage_wmma_cshuffle_v3.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_weight.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight/device_grouped_conv_bwd_weight_two_stage_wmma_instance.hpp"
@@ -48,14 +50,53 @@ using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSp
                                                                           PassThrough,
                                                                           PassThrough>;
 
+template <ck::index_t... Values>
+using S = ck::Sequence<Values...>;
+template <bool PatchView>
+using XCVectorOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<
+    2, NHWGC, GKYXC, NHWGK, ck::bhalf_t, ck::bhalf_t, ck::bhalf_t, float,
+    PassThrough, PassThrough, PassThrough,
+    ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default,
+    128, 64, 64, 128, 8, 16, 16, 4, 1,
+    S<16, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 8, 8, false,
+    S<16, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 8, 8, false,
+    1, 1, S<1, 16, 1, 8>, 1,
+    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1,
+    1, ck::bhalf_t, ck::bhalf_t, 1, 1, false, PatchView>;
+
 enum class Candidate
 {
     DirectScalar,
-    TwoStageScalar
+    TwoStageScalar,
+    TwoStageXCVector,
+    TwoStagePatch,
+    TwoStagePatchWide,
+    TwoStageSkinny
 };
 
 bool IsCandidate(const std::string& name, Candidate candidate)
 {
+    if(candidate == Candidate::TwoStageXCVector || candidate == Candidate::TwoStagePatch)
+    {
+        const std::string prefix =
+            "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<128, 64, 64, 128, Default";
+        const bool patch = name.find("NonOverlapPatchView") != std::string::npos;
+        return name.compare(0, prefix.size(), prefix) == 0 &&
+               patch == (candidate == Candidate::TwoStagePatch);
+    }
+    if(candidate == Candidate::TwoStagePatchWide)
+    {
+        const std::string prefix =
+            "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<128, 128, 128, 32, Default";
+        const bool patch = name.find("NonOverlapPatchView") != std::string::npos;
+        return name.compare(0, prefix.size(), prefix) == 0 && patch;
+    }
+    if(candidate == Candidate::TwoStageSkinny)
+    {
+        const std::string prefix =
+            "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<128, 16, 128, 64, Default";
+        return name.compare(0, prefix.size(), prefix) == 0;
+    }
     const std::string direct = "DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<32, 16, 16, 32, Default";
     const std::string two_stage =
         "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default";
@@ -103,6 +144,29 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
     ck::Tensor<DataType> expected(wei_desc);
     ck::Tensor<DataType> actual(wei_desc);
 
+    if(candidate == Candidate::TwoStageXCVector || candidate == Candidate::TwoStagePatch ||
+       candidate == Candidate::TwoStagePatchWide ||
+       candidate == Candidate::TwoStageSkinny)
+    {
+        // Include cancellation and distinguish image, patch, filter-row, and
+        // channel coordinates. Products and FP32 partial sums are exact here.
+        in.ForEach([](auto& tensor, const auto& index) {
+            std::size_t pattern = 7 * index[0] + 11 * index[1] + 13 * index[2];
+            for(ck::index_t d = 0; d < NDimSpatial; ++d)
+                pattern = pattern * 17 + (d + 3) * index[d + 3];
+            const int value = static_cast<int>(pattern % 7) - 3;
+            tensor(index) = ck::type_convert<DataType>((value >= 0 ? value + 1 : value) / 16.f);
+        });
+        out.ForEach([](auto& tensor, const auto& index) {
+            std::size_t pattern = 19 * index[0] + 23 * index[1] + 29 * index[2];
+            for(ck::index_t d = 0; d < NDimSpatial; ++d)
+                pattern = pattern * 31 + (d + 5) * index[d + 3];
+            const int value = static_cast<int>(pattern % 9) - 4;
+            tensor(index) = ck::type_convert<DataType>((value >= 0 ? value + 1 : value) / 32.f);
+        });
+    }
+    else
+    {
     // Distinct signs and spatial patterns make neighboring groups' gradients different.
     // Small integral products accumulate exactly in FP32 (including the split-2 path).
     in.ForEach([](auto& tensor, const auto& index) {
@@ -125,6 +189,7 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
         const float sign = g % 3 == 0 ? -1.f : 1.f;
         tensor(index)    = ck::type_convert<DataType>(sign * (1.f + (2 * g + n + k + spatial) % 3));
     });
+    }
 
     ck::DeviceMem in_device(sizeof(DataType) * in.mDesc.GetElementSpaceSize());
     ck::DeviceMem out_device(sizeof(DataType) * out.mDesc.GetElementSpaceSize());
@@ -198,6 +263,18 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
         }
 #endif
     }
+    if constexpr(NDimSpatial == 2 && std::is_same_v<DataType, ck::bhalf_t>)
+    {
+        if(candidate == Candidate::TwoStageXCVector || candidate == Candidate::TwoStagePatch)
+        {
+            // Test the descriptor/lifetime behavior independently of catalog ordering.
+            instances.clear();
+            if(candidate == Candidate::TwoStageXCVector)
+                instances.push_back(std::make_unique<XCVectorOp<false>>());
+            else
+                instances.push_back(std::make_unique<XCVectorOp<true>>());
+        }
+    }
     int matches = 0;
     for(const auto& op : instances)
     {
@@ -207,45 +284,63 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
             continue;
         }
         ++matches;
-        auto arg                   = op->MakeArgumentPointer(in_device.GetDeviceBuffer(),
+        const auto make_arg = [&](const auto& il,
+                                  const auto& is,
+                                  const auto& wl,
+                                  const auto& ws,
+                                  const auto& ol,
+                                  const auto& os,
+                                  const auto& strides,
+                                  const auto& dilations,
+                                  const auto& left,
+                                  const auto& right) {
+            return op->MakeArgumentPointer(in_device.GetDeviceBuffer(),
                                            wei_device.GetDeviceBuffer(),
                                            out_device.GetDeviceBuffer(),
-                                           in_lengths,
-                                           in_strides,
-                                           wei_lengths,
-                                           wei_strides,
-                                           out_lengths,
-                                           out_strides,
-                                           filter_strides,
-                                           filter_dilations,
-                                           left_pads,
-                                           right_pads,
+                                           il,
+                                           is,
+                                           wl,
+                                           ws,
+                                           ol,
+                                           os,
+                                           strides,
+                                           dilations,
+                                           left,
+                                           right,
                                            PassThrough{},
                                            PassThrough{},
                                            PassThrough{},
                                            split);
+        };
+        const bool use_long_metadata =
+            long_index_metadata || candidate == Candidate::TwoStageXCVector ||
+            candidate == Candidate::TwoStagePatch || candidate == Candidate::TwoStagePatchWide ||
+            candidate == Candidate::TwoStageSkinny;
+        auto arg = use_long_metadata
+                       ? make_arg(LongIndexMetadata(in_lengths),
+                                  LongIndexMetadata(in_strides),
+                                  LongIndexMetadata(wei_lengths),
+                                  LongIndexMetadata(wei_strides),
+                                  LongIndexMetadata(out_lengths),
+                                  LongIndexMetadata(out_strides),
+                                  LongIndexMetadata(filter_strides),
+                                  LongIndexMetadata(filter_dilations),
+                                  LongIndexMetadata(left_pads),
+                                  LongIndexMetadata(right_pads))
+                       : make_arg(in_lengths,
+                                  in_strides,
+                                  wei_lengths,
+                                  wei_strides,
+                                  out_lengths,
+                                  out_strides,
+                                  filter_strides,
+                                  filter_dilations,
+                                  left_pads,
+                                  right_pads);
+        if(use_long_metadata)
+            OverwriteMetadataStack();
         if(long_index_metadata)
         {
-            // Both these temporaries and the overload's local i32 conversion arrays
-            // are gone before support checks and the numerical invocations below.
-            arg = op->MakeArgumentPointer(in_device.GetDeviceBuffer(),
-                                          wei_device.GetDeviceBuffer(),
-                                          out_device.GetDeviceBuffer(),
-                                          LongIndexMetadata(in_lengths),
-                                          LongIndexMetadata(in_strides),
-                                          LongIndexMetadata(wei_lengths),
-                                          LongIndexMetadata(wei_strides),
-                                          LongIndexMetadata(out_lengths),
-                                          LongIndexMetadata(out_strides),
-                                          LongIndexMetadata(filter_strides),
-                                          LongIndexMetadata(filter_dilations),
-                                          LongIndexMetadata(left_pads),
-                                          LongIndexMetadata(right_pads),
-                                          PassThrough{},
-                                          PassThrough{},
-                                          PassThrough{},
-                                          split);
-            OverwriteMetadataStack();
             using OrdinaryTwoStage = std::tuple_element_t<
                 0,
                 ck::tensor_operation::device::instance::
@@ -280,7 +375,6 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
         {
             ASSERT_GT(workspace_bytes, 0u) << name << " must use its FP32 workspace";
         }
-
         using Reference = ck::tensor_operation::host::ReferenceConvBwdWeight<NDimSpatial,
                                                                              DataType,
                                                                              DataType,
@@ -382,6 +476,41 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16ScalarOddChannels)
 #endif
 }
 
+TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16XCVectorMetadataLifetimeAndPatchTails)
+{
+    if(!ck::is_gfx125_supported())
+        GTEST_SKIP() << "gfx1250-only XC-vector candidate";
+#ifdef CK_ENABLE_BF16
+    // R=90 and K=160 exercise reduction and output-tile tails; the rectangular
+    // patch/image dimensions prevent accidental contiguous patch flattening.
+    const ck::utils::conv::ConvParam patch{
+        2, 1, 3, 160, 3, {16, 16}, {80, 96}, {16, 16}, {1, 1}, {0, 0}, {0, 0}};
+    for(auto candidate : {Candidate::TwoStageXCVector, Candidate::TwoStagePatch})
+        for(ck::index_t split : {1, 3, 8})
+            CheckCandidate<2, ck::bhalf_t>(patch, candidate, split, true);
+    const ck::utils::conv::ConvParam wide_tail{
+        2, 1, 3, 132, 3, {16, 16}, {80, 96}, {16, 16}, {1, 1}, {0, 0}, {0, 0}};
+    CheckCandidate<2, ck::bhalf_t>(wide_tail, Candidate::TwoStagePatchWide, 3, true);
+    const ck::utils::conv::ConvParam four{
+        2, 1, 3, 132, 3, {4, 4}, {20, 28}, {4, 4}, {1, 1}, {0, 0}, {0, 0}};
+    CheckCandidate<2, ck::bhalf_t>(four, Candidate::TwoStagePatchWide, 3, true);
+    const ck::utils::conv::ConvParam eight{
+        2, 1, 3, 132, 3, {8, 8}, {40, 56}, {8, 8}, {1, 1}, {0, 0}, {0, 0}};
+    CheckCandidate<2, ck::bhalf_t>(eight, Candidate::TwoStagePatchWide, 3, true);
+    const ck::utils::conv::ConvParam padded{
+        2, 1, 3, 160, 3, {16, 16}, {80, 96}, {16, 16}, {1, 1}, {0, 1}, {0, 1}};
+    const ck::utils::conv::ConvParam dilated{
+        2, 1, 3, 160, 3, {16, 16}, {96, 112}, {16, 16}, {2, 1}, {0, 0}, {0, 0}};
+    const ck::utils::conv::ConvParam overlapping{
+        2, 1, 3, 160, 3, {16, 16}, {80, 96}, {8, 16}, {1, 1}, {0, 0}, {0, 0}};
+    CheckCandidate<2, ck::bhalf_t>(padded, Candidate::TwoStagePatch, 3, false);
+    CheckCandidate<2, ck::bhalf_t>(dilated, Candidate::TwoStagePatch, 3, false);
+    CheckCandidate<2, ck::bhalf_t>(overlapping, Candidate::TwoStagePatch, 3, false);
+#else
+    GTEST_SKIP() << "BF16 instances disabled";
+#endif
+}
+
 TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Fp16ScalarOddChannels3d)
 {
     if(!ck::is_gfx125_supported())
@@ -409,6 +538,26 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16ScalarOddChannels3d)
     CheckCandidate<3, ck::bhalf_t>(odd_channels_3d, Candidate::DirectScalar, 2, false);
     CheckCandidate<3, ck::bhalf_t>(odd_channels_3d, Candidate::TwoStageScalar, 1, true);
     CheckCandidate<3, ck::bhalf_t>(odd_channels_3d, Candidate::TwoStageScalar, 2, true);
+#else
+    GTEST_SKIP() << "BF16 instances disabled";
+#endif
+}
+
+TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16SkinnyOutputSignedSplitTails)
+{
+    if(!ck::is_gfx125_supported())
+        GTEST_SKIP() << "gfx1250-only skinny-output candidate";
+#ifdef CK_ENABLE_BF16
+    const ck::utils::conv::ConvParam k3{
+        2, 1, 2, 3, 32, {3, 3}, {17, 19}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+    const ck::utils::conv::ConvParam k5{
+        2, 1, 2, 5, 40, {3, 3}, {65, 67}, {2, 2}, {1, 1}, {1, 1}, {1, 1}};
+    const ck::utils::conv::ConvParam rank3{
+        3, 1, 2, 3, 16, {3, 3, 3}, {5, 11, 13}, {1, 1, 1}, {1, 1, 1},
+        {1, 1, 1}, {1, 1, 1}};
+    CheckCandidate<2, ck::bhalf_t>(k3, Candidate::TwoStageSkinny, 3, true);
+    CheckCandidate<2, ck::bhalf_t>(k5, Candidate::TwoStageSkinny, 8, true);
+    CheckCandidate<3, ck::bhalf_t>(rank3, Candidate::TwoStageSkinny, 3, true);
 #else
     GTEST_SKIP() << "BF16 instances disabled";
 #endif
