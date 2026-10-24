@@ -130,6 +130,26 @@ target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
 
+# Development builds link the host statically so an installed
+# libtensilelite-host.so.1 on LD_LIBRARY_PATH cannot be substituted.
+# Packaged shared builds keep their DT_NEEDED entry and skip this check.
+if(UNIX AND NOT BUILD_SHARED_LIBS)
+    find_program(TENSILELITE_READELF readelf)
+    if(NOT TENSILELITE_READELF)
+        message(FATAL_ERROR "readelf is required to verify the static tensilelite client")
+    endif()
+    foreach(tensilelite_client_target tensilelite-client cpu-gemm-driver)
+        add_custom_command(
+            TARGET ${tensilelite_client_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DREADELF=${TENSILELITE_READELF}
+                -DCLIENT=$<TARGET_FILE:${tensilelite_client_target}>
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_client_has_no_host_dependency.cmake
+            VERBATIM
+        )
+    endforeach()
+endif()
+
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)

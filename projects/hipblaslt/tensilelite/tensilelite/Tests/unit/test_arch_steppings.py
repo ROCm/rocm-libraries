@@ -1265,6 +1265,7 @@ def test_build_client_configures_for_the_target_and_not_the_features(monkeypatch
 
     configure = next(c for c in context.commands if c.startswith("cmake"))
     assert "-DGPU_TARGETS=gfx950" in configure
+    assert "-DTENSILELITE_BUILD_SHARED_LIBS=OFF" in configure
     assert "sramecc" not in configure
 
 
@@ -1288,6 +1289,7 @@ def test_build_client_strips_features_from_an_explicit_gpu_target(monkeypatch, t
 
     configure = next(c for c in context.commands if c.startswith("cmake"))
     assert "-DGPU_TARGETS=gfx942" in configure
+    assert "-DTENSILELITE_BUILD_SHARED_LIBS=OFF" in configure
     assert "sramecc" not in configure
 
 
