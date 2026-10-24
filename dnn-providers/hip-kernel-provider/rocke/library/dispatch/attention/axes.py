@@ -194,6 +194,8 @@ _DENSE_LDS_PADS = (0, 8, 16, 24, 32)
 _DENSE_LAZY_THRESHOLDS = (1.0, 2.0, 4.0)
 _DENSE_EXP_PER_PV_STEP = (1, 2, 3, 4)
 _DENSE_PV_SCHED_DS_READS = (1, 2, 3, 4)
+# KV-segment split of the default grid (1 = no split).
+_DENSE_KV_SEGMENTS = (2, 4, 8)
 # Symbolic persistent-CTA counts, resolved against the problem by
 # :func:`resolve_dense_num_persistent` (the ``tile_policy="2x"`` pattern).
 _NUM_PERSISTENT_MULTIPLES = ("half", "0.75x", "1.25x", "1.5x", "1.75x", "2x")
@@ -275,6 +277,7 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_loop_order", None, ("d_major", "k_major")),
     _values("causal_diag_split", True, (False,)),
     _values("o_store_width", 4, (1, 2, 4)),
+    _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
 )
 
 # gfx942 registers one dense candidate, so persistent is a knob here as well
@@ -314,6 +317,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_loop_order", "d_major", ("d_major", "k_major")),
     _values("o_store_width", 4, (1, 2, 4)),
     _values("causal_diag_split", False, (True,)),
+    _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
 )
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never

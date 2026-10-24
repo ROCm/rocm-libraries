@@ -49,6 +49,7 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
     _BLOCK_M,
+    _as_gfx942_spec,
     _DEFAULT_LDS_ROW_PAD,
     _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
@@ -266,7 +267,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
-        "causal_bottom_right",
         "lds_num_buffers",
     }
 )
@@ -294,7 +294,7 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
-    "causal_bottom_right": (),  # unbuildable on gfx942
+    "causal_bottom_right": (True,),
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
@@ -335,6 +335,7 @@ _PRIVATE_PERTURBATIONS = {
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
     "emit_lse": (True, False),
+    "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -797,9 +798,10 @@ def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     assert marker in why
 
 
-def test_shared_bottom_right_field_is_rejected_by_support_and_build():
-    """The reflected common field is outside gfx942's concrete contract."""
-    spec = AttentionDenseSpec(
+def test_bottom_right_is_supported_without_a_window():
+    """Bottom-right causal is the plain causal band shifted by seqlen_kv - seqlen_q;
+    a window cannot shift with it, so that combination stays rejected."""
+    common = dict(
         batch=1,
         seqlen_q=2048,
         seqlen_kv=4096,
@@ -811,11 +813,51 @@ def test_shared_bottom_right_field_is_rejected_by_support_and_build():
         block_n=64,
         causal_bottom_right=True,
     )
+    spec = AttentionDenseSpec(**common)
     ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert "_br_" in _as_gfx942_spec(spec).kernel_name()
+    build_attention_dense(spec, arch="gfx942")
+    windowed = AttentionDenseSpec(**{**common, "sliding_window": 128})
+    ok, why = supports_attention_dense(windowed, arch="gfx942")
     assert not ok
     assert "causal_bottom_right" in why
-    with pytest.raises(ValueError, match="causal_bottom_right"):
-        build_attention_dense(spec, arch="gfx942")
+
+
+def test_kv_segments_admission():
+    """The KV-segment split runs on the default grid only, and tags the name."""
+    base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=8192,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_m=128,
+        block_n=64,
+        causal_bottom_right=True,
+    )
+    spec = Gfx942AttentionDenseSpec(**base, kv_segments=4)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert spec.kernel_name().endswith("_kvs4")
+    assert attention_dense_grid(spec)[0] == 4 * attention_dense_grid(
+        Gfx942AttentionDenseSpec(**base)
+    )[0]
+    for over in (
+        {"persistent": True},
+        {"use_sinks": True},
+        {"emit_lse": True},
+    ):
+        bad = Gfx942AttentionDenseSpec(**{**base, **over}, kv_segments=4)
+        ok, why = supports_attention_dense(bad, arch="gfx942")
+        assert not ok and "kv_segments" in why, over
+    ok, _ = supports_attention_dense(
+        Gfx942AttentionDenseSpec(**base, kv_segments=0), arch="gfx942"
+    )
+    assert not ok
 
 
 @pytest.mark.parametrize("block_n", [96, 160, 224])
@@ -1155,6 +1197,9 @@ _CONTRACT_GRID = [
     dict(dtype="fp16", iglp=True),
     dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
     # --- private: performance-only codegen knobs ---
+    # --- private: kv_segments (default grid only) ---
+    dict(kv_segments=4),  # accepted
+    dict(kv_segments=4, persistent=True, num_persistent=304),  # REJECTED
     dict(lds_num_buffers=1),  # accepted: the only implemented depth
     dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
     dict(iglp=True, iglp_mode=1),  # accepted

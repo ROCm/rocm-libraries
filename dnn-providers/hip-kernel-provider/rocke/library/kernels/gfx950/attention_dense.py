@@ -109,6 +109,15 @@ from kernels.common.attention_dense_decode import (
     PersistQbMajor,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common.attention_dense_kv_split import (
+    SEGMENT_PARAMS,
+    allocate_segment_workspace,
+    check_kv_segments,
+    declare_segment_params,
+    emit_segment_store,
+    launch_segment_combine,
+    segment_tile_range,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
@@ -197,6 +206,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # ``(sliding_window, right_bound)`` is the cuDNN ``(left, right)`` band on the
     # top-left diagonal. Not combinable with ``causal_bottom_right``.
     right_bound: int = field(default=0, kw_only=True)
+    # KV-segment split on the default grid: each work item's KV tiles are split
+    # into this many contiguous chunks, one CTA each, merged by a combine kernel
+    # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
+    kv_segments: int = field(default=1, kw_only=True)
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -492,6 +505,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append(codegen)
         if self.emit_lse:
             parts.append("lse")
+        if self.kv_segments != 1:
+            parts.append(f"kvs{self.kv_segments}")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -693,6 +708,9 @@ def supports_attention_dense(
             f"block_n={spec.block_n} exceeds gfx950's "
             f"{GFX950_LDS_CAPACITY_BYTES}"
         )
+    ok, why = check_kv_segments(spec)
+    if not ok:
+        return False, why
     return True, ""
 
 
@@ -858,6 +876,9 @@ def build_attention_dense(
             writeonly=True,
             align=4,
         )
+    KVS = spec.kv_segments
+    if KVS > 1:
+        segment_params = declare_segment_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
@@ -885,9 +906,18 @@ def build_attention_dense(
 
     # Heads are baked here; NQB comes from the seqlen_q param.
     grid_shape = DecodeShape(b, spec, {"seqlen_q": seqlen_q_p})
-    qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
-        grid_shape, b.block_id_x(), b.block_id_y(), b.block_id_z()
-    )
+    if KVS > 1:
+        # The segment index is the fastest-varying part of grid x, so the decode
+        # sees the unsplit grid unchanged.
+        raw_x = b.block_id_x()
+        seg = b.mod(raw_x, b.const_i32(KVS))
+        qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+            grid_shape, b.div(raw_x, b.const_i32(KVS)), b.block_id_y(), b.block_id_z()
+        )
+    else:
+        qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+            grid_shape, b.block_id_x(), b.block_id_y(), b.block_id_z()
+        )
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
@@ -1365,6 +1395,12 @@ def build_attention_dense(
                 start_tile,
                 b.const_i32(n_ktiles - 1),
             )
+    elif KVS > 1:
+        # This CTA's segment [start_tile, seg_hi) of [0, n_upper). The prologue
+        # always computes start_tile; an empty segment's result is discarded at
+        # the epilogue.
+        start_tile, seg_hi = segment_tile_range(b, seg, b.const_i32(0), n_upper, KVS)
+        seg_lo1 = b.add(start_tile, b.const_i32(1))
     else:
         start_tile = b.const_i32(0)
     start_buf = b.mod(start_tile, b.const_i32(NBUF))
@@ -1541,24 +1577,45 @@ def build_attention_dense(
         diag_start = b.mul(qb, b.const_i32(n_per))
         if DIAG_TILES:
             diag_start = b.add(diag_start, b.const_i32(DIAG_TILES))
-        body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
+        if KVS > 1:
+            body_upper = b.select(b.cmp_lt(diag_start, seg_lo1), seg_lo1, diag_start)
+            body_upper = b.select(b.cmp_lt(body_upper, seg_hi), body_upper, seg_hi)
+        else:
+            body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
         body = b.scf_for_iter(
-            b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
+            seg_lo1 if KVS > 1 else b.const_i32(1),
+            body_upper,
+            b.const_i32(1),
+            iter_args,
+            iv_name="nb",
         )
         with body as (j, carry):
             emit_loop_body(j, carry, mask_kbound=RAG_KBOUND)
         tail_args = [
             (name + "_t", val) for (name, _), val in zip(iter_args, body.results)
         ]
-        tail_lo = b.select(
-            b.cmp_lt(diag_start, b.const_i32(1)), b.const_i32(1), diag_start
+        if KVS > 1:
+            tail_lo = body_upper
+        else:
+            tail_lo = b.select(
+                b.cmp_lt(diag_start, b.const_i32(1)), b.const_i32(1), diag_start
+            )
+        loop = b.scf_for_iter(
+            tail_lo,
+            seg_hi if KVS > 1 else n_upper,
+            b.const_i32(1),
+            tail_args,
+            iv_name="nt",
         )
-        loop = b.scf_for_iter(tail_lo, n_upper, b.const_i32(1), tail_args, iv_name="nt")
         with loop as (j, carry):
             emit_loop_body(j, carry, mask_upper=True, mask_kbound=RAG_KBOUND)
     else:
         loop = b.scf_for_iter(
-            b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
+            seg_lo1 if KVS > 1 else b.const_i32(1),
+            seg_hi if KVS > 1 else n_upper,
+            b.const_i32(1),
+            iter_args,
+            iv_name="nkt",
         )
         with loop as (j, carry):
             emit_loop_body(j, carry, mask_upper=causal, mask_kbound=RAG_KBOUND)
@@ -1572,8 +1629,32 @@ def build_attention_dense(
     # PF: drain the last iter's in-flight V prefetch before the epilogue do_pv.
     b.s_waitcnt(vmcnt=0)
     b.s_barrier_bare()
-    last_vbuf = b.mod(b.add(n_upper, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
+    if KVS > 1:
+        # The last computed tile is seg_hi - 1, or start_tile for an empty segment.
+        seg_nonempty = b.cmp_lt(start_tile, seg_hi)
+        last_end = b.select(seg_nonempty, seg_hi, seg_lo1)
+    else:
+        last_end = n_upper
+    last_vbuf = b.mod(b.add(last_end, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
+    if KVS > 1:
+        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        emit_segment_store(
+            b,
+            segment_params,
+            token=b.add(b.mul(bt, seqlen_q_p), qtok),
+            head=hq,
+            num_heads=b.const_i32(Hq),
+            seg=seg,
+            segments=KVS,
+            head_size=D,
+            o_acc=o_acc,
+            m=b.select(seg_nonempty, m_i, neg_inf),
+            denom=b.select(seg_nonempty, l_i, b.const_f32(0.0)),
+            lane_h=lane_h,
+        )
+        b.ret()
+        return b.kernel
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
     if spec.emit_lse:
@@ -2684,7 +2765,8 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     nonpersist decode."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
+    gx, gy, gz = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
+    return (gx * getattr(spec, "kv_segments", 1), gy, gz)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
@@ -2742,6 +2824,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         )
     if spec.emit_lse:
         sig = sig.ptr("lse_ptr", "f32")
+    if getattr(spec, "kv_segments", 1) > 1:
+        for name in SEGMENT_PARAMS:
+            sig = sig.ptr(name, "f32")
     return sig.build()
 
 
@@ -2977,6 +3062,9 @@ def run_attention_dense_torch(
         vals["sink_ptr"] = sinks
     if spec.emit_lse:
         vals["lse_ptr"] = lse
+    if spec.kv_segments > 1:
+        workspace = allocate_segment_workspace(spec, q.device)
+        vals.update(workspace)
     launcher(
         vals,
         config=LaunchConfig(
@@ -2985,4 +3073,6 @@ def run_attention_dense_torch(
             stream=int(stream),
         ),
     )
+    if spec.kv_segments > 1:
+        launch_segment_combine(spec, arch, out, workspace, stream)
     return out

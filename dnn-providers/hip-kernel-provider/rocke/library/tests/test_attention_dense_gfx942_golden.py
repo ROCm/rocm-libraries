@@ -105,6 +105,11 @@ def _cases():
         )
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
+    def mk_gfx942(**over):
+        d = dict(base)
+        d.update(over)
+        return lambda: build_attention_dense(Gfx942AttentionDenseSpec(**d), arch=_ARCH)
+
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
         (incl. the inherited D64 K row-group pad and the ``waves_per_eu`` bump). Small
@@ -264,6 +269,30 @@ def _cases():
         # --- sinks + LSE: a keyless row keeps the sink seed (m = sink * LOG2E,
         #     l = 1), so its LSE is the sink logit rather than -inf. Same geometry
         #     as the LSE empty-window case. ---
+        # --- bottom-right causal (runtime diagonal offset) on both grids, the
+        #     diagonal split, the KV-segment split, and the dispatcher path. ---
+        "attention_dense_gfx942/br_d128_bf16": mk(
+            seqlen_kv=1024, causal_bottom_right=True
+        ),
+        "attention_dense_gfx942/br_persist_d128_bf16": mk(
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            persistent=True,
+            num_persistent=304,
+        ),
+        "attention_dense_gfx942/br_dsplit_d64_bf16": mk_gfx942(
+            head_size=64,
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+        ),
+        "attention_dense_gfx942/br_dsplit_kvs4_d128_bf16": mk_gfx942(
+            seqlen_kv=2048,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+            kv_segments=4,
+            block_m=128,
+        ),
         "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": mk(
             emit_lse=True,
             use_sinks=True,

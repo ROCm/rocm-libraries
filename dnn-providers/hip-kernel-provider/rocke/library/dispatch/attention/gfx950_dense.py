@@ -30,6 +30,7 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
+from .dense_rules import dense_kv_segments, dense_wave_segments
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -176,6 +177,28 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     bn = int(geometry["block_n"])
     causal, right_bound, moving_bottom_right = _dense_band(req)
     ragged = _is_ragged(sq, sk, bm, bn)
+    kv_segments = 1
+    if (
+        moving_bottom_right
+        and not variant.persistent
+        and not req.use_sinks
+        and not req.emit_lse
+    ):
+        # A short query chunk over a long KV prefix launches few CTAs: halve the
+        # query tile, then split each work item's KV range so the grid covers the
+        # device (see dense_kv_segments).
+        cus = int(req.num_cus) if int(req.num_cus) > 0 else _DEFAULT_NUM_PERSISTENT
+        batch_heads = int(req.batch) * int(req.nhead_q)
+        if -(-sq // bm) * batch_heads < cus:
+            small = DENSE_TILE_GEOMETRIES["bm128"]
+            sbm, sbn = int(small["block_m"]), int(small["block_n"])
+            if not _is_ragged(sq, sk, sbm, sbn):
+                bm, bn, ragged = sbm, sbn, False
+                kv_segments = dense_kv_segments(-(-sq // bm) * batch_heads, cus)
+        elif not ragged:
+            # A grid that covers the device can still leave its last wave mostly
+            # empty (a head count just past the CU count): split to fill it.
+            kv_segments = dense_wave_segments(-(-sq // bm) * batch_heads, cus)
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
             if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
@@ -205,6 +228,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
+        kv_segments=kv_segments,
     )
 
 

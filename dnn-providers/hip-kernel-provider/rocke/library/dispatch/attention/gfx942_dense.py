@@ -49,12 +49,18 @@ def _default_block_m(req: AttentionRequest) -> int:
     half as long. Measured on the 304-CU part at D128, both dtypes, causal
     without window or sinks: the 128-row tile wins every shape below that
     threshold and loses every shape at or above it. A 64-row tile loses almost
-    everywhere. Window and sink requests keep the shared tile.
+    everywhere. Window and sink requests keep the shared tile, and so do
+    bottom-right (chunked) requests, whose KV split below is sized for it.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    if int(req.hdim_q) != 128 or int(req.sliding_window) or bool(req.use_sinks):
+    if (
+        int(req.hdim_q) != 128
+        or int(req.sliding_window)
+        or bool(req.use_sinks)
+        or "causal_bottom_right" in req.features()
+    ):
         return bm
     num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
@@ -99,6 +105,40 @@ def _base_spec(req: AttentionRequest):
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did.
     persistent = head_size == 128
+    # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
+    # matches against ``features`` below, so a band this body cannot shift (a
+    # bottom-right window) reaches ``supports_attention_dense`` and is rejected
+    # there instead of running top-left.
+    bottom_right = "causal_bottom_right" in req.features()
+    if bottom_right and mask_type == AttentionMaskType.NO_MASK:
+        # The band normalizer maps a cross-length NO_MASK request on this arch to
+        # the bottom-right causal band; the dense body serves only explicit
+        # causal kinds there.
+        raise ValueError(
+            "gfx942 dense: cross-length NO_MASK requests are not served by the "
+            "dense kernel"
+        )
+    diag_split = False
+    kv_segments = 1
+    if bottom_right and not ragged:
+        # Chunked prefill: the unmasked body loop skips the mask on every tile
+        # below the shifted diagonal. When the work items fill their last wave
+        # poorly (short chunks, or a head count just past the CU count), the
+        # non-persistent grid splits each work item's KV range across CTAs.
+        from .dense_rules import dense_wave_segments
+
+        diag_split = True
+        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
+        work = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
+        if (
+            sq % bm == 0
+            and not req.use_sinks
+            and not req.emit_lse
+            and not int(req.sliding_window)
+        ):
+            kv_segments = dense_wave_segments(work, cus)
+            if kv_segments > 1:
+                persistent = False
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -118,6 +158,9 @@ def _base_spec(req: AttentionRequest):
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        causal_bottom_right=bottom_right,
+        causal_diag_split=diag_split,
+        kv_segments=kv_segments,
     )
 
 
@@ -153,10 +196,12 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         variant_id=_VARIANT_ID,
         base_spec=_base_spec,
         supports=_supports,
-        # Dense: causal, sliding-window and sinks (alone or combined), optional
-        # LSE output; no moving bottom-right diagonal. Head size stays out:
-        # D64/D128 coverage is ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
+        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
+        # is ``supports_attention_dense``'s call.
+        features=frozenset(
+            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+        ),
         # _base_spec picks these from the dtype, head size and work count.
         recorded=frozenset({"block_m", "persistent", "waves_per_eu"}),
     )
