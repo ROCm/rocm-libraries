@@ -198,7 +198,12 @@ class UnifiedAttentionProblem:
         as ``num_cus * 4`` (4 CTAs/CU)."""
         return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
-    def select_path(self) -> str:
+    def select_path(self, arch: str | None = None) -> str:
+        """2D or 3D route. ``arch`` adds per-arch decode routing on top of the
+        shared selector (``_decode_prefers_3d``); None keeps the shared
+        selector alone."""
+        if arch is not None and _decode_prefers_3d(self, arch):
+            return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
@@ -3441,14 +3446,22 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
 _PRE_BUMP_CUS = 120
 
 
-def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+def _pre_bump_segments(
+    problem: UnifiedAttentionProblem, *, decode_grid: bool = False
+) -> int:
     """Segment count the split-KV formula produced at the historical
     ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
     ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
     over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
-    gfx1250 when it lands) rather than pasted per arch.
+    gfx1250 when it lands) rather than pasted per arch. ``decode_grid`` counts
+    one q-block per sequence (the all-decode launch grid) instead of the
+    prefill upper bound, which doubles the count at one query row per q-block.
     """
-    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    num_2d = (
+        _num_q_blocks(problem, 1, decode_grid=True)
+        if decode_grid
+        else problem.total_num_q_blocks_upper_bound
+    ) * problem.num_kv_heads
     min_seg = 16 if problem.block_size <= 16 else 8
     return max(
         min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
@@ -3476,7 +3489,22 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
             per_cu = 6 if problem.head_size == 64 else 4
             cap = 64 if problem.max_seqlen_k < 8192 else 128
             return max(2, min(per_cu * problem.num_cus // ctas, cap))
-        pre_bump = _pre_bump_segments(problem)
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and int(problem.target_ctas) <= 0
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Head-size-256 decode: about 2 CTAs per CU (its LDS footprint
+            # halves the resident CTAs of the smaller heads), and at least two
+            # pages per segment.
+            ctas = problem.num_seqs * problem.num_kv_heads
+            return max(
+                2,
+                min(2 * problem.num_cus // ctas, 128, problem.max_seqlen_k // 32),
+            )
+        pre_bump = _pre_bump_segments(problem, decode_grid=problem.all_decode)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -3542,6 +3570,16 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
                 return max(1, min(segments, kv // 64))
             return max(2, min(4 * cus // ctas, 64 if kv < 8192 else 128))
         pre_bump = _pre_bump_segments(problem)
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Few-CTA head-size-256 decode (outside the split rule above): keep
+            # at least two pages per segment; one-page segments leave the
+            # segment kernel latency-bound and double the reduce input.
+            return max(1, min(segments, pre_bump, problem.max_seqlen_k // 32))
         return min(segments, pre_bump)
     return segments
 
@@ -3603,19 +3641,35 @@ def _use_decode_grid(problem: UnifiedAttentionProblem, arch: str) -> bool:
     return problem.all_decode and arch in ("gfx942", "gfx950")
 
 
+# Last-level (Infinity Cache) capacity of gfx942/gfx950 parts, in bytes.
+_DECODE_KV_LLC_BYTES = 256 << 20
+
+
 def _kv_cache_policy_3d(problem: UnifiedAttentionProblem, arch: str) -> str:
     """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
 
-    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
-    so keeping it in the caches only evicts other data. Otherwise "all". fp8
-    K/V loads synchronously and keeps "all".
+    "stream" (NT) when every sequence decodes and the K/V the call reads is
+    larger than the last-level cache: each K/V byte is read once per call, so
+    keeping it cached only evicts other data. A decode whose K/V fits keeps
+    "all", so the next call over the same cache (the next decode step of a
+    model whose K/V fits) can hit in the last-level cache. Otherwise "all".
+    fp8 K/V loads synchronously and keeps "all".
     """
     if (
         arch in ("gfx942", "gfx950")
         and problem.all_decode
         and _kv_storage_dtype(problem) is None
     ):
-        return "stream"
+        kv_bytes = (
+            2
+            * problem.num_seqs
+            * problem.max_seqlen_k
+            * problem.num_kv_heads
+            * problem.head_size
+            * (1 if problem.use_fp8 else 2)
+        )
+        if kv_bytes > _DECODE_KV_LLC_BYTES:
+            return "stream"
     return "all"
 
 
@@ -3675,6 +3729,47 @@ def _gfx942_3d_decode_ctas_per_segment(
     ):
         return ctas
     return None
+
+
+# Head sizes per arch for which decode routes to the 3D segment kernel past the
+# shared selector (``_decode_prefers_3d``).
+_DECODE_3D_HEAD_SIZES = {"gfx942": (64, 128, 256), "gfx950": (128, 256)}
+
+
+def _decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """Decode routes to the split-KV 3D kernel even where the shared selector
+    picks 2D (2D grid past the subscription target, or KV <= 512 tokens).
+
+    The tiled 2D decode bodies run one single-wave workgroup per q-block: a
+    large-batch grid is bound by the workgroups per CU its LDS footprint allows
+    (one on gfx942), and a small-batch short-KV grid of a few workgroups walks
+    its tiles serially. The 3D segment kernel splits KV across several waves per
+    CU in both cases. Scope: gfx942/gfx950 decode split rule cohorts (fp16/bf16,
+    the head sizes in ``_DECODE_3D_HEAD_SIZES``, 16-token pages, no sliding
+    window, no explicit target_ctas) and, on gfx942, a cache the 3D kernel's K/V
+    loader can address (it has no i64 path).
+    """
+    arch = _canonical_arch_for_selection(arch)
+    if not (
+        problem.all_decode
+        and problem.head_size in _DECODE_3D_HEAD_SIZES.get(arch, ())
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and not problem.use_fp8
+        and _kv_storage_dtype(problem) is None
+    ):
+        return False
+    if arch == "gfx942":
+        if problem.num_kv_blocks <= 0:
+            problem = replace(
+                problem,
+                num_kv_blocks=problem.num_seqs
+                * -(-problem.max_seqlen_k // problem.block_size),
+            )
+        if _enable_i64_kv_addr_3d(problem, arch):
+            return False
+    return supports_native_unified_attention_3d_tiled(problem, arch)[0]
 
 
 def _gfx950_3d_tile_size_override(
@@ -6047,7 +6142,7 @@ def run_unified_attention_torch(
     # 150× the right path's cost) while keeping the decode-shape 3D
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
-    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    prefer_2d = backend == "auto" and problem.select_path(_launch_arch) == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch

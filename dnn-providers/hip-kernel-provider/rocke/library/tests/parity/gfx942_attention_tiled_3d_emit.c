@@ -296,6 +296,19 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
+    case 18:
+        /* num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 40;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }

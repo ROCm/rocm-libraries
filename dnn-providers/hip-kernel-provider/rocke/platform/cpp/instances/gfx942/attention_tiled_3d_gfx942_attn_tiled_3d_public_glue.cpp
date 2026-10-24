@@ -563,11 +563,8 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         ATTN3D_REASON(reason_buf);
         return false;
     }
-    if(16 % num_queries_per_kv != 0)
-    {
-        ATTN3D_REASON("tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16");
-        return false;
-    }
+    /* A num_queries_per_kv that does not divide BLOCK_M=16 is supported: see
+     * supports_tiled_3d in the Python twin. */
     ATTN3D_REASON("supported");
     return true;
 #undef ATTN3D_REASON

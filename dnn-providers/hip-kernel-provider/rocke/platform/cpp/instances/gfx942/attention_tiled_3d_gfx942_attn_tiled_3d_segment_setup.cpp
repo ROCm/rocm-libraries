@@ -624,6 +624,13 @@ void rocke_gfx942_attention_tiled_3d_emit_early_zero_fill(
             rocke_value_t* row_ok_a = rocke_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len);
             rocke_value_t* row_ok_b = rocke_b_cmp_lt(B, qh_r, rocke_b_const_i32(B, NUM_QH));
             rocke_value_t* row_ok = rocke_b_land(B, row_ok_a, row_ok_b);
+            /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+            if(CFG.BLOCK_Q * NQK < CFG.BLOCK_M)
+            {
+                rocke_value_t* vr = rocke_b_const_i32(B, CFG.BLOCK_Q * NQK);
+                rocke_value_t* row_vr = rocke_b_cmp_lt(B, row, vr);
+                row_ok = rocke_b_land(B, row_ok, row_vr);
+            }
             rocke_value_t* qp_r_safe = rocke_b_select(B, row_ok, qp_r, rocke_b_const_i32(B, 0));
             rocke_value_t* qh_r_safe = rocke_b_select(B, row_ok, qh_r, rocke_b_const_i32(B, 0));
             rocke_value_t* qtoken = rocke_b_add(B, ctx->cu_q_start, qp_r_safe);
@@ -657,6 +664,13 @@ void rocke_gfx942_attention_tiled_3d_emit_early_zero_fill(
                     rocke_value_t* row_ok_a = rocke_b_cmp_lt(B, qp_r, ctx->cur_batch_q_len);
                     rocke_value_t* row_ok_b = rocke_b_cmp_lt(B, qh_r, rocke_b_const_i32(B, NUM_QH));
                     rocke_value_t* row_ok = rocke_b_land(B, row_ok_a, row_ok_b);
+                    /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+                    if(CFG.BLOCK_Q * NQK < CFG.BLOCK_M)
+                    {
+                        rocke_value_t* vr = rocke_b_const_i32(B, CFG.BLOCK_Q * NQK);
+                        rocke_value_t* row_vr = rocke_b_cmp_lt(B, row, vr);
+                        row_ok = rocke_b_land(B, row_ok, row_vr);
+                    }
                     rocke_value_t* qp_r_safe
                         = rocke_b_select(B, row_ok, qp_r, rocke_b_const_i32(B, 0));
                     rocke_value_t* qh_r_safe

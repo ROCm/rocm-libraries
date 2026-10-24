@@ -312,8 +312,9 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    if 16 % num_queries_per_kv != 0:
-        return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
+    # A num_queries_per_kv that does not divide BLOCK_M=16 leaves the last
+    # 16 % num_queries_per_kv rows of a q-block as padding; the kernel masks
+    # their stores (VALID_ROWS), as they alias the next q-block's rows.
     return True, "supported"
 
 
@@ -359,6 +360,9 @@ def build_unified_attention_3d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
+    # Rows past BLOCK_Q * NQK are q-block padding when NQK does not divide
+    # BLOCK_M; they must not store, as they alias the next q-block's rows.
+    VALID_ROWS = spec.block_q * NQK
     NUM_KV = spec.num_kv_heads
     NUM_QH = spec.num_query_heads
     NUM_SEG = spec.num_segments
@@ -513,6 +517,8 @@ def build_unified_attention_3d_tiled(
             row_ok = b.land(
                 b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
             )
+            if VALID_ROWS < spec.block_m:
+                row_ok = b.land(row_ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
             qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
             qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
             qtoken = b.add(cu_q_start, qp_r_safe)
@@ -532,6 +538,8 @@ def build_unified_attention_3d_tiled(
                 row_ok = b.land(
                     b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
                 )
+                if VALID_ROWS < spec.block_m:
+                    row_ok = b.land(row_ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
                 qp_r_safe = b.select(row_ok, qp_r, b.const_i32(0))
                 qh_r_safe = b.select(row_ok, qh_r, b.const_i32(0))
                 qtoken = b.add(cu_q_start, qp_r_safe)
@@ -1054,6 +1062,8 @@ def build_unified_attention_3d_tiled(
     row_ok = b.land(
         b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
     )
+    if VALID_ROWS < spec.block_m:
+        row_ok = b.land(row_ok, b.cmp_lt(lane_col, b.const_i32(VALID_ROWS)))
     causal_lim = b.add(context_len, qp_r)
 
     if USE_ALIBI:

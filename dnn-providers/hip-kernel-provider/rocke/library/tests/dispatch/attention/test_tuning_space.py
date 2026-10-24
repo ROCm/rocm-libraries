@@ -172,10 +172,16 @@ class TestTuningSpace(unittest.TestCase):
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
         other value stays reachable, and every id records the policy built."""
         for arch in ("gfx950", "gfx942"):
-            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
-                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+            # Decode streams K/V past the caches only when it exceeds the
+            # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
+            for seqlen_q, batch, auto in (
+                (1, 64, "stream"),
+                (1, 1, "all"),
+                (1024, 1, "all"),
+            ):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
                     prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
-                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
                     specs = _sampled(prefix, 1000, **kw)
                     kernels = {repr(s.kernel_spec) for s in specs}
                     self.assertEqual(len(kernels), len(specs))
