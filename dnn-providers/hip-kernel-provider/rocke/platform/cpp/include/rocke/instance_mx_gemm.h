@@ -18,8 +18,8 @@
  * The MX GEMM uses the OCP MX-spec shared-exponent format: each 32-element
  * mantissa block carries one 8-bit biased E8M0 scale (bias 127). v1 ships fp8e4m3 /
  * bf8e5m2 mantissa, group_k=32, 16x16 tiles, wave64, f32 output. The body
- * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0 decode +
- * scale-apply chain (decode_mx_scale_e8m0).
+ * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0
+ * scale-apply step (fma_with_mx_scale_pair).
  *
  * SPEC AS AN EXPLICIT C STRUCT. The Python dataclass is a frozen value type with
  * defaults. In C the caller fills a rocke_mx_gemm_spec_t;

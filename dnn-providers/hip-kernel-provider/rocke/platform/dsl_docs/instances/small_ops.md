@@ -771,12 +771,10 @@ Per-element math::
 
  A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
 
-The kernel uses :func:`rocke.helpers.decode_mx_scale_e8m0` to turn
-the E8M0 byte into an f32 multiplier (per the OCP MX spec: the byte
-is unsigned, codes 0..254 give ``2^(code - 127)`` and code 255 gives
-NaN) and
-:func:`rocke.helpers.apply_mx_scale` to apply the scale before the
-accumulate.
+The kernel scales each group's MFMA result with
+:func:`rocke.helpers.fma_with_mx_scale_pair` (see the MX GEMM section
+of ``instances/gemm.md`` for the scale contract and why the two scale
+exponents are added as integers).
 
 v1 ships fp8 and bf8 mantissa with ``group_k=32`` (the MX spec
 default); fp4 and fp6 mantissa variants land with the matching

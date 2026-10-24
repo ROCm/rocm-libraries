@@ -69,7 +69,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
 | `helpers/streamk.py` | `StreamKPartition`, `StreamKReductionStrategy`, `compute_streamk_grid_size`, `emit_streamk_decode`, `streamk_num_macro_tiles`. Tile-id decode + grid sizing for the StreamK GEMM family. |
 | `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32`, `dequant_i4_byte_to_fp8_pair`, `dequant_i4_byte_to_bf8_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
-| `helpers/mx_scale.py` | `decode_mx_scale_e8m0`, `apply_mx_scale`, `load_and_decode_mx_scale_byte`. OCP MX shared-exponent decode + per-block fmul. |
+| `helpers/mx_scale.py` | `decode_mx_scale_e8m0`, `apply_mx_scale`, `fma_with_mx_scale_pair`, `load_and_decode_mx_scale_byte`. OCP MX shared-exponent decode + per-block fmul; scale-pair fma for an A and a B scale. |
 | `helpers/preshuffle.py` | `PreshuffleBSpec`, `emit_preshuffleb_offset`, `host_preshuffle_layout`. Tile-major B-layout descriptor for FP8 / BF8 / i4 GEMM bandwidth path. |
 | `helpers/gather_scatter.py` | `gather_row_offset`, `scatter_token_offset`, `load_sorted_token_id`, `load_sorted_topk_weight`. Per-token indirect-address chain for the fused-MoE gather / topk-weighted scatter kernels; consumes the moe-sort outputs. |
 | `helpers/rotary.py` | `RotaryLayout`, `RotarySpec`, `pair_indices`, `load_cos_sin`, `apply_rotary_pair_f32`. RoPE primitives for both interleaved (GPT-J) and LLaMA-half layouts; one (cos, sin) f32 pair per call, 2x2 rotation lowering to two `v_fma_f32`. |

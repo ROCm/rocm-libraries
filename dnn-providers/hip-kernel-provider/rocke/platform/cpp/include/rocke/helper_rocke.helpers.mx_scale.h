@@ -3,9 +3,10 @@
  *
  * rocke/helper_rocke.helpers.mx_scale.h -- C99 port of rocke.helpers.mx_scale.
  *
- * Scope of THIS file: only `decode_mx_scale_e8m0` is ported here (the other MX
- * helpers in helpers/mx_scale.py -- apply_mx_scale, load_and_decode_mx_scale_byte,
- * load_and_decode_mx_scales_wave -- are out of scope for this phase).
+ * Scope of THIS file: `decode_mx_scale_e8m0` and `fma_with_mx_scale_pair` are
+ * ported here (the other MX helpers in helpers/mx_scale.py -- apply_mx_scale,
+ * load_and_decode_mx_scale_byte, load_and_decode_mx_scales_wave -- are out of
+ * scope for this phase).
  *
  * MX (microscaling) shared-exponent helper. Decodes an 8-bit E8M0 scale code
  * (one byte per 32-element mantissa block) into its f32 multiplier, per the OCP
@@ -46,6 +47,25 @@ extern "C" {
  * (ROCKE_ERR_VALUE) is set with the Python-matching message and NULL is returned.
  * Returns the f32 multiplier Value (ready for an MX-scale fmul). */
 rocke_value_t* rocke_decode_mx_scale_e8m0(rocke_ir_builder_t* b, rocke_value_t* e8m0);
+
+/* ``value * 2^(ea + eb) + addend`` for two E8M0 scale bytes, as one fma; NaN
+ * if either code is 255. ``ea``, ``eb`` are the unbiased exponents of the i8
+ * codes `a_e8m0`, `b_e8m0`; `value` and `addend` are matching f32 vectors.
+ *
+ * The two exponents are added as integers and never formed into one f32
+ * scale, which would overflow to Inf or flush to zero for large or small
+ * codes: with ``ea + eb = pre + fused``, ``fused`` clamped to -127..127, the
+ * result is ``fma(value * 2^pre, 2^fused, addend)``. See the Python docstring
+ * of rocke.helpers.mx_scale.fma_with_mx_scale_pair for why this is exact.
+ *
+ * On a non-f32-vector value, a mismatched addend or a non-i8 code the
+ * builder's sticky error (ROCKE_ERR_VALUE) is set with the Python-matching
+ * message and NULL is returned. Returns the result vector Value. */
+rocke_value_t* rocke_fma_with_mx_scale_pair(rocke_ir_builder_t* b,
+                                            rocke_value_t* value,
+                                            rocke_value_t* a_e8m0,
+                                            rocke_value_t* b_e8m0,
+                                            rocke_value_t* addend);
 
 #ifdef __cplusplus
 }

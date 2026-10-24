@@ -126,7 +126,7 @@ compute_streamk_grid_size, emit_streamk_decode, streamk_num_macro_tiles
 unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8
 dequant_i4_byte_to_fp8_pair, dequant_i4_byte_to_bf8_pair
 # OCP MX E8M0 shared-exponent (helpers/mx_scale.py)
-decode_mx_scale_e8m0, apply_mx_scale, load_and_decode_mx_scale_byte
+decode_mx_scale_e8m0, apply_mx_scale, fma_with_mx_scale_pair, load_and_decode_mx_scale_byte
 # Preshuffled-B layout (helpers/preshuffle.py)
 PreshuffleBSpec, emit_preshuffleb_offset, host_preshuffle_layout
 # FP8 / BF8 MFMA catalog (helpers/atoms.py)

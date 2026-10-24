@@ -373,12 +373,14 @@ block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8
 mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
 matching unpack helpers as v2.
 
-The decode chain
-(:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) follows the OCP MX spec: the
-E8M0 byte is an unsigned biased exponent, codes 0..254 decode to
-exactly ``2^(code - 127)`` (code 0 is the f32 subnormal ``2^-127``)
-and code 255 decodes to NaN.
+The scales follow the OCP MX spec: the E8M0 byte is an unsigned
+biased exponent, codes 0..254 mean exactly ``2^(code - 127)`` (code 0
+is the f32 subnormal ``2^-127``) and code 255 means NaN. Each group's
+MFMA result is scaled by :func:`rocke.helpers.fma_with_mx_scale_pair`,
+which adds the A and B scale exponents as integers instead of
+multiplying two decoded f32 scales: that product spans
+``2^-254..2^254`` and would overflow or flush to zero in f32 even when
+the output is an ordinary f32.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

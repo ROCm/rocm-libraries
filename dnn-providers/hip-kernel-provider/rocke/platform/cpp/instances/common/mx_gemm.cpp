@@ -6,7 +6,7 @@
  *
  * The build entry mirrors the Python build_mx_gemm one op at a time so a
  * reviewer can diff line by line: same param order/attrs, same K-group
- * scf.for_iter, same per-group E8M0 decode + scale-fold, same store epilogue.
+ * scf.for_iter, same per-group E8M0 scale-fold, same store epilogue.
  *
  * Builder primitives are rocke/ir.h's rocke_b_*; the MX scale decode, quant type
  * map, MFMA atom, and GEMM load/store helpers are the already-ported C helpers.
@@ -411,12 +411,10 @@ rocke_kernel_def_t*
 
         rocke_value_t* a_scale_off;
         rocke_value_t* b_scale_off;
-        rocke_value_t* a_scale;
-        rocke_value_t* b_scale;
-        rocke_value_t* ab_scale;
+        rocke_value_t* a_scale_code;
+        rocke_value_t* b_scale_code;
         rocke_value_t* k_group_base;
         rocke_value_t* group_acc;
-        rocke_value_t* ab_scale_vec;
         rocke_value_t* new_outer;
 
         /* a_scale_off = b.add(a_scale_row_base, kg) */
@@ -425,12 +423,10 @@ rocke_kernel_def_t*
         b_scale_off
             = rocke_b_add(b, rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->N)), n_global_col);
 
-        /* a_scale = decode_mx_scale_e8m0(b, b.global_load_i8(AScale, a_scale_off)) */
-        a_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, AScale, a_scale_off, 0));
-        /* b_scale = decode_mx_scale_e8m0(b, b.global_load_i8(BScale, b_scale_off)) */
-        b_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, BScale, b_scale_off, 0));
-        /* ab_scale = b.fmul(a_scale, b_scale) */
-        ab_scale = rocke_b_fmul(b, a_scale, b_scale);
+        /* a_scale_code = b.global_load_i8(AScale, a_scale_off) */
+        a_scale_code = rocke_b_global_load_i8(b, AScale, a_scale_off, 0);
+        /* b_scale_code = b.global_load_i8(BScale, b_scale_off) */
+        b_scale_code = rocke_b_global_load_i8(b, BScale, b_scale_off, 0);
 
         /* k_group_base = b.mul(kg, b.const_i32(group_k)) */
         k_group_base = rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->group_k));
@@ -458,10 +454,10 @@ rocke_kernel_def_t*
             group_acc = rocke_b_mma(b, atom->name, a_vec, b_vec, group_acc, NULL, 0);
         }
 
-        /* ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane) */
-        ab_scale_vec = rocke_b_vector_splat(b, ab_scale, atom->c_per_lane);
-        /* new_outer = b.vector_fma(group_acc, ab_scale_vec, outer_acc) */
-        new_outer = rocke_b_vector_fma(b, group_acc, ab_scale_vec, outer_acc);
+        /* new_outer = fma_with_mx_scale_pair(b, group_acc, a_scale_code,
+         *                                    b_scale_code, outer_acc) */
+        new_outer
+            = rocke_fma_with_mx_scale_pair(b, group_acc, a_scale_code, b_scale_code, outer_acc);
         /* b.scf_yield(new_outer) */
         {
             rocke_value_t* yvals[1];
