@@ -7443,6 +7443,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
     #   same B never request the same address at the same time, which defeats
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
+    # - block scales (UseScaleAB=Block) without any compile-time or runtime stagger
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
@@ -7450,7 +7451,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
        kernel["UseSubtileImpl"] or \
-       clusterEnabled(kernel["ClusterDim"]):
+       clusterEnabled(kernel["ClusterDim"]) or \
+       (kernel["ProblemType"]["UseScaleAB"] == "Block" and kernel["StaggerU"] == 0
+        and not kernel["InternalSupportParams"]["SupportCustomStaggerU"]):
       self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1

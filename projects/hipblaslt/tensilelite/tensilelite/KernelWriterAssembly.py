@@ -90,7 +90,7 @@ from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave
 from .SolutionStructs import isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
 from .SolutionStructs.Validators.DirectToVgprDot2 import DOT2_DTVA_ITEM, dot2DtvADoubleBuffered, \
-  dot2DtvASlotPipelined
+  dot2DtvASlotPipelined, dot2NoLdsAB
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -193,17 +193,7 @@ class KernelWriterAssembly(KernelWriter):
 
     isCustom = isCustomKernelConfig(kernel)
     try:
-      if kernel.get("W4A16Decode"):
-        rocIsa.getInstance().setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
-        from .KernelWriterW4A16Decode import DecodeConfig, KernelWriterW4A16Decode
-        from .CustomKernels import _buildCustomKernelFromMetadata
-        import yaml
-        config = DecodeConfig.fromSolution(kernel)
-        code = KernelWriterW4A16Decode(config).generate(getKernelFileBase(self.debugConfig.splitGSU, kernel))
-        metadata = yaml.safe_load(code.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])
-        kernel["CustomKernel"] = _buildCustomKernelFromMetadata(config.kernelName(), metadata, kernel)
-        kernel["CustomKernel"]["generated"] = True
-      elif isCustom:
+      if isCustom:
         code = self._getCustomKernelSource(kernel)
         # The occupancy formula in compute_occupancy_from_resources is
         # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
@@ -2584,6 +2574,8 @@ class KernelWriterAssembly(KernelWriter):
 
   def localReadAddresses(self, kernel, tPA, tPB, tPM):
     module = Module("Local Read Addresses")
+    if dot2NoLdsAB(kernel):
+      return module
 
     ####################################
     # Local Read Addresses
@@ -2674,6 +2666,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.lwaUnrollAssignment(kernel, tPM))
 
     # first offsets
+    if dot2NoLdsAB(kernel):
+      return module
     module.addComment1("local write addresses: first offset a")
     if not kernel["enableTDMA"]:
       module.add(self.lwaFirstOffset(kernel, tPA))
@@ -2797,6 +2791,15 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["GlobalSplitU"] != 0:
           module.add(SAndB32(dst=sgpr(tmpSgpr.idx+1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr(tmpSgpr.idx), src1=sgpr(tmpSgpr.idx+1)))
+        # WaveSplitK kernels are short memory streams, so every wave pays the
+        # division latency; skip a division whose quotient is 0.
+        skipZeroDiv = kernel["WaveSplitK"]
+        if skipZeroDiv:
+          labelWG2 = Label(self.labels.getNameInc("RemapWG2Done"), "")
+          labelWG1 = Label(self.labels.getNameInc("RemapWG1Done"), "")
+          module.add(SMovB32(dst=sgpr("WorkGroup2"), src=0))
+          module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr.idx), comment="wg2 == 0?"))
+          module.add(SCBranchSCC1(labelName=labelWG2.getLabelName()))
         module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr.idx, dReg="WorkGroup0", divReg=tmpSgpr.idx, rReg=tmpSgpr.idx+1,\
                                         tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
         module.add(SMovB32(dst=sgpr("WorkGroup2"), src=sgpr(tmpSgpr.idx)))
@@ -2809,6 +2812,11 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["GlobalSplitU"] != 0:
           module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr(tmpSgpr.idx), src1=sgpr(tmpSgpr.idx+1)))
         module.add(SSubU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr.idx)))
+        if skipZeroDiv:
+          module.add(labelWG2)
+          module.add(SMovB32(dst=sgpr("WorkGroup1"), src=0))
+          module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr("NumWorkGroups0"), comment="wg1 == 0?"))
+          module.add(SCBranchSCC1(labelName=labelWG1.getLabelName()))
         module.addComment0("wg1 = idxWG01 * smallMagicNumber(1/numWG0)")
         module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr.idx, dReg="WorkGroup0", divReg="NumWorkGroups0", rReg=tmpSgpr.idx+1,\
                                         tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
@@ -2817,6 +2825,8 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment0("wg0 = idxWG01 - wg1 * numWG0")
         module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0")))
         module.add(SSubU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr.idx)))
+        if skipZeroDiv:
+          module.add(labelWG1)
 
       # early stop if wgIdx exceed wg needed
       if earlyStop:
@@ -5430,8 +5440,15 @@ class KernelWriterAssembly(KernelWriter):
       # Aligned origin: (wg0*MT0/8)*4*kGroups == (wg0*MT0/2)*kGroups.
       module.add(SMulI32(dst=sgpr(tmp), src0=sgpr("WorkGroup0"), src1=kernel["MacroTile0"],
                          comment="scaleZeroA: workgroup row origin"))
-      module.add(SLShiftRightB32(dst=sgpr(tmp), shiftHex=1, src=sgpr(tmp),
-                                 comment="scaleZeroA: aligned row origin to bytes"))
+      if kernel["MacroTile0"] % 8:
+        # Start at the 8-row word holding the first row; the final offsets add the rest.
+        module.add(SLShiftRightB32(dst=sgpr(tmp), shiftHex=3, src=sgpr(tmp),
+                                   comment="scaleZeroA: row origin to words"))
+        module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=2, src=sgpr(tmp),
+                                  comment="scaleZeroA: words to bytes"))
+      else:
+        module.add(SLShiftRightB32(dst=sgpr(tmp), shiftHex=1, src=sgpr(tmp),
+                                   comment="scaleZeroA: aligned row origin to bytes"))
       module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("StrideScaleA"),
                          comment="scaleZeroA: * kGroups"))
 
@@ -5478,7 +5495,18 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["ScaleZeroPointA"]:
       # Keep a linear nibble index; its low bit selects within the loaded byte.
       dstZ = "GlobalReadOffsetScaleZeroA+%u" % graIdx
-      module.add(VLShiftRightB32(dst=vgpr(dstZ), shiftHex=3, src=vgpr(vgprTile),
+      row = vgprTile
+      if kernel["MacroTile0"] % 8:
+        # The SRD starts at the word of the tile's first row; count rows from there.
+        row = tmp + 1
+        with self.allocTmpSgpr(1, tag="blockScaleAFinalOffset_rowInWord") as tmpSgprInfo:
+          module.add(SMulI32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("WorkGroup0"), src1=kernel["MacroTile0"],
+                             comment="scaleZeroA: workgroup row origin"))
+          module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr(tmpSgprInfo.idx), src1=7,
+                             comment="scaleZeroA: origin row within its word"))
+          module.add(VAddU32(dst=vgpr(row), src0=sgpr(tmpSgprInfo.idx), src1=vgpr(vgprTile),
+                             comment="scaleZeroA: row from the word origin"))
+      module.add(VLShiftRightB32(dst=vgpr(dstZ), shiftHex=3, src=vgpr(row),
                                  comment="scaleZeroA: row / 8"))
       module.add(VMulLOU32(dst=vgpr(dstZ), src0=sgpr("StrideScaleA"), src1=vgpr(dstZ),
                            comment="scaleZeroA: (row/8) * kGroups"))
@@ -5486,7 +5514,7 @@ class KernelWriterAssembly(KernelWriter):
                          comment="scaleZeroA: + kGroup -> word offset"))
       module.add(VLShiftLeftB32(dst=vgpr(dstZ), shiftHex=3, src=vgpr(dstZ),
                                 comment="scaleZeroA: word to nibble index"))
-      module.add(VAndB32(dst=vgpr(tmp), src0=7, src1=vgpr(vgprTile),
+      module.add(VAndB32(dst=vgpr(tmp), src0=7, src1=vgpr(row),
                          comment="scaleZeroA: nibble = row & 7"))
       module.add(VOrB32(dst=vgpr(dstZ), src0=vgpr(tmp), src1=vgpr(dstZ),
                         comment="scaleZeroA: (word << 3) | nibble"))
@@ -12924,11 +12952,18 @@ class KernelWriterAssembly(KernelWriter):
       g2lIdx = 0
       loadWidth = tP["globalReadInstruction"].totalWidth # load width in elements?
       bpe = tP["bpeGR"] if isAB else tP["bpe"]
-      bpl = bpe * tP["glvw"]  # bytes per load
-      isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
-          self.states.asmCaps, tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, tc))
       isLds = True if kernel["DirectToLds%s"%tc] else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
+      bpl = bpe * tP["glvw"]  # bytes per load
+      # A vector wider than one load is split into nrcv/nrcvpi whole loads; they
+      # share the vector's offset and step through it with the instruction offset.
+      splitVector = isAB and kernel["BufferLoad"] and not isLds and not isTr \
+        and tP["nrcv"] > tP["nrcvpi"] and tP["nrcv"] % tP["nrcvpi"] == 0 \
+        and not (kernel["DirectToVgpr%s"%tc] and kernel["reorderGRInstForDTV%s"%tc])
+      if splitVector:
+        bpl = bpe * tP["nrcvpi"]
+      isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
+          self.states.asmCaps, tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, tc))
 
       directToLdsLoads = 0
       instOffset       = 0
@@ -12950,7 +12985,9 @@ class KernelWriterAssembly(KernelWriter):
               else:
                 i = sPara + (tP["nrcv"]//tP["nrcvpi"]) * (para + tP["nrc"] * (sPerp + tP["nrpv"] * perp))
               loopCnt += 1
-              graIdx = i * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
+              graIdx = (i - sPara if splitVector else i) * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
+              if splitVector:
+                instOffset = sPara * bpl
               g2lIdx = i * loadWidth * tP["bpeRatio"] if loadWidth != 3 else i * (loadWidth + 1) * tP["bpeRatio"]
 
               #TODO: remove this if upcoming compiler changes getting merged
@@ -18339,10 +18376,12 @@ class KernelWriterAssembly(KernelWriter):
                        scope=CacheScope.SCOPE_NONE, th=TemporalHint.TH_NONE, nv=NonVolatile.NV_NONE):
     # rpv = regs per vector
     rpv = bpl/4.0
+    # gfx10/gfx11 have no nt modifier; a non-temporal load streams with dlc instead.
+    dlc = bool(nt and self.states.asmCaps["HasDLCModifier"] and not self.states.asmCaps["HasNTModifier"])
 
     if useBuffer:
       rv = Module("Global Read")
-      mubuf = MUBUFModifiers(offen=True, offset12=int(offset), glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+      mubuf = MUBUFModifiers(offen=True, offset12=int(offset), glc=glc, slc=slc, dlc=dlc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
 
       # Nested buffer load implementation function for easy branching for soffset
       def bufferLoadImpl(soffset):
@@ -18406,7 +18445,7 @@ class KernelWriterAssembly(KernelWriter):
           dst = None if lds else vgpr(destVgpr, 4)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
-          mubuf2 = MUBUFModifiers(offen=True, offset12=offset+16, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+          mubuf2 = MUBUFModifiers(offen=True, offset12=offset+16, glc=glc, slc=slc, dlc=dlc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
           dst = None if lds else vgpr(_vgprOffset(destVgpr, 4), 2)
           rv.add(BufferLoadB64(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf2, comment=comment))
@@ -18417,7 +18456,7 @@ class KernelWriterAssembly(KernelWriter):
           dst = None if lds else vgpr(destVgpr, rpv//2)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
-          mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+          mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, dlc=dlc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
           dst = None if lds else vgpr(_vgprOffset(destVgpr, int(rpv//2)), rpv//2)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf2, comment=comment))
@@ -18426,7 +18465,7 @@ class KernelWriterAssembly(KernelWriter):
           rv = Module("emulated _buffer_load_b512")
           quarter_rpv = int(rpv//4)
           for i in range(4):
-            mubuf_n = MUBUFModifiers(offen=True, offset12=int(offset + i*bpl/4), glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+            mubuf_n = MUBUFModifiers(offen=True, offset12=int(offset + i*bpl/4), glc=glc, slc=slc, dlc=dlc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
             dst = vgpr(_vgprOffset(destVgpr, i*quarter_rpv), quarter_rpv)
             rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                   soffset=soffset, mubuf=mubuf_n, comment=comment))
@@ -18437,7 +18476,7 @@ class KernelWriterAssembly(KernelWriter):
       # if offset >= 4096, use soffset instead
       if offset >= 4096:
         if soffset in (0, "0"):
-          mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+          mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, dlc=dlc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
           with self.allocTmpSgpr(1, tag="chooseGlobalRead_tmpSgprInfo") as tmpSgprInfo:
             soffset = sgpr(tmpSgprInfo.idx)
             rv.add(SMovB32(dst=soffset, src=offset, comment="large offset"))

@@ -576,14 +576,15 @@ def test_zero_point_solution_is_valid(toolchain):
         assert sol.get("Valid") is True, f"G={blockSize} DepthU={depthU} should be valid"
 
 
-@pytest.mark.parametrize("custom", [False, True])
-def test_eight_row_alignment_applies_only_to_generated_kernels(toolchain, custom):
+@pytest.mark.parametrize("macroTile0", [1, 4, 12])
+def test_zero_points_accept_any_macro_tile0(toolchain, macroTile0):
+    # The zero-point SRD starts at the word of the tile's first row, so a tile
+    # does not have to cover whole 8-row words.
     from Tensile.SolutionStructs.Validators.BlockDequant import validateBlockDequantCombination
 
     params = dict(_solution(toolchain, zeroPoint=True))
-    params["MacroTile0"] = 4
-    params["CustomKernelName"] = "CustomAbsoluteRowAddressing" if custom else ""
-    assert validateBlockDequantCombination(params, False) is custom
+    params["MacroTile0"] = macroTile0
+    assert validateBlockDequantCombination(params, False) is True
 
 
 @pytest.mark.parametrize(
@@ -851,19 +852,14 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
         assert len(logic.solutions) == len(data["Solutions"])
         for solution in logic.solutions:
             assert not solution.get("CustomKernelName")
-            if solution.get("W4A16Decode"):
-                kernel, src = _emit_solution(toolchain, solution)
-                assert "v_dot2_f32_f16" in src
-                assert kernel["CustomKernel"]["generated"]
-                assert kernel["CustomKernel"]["args"][-1]["semantic"] == "ScaleBlockSizeA"
-                continue
             kernel, src = _emit_solution(toolchain, solution)
             assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
             args = kernel["CustomKernel"]["args"]
             assert args[-1]["semantic"] == "ScaleBlockSizeA"
             assert any(a["semantic"] == "AddressScaleZeroA" for a in args) == kernel["ProblemType"]["ScaleZeroPointA"]
             assert ".name:            groupSize" in src
-            assert "v_wmma_f32_16x16x16" in src
+            # Decode (WaveSplitK) multiplies with v_dot2, prefill with WMMA.
+            assert ("v_dot2_f32_f16" if kernel["WaveSplitK"] else "v_wmma_f32_16x16x16") in src
             assert "s[sgprScaleAGShift]" in src
             assert kernel["StaggerU"] == 0
             if not kernel["ProblemType"]["ScaleZeroPointA"]:
@@ -872,4 +868,4 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "v_pk_fma_f16" not in src
                     assert "0xe408e408" in src and "0xd480d480" in src
             seen.add(kernel["BaseName"])
-    assert len(seen) == 20
+    assert len(seen) == 41

@@ -190,3 +190,71 @@ def test_dtvb_no_lds(toolchain):
     assert not re.search(r"\bds_(store|load|write|read)", body)
     dots = re.findall(r"v_dot2_f32_f16 \S+, v\[vgprG2LA\+\d+\], v\[vgprG2LB\+\d+\]", body)
     assert len(dots) == 16
+
+
+def test_dtvb_wide_b_shares_one_offset(toolchain):
+    """A B vector wider than one load (32 halves) is four b128 loads stepping
+    through the vector with the instruction offset."""
+    sol = _solution(toolchain, **_dtvb(glvwA=32, depthU=1024))
+    assert sol.get("Valid") is True
+    body = _loopBody(_emit_solution(toolchain, sol)[1])
+    loads = re.findall(r"buffer_load_b128 v\[vgprG2LB\+(\d+):\S+, v\[vgprGlobalReadOffsetB\+(\d+)\], "
+                       r"\S+, 0 offen offset:(\d+)", body)
+    assert loads == [(str(4 * i), "0", str(16 * i)) for i in range(4)]
+
+
+def test_dtvb_wide_b_limit(toolchain):
+    assert _solution(toolchain, **_dtvb(glvwA=32, depthU=1024)).get("Valid") is True
+    # 64 halves (128 bytes) per vector is still too wide.
+    assert _solution(toolchain, **_dtvb(glvwA=64, depthU=2048)).get("Valid") is not True
+    # Without DirectToVgprDot2B the generic 24-byte limit stays.
+    assert _solution(toolchain, pgr=0, glvwA=32, depthU=1024,
+                     GlobalReadVectorWidthB=32).get("Valid") is not True
+
+
+@pytest.mark.parametrize("nt, mods", [(0, ""), (2, " slc"), (6, " slc dlc")])
+def test_non_temporal_a_streams_with_dlc(toolchain, nt, mods):
+    """gfx11 has no nt modifier; the nt bit of NonTemporalA becomes dlc."""
+    sol = _solution(toolchain, **_dtvb(glvwA=32, depthU=1024, NonTemporalA=nt))
+    assert sol["NonTemporalA"] == nt
+    body = _loopBody(_emit_solution(toolchain, sol)[1])
+    loads = re.findall(r"buffer_load_b128 v\[vgprG2LA\+\d+:\S+, \S+, \S+, 0 offen offset:0([a-z ]*?) //", body)
+    assert loads and set(loads) == {mods}
+
+
+def test_wave_split_k_skips_zero_quotient_division(toolchain):
+    """The 1D workgroup index is split without dividing when the quotient is 0."""
+    src = _emit_solution(toolchain, _solution(toolchain, **_dtvb()))[1]
+    for name in ("RemapWG2Done", "RemapWG1Done"):
+        assert re.search(r"s_cbranch_scc1 label_%s" % name, src)
+
+
+@pytest.mark.parametrize("tile0", [1, 3])
+def test_zero_point_tile_below_eight_rows(toolchain, tile0):
+    """A zero-point word holds eight rows; a smaller tile starts its SRD at the word
+    of its first row and adds the row's position within that word."""
+    sol = _solution(toolchain, zeroPoint=True, problemType={"ScaleBlockSizesA": [32]},
+                    **_dtvb(glvwA=32, depthU=1024, WorkGroup=[1, 1, 32], ThreadTile=[tile0, 1]))
+    assert sol.get("Valid") is True
+    src = _emit_solution(toolchain, sol)[1]
+    assert "scaleZeroA: row origin to words" in src
+    assert "scaleZeroA: origin row within its word" in src
+
+
+def test_block_scale_has_no_runtime_stagger_or_user_gsu(toolchain):
+    """The scale pointer follows neither a staggered K start nor a split K, so the
+    host must not request them and the kernel carries no stagger code."""
+    sol = _solution(toolchain, **_dtvb())
+    assert sol["InternalSupportParams"]["SupportCustomStaggerU"] is False
+    assert sol["InternalSupportParams"]["SupportUserGSU"] is False
+    src = _emit_solution(toolchain, sol)[1]
+    assert "StaggerUIter" not in src
+
+
+def test_dtvb_sets_up_no_lds_addresses(toolchain):
+    src = _emit_solution(toolchain, _solution(toolchain, **_dtvb()))[1]
+    assert "local read addresses: final offsets" not in src
+    assert "local write addresses: first offset" not in src
+    # A alone bypassing LDS still needs B's addresses.
+    src = _emit_solution(toolchain, _solution(toolchain, pgr=0, glvwA=8, ThreadTile=[1, 1]))[1]
+    assert "local read addresses: final offsets b" in src
