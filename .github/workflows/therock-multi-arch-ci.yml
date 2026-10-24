@@ -40,7 +40,7 @@ on:
         default: ""
       pr_labels:
         type: string
-        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). On pull_request events the labels come from the event payload instead."
+        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). A test_filter: label sets the test category of this manual run. On pull_request events the labels come from the event payload instead."
         default: ""
       prebuilt_stages:
         type: string
@@ -79,7 +79,9 @@ concurrency:
   # queued and in-progress runs for the same PR (presubmit) or commit
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  # A manual run gets its own group, so a long manual run and the postsubmit
+  # run for the same commit cannot cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}${{ github.event_name == 'workflow_dispatch' && '-dispatch' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -229,7 +231,10 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      # A manual run with a test_filter: label uses the category setup resolved
+      # from it (for example test_filter:workloads). Every other run,
+      # including every pull request, keeps the category from configure.
+      test_type: ${{ contains(inputs.pr_labels, 'test_filter:') && needs.setup.outputs.test_type || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
@@ -254,7 +259,7 @@ jobs:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ contains(inputs.pr_labels, 'test_filter:') && needs.setup.outputs.test_type || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}

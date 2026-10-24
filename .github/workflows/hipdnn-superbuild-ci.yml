@@ -252,6 +252,40 @@ jobs:
           set -euo pipefail
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
 
+      # Optional dnn-benchmarking workload graphs (workloads/*.tar.gz.dvc, see
+      # dnn-providers/integration-tests/docs/running-tests.md). Configure extracts whatever
+      # was pulled, so this MUST also precede configure. This lane builds on a
+      # runner with no GPU and does not execute the workloads, so what it proves
+      # is that the pinned pointers can be fetched and the archives extract. On a
+      # GPU machine, run them with the workloads category
+      # (`ctest -L workloads`); the `full` category excludes them.
+      # This runs on the nightly schedule and on manual runs, and on a PR only
+      # when it changes the pinned pointers.
+      - name: Select dnn-benchmarking workloads
+        id: workloads
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          fetch=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
+            if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
+              fetch=false
+            fi
+          fi
+          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dnn-benchmarking workloads
+        if: steps.workloads.outputs.fetch == 'true'
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/integration-tests/workloads
+          count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
+          echo "Fetched $count workload archive(s)"
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
@@ -514,6 +548,32 @@ jobs:
           count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
           echo "Fetched $count rocKE KDP(s)"
+
+      # Optional dnn-benchmarking workload graphs. See the Windows lane above.
+      - name: Select dnn-benchmarking workloads
+        id: workloads
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          fetch=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
+            if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
+              fetch=false
+            fi
+          fi
+          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dnn-benchmarking workloads
+        if: steps.workloads.outputs.fetch == 'true'
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/workloads
+          count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
+          echo "Fetched $count workload archive(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The

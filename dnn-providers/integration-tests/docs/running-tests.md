@@ -458,6 +458,57 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
 | `auto` mode, no `dvc pull` | The golden comparison silently fell back to a reference executor. To require golden data, use `--verification-mode golden`. |
 | `hipdnn_golden_data_tests` registers nothing | Golden `.bin` blobs were not pulled (or were pulled after configure). |
 
+## Optional dnn-benchmarking workloads
+
+`workloads/*.tar.gz.dvc` pin graph archives from the
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) repo (created with
+`dvc import`). They are not fetched by default. To run them:
+
+```bash
+cd dnn-providers/integration-tests
+dvc pull -R workloads   # fetch the archives (gitignored)
+cmake ...               # re-run configure; archives are extracted into the build tree
+./bin/hipdnn_integration_tests --gtest_filter='workloads_*'
+```
+
+Configure extracts each archive to `integration-test-bundles/workloads/<name>/`
+in the build tree. Discovery registers every graph `.json` as a graph-only
+bundle test named `workloads_<archive>_<subdir>.<graph>`, verified
+against a reference executor. Nothing is committed to the bundle tree.
+
+They run in their own `workloads` category (label `workloads`) in
+each provider's `test_categories_integration.yaml`, not in `quick`, `standard`,
+`comprehensive` or `full`: `full` excludes `workloads_*`. On gfx90a the
+MIOpen share takes about 30 minutes, which alone fills TheRock's 30-minute
+provider job. MIOpen's category runs `conv`, `bnorm` and `rocke_conv`;
+hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
+`ctest -L workloads` in that provider's build. `attn`, `norm`, `moe` and
+`rocke_sdpa` are not in any engine's category yet. The superbuild CI builds on a
+runner with no GPU, so it only proves the pointers fetch and the archives
+extract.
+
+To run the category on GPU runners in CI, start **TheRock Multi-Arch CI**
+(`therock-multi-arch-ci.yml`) by hand with a `test_filter:workloads`
+label:
+
+```bash
+gh workflow run therock-multi-arch-ci.yml --repo ROCm/rocm-libraries --ref develop \
+  -f pr_labels=test:miopenprovider,test:hipblasltprovider,test_filter:workloads \
+  -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none
+```
+
+On a manual run, a `test_filter:` label sets the test category; only the
+components that opt in to `workloads` in TheRock
+(`miopenprovider`, `hipblasltprovider`) run it. Pull requests, pushes and the
+nightly schedule never select it. TheRock accepts `workloads` only from
+the TheRock commit that adds it (ROCm/TheRock#9312); with an older TheRock pin
+the run stops in setup with `Unrecognized test_filter value`.
+
+hipBLASLt matmul graphs verify on the GPU reference (`GpuMatmulPlan`). On gfx90a
+the 578 `hipblaslt_*` graphs took about 4 minutes. `HIPBLASLT_ENGINE.toml` skips
+one shape whose 7.2e9-element operands the harness cannot fill. To take newer
+workloads, run `dvc update workloads/*.dvc` and commit the changed pointers.
+
 ## In CI
 
 - `.github/workflows/hipdnn-superbuild-ci.yml` configures with
