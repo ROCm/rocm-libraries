@@ -2335,7 +2335,7 @@ namespace
         {
             tensileProblem.setFusedGemmA2A(true);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
-            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+            tensileProblem.setWorld(prob.fused_a2a_world);
         }
 #endif
 
@@ -2632,7 +2632,7 @@ namespace
         {
             tensileProblem.setFusedGemmA2A(true);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
-            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+            tensileProblem.setWorld(prob.fused_a2a_world);
         }
 #endif
 
