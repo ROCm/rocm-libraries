@@ -4,7 +4,7 @@
 // The SDPA score pipeline the forward and backward kernels share, so each feature is written once
 // (the device counterpart of CpuFpReferenceSdpa::scoreRow). Include after the kernel's
 // MASK_TYPE / COMPUTE_TYPE defines. For key skv of row (b, h, sq), in order:
-// (q . k) * scale, softcap, + bias, + ALiBi; then the diagonal band masks it to -inf.
+// (q . k) * scale, softcap, + bias, + ALiBi; then the diagonal band and block mask mask it to -inf.
 
 #pragma once
 
@@ -54,6 +54,22 @@ __device__ inline float alibiSlope(long long h, long long numHeads)
         return exp2f(-8.0f * static_cast<float>(h + 1) / static_cast<float>(n));
     }
     return exp2f(-4.0f * static_cast<float>(2 * (h - n) + 1) / static_cast<float>(n));
+}
+
+// CpuFpReferenceSdpa::isBlockMasked: whether the block mask clears the 128 x 128 tile holding
+// score (sq, skv).
+__device__ inline bool
+    blockMasked(const SdpaScoreParams& p, long long b, long long h, long long sq, long long skv)
+{
+    if(p.blockMask == nullptr)
+    {
+        return false;
+    }
+    const long long tileKv = skv / 128;
+    const unsigned byte
+        = p.blockMask[b * p.blockMaskStr.s[0] + h * p.blockMaskStr.s[1]
+                      + (sq / 128) * p.blockMaskStr.s[2] + (tileKv / 8) * p.blockMaskStr.s[3]];
+    return ((byte >> static_cast<unsigned>(tileKv % 8)) & 1u) == 0;
 }
 
 // The score of an unmasked live key from its dot product: scale, softcap, + bias, + ALiBi.

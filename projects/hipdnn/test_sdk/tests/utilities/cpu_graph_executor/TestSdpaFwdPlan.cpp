@@ -21,7 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/SdpaFp8TestGraphs.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaFwdTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
@@ -781,6 +781,9 @@ INSTANTIATE_TEST_SUITE_P(
                "WithoutSeqLens", {true, true, false, DataType::INT32, std::nullopt}, false},
            PagedApplicabilityCase{
                "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7}, false},
+           // cuDNN: the table has exactly ceil(max_seq_len_kv / block size) entries (2, not 3).
+           PagedApplicabilityCase{
+               "TableWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 4}, false},
            PagedApplicabilityCase{
                "FloatPageTable", {true, true, true, DataType::FLOAT, std::nullopt}, false},
            // cuDNN: max_seq_len_kv without paging is rejected.
@@ -1706,9 +1709,9 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
 // changes one field of an accepted graph.
 TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
 {
-    namespace fp8 = hipdnn_test_sdk::utilities::sdpa_fp8_test;
-    const auto applicable = [](const auto& builder, const fp8::Fp8GraphSpec& spec) {
-        auto graphBuilder = fp8::makeFp8Graph(spec);
+    namespace graphs = hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const auto applicable = [](const auto& builder, const graphs::SdpaGraphSpec& spec) {
+        auto graphBuilder = graphs::makeSdpaGraph(spec);
         const GraphWrapper wrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap());
     };
@@ -1733,7 +1736,7 @@ TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
                              DataType::BFLOAT16>
         bf16;
 
-    fp8::Fp8GraphSpec spec;
+    graphs::SdpaGraphSpec spec;
     EXPECT_TRUE(applicable(ocp, spec));
     spec.withFullScaling();
     EXPECT_TRUE(applicable(ocp, spec));
@@ -1749,8 +1752,9 @@ TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
     spec = {};
     spec.withFullScaling().descaleS = false;
     EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
-    for(auto fp8::Fp8GraphSpec::*field :
-        {&fp8::Fp8GraphSpec::scaleO, &fp8::Fp8GraphSpec::amaxS, &fp8::Fp8GraphSpec::amaxO})
+    for(auto graphs::SdpaGraphSpec::*field : {&graphs::SdpaGraphSpec::scaleO,
+                                              &graphs::SdpaGraphSpec::amaxS,
+                                              &graphs::SdpaGraphSpec::amaxO})
     {
         spec = {};
         spec.*field = true;
@@ -1771,6 +1775,38 @@ TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
     EXPECT_TRUE(applicable(bf16, spec));
     spec.scaleO = true;
     EXPECT_FALSE(applicable(bf16, spec)) << "scale_o on bf16 inputs";
+}
+
+// cuDNN's block mask (SEM-025): UINT8 with cuDNN's tile shape [B, H_q, ceil(Sq / 128),
+// ceil(ceil(Skv / 128) / 8)]. Each case changes one field of an accepted graph (the GPU plan test
+// asserts the same rules).
+TEST(TestSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
+{
+    namespace graphs = hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const SdpaFwdPlanBuilder<DataType::BFLOAT16,
+                             DataType::BFLOAT16,
+                             DataType::BFLOAT16,
+                             DataType::BFLOAT16>
+        bf16;
+    const auto applicable = [&bf16](const graphs::SdpaGraphSpec& spec) {
+        auto graphBuilder = graphs::makeSdpaGraph(spec);
+        const GraphWrapper wrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return bf16.isApplicable(wrapper.getNode(0), wrapper.getTensorMap());
+    };
+    graphs::SdpaGraphSpec spec;
+    spec.fp8Type = DataType::BFLOAT16;
+    spec.descales = 0;
+    spec.blockMaskType = DataType::UINT8;
+    EXPECT_TRUE(applicable(spec));
+    spec.blockMaskType = DataType::INT8;
+    EXPECT_FALSE(applicable(spec)) << "UINT8 only";
+    spec.blockMaskType = DataType::UINT8;
+    for(const auto& dims : std::vector<std::vector<int64_t>>{
+            {2, 2, 1, 1}, {1, 1, 1, 1}, {1, 2, 2, 1}, {1, 2, 1, 2}, {1, 2, 1}})
+    {
+        spec.blockMaskDims = dims;
+        EXPECT_FALSE(applicable(spec)) << "dims must be [B, H_q, ceil(Sq/128), ceil(tiles/8)]";
+    }
 }
 
 TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)

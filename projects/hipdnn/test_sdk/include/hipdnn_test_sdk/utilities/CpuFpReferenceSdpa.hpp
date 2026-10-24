@@ -68,6 +68,9 @@ struct SdpaFwdOptions
     std::optional<float> softcap;
     /// cuDNN ALiBi: (skv - sq) * alibiSlope(h) after the bias (SEM-021).
     bool alibi = false;
+    /// cuDNN block-sparse mask (SEM-025): UINT8 [B, H, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)],
+    /// one bit per 128 x 128 score tile, least significant bit first; a clear bit masks the tile.
+    const hipdnn_data_sdk::utilities::TensorBase<uint8_t>* blockMask = nullptr;
     /// Outputs, FP32 [B, H, Sq, 1]: LSE = Max + log(Sum_exp) (SEM-023).
     hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr;
@@ -136,6 +139,11 @@ struct SdpaFwdOptions
     SdpaFwdOptions& setAlibi(bool value)
     {
         alibi = value;
+        return *this;
+    }
+    SdpaFwdOptions& setBlockMask(const hipdnn_data_sdk::utilities::TensorBase<uint8_t>* value)
+    {
+        blockMask = value;
         return *this;
     }
     SdpaFwdOptions& setLse(hipdnn_data_sdk::utilities::TensorBase<float>* value)
@@ -510,6 +518,7 @@ public:
         {
             throw std::invalid_argument("CpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
         }
+        validateBlockMask(options.blockMask, batch, numHeads, seqQ, seqKv);
 
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
@@ -977,8 +986,8 @@ private:
     }
 
     /// The score pipeline forward and backward share. For each live key skv of row (b, h, sq):
-    /// s = (q . k) * scale, then softcap, + bias, + ALiBi; keys the diagonal band masks, and keys
-    /// at or past liveKv, are -inf. softcapGrad, when given, receives d(softcap)/d(s) at each key
+    /// s = (q . k) * scale, then softcap, + bias, + ALiBi; keys the diagonal band or the forward's
+    /// block mask masks, and keys at or past liveKv, are -inf. softcapGrad, when given, receives d(softcap)/d(s) at each key
     /// the band keeps (the caller initialises it to 1).
     template <class QDataType, class KDataType, class ComputeDataType, class OptionsT>
     static void scoreRow(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
@@ -998,6 +1007,7 @@ private:
         const auto headDim = q.dims()[3];
         const auto slope = options.alibi ? static_cast<ComputeDataType>(alibiSlope(h, q.dims()[1]))
                                          : static_cast<ComputeDataType>(0.0);
+        const auto* blockMask = blockMaskOf(options);
         for(int64_t skv = 0; skv < liveKv; ++skv)
         {
             if(isMasked(sq,
@@ -1006,7 +1016,8 @@ private:
                         liveKv,
                         options.leftBound,
                         options.rightBound,
-                        options.topLeftAlignment))
+                        options.topLeftAlignment)
+               || isBlockMasked(blockMask, b, h, sq, skv))
             {
                 continue;
             }
@@ -1063,6 +1074,61 @@ private:
             }
         }
         return {maxVal, sumExp};
+    }
+
+    /// cuDNN's block-sparse tile size: each block-mask bit covers BLOCK_MASK_TILE x BLOCK_MASK_TILE.
+    static constexpr int64_t BLOCK_MASK_TILE = 128;
+
+    template <class MaskDataType>
+    static const hipdnn_data_sdk::utilities::TensorBase<uint8_t>*
+        blockMaskOf(const SdpaFwdOptions<MaskDataType>& options)
+    {
+        return options.blockMask;
+    }
+    // The backward has no block mask (cuDNN's backward node takes none).
+    template <class MaskDataType>
+    static const hipdnn_data_sdk::utilities::TensorBase<uint8_t>*
+        blockMaskOf(const SdpaBwdOptions<MaskDataType>& /*options*/)
+    {
+        return nullptr;
+    }
+
+    static void validateBlockMask(const hipdnn_data_sdk::utilities::TensorBase<uint8_t>* mask,
+                                  int64_t batch,
+                                  int64_t numHeads,
+                                  int64_t seqQ,
+                                  int64_t seqKv)
+    {
+        if(mask == nullptr)
+        {
+            return;
+        }
+        const auto tilesKv = (seqKv + BLOCK_MASK_TILE - 1) / BLOCK_MASK_TILE;
+        const std::vector<int64_t> want
+            = {batch, numHeads, (seqQ + BLOCK_MASK_TILE - 1) / BLOCK_MASK_TILE, (tilesKv + 7) / 8};
+        if(mask->dims() != want)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa: blockMask must be UINT8 [B, H, ceil(Sq / 128), "
+                "ceil(ceil(Skv / 128) / 8)]");
+        }
+    }
+
+    /// Whether the block mask clears the tile holding score (sq, skv).
+    static bool isBlockMasked(const hipdnn_data_sdk::utilities::TensorBase<uint8_t>* mask,
+                              int64_t b,
+                              int64_t h,
+                              int64_t sq,
+                              int64_t skv)
+    {
+        if(mask == nullptr)
+        {
+            return false;
+        }
+        const auto tileKv = skv / BLOCK_MASK_TILE;
+        const auto byte
+            = mask->getHostValue(std::vector<int64_t>{b, h, sq / BLOCK_MASK_TILE, tileKv / 8});
+        return ((static_cast<unsigned>(byte) >> static_cast<unsigned>(tileKv % 8)) & 1U) == 0;
     }
 
     /// The fp8 format of an fp8 element type, NONE for any other type.

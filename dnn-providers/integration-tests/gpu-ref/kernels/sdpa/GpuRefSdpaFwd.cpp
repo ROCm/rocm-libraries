@@ -162,7 +162,8 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
             dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
         }
         // The shared score pipeline (scale, softcap, bias, ALiBi), then the band.
-        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv))
+        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv)
+           || sdpa_common::blockMasked(args.score, b, h, sq, skv))
         {
             return negInf;
         }
