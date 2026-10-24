@@ -43,6 +43,9 @@ extern "C" {
 //! @details This function creates a hipTensor handle associated with the current device. To use a different device, call `hipInit(0)` to set the new device, then create another hipTensor handle with `hiptensorCreate()`.
 //! @param[out] handle A pointer to the `hiptensorHandle_t` pointer that will store the newly created handle.
 //! @returns `HIPTENSOR_STATUS_SUCCESS` if the handle is created successfully, otherwise an error code.
+//! Returns `HIPTENSOR_STATUS_ARCH_MISMATCH` if the architecture of the current device is not supported, and
+//! `HIPTENSOR_STATUS_HIP_ERROR` if the current device cannot be queried (for example, when no GPU is visible).
+//! In both cases `*handle` is set to `NULL`.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle);
 
 //! @brief Deallocates a hipTensor library handle.
@@ -58,17 +61,37 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorHandleResizePlanCache(hiptensorHandl
                                                                   const uint32_t    numEntries);
 
 //! @brief Writes the plan cache of a hipTensor handle to a file.
+//! @details The file records the hipTensor version and the device architecture and compute unit
+//! count, and can only be read back with the same version on the same kind of device.
 //! @param[in] handle The hipTensor handle whose plan cache will be written.
-//! @param[in] fileName The name of the file to write the cache to.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @param[in] fileName The name of the file to write the cache to. An existing file is overwritten.
+//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise. With the plan cache
+//! disabled, nothing is written and `HIPTENSOR_STATUS_SUCCESS` is returned.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is NULL.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` is NULL.
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file cannot be written.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorHandleWritePlanCacheToFile(const hiptensorHandle_t handle, const char fileName[]);
 
 //! @brief Reads a plan cache from a file into a hipTensor handle.
+//! @details The cache lines read replace those of the handle; the size of the cache is kept, so
+//! resize it with `hiptensorHandleResizePlanCache` before reading a file with more cachelines.
+//! On any error the plan cache of the handle is unchanged.
 //! @param[in] handle The hipTensor handle to populate with the plan cache.
 //! @param[in] fileName The name of the file to read the cache from.
-//! @param[out] numCachelinesRead On exit, this variable will hold the number of successfully-read cachelines.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @param[out] numCachelinesRead On exit, this variable will hold the number of successfully-read
+//! cachelines. With `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` it holds the number of cachelines
+//! the file needs.
+//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise. With the plan cache
+//! disabled, nothing is read, `numCachelinesRead` is set to 0 and `HIPTENSOR_STATUS_SUCCESS` is
+//! returned.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is NULL.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` or `numCachelinesRead` is NULL, or if the
+//! file was written by another hipTensor version (this includes the files of versions that did not
+//! record one) or on a device of another architecture or compute unit count.
+//! @retval HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE if the file holds more cachelines than the plan
+//! cache of the handle (see `hiptensorHandleResizePlanCache`).
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file cannot be read or is damaged.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorHandleReadPlanCacheFromFile(
     hiptensorHandle_t handle, const char fileName[], uint32_t* numCachelinesRead);
 
@@ -129,8 +152,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] descC Tensor descriptor for C.
 //! @param[in] modeC Array with `nmodeC` entries representing tensor C's modes.
 //! @param[in] opC Unary operator applied to each element of C.
-//! @param[in] descD Tensor descriptor for D (must match `descC`).
-//! @param[in] modeD Array with `nmodeD` entries representing tensor D's modes (must match `modeC`).
+//! @param[in] descD Tensor descriptor for D. C must carry the same modes as D, otherwise `HIPTENSOR_STATUS_NOT_SUPPORTED` is returned, with the same extents, otherwise `HIPTENSOR_STATUS_INVALID_VALUE` is returned. C's strides may differ from D's, except with a complex `descCompute`, which requires C and D to share a layout, otherwise `HIPTENSOR_STATUS_NOT_SUPPORTED` is returned.
+//! @param[in] modeD Array with `nmodeD` entries representing tensor D's modes (the same set as `modeC`, in any order).
 //! @param[in] descCompute Data type used for intermediate computation of \f$T = A * B\f$.
 //! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When data type combinations or operations aren't supported.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values.
@@ -159,12 +182,21 @@ HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorDestroyOperationDescriptor(hiptensorOperationDescriptor_t desc);
 
 //! @brief Configures an attribute in a `hiptensorOperationDescriptor_t` object.
+//!
+//! @details `sizeInBytes` must match the attribute: the size of its value for
+//! `HIPTENSOR_OPERATION_DESCRIPTOR_TAG`, `SCALAR_TYPE`, `FLOPS` and `MOVED_BYTES`; one `uint32_t`
+//! per mode of the output tensor for `PADDING_LEFT` and `PADDING_RIGHT`; and one element of the
+//! output tensor's type for `PADDING_VALUE`. Output padding isn't supported, so `PADDING_LEFT` and
+//! `PADDING_RIGHT` accept only zeros.
 //! @param[in] handle Opaque handle for the hipTensor library context.
 //! @param[in] desc The `hiptensorOperationDescriptor_t` object being modified.
 //! @param[in] attr The attribute to configure.
 //! @param[in] buf Pointer to the buffer containing the attribute's new value.
 //! @param[in] sizeInBytes Size of the `buf` in bytes.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` when successful, otherwise returns an error code.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the attribute is set.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `desc` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown, or the padding isn't zero.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorOperationDescriptorSetAttribute(const hiptensorHandle_t                 handle,
                                              hiptensorOperationDescriptor_t          desc,
@@ -173,12 +205,18 @@ HIPTENSOR_EXPORT hiptensorStatus_t
                                              size_t                                  sizeInBytes);
 
 //! @brief Extracts an attribute from a `hiptensorOperationDescriptor_t` object.
+//!
+//! @details `sizeInBytes` must match the attribute, as for `hiptensorOperationDescriptorSetAttribute`.
+//! `PADDING_VALUE` reads as zero until it is set.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] desc The `hiptensorOperationDescriptor_t` object to examine.
 //! @param[in] attr The attribute to extract.
 //! @param[out] buf Pointer to the buffer where the attribute value will be written.
 //! @param[in] sizeInBytes The buffer size in bytes.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` when successful, otherwise returns an error code.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the attribute is read.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `desc` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorOperationDescriptorGetAttribute(const hiptensorHandle_t                 handle,
                                              hiptensorOperationDescriptor_t          desc,
@@ -285,12 +323,12 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! The resulting plan can be passed to the corresponding `hiptensor*Execute` function to perform the operation.
 //! The plan is created for the currently active HIP device.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
-//! @param[out] plan Pointer to the `hiptensorPlan_t` structure that will contain all execution information (including selected kernel).
+//! @param[out] plan Pointer to the `hiptensorPlan_t` structure that will contain all execution information (including selected kernel). Set to `NULL` when the plan isn't created, so there is nothing to destroy.
 //! @param[in] desc Opaque structure encoding the operation details.
-//! @param[in] pref Opaque structure limiting the applicable kernels. May be `nullptr` to use defaults.
+//! @param[in] pref Opaque structure limiting the applicable kernels. May be `nullptr` to use the defaults of `hiptensorCreatePlanPreference` with `HIPTENSOR_ALGO_DEFAULT` and `HIPTENSOR_JIT_MODE_NONE`. The plan keeps its own copy, so `pref` may be shared by several plans, changed, or destroyed afterwards.
 //! @param[in] workspaceSizeLimit Maximum workspace size in bytes that the operation may use.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When a viable kernel is found.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When no viable kernel can be found.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When no viable kernel can be found, or when a tensor, including the intermediate `A * B` of a trinary contraction, exceeds the size limit of the kernels: its elements, from the lowest to the highest addressed by its lengths and strides, span 2^31 bytes or more (for complex types, per real or imaginary part), or, for an `HIPTENSOR_R_64F` permutation or elementwise binary or trinary operation with an input laid out differently from the output, 2^29 bytes or more. The limits are conservative, so some tensors at or above them would also have given correct results.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` When the provided workspace is too small.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
@@ -359,8 +397,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
 //! @param[in] descD Tensor descriptor for D.
 //! @param[in] modeD Array representing tensor D's modes.
 //! @param[in] opD Unary operator applied to each element of D.
-//! @param[in] descE Tensor descriptor for E (output, must match `descD`).
-//! @param[in] modeE Array representing tensor E's modes (must match `modeD`).
+//! @param[in] descE Tensor descriptor for E (output). D must carry the same modes as E, otherwise `HIPTENSOR_STATUS_NOT_SUPPORTED` is returned, with the same extents, otherwise `HIPTENSOR_STATUS_INVALID_VALUE` is returned. D's strides may differ from E's, except with a complex `descCompute`, which requires D and E to share a layout, otherwise `HIPTENSOR_STATUS_NOT_SUPPORTED` is returned.
+//! @param[in] modeE Array representing tensor E's modes (the same set as `modeD`, in any order).
 //! @param[in] descCompute Data type used for intermediate computation.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
@@ -467,7 +505,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t hand
 //! @param[in] opC Unary operator applied to each element of C before processing. C's original data remains unchanged.
 //! @param[in] descD Descriptor containing D's data type, modes, and strides. Currently must be identical to descC.
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
-//! @param[in] opAC Element-wise binary operator.
+//! @param[in] opAC Element-wise binary operator: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //! @param[in] descCompute Determines the precision for this operation.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When tensor dimensions or modes contain illegal values
@@ -543,8 +581,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hipte
 //! @param[in] opC Unary operator applied to each element of C before processing. C's original data remains unchanged.
 //! @param[in] descD Descriptor containing D's data type, modes, and strides. Currently must be identical to descC.
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
-//! @param[in] opAB Element-wise binary operator.
-//! @param[in] opABC Element-wise binary operator.
+//! @param[in] opAB Element-wise binary operator that combines A and B: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
+//! @param[in] opABC Element-wise binary operator that combines the result of opAB with C: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //! @param[in] descCompute Determines the precision for this operation.
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully.
 //! @retval HIPTENSOR_STATUS_NOT_INITIALIZED When the handle isn't initialized.

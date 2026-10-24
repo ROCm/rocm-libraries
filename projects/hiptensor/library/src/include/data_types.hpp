@@ -60,9 +60,10 @@ struct hiptensorOperationDescriptor
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
-    uint32_t            mPaddingLeft;
-    uint32_t            mPaddingRighT;
-    void*               mPaddingValue;
+
+    //! One output-tensor element set through HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE, empty
+    //! until set. Only zero padding is accepted, so no kernel reads it.
+    std::vector<uint8_t> mPaddingValue;
 
     hiptensorOperationType_t    mOperationType;
     int32_t                     mContractionOpId;

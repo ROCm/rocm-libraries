@@ -195,7 +195,11 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id)
     {
-        if(id == HIPTENSOR_COMPUTE_DESC_16F)
+        if(id == HIPTENSOR_COMPUTE_DESC_16BF)
+        {
+            return static_cast<T>(*(hip_bfloat16*)value);
+        }
+        else if(id == HIPTENSOR_COMPUTE_DESC_16F)
         {
             return static_cast<T>(*(_Float16*)value);
         }

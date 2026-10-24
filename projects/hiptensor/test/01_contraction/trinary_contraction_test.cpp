@@ -34,6 +34,7 @@
 #include "hiptensor_options.hpp"
 
 #include "contraction/contraction_cpu_reference.hpp"
+#include "contraction_test_utils.hpp"
 #include "trinary_contraction_test.hpp"
 #include "util.hpp"
 #include "utils.hpp"
@@ -465,6 +466,9 @@ namespace hiptensor
             if(worksize > 0)
             {
                 CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&workspace), worksize));
+                // The workspace holds the intermediate tensor, whose initial contents must not
+                // reach the result. Fill it with NaN (all bits set) so that any use shows.
+                CHECK_HIP_ERROR(hipMemset(workspace, 0xFF, worksize));
             }
         }
     }
@@ -518,8 +522,13 @@ namespace hiptensor
 
             ScalarData alphaBuf;
             ScalarData betaBuf;
-            writeVal(&alphaBuf, computeType, ScalarData(computeType, alpha[0], alpha[1]));
-            writeVal(&betaBuf, computeType, ScalarData(computeType, beta[0], beta[1]));
+            // Real scalars are configured with a single value.
+            writeVal(&alphaBuf,
+                     computeType,
+                     ScalarData(computeType, alpha[0], alpha.size() > 1 ? alpha[1] : 0.0));
+            writeVal(&betaBuf,
+                     computeType,
+                     ScalarData(computeType, beta[0], beta.size() > 1 ? beta[1] : 0.0));
 
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
@@ -571,8 +580,15 @@ namespace hiptensor
             CHECK_HIP_ERROR(hipEventElapsedTime(&timeMs, startEvent, stopEvent));
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
-            mTotalGFlops          = 0.0;
-            mMeasuredTFlopsPerSec = 0.0;
+            mTotalGFlops          = trinaryContractionGFlops(desc->mModeA,
+                                                    descA->mLengths,
+                                                    desc->mModeB,
+                                                    descB->mLengths,
+                                                    desc->mModeC,
+                                                    descC->mLengths,
+                                                    desc->mModeE,
+                                                    computeType);
+            mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
             size_t sizeA = std::accumulate(descA->mLengths.begin(), descA->mLengths.end(),
                                            hiptensorDataTypeSize(ADataType),

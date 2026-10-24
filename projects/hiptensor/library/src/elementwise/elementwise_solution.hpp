@@ -70,6 +70,12 @@ namespace hiptensor
                               std::vector<void*> const&                    outBuffers)
             = 0;
 
+        // Whether the instance applies the given scalars and operators. The pass-through
+        // permutation instances ignore both, so they only serve alpha == 1 with identity ops.
+        virtual bool appliesScalarsAndOps(std::vector<float> const&               scalarValues,
+                                          std::vector<hiptensorOperator_t> const& operators) const
+            = 0;
+
         float operator()(StreamConfig const& streamConfig = StreamConfig{});
 
         /// Accessors

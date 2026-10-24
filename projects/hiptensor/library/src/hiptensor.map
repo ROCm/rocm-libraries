@@ -33,8 +33,9 @@
     _ZZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
     _ZGVZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
 
-    # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
+    # hiptensor::Logger (shared singleton, incl. its const members) + its LazySingleton plumbing
     _ZN9hiptensor6Logger*;
+    _ZNK9hiptensor6Logger*;
     _ZN9hiptensor13LazySingletonINS_6LoggerEE*;
     _ZZN9hiptensor13LazySingletonINS_6LoggerEE*;
     _ZGVZN9hiptensor13LazySingletonINS_6LoggerEE*;

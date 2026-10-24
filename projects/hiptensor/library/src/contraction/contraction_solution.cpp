@@ -37,6 +37,9 @@ namespace hiptensor
                              std::vector<std::size_t> const& b_ns_ks_lengths,
                              std::vector<std::size_t> const& b_ns_ks_strides,
                              std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& ds_ms_ns_lengths,
+                             std::vector<std::size_t> const& ds_ms_ns_strides,
+                             std::vector<int32_t> const&     ds_ms_ns_modes,
                              std::vector<std::size_t> const& e_ms_ns_lengths,
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes)
@@ -47,6 +50,8 @@ namespace hiptensor
         std::vector<std::size_t> normal_b_ns_ks_lengths(MaxNumDimsK + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_b_ns_ks_strides(MaxNumDimsK + MaxNumDimsN, 1);
         std::vector<int32_t>     normal_b_ns_ks_modes(MaxNumDimsK + MaxNumDimsN, -1);
+        std::vector<std::size_t> normal_ds_ms_ns_lengths(MaxNumDimsM + MaxNumDimsN, 1);
+        std::vector<std::size_t> normal_ds_ms_ns_strides(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_e_ms_ns_lengths(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_e_ms_ns_strides(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<int32_t>     normal_e_ms_ns_modes(MaxNumDimsM + MaxNumDimsN, -1);
@@ -146,36 +151,68 @@ namespace hiptensor
             }
         }
 
+        // reorder m, n in D by D's own modes, since D may be laid out differently
+        // from E. A D given without modes carries E's modes. Without a usable D
+        // (e.g. scale contractions), mirror E.
+        auto const& ds_modes = ds_ms_ns_modes.empty() ? e_ms_ns_modes : ds_ms_ns_modes;
+        if(ds_ms_ns_lengths.size() != ds_modes.size() || ds_ms_ns_strides.size() != ds_modes.size())
+        {
+            normal_ds_ms_ns_lengths = normal_e_ms_ns_lengths;
+            normal_ds_ms_ns_strides = normal_e_ms_ns_strides;
+        }
+        else
+        {
+            for(int i = 0; i < contraction_result_modes.size(); i++)
+            {
+                auto it
+                    = std::find(ds_modes.cbegin(), ds_modes.cend(), contraction_result_modes[i]);
+                if(it != ds_modes.cend())
+                {
+                    auto offset                = std::distance(ds_modes.cbegin(), it);
+                    normal_ds_ms_ns_lengths[i] = ds_ms_ns_lengths[offset];
+                    normal_ds_ms_ns_strides[i] = ds_ms_ns_strides[offset];
+                }
+                else
+                {
+                    normal_ds_ms_ns_lengths[i] = 1;
+                    normal_ds_ms_ns_strides[i] = (i > 0) ? normal_ds_ms_ns_strides[i - 1] : 1;
+                }
+            }
+        }
+
         return {
             normal_a_ms_ks_lengths,
             normal_a_ms_ks_strides,
             normal_b_ns_ks_lengths,
             normal_b_ns_ks_strides,
-            normal_e_ms_ns_lengths,
-            normal_e_ms_ns_strides,
+            normal_ds_ms_ns_lengths,
+            normal_ds_ms_ns_strides,
             normal_e_ms_ns_lengths,
             normal_e_ms_ns_strides,
         };
     }
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths)
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths)
     {
-        if(strides.empty())
+        if(strides.size() != lengths.size())
         {
-            using hiptensor::HiptensorOptions;
-            auto& options = HiptensorOptions::instance();
-            return options->isColMajorStrides();
+            return false;
         }
 
-        if(strides.size() > 0 && strides[0] != 1)
-            return false;
-        for(int i = 1; i < static_cast<int>(strides.size()); i++)
+        // Unit-length modes never contribute to an offset, so their strides are free.
+        std::size_t packedStride = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
         {
-            if(strides[i] != strides[i - 1] * lengths[i - 1])
+            if(lengths[i] == 1)
+            {
+                continue;
+            }
+            if(strides[i] != packedStride)
             {
                 return false;
             }
+            packedStride *= lengths[i];
         }
         return true;
     }
@@ -264,7 +301,8 @@ namespace hiptensor
 
         if(this->workspaceSize() > workspaceSize)
         {
-            resetInvokerArgs();
+            // Keep the arguments, so that the caller can still report the required size.
+            // The next initArgs replaces them.
             return {HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE, -1.0f};
         }
         auto time = mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig);
@@ -318,7 +356,8 @@ namespace hiptensor
 
     size_t ContractionSolution::workspaceSize() const
     {
-        if(mValid)
+        // A run releases the arguments, and CK operators read the workspace size from them.
+        if(mValid && mInvokerArgPtr)
         {
             return mDeviceOp->GetWorkSpaceSize(mInvokerArgPtr.get());
         }

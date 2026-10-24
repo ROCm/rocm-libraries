@@ -172,3 +172,46 @@ set (ScaleContractionUnaryOpsTestSources ${ContractionCommonSources}
 ${CMAKE_CURRENT_SOURCE_DIR}/scale_contraction_with_unary_ops_test.cpp)
 set (ScaleContractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/scale_contraction_unary_ops_params.yaml)
 add_hiptensor_test(scale_contraction_with_unary_ops_test ${ScaleContractionUnaryOpsTestConfig}  ${ScaleContractionUnaryOpsTestSources})
+
+# Contraction layout tests (checked against an independent reference)
+add_hiptensor_unit_test(contraction_layout_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_layout_test.cpp)
+
+# Trinary contraction with a NaN-filled workspace (checked against an independent reference)
+add_hiptensor_unit_test(trinary_contraction_workspace_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_workspace_test.cpp)
+
+# Output comparison and GFLOP count helpers of the contraction tests
+add_hiptensor_unit_test(contraction_test_utils_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_test_utils_test.cpp)
+# The same binary with a Google Test flag, which the test main must hand to Google Test. The
+# flag selects one suite, so the other suite must not appear in the output.
+add_test(NAME contraction_test_utils_test_gtest_filter
+         COMMAND contraction_test_utils_test --gtest_filter=ContractionFlopsTest.*)
+set_tests_properties(contraction_test_utils_test_gtest_filter PROPERTIES
+    FAIL_REGULAR_EXPRESSION "ContractionOutputCompareTest"
+    SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+if(WIN32)
+    set_tests_properties(contraction_test_utils_test_gtest_filter PROPERTIES ENVIRONMENT
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()
+# A YAML-driven test with a -y config and a Google Test flag. The test main must load the config
+# before Google Test registers the parameterized tests: the one-case quick config must list one
+# case, not the cases of the bundled standard config.
+add_test(NAME bilinear_contraction_test_m1n1k1_yaml_config
+         COMMAND bilinear_contraction_test_m1n1k1
+                 -y ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/quick/bilinear_test_params_rank1.yaml
+                 --gtest_list_tests)
+set_tests_properties(bilinear_contraction_test_m1n1k1_yaml_config PROPERTIES
+    PASS_REGULAR_EXPRESSION "RunKernel/0  # GetParam"
+    FAIL_REGULAR_EXPRESSION "RunKernel/[1-9][0-9]*  # GetParam"
+    SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+if(WIN32)
+    set_tests_properties(bilinear_contraction_test_m1n1k1_yaml_config PROPERTIES ENVIRONMENT
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()

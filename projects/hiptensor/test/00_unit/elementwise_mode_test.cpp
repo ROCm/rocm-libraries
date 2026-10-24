@@ -32,6 +32,8 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
+#include <utility>
+
 constexpr int32_t mMode = 'm';
 constexpr int32_t nMode = 'n';
 
@@ -290,4 +292,126 @@ TEST_F(ElementwiseModeTest, TrinaryWithReorderedModesIsSupported)
                                                 HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_SUCCESS);
     hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// The elementwise kernels only implement ADD, MUL, MAX and MIN as the operator combining two
+// operands. Any other value used to be accepted and left the output undefined, so it has to be
+// rejected when the descriptor is created.
+constexpr hiptensorOperator_t nonBinaryOperators[]
+    = {HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_NEG, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_UNKNOWN};
+constexpr hiptensorOperator_t binaryOperators[]
+    = {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN};
+
+TEST_F(ElementwiseModeTest, BinaryWithNonBinaryOperatorReturnsInvalidValue)
+{
+    for(auto opAC : nonBinaryOperators)
+    {
+        hiptensorOperationDescriptor_t opDesc{};
+        EXPECT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                                   &opDesc,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   opAC,
+                                                   HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_INVALID_VALUE)
+            << "opAC = " << opAC;
+        if(opDesc != nullptr)
+        {
+            hiptensorDestroyOperationDescriptor(opDesc);
+        }
+    }
+}
+
+TEST_F(ElementwiseModeTest, BinaryWithBinaryOperatorIsSupported)
+{
+    for(auto opAC : binaryOperators)
+    {
+        hiptensorOperationDescriptor_t opDesc{};
+        ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                                   &opDesc,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   opAC,
+                                                   HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << "opAC = " << opAC;
+        hiptensorDestroyOperationDescriptor(opDesc);
+    }
+}
+
+TEST_F(ElementwiseModeTest, TrinaryWithNonBinaryOperatorReturnsInvalidValue)
+{
+    for(auto badOp : nonBinaryOperators)
+    {
+        // The bad operator in either position is rejected, with a valid operator in the other.
+        for(auto [opAB, opABC] :
+            {std::pair{badOp, HIPTENSOR_OP_ADD}, std::pair{HIPTENSOR_OP_ADD, badOp}})
+        {
+            hiptensorOperationDescriptor_t opDesc{};
+            EXPECT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                        &opDesc,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        opAB,
+                                                        opABC,
+                                                        HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_INVALID_VALUE)
+                << "opAB = " << opAB << ", opABC = " << opABC;
+            if(opDesc != nullptr)
+            {
+                hiptensorDestroyOperationDescriptor(opDesc);
+            }
+        }
+    }
+}
+
+TEST_F(ElementwiseModeTest, TrinaryWithBinaryOperatorsIsSupported)
+{
+    for(auto opAB : binaryOperators)
+    {
+        for(auto opABC : binaryOperators)
+        {
+            hiptensorOperationDescriptor_t opDesc{};
+            ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                        &opDesc,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        opAB,
+                                                        opABC,
+                                                        HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << "opAB = " << opAB << ", opABC = " << opABC;
+            hiptensorDestroyOperationDescriptor(opDesc);
+        }
+    }
 }

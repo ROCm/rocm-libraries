@@ -185,6 +185,13 @@ int main(int argc, char* argv[])
 
     CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(HIPTENSOR_LOG_LEVEL_PERF_TRACE));
 
+    /**********************
+    * Optional: Resize the maximum number of cache lines. Reading a file keeps the size of the
+    * plan cache, so resize it before reading the file.
+    **********************/
+    uint32_t numEntries = 128;
+    CHECK_HIPTENSOR_ERROR(hiptensorHandleResizePlanCache(handle, numEntries));
+
     /************************************************
    * load Plan Cache from disk
    ************************************************/
@@ -194,7 +201,18 @@ int main(int argc, char* argv[])
         = hiptensorHandleReadPlanCacheFromFile(handle, planCacheFileName, &numCachelines);
     if(status == HIPTENSOR_STATUS_IO_ERROR)
     {
-        std::cout << "File " << planCacheFileName << " doesn't seem to exist." << std::endl;
+        std::cout << "File " << planCacheFileName << " doesn't exist or is damaged." << std::endl;
+    }
+    else if(status == HIPTENSOR_STATUS_INVALID_VALUE)
+    {
+        std::cout << "File " << planCacheFileName
+                  << " was written by another hipTensor version or for another device."
+                  << std::endl;
+    }
+    else if(status == HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+    {
+        std::cout << "File " << planCacheFileName << " needs a plan cache of " << numCachelines
+                  << " lines." << std::endl;
     }
     else if(status != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -206,12 +224,6 @@ int main(int argc, char* argv[])
         std::cout << "hiptensorHandleReadPlanCacheFromFile read " << numCachelines
                   << " cachelines from file." << std::endl;
     }
-
-    /**********************
-    * Optional: Resize the maximum number of cache lines
-    **********************/
-    uint32_t numEntries = 128;
-    CHECK_HIPTENSOR_ERROR(hiptensorHandleResizePlanCache(handle, numEntries));
 
     /********************************************
    * Initialize tensors with the input lengths *

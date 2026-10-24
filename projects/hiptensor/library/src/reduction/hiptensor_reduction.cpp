@@ -33,6 +33,7 @@
 
 #include "handle.hpp"
 #include "hip_device.hpp"
+#include "hip_error.hpp"
 #include "logger.hpp"
 
 #include "reduction_solution.hpp"
@@ -160,6 +161,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                   void*                   workspace,
                                   uint64_t                workspaceSize,
                                   hipStream_t             stream)
+try
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -308,11 +310,12 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
         // Need to copy C to D if C != D
-        CHECK_HIP_ERROR(hipMemcpy(D,
-                                  C,
-                                  hiptensor::elementsFromLengths(descC->mLengths)
-                                      * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                  hipMemcpyDeviceToDevice));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(
+            hipMemcpy(D,
+                      C,
+                      hiptensor::elementsFromLengths(descC->mLengths)
+                          * hiptensor::hiptensorDataTypeSize(descC->mType),
+                      hipMemcpyDeviceToDevice));
     }
 
     // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
@@ -335,10 +338,10 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     hiptensorTensorDescriptor sortedDescC    = *descC;
     std::vector<int>          sortingIndices = {};
 
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::getSortingIndices(
         modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
 
     for(auto pSolution : solutions)
     {
@@ -418,4 +421,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
              hiptensorGetErrorString(errorCode));
     logger->logError("hiptensorReduce", msg);
     return errorCode;
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorReduce");
 }

@@ -27,6 +27,7 @@
 #pragma once
 
 #include "data_types.hpp"
+#include "hip_error.hpp"
 #include "util.hpp"
 #include <hiptensor/hiptensor.h>
 
@@ -122,15 +123,25 @@ namespace hiptensor
     {
         void operator()(void* ptr)
         {
-            CHECK_HIP_ERROR(hipFree(ptr));
+            // Runs during stack unwinding as well, so a failure cannot be reported here.
+            (void)hipFree(ptr);
         }
     };
 
+    // Called where no status can be returned (kernel argument constructors). A failed
+    // allocation throws HipError, which the API entry point turns into
+    // HIPTENSOR_STATUS_ALLOC_FAILED.
     template <typename T>
     auto allocDevice(int64_t numElements)
     {
-        T* data;
-        CHECK_HIP_ERROR(hipMalloc(&data, numElements * sizeof(T)));
+        T*   data   = nullptr;
+        auto status = hipMalloc(&data, numElements * sizeof(T));
+        if(status != hipSuccess)
+        {
+            // Handled here: clear it so the next kernel launch check does not report it.
+            (void)hipGetLastError();
+            throw HipError(status);
+        }
         return std::unique_ptr<T, DeviceDeleter>(data, DeviceDeleter());
     }
 

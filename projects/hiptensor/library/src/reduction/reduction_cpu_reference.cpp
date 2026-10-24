@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "../elementwise/elementwise_cpu_reference.hpp"
+#include "hip_error.hpp"
 #include "reduction_cpu_reference.hpp"
 #include "reduction_cpu_reference_impl.hpp"
 #include "reduction_cpu_reference_instances.hpp"
@@ -109,11 +110,12 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
         // Need to copy C to D if C != D
-        CHECK_HIP_ERROR(hipMemcpy(D,
-                                  C,
-                                  hiptensor::elementsFromLengths(descC->mLengths)
-                                      * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                  hipMemcpyHostToHost));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(
+            hipMemcpy(D,
+                      C,
+                      hiptensor::elementsFromLengths(descC->mLengths)
+                          * hiptensor::hiptensorDataTypeSize(descC->mType),
+                      hipMemcpyHostToHost));
     }
 
     // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
@@ -136,10 +138,10 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     hiptensorTensorDescriptor sortedDescC    = *descC;
     std::vector<int>          sortingIndices = {};
 
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::getSortingIndices(
         modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
+    HIPTENSOR_RETURN_IF_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
 
     for(auto [_, pSolution] : solutionQ.solutions())
     {

@@ -34,8 +34,8 @@ ALLOWLIST = [
     # in low-inlining builds (e.g. Debug); matched here to stay in lockstep with hiptensor.map.
     re.compile(r"^_ZN9hiptensor16HiptensorOptions"),
     re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_16HiptensorOptionsEE"),
-    # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
-    re.compile(r"^_ZN9hiptensor6Logger"),
+    # hiptensor::Logger (shared singleton, incl. its const members) + its LazySingleton plumbing
+    re.compile(r"^_ZNK?9hiptensor6Logger"),
     re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_6LoggerEE"),
     # Standard ELF/CRT entries. The version script already demotes these to local, so normally
     # none are exported; kept as an explicit safety net for a .so built without the script.

@@ -54,6 +54,65 @@ add_hiptensor_unit_test(elementwise_broadcast_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_broadcast_test.cpp
     )
+add_hiptensor_unit_test(elementwise_instance_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection_test.cpp
+    )
+add_hiptensor_unit_test(api_safety_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/api_safety_test.cpp
+    )
+add_hiptensor_unit_test(plan_cache_unit_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_unit_test.cpp
+    )
+add_hiptensor_unit_test(contraction_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_selection_test.cpp
+    )
+# The actor-critic cases that need the tables for row-major strides, which name kernels that
+# cannot run column-major problems. They skip with that message when the tables are not selected.
+set(_HIPTENSOR_ROW_MAJOR_TABLES_ENV "HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=OFF")
+if(WIN32)
+    list(APPEND _HIPTENSOR_ROW_MAJOR_TABLES_ENV
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()
+add_test(NAME contraction_selection_test_row_major_tables
+         COMMAND contraction_selection_test --gtest_filter=ActorCriticRowMajorTableTest.*)
+set_tests_properties(contraction_selection_test_row_major_tables PROPERTIES
+    ENVIRONMENT "${_HIPTENSOR_ROW_MAJOR_TABLES_ENV}"
+    FAIL_REGULAR_EXPRESSION "Runs only with the row-major actor-critic tables"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+add_hiptensor_unit_test(large_tensor_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/large_tensor_test.cpp
+    )
+
+# Has its own main: the shared one stops early on the hosts this test is about.
+add_hiptensor_unit_test(device_support_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/device_support_test.cpp
+    )
+# The same binary with every GPU hidden, which simulates a host without a GPU.
+set(_HIPTENSOR_NO_VISIBLE_DEVICE_ENV "HIP_VISIBLE_DEVICES=-1" "ROCR_VISIBLE_DEVICES=-1")
+if(WIN32)
+    list(APPEND _HIPTENSOR_NO_VISIBLE_DEVICE_ENV
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()
+add_test(NAME device_support_test_no_visible_device
+         COMMAND device_support_test --gtest_filter=*NoVisibleDevice*)
+set_tests_properties(device_support_test_no_visible_device PROPERTIES
+    ENVIRONMENT "${_HIPTENSOR_NO_VISIBLE_DEVICE_ENV}"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+# Fills the device memory, so it must not share the GPU with other tests.
+add_hiptensor_unit_test(alloc_failure_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/alloc_failure_test.cpp
+    )
+set_tests_properties(alloc_failure_test PROPERTIES RUN_SERIAL TRUE)
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(alloc_failure_test PROPERTIES RUN_SERIAL TRUE)\n")
+file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"alloc_failure_test smoke\" PROPERTIES RUN_SERIAL TRUE)\n")
+file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"alloc_failure_test regression\" PROPERTIES RUN_SERIAL TRUE)\n")
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}
      # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp

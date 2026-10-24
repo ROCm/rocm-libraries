@@ -193,7 +193,8 @@ add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
 # Create shared library for production use
 create_hiptensor_shared_library()
 
-# Host-side CPU reference + stateless data-type helpers, built as a static library for the
+# Host-side CPU reference + stateless data-type helpers (and the plan cache and the contraction
+# kernel selection, which their unit tests exercise directly), built as a static library for the
 # test suite only.
 # With the hidden-visibility baseline the symbols are local to the .so, so the tests get their
 # own copy here instead.
@@ -205,8 +206,11 @@ create_hiptensor_shared_library()
 if(HIPTENSOR_BUILD_TESTS)
     set(HIPTENSOR_HOST_REFERENCE_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/performance.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_selection.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution_registry.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference.cpp

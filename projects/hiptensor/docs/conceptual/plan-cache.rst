@@ -57,6 +57,15 @@ Save and load from disk
 
 When paired with cache serialization APIs like `hiptensorHandleWritePlanCacheToFile() <../api-reference/api-reference.html#hiptensorhandlewriteplancachetofile>`_ and `hiptensorHandleReadPlanCacheFromFile() <../api-reference/api-reference.html#hiptensorhandlereadplancachefromfile>`_, plan cache lines can be saved to disk and reloaded later to avoid the repeated benchmarking in future application runs.
 
+A plan cache file records the hipTensor version (major, minor, and patch) and the architecture and compute unit count of the device it was written on. It can only be read back by the same hipTensor version on a device with the same architecture and compute unit count. Reading a file never changes the size of the plan cache, so resize the plan cache before reading a file that holds more lines. ``hiptensorHandleReadPlanCacheFromFile`` returns:
+
+- ``HIPTENSOR_STATUS_SUCCESS`` when the lines were read. ``numCachelinesRead`` holds the number of lines read.
+- ``HIPTENSOR_STATUS_IO_ERROR`` when the file can't be read or is damaged.
+- ``HIPTENSOR_STATUS_INVALID_VALUE`` when the file was written by another hipTensor version, including every file written by hipTensor versions that didn't record a version, or on another device.
+- ``HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE`` when the file holds more lines than the plan cache. ``numCachelinesRead`` holds the number of lines the file needs.
+
+In every case other than ``HIPTENSOR_STATUS_SUCCESS`` the plan cache is left unchanged, so the application can tune again and write a new file.
+
 ------------------------------------
 Plan cache example
 ------------------------------------
@@ -129,8 +138,10 @@ This is particularly useful when:
 ************************************************
 5. Saving and loading the plan cache
 ************************************************
-After tuning, you can store the optimized plan cache lines to disk and reload them during future runs:
+After tuning, you can store the optimized plan cache lines to disk and reload them during future runs. Resize the plan cache before reading the file, since reading keeps the size of the plan cache:
 ::
+
+    CHECK_HIPTENSOR_ERROR(hiptensorHandleResizePlanCache(handle, numEntries));
 
     /************************************************
    * Load Plan Cache from disk
@@ -141,7 +152,18 @@ After tuning, you can store the optimized plan cache lines to disk and reload th
         = hiptensorHandleReadPlanCacheFromFile(handle, planCacheFileName, &numCachelines);
     if(status == HIPTENSOR_STATUS_IO_ERROR)
     {
-        std::cout << "File " << planCacheFileName << " doesn't seem to exist." << std::endl;
+        std::cout << "File " << planCacheFileName << " doesn't exist or is damaged." << std::endl;
+    }
+    else if(status == HIPTENSOR_STATUS_INVALID_VALUE)
+    {
+        std::cout << "File " << planCacheFileName
+                  << " was written by another hipTensor version or for another device."
+                  << std::endl;
+    }
+    else if(status == HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+    {
+        std::cout << "File " << planCacheFileName << " needs a plan cache of " << numCachelines
+                  << " lines." << std::endl;
     }
     else if(status != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -344,6 +366,13 @@ Complete code:
 
         CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(HIPTENSOR_LOG_LEVEL_PERF_TRACE));
 
+        /**********************
+        * Optional: Resize the maximum number of cache lines. Reading a file keeps the size of
+        * the plan cache, so resize it before reading the file.
+        **********************/
+        uint32_t numEntries = 128;
+        CHECK_HIPTENSOR_ERROR(hiptensorHandleResizePlanCache(handle, numEntries));
+
         /************************************************
        * load Plan Cache from disk
        ************************************************/
@@ -353,7 +382,18 @@ Complete code:
             = hiptensorHandleReadPlanCacheFromFile(handle, planCacheFileName, &numCachelines);
         if(status == HIPTENSOR_STATUS_IO_ERROR)
         {
-            std::cout << "File " << planCacheFileName << " doesn't seem to exist." << std::endl;
+            std::cout << "File " << planCacheFileName << " doesn't exist or is damaged." << std::endl;
+        }
+        else if(status == HIPTENSOR_STATUS_INVALID_VALUE)
+        {
+            std::cout << "File " << planCacheFileName
+                      << " was written by another hipTensor version or for another device."
+                      << std::endl;
+        }
+        else if(status == HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+        {
+            std::cout << "File " << planCacheFileName << " needs a plan cache of " << numCachelines
+                      << " lines." << std::endl;
         }
         else if(status != HIPTENSOR_STATUS_SUCCESS)
         {
@@ -365,12 +405,6 @@ Complete code:
             std::cout << "hiptensorHandleReadPlanCacheFromFile read " << numCachelines
                       << " cachelines from file." << std::endl;
         }
-
-        /**********************
-        * Optional: Resize the maximum number of cache lines
-        **********************/
-        uint32_t numEntries = 128;
-        CHECK_HIPTENSOR_ERROR(hiptensorHandleResizePlanCache(handle, numEntries));
 
         /********************************************
        * Initialize tensors with the input lengths *

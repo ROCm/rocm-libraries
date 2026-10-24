@@ -24,23 +24,36 @@
  *
  *******************************************************************************/
 
-#include <iostream>
+#include <string>
 
 #include "hip_device.hpp"
-#include <hiptensor/internal/hiptensor_utility.hpp>
+#include "platform.hpp"
 
 namespace hiptensor
 {
     HipDevice::HipDevice()
         : mDeviceId(-1)
+        , mProps{}
+        , mArch{}
         , mGcnArch(hipGcnArch_t::UNSUPPORTED_ARCH)
         , mWarpSize(hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
         , mSharedMemSize(0)
         , mCuCount(0)
         , mMaxFreqMhz(0)
+        , mQueryStatus(hipSuccess)
     {
-        CHECK_HIP_ERROR(hipGetDevice(&mDeviceId));
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mDeviceId));
+        // A failed query (e.g. on a host without a visible GPU) is recorded rather than
+        // fatal: hiptensorCreate reports it, so loading the library never ends the process.
+        mQueryStatus = hipGetDevice(&mDeviceId);
+        if(mQueryStatus == hipSuccess)
+        {
+            mQueryStatus = hipGetDeviceProperties(&mProps, mDeviceId);
+        }
+        if(mQueryStatus != hipSuccess)
+        {
+            mDeviceId = -1;
+            return;
+        }
 
         mArch = mProps.arch;
 
@@ -107,6 +120,15 @@ namespace hiptensor
             mGcnArch = hipGcnArch_t::GFX1250;
         }
 
+        // Test hook: classify the device as unsupported, so that the handling of an unsupported
+        // architecture can be tested on any GPU. It can only take support away: it never makes a
+        // device supported or classifies it as another architecture.
+        if(auto forceUnsupported = getEnvironmentVariable("HIPTENSOR_TEST_FORCE_UNSUPPORTED_ARCH");
+           forceUnsupported && (*forceUnsupported == "1" || *forceUnsupported == "ON"))
+        {
+            mGcnArch = hipGcnArch_t::UNSUPPORTED_ARCH;
+        }
+
         switch(mProps.warpSize)
         {
         case hipWarpSize_t::Wave32:
@@ -130,9 +152,30 @@ namespace hiptensor
         return mGcnArch;
     }
 
+    std::string HipDevice::getArchName() const
+    {
+        return std::string(mProps.gcnArchName);
+    }
+
+    int HipDevice::getCuCount() const
+    {
+        return mCuCount;
+    }
+
     int HipDevice::warpSize() const
     {
         return mWarpSize;
+    }
+
+    hipError_t HipDevice::queryStatus() const
+    {
+        return mQueryStatus;
+    }
+
+    bool HipDevice::isSupported() const
+    {
+        return mQueryStatus == hipSuccess && mGcnArch != hipGcnArch_t::UNSUPPORTED_ARCH
+               && mWarpSize != hipWarpSize_t::UNSUPPORTED_WARP_SIZE;
     }
 
     bool HipDevice::supportsF64() const
@@ -180,32 +223,5 @@ namespace hiptensor
             return false;
         }
     }
-
-    // Need to check the host device target support statically before hip modules attempt
-    // to load any kernels. Not safe to proceed if the host device is unsupported.
-    struct HipStaticDeviceGuard
-    {
-        static bool testSupportedDevice()
-        {
-            auto device = HipDevice();
-
-            if(device.getGcnArch() == HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
-            {
-                std::cerr << "Cannot proceed: unsupported host device detected. Exiting."
-                          << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            else if(device.warpSize() == HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
-            {
-                std::cerr << "Cannot proceed: unsupported warp size detected. Exiting."
-                          << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            return true;
-        }
-        static bool sResult;
-    };
-
-    bool HipStaticDeviceGuard::sResult = HipStaticDeviceGuard::testSupportedDevice();
 
 } // namespace hiptensor

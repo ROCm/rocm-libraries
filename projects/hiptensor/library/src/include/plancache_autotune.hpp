@@ -101,7 +101,13 @@ namespace hiptensor
                                candidates.begin(),
                                [](auto* p) { return (T*)p; });
 
-                plan->mPref->mSolution = findSolutionByUid(candidates, Uid);
+                // Keep the plan's solution when the cached one is not among the candidates. The
+                // trinary contraction plan, for example, keeps no candidates for ACTOR_CRITIC.
+                auto* cached = findSolutionByUid(candidates, Uid);
+                if(cached != nullptr)
+                {
+                    plan->mPref->mSolution = cached;
+                }
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {

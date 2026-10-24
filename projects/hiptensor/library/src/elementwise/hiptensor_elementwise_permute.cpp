@@ -28,6 +28,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "hip_error.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -39,6 +40,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                                    const void*             A,
                                    void*                   B,
                                    const hipStream_t       stream)
+try
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -121,6 +123,16 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
 
     autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_Permutation, handle, plan);
+
+    // The plan keeps the solution of an earlier execute, which was selected for that call's
+    // alpha. A pass-through instance picked for alpha == 1 cannot scale, so select again when
+    // this call's alpha needs it.
+    if(plan->mPref->mSolution != nullptr
+       && !((hiptensor::ElementwiseSolution*)plan->mPref->mSolution)
+               ->appliesScalarsAndOps({alphaF}, {plan->mOpDesc->mOpA}))
+    {
+        plan->mPref->mSolution = nullptr;
+    }
 
     std::vector<hiptensor::ElementwiseSolution*> solutions;
     if(plan->mPref->mSolution != nullptr)
@@ -222,4 +234,8 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
              hiptensorGetErrorString(errorCode));
     logger->logError("hiptensorPermute", msg);
     return errorCode;
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorPermute");
 }

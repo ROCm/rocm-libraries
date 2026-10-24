@@ -148,6 +148,26 @@ TEST(convertToHipTensorDataTypeTypeToStringTest, UtilTest)
     EXPECT_EQ(hiptensor::convertToHipTensorDataType(HIPTENSOR_COMPUTE_DESC_C64F), HIPTENSOR_C_64F);
 }
 
+// The elementwise and reduction entry points read alpha, beta and gamma through readVal with a
+// compute descriptor, so every real compute type they accept must decode to the value written.
+// 1.25 is exact in every one of these types.
+TEST(readValComputeDescriptorTest, UtilTest)
+{
+    hip_bfloat16 bf16Value(1.25f);
+    _Float16     f16Value = 1.25f;
+    float        f32Value = 1.25f;
+    double       f64Value = 1.25;
+
+    EXPECT_EQ(hiptensor::readVal<float>(&bf16Value, HIPTENSOR_COMPUTE_DESC_16BF), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&bf16Value, HIPTENSOR_COMPUTE_DESC_16BF), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f16Value, HIPTENSOR_COMPUTE_DESC_16F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f16Value, HIPTENSOR_COMPUTE_DESC_16F), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f32Value, HIPTENSOR_COMPUTE_DESC_32F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f32Value, HIPTENSOR_COMPUTE_DESC_32F), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f64Value, HIPTENSOR_COMPUTE_DESC_64F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f64Value, HIPTENSOR_COMPUTE_DESC_64F), 1.25);
+}
+
 TEST(algoTypeToStringTest, UtilTest)
 {
     EXPECT_STREQ(hiptensor::algoTypeToString(HIPTENSOR_ALGO_ACTOR_CRITIC).c_str(),

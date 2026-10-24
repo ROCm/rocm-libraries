@@ -49,7 +49,7 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exception is `plan_lifetime_test`, noted below). The test binaries are:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exceptions are `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test` and `alloc_failure_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
@@ -59,6 +59,13 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `util_test` | Utility helpers (type conversion, index math, stride calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
+| `api_safety_test` | API misuse and documented-legal calls: operation descriptor attribute sizes and padding, compute descriptors without a scalar type, `hiptensorCreatePlan` with a null preference, one preference shared by several plans, and the contraction workspace-size query. Its plans launch permute and contraction kernels, so it **requires a GPU** and is registered as a device tier test |
+| `large_tensor_test` | `hiptensorCreatePlan` returning `HIPTENSOR_STATUS_NOT_SUPPORTED` for tensors the kernels cannot address (2^31 bytes or more, from lengths and strides; 2^29 bytes or more for f64 elementwise operations with an input laid out differently from the output; the intermediate tensor of a trinary contraction), just below and at each limit, for every operation. It creates descriptors only, but needs a handle and plans small contractions, so it **requires a GPU** and is registered as a device tier test |
+| `plan_cache_unit_test` | Plan cache: LRU eviction within the capacity, the key (device, output tensor E, operators, tensor ranks), the versioned cache file (round trip; files of earlier or other versions, of other devices, damaged or with more lines than the capacity are refused), and the cache staying usable after a write. Its API cases run contractions before and after writing and reading the cache file, so it **requires a GPU** and is registered as a device tier test |
+| `contraction_selection_test` | `HIPTENSOR_ALGO_ACTOR_CRITIC` selection: f32 contractions with f32 and bf16 compute are planned and run correctly, a problem the actor-critic table names no kernel for is planned among the kernels that can run it, a named kernel that cannot run the problem (for a trinary contraction, either of its steps) is replaced by one that can, and (with mock kernels) the replacement is the fastest kernel that can run the problem within the workspace limit, or the plan is refused when none can. CTest also runs it as `contraction_selection_test_row_major_tables`, with `HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=OFF` and a `--gtest_filter` for the `ActorCriticRowMajorTableTest` cases, which need the actor-critic tables for row-major strides and are skipped in the plain run. It launches contraction kernels, so it **requires a GPU** and is registered as a device tier test |
+| `device_support_test` | `hiptensorCreate` on a device whose architecture hipTensor does not support (simulated on any GPU with the test-only environment variable `HIPTENSOR_TEST_FORCE_UNSUPPORTED_ARCH=ON`, which can only take support away) returns `HIPTENSOR_STATUS_ARCH_MISMATCH`, and on a host without a visible GPU returns `HIPTENSOR_STATUS_HIP_ERROR`, instead of ending the process when the library is loaded. It has its own `main`, since the shared test main stops on such hosts. CTest also runs it as `device_support_test_no_visible_device`, with `HIP_VISIBLE_DEVICES=-1` and `ROCR_VISIBLE_DEVICES=-1`, which runs the no-device case; in the plain run that case is skipped. Registered as a host test |
+| `elementwise_instance_selection_test` | Host-only lookup of the tuned permutation instance parameters: extents beyond the largest tuned extent use the last table entry instead of reading past the end of the table |
+| `alloc_failure_test` | A device allocation failure inside the library is returned as `HIPTENSOR_STATUS_ALLOC_FAILED` and the library keeps working: it fills the device memory between two executions of a complex contraction plan. It **requires a GPU** with its own device memory (it skips on integrated GPUs) and runs serially (`RUN_SERIAL`), since it fills the device memory that other tests would use |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -127,10 +134,13 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 
 | Group | Binaries | Scenarios |
 |---|---|---|
-| Contraction — bilinear (`C = alpha * A * B + beta * D`) | `bilinear_contraction_test_m{1-6}n{1-6}k{1-6}` | FP16/BF16/FP32/FP64/CF32/CF64; ranks 1–6; ACTOR_CRITIC and DEFAULT algorithms |
+| Contraction — bilinear (`C = alpha * A * B + beta * D`) | `bilinear_contraction_test_m{1-6}n{1-6}k{1-6}` | FP16/BF16/FP32/FP64/CF32/CF64; ranks 1–6; ACTOR_CRITIC and DEFAULT algorithms. CTest also runs `bilinear_contraction_test_m1n1k1` as `bilinear_contraction_test_m1n1k1_yaml_config`, with a one-case `-y` config and `--gtest_list_tests`, which must list only that case |
 | Contraction — scale (`C = alpha * A * B`) | `scale_contraction_test_m{1-6}n{1-6}k{1-6}` | Same type matrix as bilinear |
 | Contraction — complex bilinear/scale | `complex_{bilinear,scale}_contraction_test_m{1-6}...` | CF32, CF64 |
 | Contraction — trinary | `trinary_bilinear_contraction_test`, `trinary_scale_contraction_test` | Three-tensor contractions |
+| Contraction — layouts | `contraction_layout_test` | Binary and trinary f32 contractions with permuted mode orders, packed column-major, row-major and padded layouts, mixed layouts, and an additive input laid out differently from the output, checked bit-exactly against an independent loop reference; validation of the additive input's modes and extents |
+| Contraction — trinary workspace | `trinary_contraction_workspace_test` | Trinary contractions (bilinear, bilinear with a unary op, scale; DEFAULT and ACTOR_CRITIC) with the workspace filled with NaN before every execution, checked bit-exactly against an independent loop reference |
+| Contraction — test helpers | `contraction_test_utils_test` | The output comparison of the contraction tests checks every element, both parts of every complex element included; GFLOP counts for any mode order, complex types and trinary contractions. CTest also runs it as `contraction_test_utils_test_gtest_filter`, with a `--gtest_filter` flag that must reach GoogleTest |
 | Contraction — unary ops | `bilinear_contraction_with_unary_ops_test`, `scale_contraction_with_unary_ops_test` | Fused unary activation ops |
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
@@ -138,15 +148,17 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Elementwise — permute | `rank{2-6}_elementwise_permute_test` | All rank/type combinations |
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | Binary elementwise ops |
 | Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | Trinary elementwise ops |
+| Elementwise — scalars and operators | `elementwise_scalar_op_test` | Scalars with a BF16 compute descriptor, the order of `opAB` and `opABC` in trinary operations, and a permutation plan executed again with another `alpha`, checked exactly against an independent loop reference |
 | Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary) |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
+| Reduction — scalars | `reduction_scalar_test` | Scalars with a BF16 compute descriptor, checked exactly against an independent loop reference |
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test`, `contraction_test_utils_test`, `contraction_layout_test`, `elementwise_scalar_op_test`, `reduction_scalar_test`, `alloc_failure_test`.
 
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`).
+**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`, `device_support_test`). `device_support_test` runs on hosts with or without a GPU, and checks the device only through `hiptensorCreate`.
 
 **Test tiers (CTest labels):**
 

@@ -62,8 +62,8 @@ void scaleContractionSampleUnaryOps(void* alpha, hiptensorOperator_t opA, hipten
     extent['n'] = 20;
     extent['u'] = 128;
     extent['v'] = 128;
-    extent['h'] = 128;
-    extent['k'] = 128;
+    extent['h'] = 64;
+    extent['k'] = 64;
 
     std::vector<int64_t> d_ms_ns_lengths;
     for(auto mode : modeD)

@@ -56,6 +56,50 @@ namespace hiptensor
                                       ContractionUnaryOps const&         unaryOps,
                                       const uint64_t                     workspaceSize);
 
+    // True if the solution can run the problem with at most workspaceSize bytes of workspace.
+    // Host-side check only: nothing is allocated or launched.
+    bool isSupportedSolution(ContractionSolution*            solution,
+                             std::vector<std::size_t> const& a_ms_ks_lengths,
+                             std::vector<std::size_t> const& a_ms_ks_strides,
+                             std::vector<int32_t> const&     a_ms_ks_modes,
+                             std::vector<std::size_t> const& b_ns_ks_lengths,
+                             std::vector<std::size_t> const& b_ns_ks_strides,
+                             std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& d_ms_ns_lengths,
+                             std::vector<std::size_t> const& d_ms_ns_strides,
+                             std::vector<int32_t> const&     d_ms_ns_modes,
+                             std::vector<std::size_t> const& e_ms_ns_lengths,
+                             std::vector<std::size_t> const& e_ms_ns_strides,
+                             std::vector<int32_t> const&     e_ms_ns_modes,
+                             ContractionUnaryOps const&      unaryOps,
+                             const uint64_t                  workspaceSize);
+
+    // Keeps *winner if it can run the problem within workspaceSize. Otherwise (no winner, or a
+    // winner that the problem's shape, strides or workspace rule out) selects by brute force
+    // among the candidates that can, and returns HIPTENSOR_STATUS_NOT_SUPPORTED if none can.
+    // Used after the actor-critic lookup, which picks a kernel by name only.
+    hiptensorStatus_t ensureSupportedWinner(ContractionSolution**                    winner,
+                                            std::vector<ContractionSolution*> const& candidates,
+                                            hiptensorDataType_t                      typeA,
+                                            std::vector<std::size_t> const& a_ms_ks_lengths,
+                                            std::vector<std::size_t> const& a_ms_ks_strides,
+                                            std::vector<int32_t> const&     a_ms_ks_modes,
+                                            hiptensorDataType_t             typeB,
+                                            std::vector<std::size_t> const& b_ns_ks_lengths,
+                                            std::vector<std::size_t> const& b_ns_ks_strides,
+                                            std::vector<int32_t> const&     b_ns_ks_modes,
+                                            hiptensorDataType_t             typeD,
+                                            std::vector<std::size_t> const& d_ms_ns_lengths,
+                                            std::vector<std::size_t> const& d_ms_ns_strides,
+                                            std::vector<int32_t> const&     d_ms_ns_modes,
+                                            hiptensorDataType_t             typeE,
+                                            std::vector<std::size_t> const& e_ms_ns_lengths,
+                                            std::vector<std::size_t> const& e_ms_ns_strides,
+                                            std::vector<int32_t> const&     e_ms_ns_modes,
+                                            hiptensorComputeDescriptor_t    computeType,
+                                            ContractionUnaryOps const&      unaryOps,
+                                            const uint64_t                  workspaceSize);
+
     template <typename A,
               typename B,
               typename C,

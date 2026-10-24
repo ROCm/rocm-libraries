@@ -31,6 +31,9 @@
 
 #include "../hiptensor_types.h"
 
+// CHECK_HIP_ERROR and CHECK_HIPTENSOR_ERROR end the process on any error. They are convenience
+// helpers for samples and tests only: the library itself never uses them and reports every
+// failure as a hiptensorStatus_t.
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(expression)                   \
     {                                                 \

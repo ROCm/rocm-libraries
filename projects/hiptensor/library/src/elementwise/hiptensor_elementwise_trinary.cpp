@@ -28,6 +28,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "hip_error.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -43,6 +44,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                                                      const void*             C,
                                                      void*                   D,
                                                      hipStream_t             stream)
+try
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -273,4 +275,8 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
              hiptensorGetErrorString(errorCode));
     logger->logError("hiptensorElementwiseTrinaryExecute", msg);
     return errorCode;
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorElementwiseTrinaryExecute");
 }

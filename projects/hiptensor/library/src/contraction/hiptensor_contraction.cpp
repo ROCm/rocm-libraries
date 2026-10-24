@@ -23,17 +23,20 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
 #include <set>
 #include <unordered_map>
 
 #include <hiptensor/hiptensor.h>
 
+#include "ck_tensor_limits.hpp"
 #include "contraction_selection.hpp"
 #include "contraction_solution.hpp"
 #include "contraction_solution_instances.hpp"
 #include "contraction_solution_registry.hpp"
 #include "handle.hpp"
 #include "hip_device.hpp"
+#include "hip_error.hpp"
 #include "logger.hpp"
 #include "util.hpp"
 
@@ -59,6 +62,77 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
         }
     }
     return false;
+}
+
+// The additive input of a contraction is addressed through its own modes and
+// strides, so it must carry exactly the output's modes, otherwise
+// HIPTENSOR_STATUS_NOT_SUPPORTED, each with the output's extent, otherwise
+// HIPTENSOR_STATUS_INVALID_VALUE (as for a mode the elementwise operations share).
+static hiptensorStatus_t checkSameModesAndExtents(char const*                     apiFuncName,
+                                                  char const*                     nameIn,
+                                                  std::vector<int32_t> const&     modeIn,
+                                                  std::vector<std::size_t> const& lengthsIn,
+                                                  char const*                     nameOut,
+                                                  std::vector<int32_t> const&     modeOut,
+                                                  std::vector<std::size_t> const& lengthsOut)
+{
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    char msg[256];
+    bool sameModes = modeIn.size() == lengthsIn.size() && modeOut.size() == lengthsOut.size()
+                     && modeIn.size() == modeOut.size();
+    for(std::size_t i = 0; sameModes && i < modeOut.size(); i++)
+    {
+        sameModes = std::find(modeIn.cbegin(), modeIn.cend(), modeOut[i]) != modeIn.cend();
+    }
+    if(!sameModes)
+    {
+        snprintf(
+            msg, sizeof(msg), "Tensor %s must carry the same modes as tensor %s", nameIn, nameOut);
+        logger->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    for(std::size_t i = 0; i < modeOut.size(); i++)
+    {
+        auto it = std::find(modeIn.cbegin(), modeIn.cend(), modeOut[i]);
+        if(lengthsIn[std::distance(modeIn.cbegin(), it)] != lengthsOut[i])
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Mode '%c' has a different extent in tensor %s than in tensor %s",
+                     static_cast<char>(modeOut[i]),
+                     nameIn,
+                     nameOut);
+            logger->logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+    }
+    return HIPTENSOR_STATUS_SUCCESS;
+}
+
+// True if the additive input stores every element at the same offset as the
+// output. Assumes checkSameModesAndExtents() succeeds.
+static bool hasSameLayout(std::vector<int32_t> const&     modeIn,
+                          std::vector<std::size_t> const& stridesIn,
+                          std::vector<int32_t> const&     modeOut,
+                          std::vector<std::size_t> const& lengthsOut,
+                          std::vector<std::size_t> const& stridesOut)
+{
+    if(stridesIn.size() != modeIn.size() || stridesOut.size() != modeOut.size())
+    {
+        return false;
+    }
+    for(std::size_t i = 0; i < modeOut.size(); i++)
+    {
+        auto it = std::find(modeIn.cbegin(), modeIn.cend(), modeOut[i]);
+        if(lengthsOut[i] != 1 && stridesIn[std::distance(modeIn.cbegin(), it)] != stridesOut[i])
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Convert between vectors of void ptrs stored in opaque API objects
@@ -203,6 +277,17 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return checkResult;
     }
 
+    // The scaling factors take the type the compute descriptor maps to.
+    if(!hiptensor::convertToHipTensorDataType(descCompute))
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Unsupported compute descriptor (0x%X)",
+                 static_cast<unsigned int>(descCompute));
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
     if(!handle->getDevice().matrixCoreSupport(descCompute))
     {
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
@@ -229,6 +314,38 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
+    // C given without modes is taken to carry D's modes.
+    if(descC != nullptr)
+    {
+        if(auto status = checkSameModesAndExtents("hiptensorCreateContraction",
+                                                  "C",
+                                                  modeC != nullptr ? modeCV : modeDV,
+                                                  descC->mLengths,
+                                                  "D",
+                                                  modeDV,
+                                                  descD->mLengths);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    // Complex contractions combine C and D element by element in D's layout.
+    if(descC != nullptr
+       && (descCompute == HIPTENSOR_COMPUTE_DESC_C32F || descCompute == HIPTENSOR_COMPUTE_DESC_C64F)
+       && !hasSameLayout(modeC != nullptr ? modeCV : modeDV,
+                         descC->mStrides,
+                         modeDV,
+                         descD->mLengths,
+                         descD->mStrides))
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Complex contraction requires tensor C to have the same layout as tensor D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
@@ -244,13 +361,10 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
@@ -288,6 +402,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
                                     void*                   workspace,
                                     uint64_t                workspaceSize,
                                     hipStream_t             stream)
+try
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -498,6 +613,10 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
 
     return errorCode;
 }
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorContract");
+}
 
 hiptensorStatus_t contractionCreatePlanPreference(const hiptensorHandle_t   handle,
                                                   hiptensorPlanPreference_t pref,
@@ -655,11 +774,11 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     candidates = toContractionSolutionVec(solutionQ.solutions());
 
     // Measure timing for solution selection
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
+    hiptensor::HipEventGuard startEvent, stopEvent;
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventCreate(&startEvent.event));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventCreate(&stopEvent.event));
 
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventRecord(startEvent.event));
 
     // Launch selection algorithm
     hiptensor::ContractionSolution* winner = nullptr;
@@ -755,17 +874,40 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
                                                      desc->mModeD,
                                                      desc->mDescCompute,
                                                      workspaceSizeLimit);
+
+            // The actor-critic table picks a kernel by name only. Check that it can run this
+            // problem, otherwise select among the candidates that can.
+            result = hiptensor::ensureSupportedWinner(
+                &winner,
+                candidates,
+                ADataType,
+                hiptensor::getTensorLengths(desc->mDescA),
+                hiptensor::getTensorStrides(desc->mDescA),
+                desc->mModeA,
+                BDataType,
+                hiptensor::getTensorLengths(desc->mDescB),
+                hiptensor::getTensorStrides(desc->mDescB),
+                desc->mModeB,
+                DDataType,
+                hiptensor::getTensorLengths(desc->mDescC),
+                hiptensor::getTensorStrides(desc->mDescC),
+                desc->mModeC,
+                EDataType,
+                hiptensor::getTensorLengths(desc->mDescD),
+                hiptensor::getTensorStrides(desc->mDescD),
+                desc->mModeD,
+                desc->mDescCompute,
+                {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
+                workspaceSizeLimit);
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventRecord(stopEvent.event));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventSynchronize(stopEvent.event));
 
     auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(
+        hipEventElapsedTime(&elapsedTimeMs, startEvent.event, stopEvent.event));
 
     if(result != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -812,10 +954,10 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
 // where T is a temporary intermediate tensor whose storage comes from the
 // user-provided workspace.
 //
-// The plan-creation phase selects a single "winner" kernel by driving the
-// selection heuristic with the step 2 problem shape (T * C -> E, with bias D
-// in the bilinear case).  The same kernel is then reused for step 1 at
-// execution time with alpha=1 and beta=0.
+// The plan-creation phase selects a single "winner" kernel, among the kernels
+// that can also run step 1, by driving the selection heuristic with the step 2
+// problem shape (T * C -> E, with bias D in the bilinear case).  The same
+// kernel is then reused for step 1 at execution time with alpha=1 and beta=0.
 // ============================================================================
 
 // Determine which modes the intermediate tensor T must carry.
@@ -964,6 +1106,18 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         return checkResult;
     }
 
+    // The scaling factors take the type the compute descriptor maps to.
+    if(!hiptensor::convertToHipTensorDataType(descCompute))
+    {
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "Unsupported compute descriptor (0x%X)",
+                 static_cast<unsigned int>(descCompute));
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
     if(!handle->getDevice().matrixCoreSupport(descCompute))
     {
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
@@ -1010,6 +1164,37 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
+    // D given without modes is taken to carry E's modes.
+    if(descD != nullptr)
+    {
+        if(auto status = checkSameModesAndExtents("hiptensorCreateContractionTrinary",
+                                                  "D",
+                                                  modeD != nullptr ? modeDV : modeEV,
+                                                  descD->mLengths,
+                                                  "E",
+                                                  modeEV,
+                                                  descE->mLengths);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    // Complex contractions combine D and E element by element in E's layout.
+    if(descD != nullptr
+       && (descCompute == HIPTENSOR_COMPUTE_DESC_C32F || descCompute == HIPTENSOR_COMPUTE_DESC_C64F)
+       && !hasSameLayout(modeD != nullptr ? modeDV : modeEV,
+                         descD->mStrides,
+                         modeEV,
+                         descE->mLengths,
+                         descE->mStrides))
+    {
+        logger->logError(
+            "hiptensorCreateContractionTrinary",
+            "Complex contraction requires tensor D to have the same layout as tensor E");
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
@@ -1025,13 +1210,10 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION_TRINARY;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
@@ -1168,7 +1350,8 @@ hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
 //     (BILINEAR / BILINEAR_UNARY when descD is provided, SCALE / SCALE_COMPLEX
 //     when descD is null).  The same kernel handles both steps by varying
 //     alpha/beta and the tensor arguments.
-//  3. Selects a single winner kernel via bruteForceModel (DEFAULT) or
+//  3. Keeps only the kernels that can run step 1 (A * B -> T), and selects a
+//     single winner among them via bruteForceModel (DEFAULT) or
 //     actorCriticModel (ACTOR_CRITIC), using the step 2 problem shape
 //     (T * C -> E, with bias D in the bilinear case).
 //  4. Stores the winner in pref->mSolution for use by
@@ -1221,6 +1404,16 @@ hiptensorStatus_t contractionTrinaryInitPlan(
     auto intermediateDesc = buildTrinaryContractionIntermediateDescriptor(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB, tDataType);
 
+    // Both steps address T, so it has the same size limit as the operation's own tensors,
+    // which hiptensorCreatePlan has checked.
+    if(auto status = hiptensor::reportCkTensorLimitViolation(
+           hiptensor::ckTensorSizeViolation(intermediateDesc, "T (A * B)"),
+           "contractionTrinaryInitPlan");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     auto tBytes = tensorByteSize(intermediateDesc);
     auto tBytesAligned = alignUp256(tBytes);
 
@@ -1267,14 +1460,61 @@ hiptensorStatus_t contractionTrinaryInitPlan(
 
     auto candidates = toContractionSolutionVec(solutionQ.solutions());
 
+    // --- Keep the kernels that can run step 1 ---
+    // The winner also runs step 1 (A * B -> T, with T as its own bias), whose
+    // extents and strides differ from step 2's.
+    {
+        hiptensor::ContractionUnaryOps step1Ops = {desc->mOpA, desc->mOpB, HIPTENSOR_OP_IDENTITY};
+
+        auto aLengths = hiptensor::getTensorLengths(desc->mDescA);
+        auto aStrides = hiptensor::getTensorStrides(desc->mDescA);
+        auto bLengths = hiptensor::getTensorLengths(desc->mDescB);
+        auto bStrides = hiptensor::getTensorStrides(desc->mDescB);
+
+        auto const candidateCount = candidates.size();
+        candidates.erase(std::remove_if(candidates.begin(),
+                                        candidates.end(),
+                                        [&](hiptensor::ContractionSolution* solution) {
+                                            return !hiptensor::isSupportedSolution(
+                                                solution,
+                                                aLengths,
+                                                aStrides,
+                                                desc->mModeA,
+                                                bLengths,
+                                                bStrides,
+                                                desc->mModeB,
+                                                intermediateDesc.mLengths,
+                                                intermediateDesc.mStrides,
+                                                modeT,
+                                                intermediateDesc.mLengths,
+                                                intermediateDesc.mStrides,
+                                                modeT,
+                                                step1Ops,
+                                                kernelWsLimit);
+                                        }),
+                         candidates.end());
+
+        if(candidateCount > 0 && candidates.empty())
+        {
+            auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+            snprintf(msg,
+                     sizeof(msg),
+                     "No kernel can run step 1 (T = A*B) of the trinary contraction (%s)",
+                     hiptensorGetErrorString(errorCode));
+            logger->logError("contractionTrinaryInitPlan", msg);
+            return errorCode;
+        }
+    }
+
     // --- Select a single winner kernel ---
     // The winner is chosen using the step 2 problem shape (T * C -> E
-    // with bias D).  The same kernel is reused for step 1 at execution
-    // time with different alpha/beta and tensor arguments.
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    // with bias D) among the kernels that can run step 1.  The same kernel
+    // is reused for step 1 at execution time with different alpha/beta and
+    // tensor arguments.
+    hiptensor::HipEventGuard startEvent, stopEvent;
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventCreate(&startEvent.event));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventCreate(&stopEvent.event));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventRecord(startEvent.event));
 
     hiptensor::ContractionSolution* winner = nullptr;
     auto                            result = HIPTENSOR_STATUS_INTERNAL_ERROR;
@@ -1364,16 +1604,40 @@ hiptensorStatus_t contractionTrinaryInitPlan(
                     desc->mModeE,
                     computeType,
                     kernelWsLimit);
+
+            // The actor-critic table picks a kernel by name only, from the step 2 problem.
+            // Drop it if it cannot run step 1, and check that it can run step 2; otherwise
+            // select among the candidates that can run both.
+            if(winner != nullptr
+               && std::find(candidates.cbegin(), candidates.cend(), winner) == candidates.cend())
+            {
+                winner = nullptr;
+            }
+            result = hiptensor::ensureSupportedWinner(
+                &winner,
+                candidates,
+                tDataType, tLengths, tStrides, modeT,
+                CDataType, cLengths, cStrides, desc->mModeC,
+                DDataType,
+                hiptensor::getTensorLengths(desc->mDescD),
+                hiptensor::getTensorStrides(desc->mDescD),
+                desc->mModeD,
+                EDataType,
+                hiptensor::getTensorLengths(desc->mDescE),
+                hiptensor::getTensorStrides(desc->mDescE),
+                desc->mModeE,
+                computeType,
+                step2Ops,
+                kernelWsLimit);
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventRecord(stopEvent.event));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(hipEventSynchronize(stopEvent.event));
 
     auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    HIPTENSOR_RETURN_IF_HIP_ERROR(
+        hipEventElapsedTime(&elapsedTimeMs, startEvent.event, stopEvent.event));
 
     if(result != HIPTENSOR_STATUS_SUCCESS || winner == nullptr)
     {
@@ -1425,6 +1689,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                                            void*                   workspace,
                                            uint64_t                workspaceSize,
                                            hipStream_t             stream)
+try
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -1574,6 +1839,14 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
         : StreamConfig{stream, false};
 
     // --- Step 1: T = A * B (alpha=1, no bias) ---
+    // In the bilinear case step 1 runs the step 2 kernel, which reads its bias, here T itself,
+    // and computes 1 * A * B + 0 * T. T is the caller's uninitialized workspace, and 0 * NaN is
+    // NaN, so clear T first.
+    if(plan->mOpDesc->mDescD != nullptr && tBytes > 0)
+    {
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMemsetAsync(T, 0, tBytes, stream));
+    }
+
     hiptensor::ScalarData oneScalar;
     hiptensor::ScalarData zeroScalar;
     hiptensor::writeVal(&oneScalar, plan->mOpDesc->mDescCompute,
@@ -1693,4 +1966,8 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
         hiptensor::AutotuneOps::Autotune_ContractionTrinary, totalTime, handle, plan);
 
     return errorCode;
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorContractTrinary");
 }
