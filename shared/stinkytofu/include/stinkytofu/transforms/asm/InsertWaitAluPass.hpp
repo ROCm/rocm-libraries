@@ -85,10 +85,11 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     WaitAluNeed query(const StinkyInstruction& inst) const;
     /// How many more `op`s must issue before `inst` no longer needs the wait `op` hides
     /// (va_vdst for Wmma, vm_vsrc otherwise). 0: it needs none now; -1: no number of `op`s
-    /// hides it, only a wait drains it.
-    int untilFree(const StinkyInstruction& inst, WaitAluHideOp op) const;
-    /// untilFree() for `consumer` right after `producer`, with nothing else in flight. The
-    /// WMMA form the va_vdst hide counts is the one already issued, else `formWmma`'s.
+    /// hides it, only a wait drains it. The WMMA form the va_vdst hide counts is the one
+    /// already issued, else `formWmma`'s (an XDL WMMA).
+    int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
+                  const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
     int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
                     WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
