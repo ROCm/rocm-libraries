@@ -123,9 +123,15 @@ Each step is one commit, checked with the GPU-less A/B on the 21 gfx1250 perf ke
 strict `s_wait_alu`, `vm_vsrc(0)`, kernels changed, barrier positions.
 
 0. `untilFree` and `requiredGap` on `WaitAluTracker`, with unit tests. No asm change.
-1. Rule 2: a VALU that `query()` says would wait does not co-issue.
-2. Pick ranking by `query()` / `untilFree()` (swap inside the released fillers).
-3. Filler pacer, replacing the fill quota, critical fillers and the strict-count hold.
+1. Swap: in `pickFreeBest`, a filler that `query()` says would wait ranks below every one that
+   would not. Measured: 1 kernel changed (medium mxf8), loop `s_wait_alu` 577 -> 575, no barrier
+   moves. VALUs are sparse, so a slot rarely has two candidates to swap between.
+2. Filler pacer, replacing the fill quota, critical fillers and the strict-count hold; producers
+   of fixed consumers released `requiredGap` WMMAs ahead. This is where most loop waits (a
+   `va_vdst` in front of a ds) can go.
+3. Rule 2 as a hold, once the pacer gives held VALUs a later slot. Tried alone it made things
+   worse (loop `s_wait_alu` 577 -> 634, strict ones 61 -> 78): held VALUs landed next to the ds
+   that read them.
 4. Remove the cycle hazard model; SALU to memory address becomes "producer first".
 
 ## Open
