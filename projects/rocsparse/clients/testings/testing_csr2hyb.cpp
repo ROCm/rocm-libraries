@@ -393,7 +393,7 @@ static void testing_csr2hyb_extra_large_ell(const Arguments& arg,
     unit_check_scalar<rocsparse_int>(N - 1 + base, probe_col);
 }
 
-void testing_csr2hyb_extra(const Arguments& arg)
+static void testing_csr2hyb_extra_large_ell_overflow(const Arguments& arg)
 {
     // Regression for two 32-bit overflows in rocsparse_csr2hyb on matrices whose
     // padded ELL part exceeds INT32_MAX elements:
@@ -424,4 +424,155 @@ void testing_csr2hyb_extra(const Arguments& arg)
     // 32-bit gate would also overflow. Probe #2 lands at 39999 * 53688 + 26844
     // = 2,147,493,156.
     testing_csr2hyb_extra_large_ell(arg, M, N, 26845, 0, false);
+}
+
+static void testing_csr2hyb_extra_reuse(const Arguments& arg)
+{
+    // Reconverting into the same HYB matrix frees its ELL and COO arrays. A part that the new
+    // conversion does not allocate must not keep the freed pointer.
+    //
+    // Four rows, nnz pattern 3,1,1,1. The automatic partition keeps an ELL width of 2, so one
+    // nonzero lands in the COO part. Partition max fits (the longest row is within the allowed
+    // width) and has no COO part. A user partition of width 0 has no ELL part. With the second row
+    // pointer array, nnz pattern 4,0,0,0, the longest row exceeds the allowed width, so partition
+    // max fails with invalid_value after the arrays are freed. m == 0 releases both parts.
+    const rocsparse_int M   = 4;
+    const rocsparse_int N   = 4;
+    const rocsparse_int nnz = 6;
+
+    const rocsparse_int hcsr_row_ptr[5]      = {0, 3, 4, 5, 6};
+    const rocsparse_int hcsr_row_ptr_long[5] = {0, 4, 4, 4, 4};
+    const rocsparse_int hcsr_col_ind[6]      = {0, 1, 2, 3, 0, 1};
+    const float         hcsr_val[6]          = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+
+    rocsparse_local_handle    handle(arg);
+    rocsparse_local_mat_descr descr;
+    rocsparse_local_hyb_mat   hyb;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, rocsparse_index_base_zero));
+
+    device_vector<rocsparse_int> dcsr_row_ptr(M + 1);
+    device_vector<rocsparse_int> dcsr_row_ptr_long(M + 1);
+    device_vector<rocsparse_int> dcsr_col_ind(nnz);
+    device_vector<float>         dcsr_val(nnz);
+
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcsr_row_ptr, hcsr_row_ptr, sizeof(hcsr_row_ptr), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(
+        dcsr_row_ptr_long, hcsr_row_ptr_long, sizeof(hcsr_row_ptr_long), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcsr_col_ind, hcsr_col_ind, sizeof(hcsr_col_ind), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val, sizeof(hcsr_val), hipMemcpyHostToDevice));
+
+    rocsparse_hyb_mat ptr  = hyb;
+    test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+
+    const auto check_parts = [dhyb](bool has_ell, bool has_coo) {
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_nnz > 0);
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_val != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_nnz > 0);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_row_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_val != nullptr);
+    };
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   M,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_auto));
+    check_parts(true, true);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   M,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_max));
+    check_parts(true, false);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   M,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_user));
+    check_parts(false, true);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   M,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_auto));
+    check_parts(true, true);
+
+    EXPECT_ROCSPARSE_STATUS(rocsparse_csr2hyb<float>(handle,
+                                                     M,
+                                                     N,
+                                                     descr,
+                                                     dcsr_val,
+                                                     dcsr_row_ptr_long,
+                                                     dcsr_col_ind,
+                                                     hyb,
+                                                     0,
+                                                     rocsparse_hyb_partition_max),
+                            rocsparse_status_invalid_value);
+    check_parts(false, false);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   M,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_auto));
+    check_parts(true, true);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
+                                                   0,
+                                                   N,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   hyb,
+                                                   0,
+                                                   rocsparse_hyb_partition_auto));
+    check_parts(false, false);
+}
+
+void testing_csr2hyb_extra(const Arguments& arg)
+{
+    // The nightly yaml entry sets M and is the large ELL overflow regression. The quick entry
+    // leaves M at the default -1 and is the HYB reuse regression.
+    if(arg.M < 0)
+    {
+        testing_csr2hyb_extra_reuse(arg);
+    }
+    else
+    {
+        testing_csr2hyb_extra_large_ell_overflow(arg);
+    }
 }

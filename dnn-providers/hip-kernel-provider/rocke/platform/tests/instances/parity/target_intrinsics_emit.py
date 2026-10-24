@@ -18,8 +18,21 @@
 # assertion-style test passed anyway because both engines named *a* pointer;
 # only a byte comparison (or an LLVM verifier run) shows it.
 #
+# Configs 8..10 cover core ops that lower to a single target intrinsic and that
+# no instance family emits yet: ``arith.fdot2`` (f16 and bf16) and the bf16
+# 4x4x4 MFMA atom (the `_1k` intrinsic with its <4 x i16> operand bitcasts).
+#
 # arch = gfx950, llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import CACHE_STREAM, F16, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import (
+    BF16,
+    CACHE_STREAM,
+    F16,
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+)
 
 from _emit_common import run_emit
 
@@ -116,6 +129,14 @@ def build_quad_perm(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_warp_shuffle_xor_dpp(b: IRBuilder) -> None:
+    v = b.const_i32(1)
+    for mask in (1, 2, 3, 7, 8, 15):
+        v = b.warp_shuffle_xor_dpp(v, mask)
+    b.warp_shuffle_xor_dpp(b.const_f32(1.0), 7)
+    b.ret()
+
+
 def build_av_b128(b: IRBuilder) -> None:
     p = b.param("p", PtrType(I32, "global"), align=16)
     data = b.av_load_b128(p)
@@ -131,6 +152,38 @@ def build_scheduler_hints(b: IRBuilder) -> None:
     b.ret()
 
 
+def _build_fdot2(b: IRBuilder, elem) -> None:
+    a_ptr = b.param("A", PtrType(elem, "global"), align=4)
+    d_ptr = b.param("D", PtrType(F32, "global"), align=4)
+    tid = b.thread_id_x()
+    idx = b.mul(tid, b.const_i32(2))
+    a = b.global_load_vN(a_ptr, idx, elem, 2)
+    acc = b.global_load(d_ptr, tid, F32, align=4)
+    dot = b.fdot2(a, a, acc)
+    b.global_store(d_ptr, tid, dot, align=4)
+    b.ret()
+
+
+def build_fdot2_f16(b: IRBuilder) -> None:
+    _build_fdot2(b, F16)
+
+
+def build_fdot2_bf16(b: IRBuilder) -> None:
+    _build_fdot2(b, BF16)
+
+
+def build_mfma_4x4x4_bf16(b: IRBuilder) -> None:
+    a_ptr = b.param("A", PtrType(BF16, "global"), align=8)
+    d_ptr = b.param("D", PtrType(F32, "global"), align=16)
+    tid = b.thread_id_x()
+    idx = b.mul(tid, b.const_i32(4))
+    a = b.global_load_vN(a_ptr, idx, BF16, 4)
+    acc = b.zero_vec_f32(4)
+    out = b.mfma_f32_4x4x4_bf16(a, a, acc)
+    b.global_store_vN(d_ptr, idx, out, 4)
+    b.ret()
+
+
 BUILDERS = [
     build_async_lds_two_allocs,
     build_async_lds_b8,
@@ -140,6 +193,10 @@ BUILDERS = [
     build_quad_perm,
     build_av_b128,
     build_scheduler_hints,
+    build_warp_shuffle_xor_dpp,
+    build_fdot2_f16,
+    build_fdot2_bf16,
+    build_mfma_4x4x4_bf16,
 ]
 
 
