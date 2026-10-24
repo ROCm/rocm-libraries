@@ -1,28 +1,33 @@
-!! Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
-!!
-!! Permission is hereby granted, free of charge, to any person obtaining a copy
-!! of this software and associated documentation files (the "Software"), to deal
-!! in the Software without restriction, including without limitation the rights
-!! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-!! copies of the Software, and to permit persons to whom the Software is
-!! furnished to do so, subject to the following conditions:
-!!
-!! The above copyright notice and this permission notice shall be included in
-!! all copies or substantial portions of the Software.
-!!
-!! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-!! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-!! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-!! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-!! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-!! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-!! THE SOFTWARE.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Copyright (C) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+!
+! SPDX-License-Identifier: MIT
+!
+! Permission is hereby granted, free of charge, to any person obtaining a copy
+! of this software and associated documentation files (the "Software"), to deal
+! in the Software without restriction, including without limitation the rights
+! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+! copies of the Software, and to permit persons to whom the Software is
+! furnished to do so, subject to the following conditions:
+!
+! The above copyright notice and this permission notice shall be included in
+! all copies or substantial portions of the Software.
+!
+! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+! THE SOFTWARE.
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 module test_hiprand
     use fruit
     use fruit_helpers
-    use hipfor
-    use hiprand_m
+    use hip
+    use hiprand
 
     implicit none
 
@@ -38,7 +43,7 @@ contains
 
     !> Test generator functions
     subroutine test_init()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         integer(kind =8), parameter :: seed = 5, offset = 10
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
         HIPRAND_RNG_PSEUDO_DEFAULT))
@@ -50,7 +55,7 @@ contains
 
     !> Test hiprandGenerate.
     subroutine test_hiprandGenerate()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         integer(kind =4), target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
@@ -66,7 +71,7 @@ contains
 
     !> Test hiprandGenerate with host generator.
     subroutine test_hiprandGenerate_host()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         integer(kind =4), target, dimension(128) :: h_x
         integer(c_size_t), parameter :: output_size = 128
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGeneratorHost(gen, &
@@ -78,7 +83,7 @@ contains
 
     !> Test hiprandGenerateLongLong.
     subroutine test_hiprandGenerateLongLong()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         integer(kind =8), target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
@@ -94,7 +99,7 @@ contains
 
     !> Test hiprandGenerateUniform.
     subroutine test_hiprandGenerateUniform()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         real, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
@@ -105,6 +110,8 @@ contains
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandGenerateUniform(gen, d_x, output_size))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
+        ! Uniform output lies in (0, 1]; this also fails on NaN.
+        call assert_equals(.true., all(h_x > 0 .and. h_x <= 1), 'sample outside (0, 1]')
         call assert_equals((sum(h_x) / output_size), mean, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandDestroyGenerator(gen))
@@ -112,11 +119,11 @@ contains
 
     !> Test hiprandGenerateUniformDouble.
     subroutine test_hiprandGenerateUniformDouble()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         double precision, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
-        double precision, parameter :: mean = 0.5, delta = 0.1
+        double precision, parameter :: mean = 0.5d0, delta = 0.1d0
         call assert_equals(hipSuccess, hipMalloc(d_x, output_size * sizeof(h_x(1))))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
         HIPRAND_RNG_PSEUDO_DEFAULT))
@@ -124,6 +131,8 @@ contains
         output_size))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
+        ! Uniform output lies in (0, 1]; this also fails on NaN.
+        call assert_equals(.true., all(h_x > 0 .and. h_x <= 1), 'sample outside (0, 1]')
         call assert_equals((sum(h_x) / output_size), mean, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandDestroyGenerator(gen))
@@ -131,11 +140,12 @@ contains
 
     !> Test hiprandGenerateNormal.
     subroutine test_hiprandGenerateNormal()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         real, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
-        real, parameter :: mean = 0.0, stddev = 1.0, delta = 0.2
+        ! Not the standard normal, so a binding that drops mean or stddev cannot pass.
+        real, parameter :: mean = 2.0, stddev = 0.5, delta = 0.2
         call assert_equals(hipSuccess, hipMalloc(d_x, output_size * sizeof(h_x(1))))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
         HIPRAND_RNG_PSEUDO_DEFAULT))
@@ -143,6 +153,8 @@ contains
         output_size, mean, stddev))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
+        ! FRUIT's range assertions below pass on NaN.
+        call assert_equals(.true., all(h_x == h_x), 'sample contains NaN')
         call assert_equals((sum(h_x) / output_size), mean, delta)
         call assert_equals(sqrt(sum((h_x - mean) ** 2) / output_size), stddev, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
@@ -151,11 +163,12 @@ contains
 
     !> Test hiprandGenerateNormalDouble.
     subroutine test_hiprandGenerateNormalDouble()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         double precision, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
-        double precision, parameter :: mean = 0.0, stddev = 1.0, delta = 0.2
+        ! Not the standard normal, so a binding that drops mean or stddev cannot pass.
+        double precision, parameter :: mean = 2.0d0, stddev = 0.5d0, delta = 0.2d0
         call assert_equals(hipSuccess, hipMalloc(d_x, output_size * sizeof(h_x(1))))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
         HIPRAND_RNG_PSEUDO_DEFAULT))
@@ -163,6 +176,8 @@ contains
         output_size, mean, stddev))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
+        ! FRUIT's range assertions below pass on NaN.
+        call assert_equals(.true., all(h_x == h_x), 'sample contains NaN')
         call assert_equals((sum(h_x) / output_size), mean, delta)
         call assert_equals(sqrt(sum((h_x - mean) ** 2) / output_size), stddev, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
@@ -171,7 +186,7 @@ contains
 
     !> Test hiprandGenerateLogNormal.
     subroutine test_hiprandGenerateLogNormal()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         real, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
@@ -184,21 +199,26 @@ contains
         output_size, mean, stddev))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
-        m = sum(h_x) / output_size
-        s = sqrt(sum((h_x - mean) ** 2) / output_size)
-        call assert_equals(log(m * m / sqrt(s + m * m)), mean, delta)
-        call assert_equals(sqrt(log(1.0 + s / (m * m))), stddev, delta)
+        ! If x is log-normal with parameters (mean, stddev) then log(x) is
+        ! normal with those moments. Log-normal samples are strictly
+        ! positive; check it first, as a NaN from log() would slip through
+        ! the range assertions below.
+        call assert_equals(.true., all(h_x > 0), 'log-normal sample was not positive')
+        m = sum(log(h_x)) / output_size
+        s = sqrt(sum((log(h_x) - m) ** 2) / output_size)
+        call assert_equals(m, mean, delta)
+        call assert_equals(s, stddev, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandDestroyGenerator(gen))
     end subroutine test_hiprandGenerateLogNormal
 
     !> Test hiprandGenerateLogNormalDouble.
     subroutine test_hiprandGenerateLogNormalDouble()
-        integer(kind =8) :: gen
+        type(c_ptr) :: gen
         double precision, target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
-        double precision, parameter :: mean = 1.6, stddev = 0.25, delta = 0.2
+        double precision, parameter :: mean = 1.6d0, stddev = 0.25d0, delta = 0.2d0
         double precision :: m, s
         call assert_equals(hipSuccess, hipMalloc(d_x, output_size * sizeof(h_x(1))))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
@@ -207,21 +227,26 @@ contains
         output_size, mean, stddev))
         call assert_equals(hipSuccess, hipMemcpy(c_loc(h_x), d_x, output_size * sizeof(h_x(1)), &
         hipMemcpyDeviceToHost))
-        m = sum(h_x) / output_size
-        s = sqrt(sum((h_x - mean) ** 2) / output_size)
-        call assert_equals(log(m * m / sqrt(s + m * m)), mean, delta)
-        call assert_equals(sqrt(log(1.0 + s / (m * m))), stddev, delta)
+        ! If x is log-normal with parameters (mean, stddev) then log(x) is
+        ! normal with those moments. Log-normal samples are strictly
+        ! positive; check it first, as a NaN from log() would slip through
+        ! the range assertions below.
+        call assert_equals(.true., all(h_x > 0), 'log-normal sample was not positive')
+        m = sum(log(h_x)) / output_size
+        s = sqrt(sum((log(h_x) - m) ** 2) / output_size)
+        call assert_equals(m, mean, delta)
+        call assert_equals(s, stddev, delta)
         call assert_equals(hipSuccess, hipFree(d_x))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandDestroyGenerator(gen))
     end subroutine test_hiprandGenerateLogNormalDouble
 
     !> Test hiprandGeneratePoisson.
     subroutine test_hiprandGeneratePoisson()
-        integer(kind =8) :: gen, distribution
+        type(c_ptr) :: gen, distribution
         integer(kind =4), target, dimension(128) :: h_x
         type(c_ptr) :: d_x
         integer(c_size_t), parameter :: output_size = 128
-        double precision, parameter :: lambda = 20.0
+        double precision, parameter :: lambda = 20.0d0
         call assert_equals(hipSuccess, hipMalloc(d_x, output_size * sizeof(h_x(1))))
         call assert_equals(HIPRAND_STATUS_SUCCESS, hiprandCreateGenerator(gen, &
         HIPRAND_RNG_PSEUDO_DEFAULT))
