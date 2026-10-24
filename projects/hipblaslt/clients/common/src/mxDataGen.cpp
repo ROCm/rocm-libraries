@@ -60,6 +60,10 @@ namespace
 {
     using namespace DGen;
 
+    // Base seed of the maf2_0 MX streams: 2^31 above the non-MX maf2_0 base (1713573849), so
+    // the two families of mt19937(seed + 32 * index + thread) streams never meet.
+    constexpr uint32_t kMaf2_0MXSeed = 1713573849u + 0x80000000u;
+
     void applyInitMethodString(DataGeneratorOptions&  opt,
                                std::string_view const initMethod,
                                hipDataType            dataType,
@@ -119,13 +123,28 @@ namespace
             auto const range = randIntRangeFor(dataType);
             opt.initMode     = DataInitMode(RandInt{range.first, range.second});
         }
+        else if(initMethod == "maf2_0_unit_scale")
+        {
+            // MAF2.0 FP4 non-scaled row: every block scale 1.0, N(0,1) data.
+            Maf2_0 mode;
+            mode.unitScaleNormalData = true;
+            opt.initMode             = DataInitMode(mode);
+        }
+        else if(initMethod == "maf2_0")
+        {
+            // MAF2.0: FP8/FP6 blocks take 2^Binomial scales, FP4 blocks N(0.34375, 0.08) scales.
+            Maf2_0 mode;
+            mode.normalScale = static_cast<int>(dataType) == static_cast<int>(HIP_R_4F_E2M1);
+            opt.initMode     = DataInitMode(mode);
+        }
         else
             throw std::runtime_error(
                 std::string("generateMXInput: unsupported initMethod '")
                 + std::string(initMethod)
                 + "'. Supported methods: Bounded/uniform_01, hpl, "
                   "uniform_low_precision, "
-                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
+                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, maf2_0, "
+                  "maf2_0_unit_scale, "
                   "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
                   "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
                   "DenormMins, DenormMaxs, NaNs, Infs.");
@@ -548,7 +567,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod,
                                    float                  min_val,
                                    float                  max_val,
-                                   std::string_view const scaleInitMethod)
+                                   std::string_view const scaleInitMethod,
+                                   uint32_t               seedIndex)
 {
     using namespace DGen;
 
@@ -557,7 +577,11 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
     applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
-    const uint32_t seed = 1713573849;
+    // maf2_0 salts the seed per matrix and batch (seedIndex = abc + 3 * batch) from its own
+    // base, so its streams differ between A and B and between batches, and stay clear of the
+    // non-MX maf2_0 streams that start at 1713573849. Other methods keep the single seed.
+    const bool     maf2_0 = initMethod == "maf2_0" || initMethod == "maf2_0_unit_scale";
+    const uint32_t seed   = maf2_0 ? kMaf2_0MXSeed + 32u * seedIndex : 1713573849;
 
     std::vector<index_t> sizes = {row, col};
     std::vector<index_t> strides;

@@ -37,7 +37,7 @@ namespace DGen
      * Zeros, Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal,
      * TrigonometricFromFloat, NormalFromFloat, Twos, NegOnes, MaxVals,
      * RandInt. The remaining `DataInitMode`s (DenormMins, DenormMaxs, NaNs,
-     * Infs) need byte-pattern semantics that the device pipeline can't
+     * Infs, Maf2_0) need byte-pattern semantics that the device pipeline can't
      * reproduce, so they are computed on host CPU and copied to device.
      *
      * Notes on CPU/GPU parity for the deterministic modes (Identity, Ones,

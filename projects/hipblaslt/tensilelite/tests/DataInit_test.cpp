@@ -563,3 +563,44 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+// RandomNarrow assembles random sign/significand bits with an exponent in [-100, 0], so every
+// value must be finite with magnitude below 2 and a biased exponent in [bias - 100, bias].
+// BFloat16 used to pass the assembled bit pattern to BFloat16's value constructor, which treats
+// it as a number (0x3f80 became 16256.0f instead of 1.0f).
+namespace
+{
+    template <typename T>
+    void expectRandomNarrowRange(int expBits, int sigBits, uint32_t (*bitsOf)(T))
+    {
+        using TensileLite::Client::DataInitialization;
+        using TensileLite::Client::InitMode;
+        const int bias = (1 << (expBits - 1)) - 1;
+        for(int i = 0; i < 10000; i++)
+        {
+            T        v    = DataInitialization::getValue<T, InitMode::RandomNarrow>();
+            float    f    = static_cast<float>(v);
+            uint32_t bits = bitsOf(v);
+            int      exp  = (bits >> sigBits) & ((1 << expBits) - 1);
+            ASSERT_TRUE(std::isfinite(f)) << "bits=0x" << std::hex << bits;
+            ASSERT_LT(std::fabs(f), 2.0f) << "bits=0x" << std::hex << bits;
+            ASSERT_GE(exp, bias - 100) << "bits=0x" << std::hex << bits;
+            ASSERT_LE(exp, bias) << "bits=0x" << std::hex << bits;
+        }
+    }
+} // namespace
+
+TEST(RandomNarrowInit, FloatStaysInNarrowRange)
+{
+    expectRandomNarrowRange<float>(8, 23, [](float v) {
+        uint32_t u;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    });
+}
+
+TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
+{
+    expectRandomNarrowRange<TensileLite::BFloat16>(
+        8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
+}

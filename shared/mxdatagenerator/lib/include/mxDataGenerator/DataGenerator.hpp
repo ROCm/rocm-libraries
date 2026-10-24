@@ -16,6 +16,7 @@
 #include <type_traits>
 #include <variant>
 #include <algorithm>
+#include <bitset>
 
 // `<bit>` provides std::endian (C++20). Used by read_data_bits_le's
 // little-endian static_assert. Guarded so this header still compiles
@@ -222,6 +223,41 @@ namespace DGen
         }
     };
 
+    // MAF2.0 block-scaled data, as ROCm/mblas-bench composes it from
+    // `--scale_init pow2_binomial_<n>_<center> --mx_init uniform_native`:
+    // each block scale is 2^(k - (n+1) + center) with k ~ Binomial(2n+1, 0.5),
+    // rounded to the scale format with round-to-nearest-even and saturation;
+    // each element is drawn uniformly from the type's finite encodings (both
+    // zeros included, NaN/Inf excluded), independently of the scale.
+    // With normalScale (`--scale_init normal_float_<mean>_<std>`, the FP4 rows),
+    // each block scale is |x| for x ~ N(scaleMean, scaleStdDev) drawn in double and
+    // rounded once to the scale format (see maf2_0NormalScaleByte) instead.
+    // With unitScaleNormalData (the FP4 non-scaled row, mblas `--mx_init normal_float_0_1
+    // --scale_init constant`), every block scale is 1.0 and each element is N(0, 1) drawn in
+    // double and rounded once to the element format (nearest even, saturating, sign kept), as
+    // the non-scaled maf2_0 types are.
+    // Scaled DTYPEs only; min/max, clampToF32, includeNaN/Inf, forceDenorm and
+    // scaleInitMode are ignored.
+    struct Maf2_0
+    {
+        int    n                   = 10;
+        int    center              = 0;
+        bool   normalScale         = false;
+        double scaleMean           = 0.34375;
+        double scaleStdDev         = 0.08;
+        bool   unitScaleNormalData = false;
+
+        std::string toString() const
+        {
+            if(unitScaleNormalData)
+                return "Maf2_0(unit scale, N(0, 1))";
+            if(normalScale)
+                return "Maf2_0(normal " + std::to_string(scaleMean) + ", "
+                       + std::to_string(scaleStdDev) + ")";
+            return "Maf2_0(" + std::to_string(n) + ", " + std::to_string(center) + ")";
+        }
+    };
+
     using DataInitMode = std::variant<Bounded,
                                       BoundedAlternatingSign,
                                       Unbounded,
@@ -242,7 +278,8 @@ namespace DGen
                                       DenormMaxs,
                                       NaNs,
                                       Infs,
-                                      RandInt>;
+                                      RandInt,
+                                      Maf2_0>;
 
     inline std::string toString(DataInitMode const& initMode)
     {
@@ -496,6 +533,7 @@ namespace DGen
         void generate_data_infs();
 
         void generate_data_rand_int(int lo, int hi);
+        void generate_data_maf2_0(Maf2_0 const& mode);
 
         uint32_t scale_block_mean(const std::vector<uint32_t>& scales,
                                   std::vector<uint64_t>&       data,
@@ -565,6 +603,124 @@ namespace DGen
         return candidates;
     }
 
+    // Binomial(trials, 0.5) as the number of set bits in `trials` fair random
+    // bits (mblas-bench `binomial_half`): one engine draw per 32 trials.
+    inline int binomialHalf(std::mt19937& gen, int trials)
+    {
+        int count = 0;
+        for(; trials >= 32; trials -= 32)
+            count += static_cast<int>(std::bitset<32>(gen()).count());
+        if(trials > 0)
+            count += static_cast<int>(
+                std::bitset<32>(gen() & ((uint32_t(1) << trials) - 1u)).count());
+        return count;
+    }
+
+    // Finite scale values of DTYPE in ascending order with their bytes, for
+    // round-to-nearest lookups.
+    template <typename DTYPE>
+    inline std::vector<std::pair<double, uint8_t>> sortedFiniteScales()
+    {
+        using scaleInfo = scale_info_t<DTYPE>;
+        std::vector<std::pair<double, uint8_t>> table;
+        for(const auto byte : enumerateFiniteScaleBytes<scaleInfo>())
+            table.emplace_back(getScaleValue<scaleInfo>(byte), byte);
+        std::sort(table.begin(), table.end());
+        return table;
+    }
+
+    // The scale byte nearest to `value` >= 0 (ties to the even encoding); values
+    // beyond the largest finite scale saturate to it.
+    inline uint8_t nearestScaleByteRne(std::vector<std::pair<double, uint8_t>> const& table,
+                                       double                                         value)
+    {
+        auto hi = std::lower_bound(
+            table.begin(), table.end(), value, [](auto const& a, double v) { return a.first < v; });
+        if(hi == table.end())
+            return table.back().second;
+        if(hi == table.begin() || hi->first == value)
+            return hi->second;
+        auto         lo  = std::prev(hi);
+        double const dLo = value - lo->first;
+        double const dHi = hi->first - value;
+        if(dLo != dHi)
+            return dLo < dHi ? lo->second : hi->second;
+        return (lo->second & 1) ? hi->second : lo->second;
+    }
+
+    // Scale byte for each Maf2_0 binomial outcome k = 0..2n+1: 2^(k - (n+1) + center)
+    // rounded to the nearest finite scale value (ties to the even encoding), so
+    // values beyond the format's range saturate. E8M0 is exact for exponents in
+    // [-127, 127]; E4M3 maps 2^-10 and below to zero and 2^9 and above to 448.
+    template <typename DTYPE>
+    inline std::vector<uint8_t> maf2_0ScaleBytes(int n, int center)
+    {
+        static_assert(isScaled<DTYPE>(), "Maf2_0 needs a block-scaled data type");
+        const auto           scales = sortedFiniteScales<DTYPE>();
+        const int            trials = 2 * n + 1;
+        std::vector<uint8_t> table(trials + 1);
+        for(int k = 0; k <= trials; k++)
+            table[k] = nearestScaleByteRne(scales, std::ldexp(1.0, k - (n + 1) + center));
+        return table;
+    }
+
+    // Scale byte for a Maf2_0 normal draw x, as mblas-bench converts its float
+    // scales: the sign is dropped, then E8M0 takes the nearest power of two
+    // (`float_to_ue8m0`: midpoint 1.5 * 2^e, ties to the even biased exponent,
+    // saturating at 0xFE, below 2^-126 -> 0x00) and the other formats round to
+    // the nearest finite value with ties to even and saturation.
+    template <typename DTYPE>
+    inline uint8_t maf2_0NormalScaleByte(double                                          x,
+                                         std::vector<std::pair<double, uint8_t>> const& scales)
+    {
+        const double a = std::abs(x);
+        if constexpr(scale_info_t<DTYPE>::mantissaBits == 0)
+        {
+            if(!(a >= std::ldexp(1.0, -126)))
+                return 0x00;
+            int          e;
+            const double m      = 2.0 * std::frexp(a, &e); // a = m * 2^(e-1), m in [1, 2)
+            int          biased = e - 1 + 127;
+            if(m > 1.5 || (m == 1.5 && (biased & 1)))
+                biased++;
+            return static_cast<uint8_t>(std::min(biased, 0xFE));
+        }
+        else
+        {
+            return nearestScaleByteRne(scales, a);
+        }
+    }
+
+    // Non-negative finite element encodings of DTYPE under a scale of one, as (value, code)
+    // in ascending value order, and the element's sign bit.
+    template <typename DTYPE>
+    inline std::vector<std::pair<double, uint8_t>> sortedNonNegativeCodes(uint8_t scaleOne,
+                                                                          uint8_t signBit)
+    {
+        const auto bits = DTYPE::dataInfo.signBits + DTYPE::dataInfo.exponentBits
+                          + DTYPE::dataInfo.mantissaBits;
+        std::vector<std::pair<double, uint8_t>> table;
+        for(uint32_t raw = 0; raw < (1u << bits); raw++)
+        {
+            const auto   code  = static_cast<uint8_t>(raw);
+            const double value = toDouble<DTYPE>(&scaleOne, &code, 0, 0);
+            if((code & signBit) == 0 && std::isfinite(value))
+                table.emplace_back(value, code);
+        }
+        std::sort(table.begin(), table.end());
+        return table;
+    }
+
+    // Element code of x under a scale of one: nearest finite magnitude (ties to the even
+    // encoding, saturating at the largest), with x's sign (so -0.1 gives -0 where it exists).
+    inline uint8_t maf2_0ElementCode(double                                          x,
+                                     std::vector<std::pair<double, uint8_t>> const& magnitudes,
+                                     uint8_t                                         signBit)
+    {
+        const uint8_t code = nearestScaleByteRne(magnitudes, std::abs(x));
+        return std::signbit(x) ? static_cast<uint8_t>(code | signBit) : code;
+    }
+
     template <typename DTYPE>
     inline void DataGenerator<DTYPE>::dispatch_generate_data(const std::vector<index_t>& size,
                                                              const std::vector<index_t>& stride)
@@ -597,7 +753,8 @@ namespace DGen
                             [&](const DenormMaxs&) { generate_data_denorm_maxs(); },
                             [&](const NaNs&) { generate_data_nans(); },
                             [&](const Infs&) { generate_data_infs(); },
-                            [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); }},
+                            [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); },
+                            [&](const Maf2_0& m) { generate_data_maf2_0(m); }},
                    m_options.initMode);
     }
 
@@ -1792,6 +1949,83 @@ namespace DGen
     }
 
     template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_maf2_0(Maf2_0 const& mode)
+    {
+        if constexpr(!isScaled<DTYPE>())
+        {
+            throw std::invalid_argument(
+                "DataGenerator::generate_data_maf2_0: Maf2_0 needs a block-scaled data type");
+        }
+        else
+        {
+            if(!mode.normalScale && !mode.unitScaleNormalData
+               && (mode.n < 0 || mode.n > (1 << 20)))
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf2_0: n must be in [0, 2^20]");
+            if(mode.normalScale && !(mode.scaleStdDev > 0.0))
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf2_0: scaleStdDev must be positive");
+
+            const int  trials     = 2 * mode.n + 1;
+            const auto scaleForK  = (mode.normalScale || mode.unitScaleNormalData)
+                                        ? std::vector<uint8_t>{}
+                                        : maf2_0ScaleBytes<DTYPE>(mode.n, mode.center);
+            const auto scales     = sortedFiniteScales<DTYPE>();
+            const auto block_size = m_options.blockScaling;
+            const auto numBlocks  = numScaleBlocks(block_size);
+
+            // Finite data encodings: decode every code under a scale of one.
+            std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+            std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+            setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+            const auto codes
+                = enumerateDataBytesForScale<DTYPE>(s_one[0],
+                                                    -std::numeric_limits<double>::infinity(),
+                                                    std::numeric_limits<double>::infinity(),
+                                                    /*requireNonzero=*/false);
+
+            // Unit-scale data: N(0, 1) elements rounded to the element format.
+            const uint8_t signBit = static_cast<uint8_t>(
+                1u << (DTYPE::dataInfo.exponentBits + DTYPE::dataInfo.mantissaBits));
+            const auto magnitudes = sortedNonNegativeCodes<DTYPE>(s_one[0], signBit);
+
+            // One normal distribution per thread: libstdc++ caches a spare draw in it.
+            std::vector<std::normal_distribution<double>> normal_dist(
+                m_num_threads,
+                mode.unitScaleNormalData
+                    ? std::normal_distribution<double>(0.0, 1.0)
+                    : std::normal_distribution<double>(mode.scaleMean, mode.scaleStdDev));
+
+            // Per block: the scale draw, then the block's elements in order.
+            std::uniform_int_distribution<size_t> code_dist(0, codes.size() - 1);
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                const auto    tid   = omp_get_thread_num();
+                const uint8_t scale = mode.unitScaleNormalData ? s_one[0]
+                                      : mode.normalScale
+                                          ? maf2_0NormalScaleByte<DTYPE>(
+                                              normal_dist[tid](m_gen[tid]), scales)
+                                          : scaleForK[binomialHalf(m_gen[tid], trials)];
+                std::memcpy(
+                    &m_scaleBytes[scale_i * m_scaleDesc.byte_size], &scale, m_scaleDesc.byte_size);
+
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size);
+                    block_i++)
+                {
+                    const auto    data_i = dataIndex(scale_i, block_i, block_size);
+                    const uint8_t code
+                        = mode.unitScaleNormalData
+                              ? maf2_0ElementCode(normal_dist[tid](m_gen[tid]), magnitudes, signBit)
+                              : codes[code_dist(m_gen[tid])];
+                    std::memcpy(
+                        &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
+                }
+            }
+        }
+    }
+
+    template <typename DTYPE>
     void DataGenerator<DTYPE>::generate_data_sequential(const std::vector<index_t>& size,
                                                         const std::vector<index_t>& stride)
     {
@@ -2166,8 +2400,10 @@ namespace DGen
 
         const auto block_size = (isScaled<DTYPE>() ? m_options.blockScaling : 1);
 
-        // Prepare a normal distribution with the requested mean and standard deviation
-        std::normal_distribution<> normal_dist{mean, std_dev};
+        // One normal distribution per thread, like m_gen: it caches a spare sample between calls,
+        // so a shared one would race and mix samples across the threads' generators.
+        std::vector<std::normal_distribution<>> normal_dist(
+            m_num_threads, std::normal_distribution<>{mean, std_dev});
 
         const auto numBlocks = numScaleBlocks(block_size);
 
@@ -2191,7 +2427,7 @@ namespace DGen
                 //
 
                 // generate value according to normal distribution
-                auto value = normal_dist(m_gen[tid]);
+                auto value = normal_dist[tid](m_gen[tid]);
 
                 value = m_options.clampToF32 ? static_cast<float>(value) : value;
 

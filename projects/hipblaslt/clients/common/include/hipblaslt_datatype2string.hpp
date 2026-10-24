@@ -55,6 +55,14 @@ enum class hipblaslt_initialization
     norm_dist_one_special = 894,
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
     uniform_low_precision  = 999,
+    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8); for
+    // block-scaled (MX) operands, mxDataGenerator Maf2_0 (FP8/FP6: 2^Binomial scales, FP4:
+    // N(0.34375, 0.08) scales, data uniform over the encodings); deterministic,
+    // mxDataGenerator-style seeding
+    maf2_0 = 1000,
+    // MAF2.0 FP4 non-scaled row: block-scaled (MX) FP4 operands get every block scale 1.0 and
+    // N(0,1) data rounded to FP4; other operands are filled as maf2_0
+    maf2_0_unit_scale = 1001,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -300,6 +308,10 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "norm_dist_one_special";
     case hipblaslt_initialization::uniform_low_precision:
         return "uniform_low_precision";
+    case hipblaslt_initialization::maf2_0:
+        return "maf2_0";
+    case hipblaslt_initialization::maf2_0_unit_scale:
+        return "maf2_0_unit_scale";
     }
     return "invalid";
 }
@@ -334,6 +346,8 @@ inline std::optional<hipblaslt_initialization>
         value == "nan"        ? hipblaslt_initialization::nan        :
         value == "norm_dist_one_special" ? hipblaslt_initialization::norm_dist_one_special :
         value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
+        value == "maf2_0"     ? hipblaslt_initialization::maf2_0     :
+        value == "maf2_0_unit_scale" ? hipblaslt_initialization::maf2_0_unit_scale :
         std::optional<hipblaslt_initialization>{};
 }
 // clang-format on

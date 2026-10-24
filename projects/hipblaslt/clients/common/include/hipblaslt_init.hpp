@@ -127,7 +127,9 @@ void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipDataType              type,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int norm_dist_one_special_type = -1);
+                           int                      norm_dist_one_special_type = -1,
+                           // pointer-array batch index; only seeds maf2_0
+                           size_t batch_index = 0);
 
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */

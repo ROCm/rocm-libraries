@@ -29,11 +29,15 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <limits>
+#include <omp.h>
+#include <random>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -155,6 +159,49 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
         fill_kernel<<<dim3(grid_size), dim3(block_size), 0, hipStreamDefault>>>(A, size, offset, f);
     }
     CHECK_HIP_ERROR(hipGetLastError());
+}
+
+// maf2_0 seeding mirrors mxDataGenerator (DataGenerator.hpp) so runs are reproducible: a fixed
+// base seed and one std::mt19937 per OpenMP thread seeded seed + tid, using
+// min(32, omp_get_max_threads()) threads that each draw a contiguous chunk. A, B, C and each
+// pointer-array batch get disjoint seed ranges so their data differ.
+constexpr uint32_t kMaf2_0Seed       = 1713573849u; // generateMXInput's fixed seed
+constexpr int      kMaf2_0MaxThreads = 32;
+
+static uint32_t maf2_0_seed(ABC_dims abc, size_t batch_index)
+{
+    constexpr uint32_t num_matrices = 3; // A, B, C
+    return kMaf2_0Seed
+           + kMaf2_0MaxThreads
+                 * (static_cast<uint32_t>(abc) + num_matrices * uint32_t(batch_index));
+}
+
+// Fills every element up to the last one used, ld padding between columns and batches included:
+// M + lda*(N-1), plus (batch_count-1)*stride when stride >= lda (stride 0 broadcasts one matrix).
+// For those strides this is the extent TensileLite fills, so both projects draw the same data.
+// Values are N(0, 1) drawn in double precision on the host, then copied to the device.
+// T(double) rounds to nearest even (FP16 and FP8 directly from double, FP8 saturating finite values
+// to the largest finite value); hip_bfloat16 has no double constructor, so it rounds to float
+// first, then to BF16, like the other double-based init modes.
+template <typename T>
+static void maf2_0_fill_normal(
+    T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, uint32_t seed)
+{
+    if(batch_count == 0 || M == 0 || N == 0)
+        return;
+    const size_t size_64
+        = M + lda * (N - 1) + (stride >= lda ? size_t(batch_count - 1) * stride : 0);
+    std::vector<T> h(size_64);
+    const int      num_threads = std::min(kMaf2_0MaxThreads, omp_get_max_threads());
+#pragma omp parallel num_threads(num_threads)
+    {
+        std::mt19937                     gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+        std::normal_distribution<double> dist(0.0, 1.0);
+#pragma omp for schedule(static)
+        for(size_t i = 0; i < size_64; i++)
+            h[i] = T(dist(gen));
+    }
+    CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
 }
 
 __host__ __device__ uint32_t pseudo_random_device(size_t idx)
@@ -713,7 +760,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   lda,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type = -1)
+                           int                      norm_dist_one_special_type = -1,
+                           size_t                   batch_index                = 0)
 {
     using T_real = get_real_type_t<T>;
 
@@ -1021,6 +1069,26 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                << std::endl;
             }
             break;
+        // maf2_0_unit_scale only changes block-scaled (MX) FP4 operands, which go through
+        // generateMXInput; every other operand is filled as maf2_0.
+        case hipblaslt_initialization::maf2_0:
+        case hipblaslt_initialization::maf2_0_unit_scale:
+            if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                         || std::is_same_v<T, hipblasLtHalf> || std::is_same_v<T, hip_bfloat16>
+#if HIP_FP8_TYPE_OCP
+                         || std::is_same_v<T, hipblaslt_f8> || std::is_same_v<T, hipblaslt_bf8>
+#endif
+#if HIP_FP8_TYPE_FNUZ
+                         || std::is_same_v<T, hipblaslt_f8_fnuz>
+                         || std::is_same_v<T, hipblaslt_bf8_fnuz>
+#endif
+                         )
+                maf2_0_fill_normal(
+                    A, M, N, lda, stride, batch_count, maf2_0_seed(abc, batch_index));
+            else
+                throw std::invalid_argument(
+                    "hipblaslt_init_device: maf2_0 is not supported for this data type yet");
+            break;
         case hipblaslt_initialization::uniform_01:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 return uniform_01<T>(idx);
@@ -1212,81 +1280,82 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            hipDataType              type,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type)
+                           int                      norm_dist_one_special_type,
+                           size_t                   batch_index)
 {
     switch(type)
     {
     case HIP_R_32F:
         hipblaslt_init_device<float>(
-            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_64F:
         hipblaslt_init_device<double>(
-            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_16F:
         hipblaslt_init_device<hipblasLtHalf>(
-            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_16BF:
         hipblaslt_init_device<hip_bfloat16>(
-            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #if HIP_FP8_TYPE_FNUZ
     case HIP_R_8F_E4M3_FNUZ:
         hipblaslt_init_device<hipblaslt_f8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_E5M2_FNUZ:
         hipblaslt_init_device<hipblaslt_bf8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         hipblaslt_init_device<hipblaslt_f8>(
-            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_E5M2:
         hipblaslt_init_device<hipblaslt_bf8>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
     case HIP_R_32I:
         hipblaslt_init_device<int32_t>(
-            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8I:
         hipblaslt_init_device<hipblasLtInt8>(
-            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_UE8M0:
         hipblaslt_init_device<hipblaslt_e8>(
-            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
     case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
         hipblaslt_init_device<hipblaslt_e5m3>(
-            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #if defined(HIPBLASLT_USE_FP6)
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         hipblaslt_init_device<hipblaslt_f6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if defined(HIPBLASLT_USE_BF6)
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
         hipblaslt_init_device<hipblaslt_bf6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if defined(HIPBLASLT_USE_FP4)
     case static_cast<hipDataType>(HIP_R_4F_E2M1):
         hipblaslt_init_device<hipblaslt_f4x2>(
-            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
     case HIP_C_32F:

@@ -1464,19 +1464,14 @@ void check(hipStream_t                   stream,
             }
             else
             {
+                std::vector<void*> gold(num_batches[gemmIdx]), result(num_batches[gemmIdx]);
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    norm_error = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             ldd[gemmIdx],
-                                                             0,
-                                                             hD_gold[batch].buf(),
-                                                             hD_1[batch].buf(),
-                                                             1,
-                                                             To));
-                    hipblaslt_error += norm_error;
+                    gold[batch]   = hD_gold[batch].buf();
+                    result[batch] = hD_1[batch].buf();
                 }
+                norm_error = norm_check_pointer_array(
+                    'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], gold, result, To);
             }
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
@@ -1785,6 +1780,15 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetRotatingBufferSizeValue(arg.rotating);
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
+
+    // maf2_0_unit_scale is the MAF2.0 plan for block-scaled FP4 only; reject other block-scaled
+    // inputs before any resources are created.
+    if(arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+       && ((isBlockScaling(arg.scaleA) && arg.a_type != static_cast<hipDataType>(HIP_R_4F_E2M1))
+           || (isBlockScaling(arg.scaleB)
+               && arg.b_type != static_cast<hipDataType>(HIP_R_4F_E2M1))))
+        throw std::invalid_argument(
+            "maf2_0_unit_scale applies to block-scaled fp4 inputs only; use maf2_0");
 
     // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
@@ -3149,6 +3153,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3156,9 +3162,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf2_0 or maf2_0_unit_scale, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3196,7 +3204,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      /*seedIndex=*/static_cast<uint32_t>(0 + 3 * b));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -3242,7 +3252,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiA,
                                           (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                              : stride_a[i],
-                                          1);
+                                          1,
+                                          -1,
+                                          batchCount);
                 }
             }
         }
@@ -3260,6 +3272,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3267,9 +3281,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf2_0 or maf2_0_unit_scale, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3309,7 +3325,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      /*seedIndex=*/static_cast<uint32_t>(1 + 3 * b));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
@@ -3355,7 +3373,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiB,
                                           (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                              : stride_b[i],
-                                          1);
+                                          1,
+                                          -1,
+                                          batchCount);
                 }
             }
         }
@@ -3928,7 +3948,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       ldc[i],
                                       To,
                                       stride_c[i],
-                                      1);
+                                      1,
+                                      -1,
+                                      batchCount);
                 // broadcast first block
                 CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
                 CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));

@@ -301,13 +301,22 @@ static int parse_arguments(int                          argc,
                 else if(arg == "--initialization")
                 {
                     std::string initializationStr = argv[++i];
-                    if(auto parsed = string2hipblaslt_initialization(initializationStr))
-                        initialization = *parsed;
-                    else
+                    auto        parsed = string2hipblaslt_initialization(initializationStr);
+                    if(!parsed)
                     {
                         std::cerr << "Invalid initialization type: " << initializationStr << '\n';
                         return EXIT_FAILURE;
                     }
+                    // initialize_a_b_c_bias has no maf2_0 fill; reject instead of leaving buffers
+                    // unfilled.
+                    if(*parsed == hipblaslt_initialization::maf2_0
+                       || *parsed == hipblaslt_initialization::maf2_0_unit_scale)
+                    {
+                        std::cerr << "Initialization " << initializationStr
+                                  << " is not supported by this client; use hipblaslt-bench\n";
+                        return EXIT_FAILURE;
+                    }
+                    initialization = *parsed;
                 }
                 else if(arg == "--sync_count")
                 {
