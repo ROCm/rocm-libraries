@@ -87,7 +87,7 @@ protected:
         device_name = handle.GetDeviceName();
 
         // Check if device is in the list of devices that support ND models
-        if(device_name != "gfx942" && device_name != "gfx950")
+        if(device_name != "gfx942" && device_name != "gfx950" && device_name != "gfx1250")
         {
             GTEST_SKIP() << "Device " << device_name << " not in supported list for " << spatial_dim
                          << "D TunaNet models";
