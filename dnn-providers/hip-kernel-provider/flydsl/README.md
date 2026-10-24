@@ -24,7 +24,10 @@ file per engine:
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
 [`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
 and
-[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
+[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp)
+(and [`FlydslSdpaDropoutMaskNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaDropoutMaskNative.cpp),
+the RNG dump's keep-mask writer's engine, which serves no graph; the dropping engines launch its
+objects, `FlydslSdpaRngDump.hpp`),
 with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`,
 and the rules RDNA and CDNA apply alike (the mask's bounds, the sink, the scale tensor,
 output aliasing) in `FlydslSdpaShared.hpp`.
@@ -78,7 +81,8 @@ error, as release builds and the superbuild CI set. Inside each directory,
 
 For RDNA, four engines -- RMSNorm forward and backward, and SDPA prefill and decode, 417
 kernel objects per family, 465 on gfx11-generic with its 48 dropout objects -- plus, on gfx12-generic only, AOTriton's gfx1201 attention
-kernel as a fifth (196 more, 613 in all), built once for each of two LLVM generic targets
+kernel as a fifth (196 more, 613 in all), and on both the RNG dump's keep-mask writer (one object
+each, 466 and 614 in all), built once for each of two LLVM generic targets
 and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -171,7 +175,8 @@ and decode objects, packed THD sequences (ragged offsets, compact) on the generi
 objects, and dropout (AOTriton's Philox mask, bit for bit) on 12 generic prefill objects
 per arch, with a bias on 12 more; exact f32 on 6 generic prefill objects per arch: every
 multiple of 8 up to 128 (to 256 on gfx950) and 256.
-174 objects on gfx950, 176 on gfx942 and 192 on gfx90a. Each class ships a default
+174 objects on gfx950, 176 on gfx942 and 192 on gfx90a, plus the RNG dump's keep-mask writer on
+each (175, 177 and 193 in all). Each class ships a default
 object and measured companions -- other tiles for short queries and large problems --
 chosen by timing every candidate on the dnn-benchmarking attention graphs
 ([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries

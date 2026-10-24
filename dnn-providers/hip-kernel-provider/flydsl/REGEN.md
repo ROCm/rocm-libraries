@@ -113,14 +113,14 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 465 (90 + 63 + 204 + 108) |
-| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 613 (90 + 63 + 156 + 108 + 196) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode` | 327 (90 + 63 + 130 + 20 + 24) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 329 (90 + 63 + 152 + 24) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 345 (90 + 63 + 168 + 24) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask` | 466 (90 + 63 + 204 + 108 + 1) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask` | 614 (90 + 63 + 156 + 108 + 196 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask` | 328 (90 + 63 + 130 + 20 + 24 + 1) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 330 (90 + 63 + 152 + 24 + 1) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 346 (90 + 63 + 168 + 24 + 1) |
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -197,6 +197,8 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
   [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
+  # The RNG dump's keep-mask writer (COVERAGE.md §5.10), one object per target.
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -216,6 +218,7 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done

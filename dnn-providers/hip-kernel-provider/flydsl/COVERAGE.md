@@ -801,6 +801,7 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
 |---|---|---|---|
 | Probability in (0, 1) with seed and offset | **served** by 36 `has_dropout` objects: bf16/f16 × causal × `head_dim` 64, 128, 256 × {no mask, a mask in the query's dtype, an f32 mask (R1)}, no sink | prefill on gfx11: **served** by 48 `has_dropout` objects (kernel modification 27): bf16/f16 × causal × `head_dim` 64, 96, 128, 256 × {no bias, an f32 bias, one in the query's dtype (R2)}, no sink; prefill on gfx12 (the aiw objects serve it, decision Q3) and decode: declined | **served** by 24 `has_dropout` objects per arch on the generic prefill tiers (12 without a bias, 12 with one the vectorized objects read), §7.9 |
 | Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
+| RNG dump (`rng_dump`) of a dropping graph | **served**: the mask writer after the attention launch | prefill on gfx11: **served** the same way; elsewhere the graph's dropout is declined | **served** the same way, padded graphs included (§7.9) |
 
 - **The mask is AOTriton's**, bit for bit from AOTriton 0.15 on: Philox4x32-10 keyed by the seed,
   one counter per 4 keys of a (batch, query head, row) at
@@ -822,7 +823,30 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   it there, as PyTorch passes it), or INT64/INT32 by value (widened on the host; a seed given by
   value is written to 8 bytes of workspace with two memsets on the launch stream, so the
   launch stays capturable). INT32 on the device, a seed or offset without a probability, a
-  probability outside [0, 1), the mask-and-scale form, and the RNG dump decline.
+  probability outside [0, 1), and the mask-and-scale form decline.
+- **The RNG dump** (`rng_dump`, `FlydslSdpaRngDump.hpp`): the keep mask the launch applied,
+  FLOAT `[B, Hq, Sq, Skv]`, 1 kept and 0 dropped, which hipDNN's references apply as the
+  explicit mask (scaled by `1/(1 − p)`) and keep-rate check. It is written by its own small
+  kernel, the `sdpa_dropout_mask` op: one object per target (gfx11-generic, gfx12-generic,
+  gfx90a, gfx942, gfx950), drawing the same counters through the same `philox.py`, one thread
+  per counter. The dropping engines' natives launch it on the attention launch's stream, after
+  it, only for a graph that names a dump, so no attention object changed (byte-identical, their
+  digests untouched). It holds the raw keep bit at every element, masked keys, padded rows and
+  keys past a batch's length included: those are draws the attention kernel makes and discards,
+  and the references' keep-rate check counts the whole buffer. Its objects ship under an engine
+  of their own, `hipkernel:flydsl_sdpa_dropout_mask`, which serves no graph; a native finds the
+  object beside its own (`sdpa_dropout_mask/<target>/` in the same arch shard), and an object
+  whose shard lacks it declines a dump at kernel match. Served: FLOAT, the graph's extents,
+  packed row-major strides (any stride on an axis of one element), a plain device tensor at a
+  4-byte-aligned base, under 2³¹ draws (the writer's grid), with a probability above 0.
+  Declined: any other dtype, extent, rank or layout, virtual, pass-by-value or ragged dumps, a
+  dump with probability 0 (the plain objects apply no mask) or without dropout, a dump that is
+  another of the node's tensors, and a dump over packed operands. Tested: every gate
+  (`RngDump/TestFlydslSdpa{Rdna,Cdna}FieldDeclines`, `TestFlydslSdpaRngDump*`,
+  `TestFlydslSdpaCdnaKernelMatch.RunsADumpOnlyBesideTheWriter`), and on the device the dump
+  equal to the oracle's mask bit for bit at every element with hipDNN's keep-rate check, O
+  equal to hipDNN's CPU reference run with the dump as its mask, and the undropped LSE
+  (`TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch.WritesTheRngDumpItApplied`).
 - **Declined in this first wave**, each a row of objects when a model needs it: dropout with a
   sink, under padding, on the padded head-dim tiers and the generic tiers, MLA,
   on the RDNA gfx12 prefill objects (the aiw objects serve gfx12), and on the decode objects
@@ -929,7 +953,8 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward, MLA with a bias (N2) | an f32-bias and a query-dtype-bias object beside each of the 4 MLA objects (`has_bias`, `bias_q`), on the 192 schedule; no spill | 8 | shipped, both RDNA targets; the 421 above byte-identical |
 | SDPA forward, dropout with a bias (R2) | an f32-bias and a query-dtype-bias object beside each of the 16 dropout twins (`has_dropout` with `has_bias`, `bias_q`), on the bias schedule (at 256 the twins' column split); no spill | 32 | shipped, `gfx11-generic` only; the 429 above byte-identical |
 | SDPA decode, a generic tier up to 512 (H4) | dtype (2) × causal (2); every multiple of 8 up to 512 (kernel modification 30 lifts the generic decode cap from 256), the output columns split four ways (`dv_split` 4), K and V columns past the runtime head_dim read as zeros past the slice; no bias, no sink; the gfx11 f16 objects spill 1 VGPR, allowed for this class (§5.1) | 4 | shipped, both RDNA targets; the 461 above byte-identical |
-| **Total, gfx11-generic** | | **465** | |
+| SDPA dropout keep-mask writer (§5.10) | the RNG dump's writer (`sdpa_dropout_mask`, its own op and engine, which serves no graph): one object, every value at runtime | 1 | shipped, `gfx11-generic` and `gfx12-generic`; every attention object byte-identical (no attention digest moved) |
+| **Total, gfx11-generic** | | **466** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table but its dropout twins, built from the same sources for RDNA4 | **417** | shipped; GPU suites pass on gfx1201 |
 | SDPA forward, AOTriton's gfx1201 kernel (§5.6) | dtype (2) × causal (2) × {64, 128, 256 each plain, with a mask in Q's dtype, with an f32 mask; sinks at 64 and 128; MLA 192/128; padded tiers 64, 96, 128, 160, 224, 256} | 72 | shipped, `gfx12-generic` only; GPU suites pass on gfx1201 |
@@ -938,8 +963,8 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward, AOTriton's kernel, head dims past 256 (§5.6) | padded tiers up to 384 and 512 (the tuning table's 384 and 512 schedules) × dtype (2) × causal (2) × {plain, a mask in Q's dtype, an f32 one}; they spill 62-141 VGPRs, allowed per class (§5.8) | 24 | shipped, `gfx12-generic` only; the 132 above byte-identical |
 | SDPA forward, AOTriton's kernel, a sink with a mask (§5.6) | a mask in Q's dtype and an f32 one beside each of the 8 sink objects (`has_sink` with `has_bias`, `bias_f32`); `head_dim` 128 spills 2-4 VGPRs, within the mask objects' allowances | 16 | shipped, `gfx12-generic` only; the 156 above byte-identical |
 | SDPA forward, AOTriton's kernel, dropout with a mask (R1) | a mask in Q's dtype and an f32 one beside each of the 12 dropout twins (`has_dropout` with `has_bias`, `bias_f32`); 256 spills 34-52 VGPRs, allowed per class (`_DROPOUT_BIAS_SPILL_ALLOWANCE`), 64 and 128 none | 24 | shipped, `gfx12-generic` only; the 172 above byte-identical |
-| **Total, gfx12-generic** | | **613** | |
-| **Total, both families** | | **1078** | |
+| **Total, gfx12-generic** | the RDNA table (417, without its dropout objects), AOTriton's kernel (196) and the keep-mask writer (1) | **614** | |
+| **Total, both families** | | **1080** | |
 | SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942, 102 on gfx90a | shipped; GPU suites pass on all three |
 | SDPA forward, CDNA, a bias on the bucket objects | one bias object beside each bucket class's default tier (`has_bias`) | 12 on gfx950, 12 on gfx942, 28 on gfx90a | shipped; the objects without it compile to identical instructions, but the generic kernel's causal prefill ones (modification 30, below) |
 | SDPA forward, CDNA, a bias read one key at a time | dtype (2) × bucket {64, 128, 256} × causal (2), `bias_kstrided` (modification 31; f32 or the query's dtype at runtime) | 12 per arch | shipped; the generic kernel takes two more arguments, appended to every object's list, and the objects without it compile to identical instructions |
@@ -952,7 +977,8 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward, CDNA, a sink with a strided bias | dtype (2) × `head_dim` {64, 128} × causal (2): a strided build (`bias_kstrided`) of each prefill sink-and-bias tier, ranked below it | 8 per arch | shipped; every existing object byte-identical |
 | SDPA forward, CDNA, dropout with a bias (§7.9) | dtype (2) × causal (2) × `head_dim` {64, 128, 256}, `has_dropout` × `has_bias` (vectorized), each dropout object's tier | 12 per arch | shipped; every existing object byte-identical |
 | SDPA forward, CDNA, exact 512/512 prefill | dtype (2) × causal (2), `head_dim` = `head_dim_v` 512, O split four ways (`dv_split` 4, modification 16), Q streamed past 256; K chunked by 256 on gfx942 and gfx90a (modification 18) | 4 per arch | shipped; every existing object byte-identical; the decode engine's wide objects serve 512/512 too (both candidates, autotune picks) |
-| **Total, CDNA** | | **174 on gfx950, 176 on gfx942, 192 on gfx90a** | |
+| SDPA dropout keep-mask writer (§7.9, §5.10) | the RNG dump's writer, one object per arch | 1 per arch | shipped; every attention object byte-identical |
+| **Total, CDNA** | | **175 on gfx950, 177 on gfx942, 193 on gfx90a** | |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -1470,6 +1496,11 @@ Dropout as §5.10 states it (`dropout_probability` with a seed and an offset ten
   extents (`Sq`, `Skv` the padded maxima, `i`, `j` positions within the sequence), as AOTriton's
   varlen does: a padded batch's real rows get the dense graph's bits, and its padded rows O = 0,
   LSE = −inf.
+- **The RNG dump** as §5.10 states it: the mask writer after the generic launch (a dropout object
+  is never a split one), on padded graphs too, where it writes the raw bit at padded rows and
+  at keys past a batch's length (the draws the kernel discards). Tested with the RDNA and aiw
+  cases' graphs, seed and offset, and under padding with a seed and offset by value
+  (`TestGpuFlydslSdpaCdnaDispatch.WritesTheRngDumpItApplied`).
 - **With a bias** (the second wave): a bias build of each dropout object, 12 per arch. The bias is
   in the query's dtype, read as the vectorized objects read it. It is added to the scores, and the
   mask is drawn after the softmax's sum, as AOTriton composes them. Every dropout tier holds the
