@@ -466,6 +466,25 @@ def _require_compiler_info() -> CompilerInfo:
     return info
 
 
+def require_options_accepted(
+    options: Optional[Sequence[str]], *, needed_by: str
+) -> None:
+    """Refuse ``-mllvm`` options the loaded compiler does not accept.
+
+    Must run before COMGR sees ``options``: LLVM's option parser exits the
+    whole process on an option it does not know. The answers come from the
+    measured table in :mod:`rocke.runtime.compiler_options`; ``needed_by``
+    names what is being compiled, for the error. An option list without
+    ``-mllvm`` is accepted without loading COMGR.
+    """
+    from .compiler_options import backend_options, require_accepted
+
+    options = list(options or ())
+    if not backend_options(options):
+        return
+    require_accepted(options, compiler=_require_compiler_info(), needed_by=needed_by)
+
+
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     """Reject a known p8-generation mismatch against the loaded compiler.
 
@@ -819,7 +838,11 @@ def build_hsaco_from_llvm_ir(
     A process that compiles one module gives the code the strategy is written
     for (its own assertion expects those counts to be zero) and the same code
     object every time. The default keeps the in-process compile.
+
+    A ``-mllvm`` option the loaded compiler does not accept raises before
+    COMGR is called (:func:`require_options_accepted`).
     """
+    require_options_accepted(options, needed_by="this COMGR compile")
     if fresh_process:
         options = list(options or ["-O3"])
         return _build_in_fresh_process(ir_text, isa=isa, options=options)
@@ -842,7 +865,8 @@ def build_hsaco_from_llvm_modules(
 
     Internal-linkage globals (rocKE's LDS pools) are renamed by the linker
     when two modules spell the same name; two external definitions of one
-    name -- two kernels sharing a symbol -- fail the link.
+    name -- two kernels sharing a symbol -- fail the link. ``options`` are
+    checked as in :func:`build_hsaco_from_llvm_ir`.
     """
     ir_texts = tuple(ir_texts)
     if len(ir_texts) < 2:
@@ -850,6 +874,7 @@ def build_hsaco_from_llvm_modules(
             "build_hsaco_from_llvm_modules links two or more modules; use "
             "build_hsaco_from_llvm_ir for one"
         )
+    require_options_accepted(options, needed_by="this COMGR compile")
     return _build_hsaco(ir_texts, isa=isa, options=options)
 
 

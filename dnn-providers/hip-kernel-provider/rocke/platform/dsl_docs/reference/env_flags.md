@@ -171,3 +171,10 @@ even with an emission override or an unrecognised input datalayout.
 The detected LLVM version selects a baseline flavor; it does not prove that
 all builds of that version share an exact DataLayout or intrinsic catalog.
 Toolchain-specific compilation and drift tests remain necessary.
+
+The detected LLVM version also decides which `-mllvm` backend options a compile
+may pass. LLVM's option parser exits the whole process on an option it does not
+know, so every one is checked against a measured table before COMGR is called,
+and a kernel that needs an option the loaded compiler lacks raises
+`CompilerOptionNotAccepted` (a `ValueError`). The contract and the table are in
+`rocke.runtime.compiler_options`; `tools/gen_compiler_options.py` measures it.
