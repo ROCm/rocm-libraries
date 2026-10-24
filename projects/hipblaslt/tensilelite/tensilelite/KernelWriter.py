@@ -11938,9 +11938,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")
 
-    if isPersistentDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
+    if not kernel["ProblemType"]["GroupedGemm"]:
       for tensor in ("D", "C", "A", "B"):
         _reg("uint64", "BatchOffset" + tensor)
+
+    # One entry for the whole fixed-size fusegemmm a2a segment
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      _reg("uint32", "FusedA2ASegment")
 
   def _getKernelSource(self, kernel: Solution):
     """
