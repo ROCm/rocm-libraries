@@ -73,6 +73,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
   stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
   including a 3x3 112x112 tile.
+* [DB] Added validated gfx1101 (Navi 32) find-db and perf-db files, so gfx1101 uses tuned
+  solver selection and performance configs instead of untuned defaults.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
@@ -86,6 +88,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   span. The 32-bit byte-offset overflow that motivated the gate is fixed in CK itself, so these
   problems can again use the faster int32 CK instances.
 * [Conv] Relaxed the ASM-GTC NHWC large-tensor guard for forward and backward-data. Those kernels address a full 4 GiB window per dispatch slice and advance the base pointer per batch-split, so the input and output bounds were redundant; what remains is a bound on the per-group weight size. Backward-weights keeps the stricter int32 bound, because 292 of its 900 kernels ignore the batch-split dimension (#11805). This restores 8,978 forward and backward-data entries across the six system find-databases that the guard's first revision removed.
+* [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
+  files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
+  in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
+  `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
+  files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
+  from the build tree without an install.
 
 ### Optimized
 * [Conv] Optimized the `ConvDirectNaiveConv` solver with per-direction kernel files, float
