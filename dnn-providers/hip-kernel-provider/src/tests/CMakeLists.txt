@@ -340,6 +340,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                ShipsTheF32FirstWave
                 RanksTheNarrowerBucketFirst
                 EveryKernelDeclaresItsFamilysSignature
         )
@@ -379,7 +380,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheThirtyEightSlotSignature
+                EveryKernelDeclaresTheFortySevenSlotSignature
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -404,7 +405,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheFortySlotSignature
+                EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
 

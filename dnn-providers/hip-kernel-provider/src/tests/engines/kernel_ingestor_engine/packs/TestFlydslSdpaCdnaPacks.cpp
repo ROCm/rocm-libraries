@@ -86,11 +86,18 @@ const CdnaEngine DUALWAVE{"hipkernel:flydsl_sdpa_cdna_dualwave",
                            {"has_sink", 0},
                            {"dv_split", 1},
                            {"split_kv", 0},
-                           {"pack_gqa", 0}}};
+                           {"pack_gqa", 0},
+                           {"bias_kstrided", 0},
+                           {"has_dropout", 0}}};
 const CdnaEngine DECODE{"hipkernel:flydsl_sdpa_cdna_decode",
                         "hipkernel.flydsl_sdpa_cdna_decode.graph_match",
                         false,
-                        {{"any_diagonal", 1}, {"kv_align", 0}, {"split_kv", 1}, {"pack_gqa", 1}}};
+                        {{"any_diagonal", 1},
+                         {"kv_align", 0},
+                         {"split_kv", 1},
+                         {"pack_gqa", 1},
+                         {"bias_kstrided", 0},
+                         {"has_dropout", 0}}};
 
 void expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(const CdnaEngine& engine)
 {
@@ -119,9 +126,9 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
     // Everything an object was built with, in one string: a duplicate would make the choice
     // between two objects an accident of ids.
     std::set<std::string> builds;
-    // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias, has_sink) -- the
-    // priorities of the objects that serve every shape of it.
-    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t>;
+    // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias, has_sink,
+    // has_dropout) -- the priorities of the objects that serve every shape of it.
+    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>;
     std::map<ClassKey, std::vector<int64_t>> serveAll;
     const std::set<std::string> features = {"none", "rows", "seq_q"};
     size_t kernels = 0;
@@ -181,7 +188,8 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
                                                   field("head_dim_v"),
                                                   field("causal"),
                                                   field("has_bias"),
-                                                  field("has_sink"));
+                                                  field("has_sink"),
+                                                  field("has_dropout"));
             // Every class, so one whose objects all need an aligned key length (or offset 0)
             // is caught for having no object that serves any graph of it.
             serveAll[classKey];
@@ -204,15 +212,16 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
         {
             ADD_FAILURE() << std::get<0>(key) << " head_dim " << std::get<1>(key) << "/"
                           << std::get<2>(key) << " causal " << std::get<3>(key) << " bias "
-                          << std::get<4>(key) << " sink " << std::get<5>(key)
-                          << ": no object serves any key length and diagonal";
+                          << std::get<4>(key) << " sink " << std::get<5>(key) << " dropout "
+                          << std::get<6>(key) << ": no object serves any key length and diagonal";
             continue;
         }
         const auto top = *std::max_element(priorities.begin(), priorities.end());
         EXPECT_EQ(std::count(priorities.begin(), priorities.end(), top), 1)
             << std::get<0>(key) << " head_dim " << std::get<1>(key) << "/" << std::get<2>(key)
             << " causal " << std::get<3>(key) << " bias " << std::get<4>(key) << " sink "
-            << std::get<5>(key) << ": two serve-all objects tie at the top";
+            << std::get<5>(key) << " dropout " << std::get<6>(key)
+            << ": two serve-all objects tie at the top";
     }
 }
 
@@ -222,7 +231,10 @@ void expectUniqueObjectsAndOneTopServeAllPerClass(const CdnaEngine& engine)
 /// two token strides, lse_on, diag_offset and the same seven strides, the window, the bias,
 /// its three strides, V's three strides and the Q/K head dim, then the split workspace's two
 /// tensors and the split count, then the sink tensor, its head stride and the sink switch,
-/// then the LSE's three strides. Every scalar slot is 4 bytes.
+/// then the LSE's three strides, then the bias's key stride and f32 switch (vendored-kernel
+/// modification 31), then four tensors (packed sequences' row offsets, the dropout seed and
+/// offset) and four scalars (the offset's two by-value words, the keep threshold, the scale;
+/// modification 32). Every scalar slot is 4 bytes.
 void expectEveryKernelDeclaresItsFamilysSignature(const CdnaEngine& engine)
 {
     const auto& set = loadedSet(engine.name);
@@ -260,6 +272,9 @@ void expectEveryKernelDeclaresItsFamilysSignature(const CdnaEngine& engine)
         tensors(1);
         scalars(2);
         scalars(3);
+        scalars(2);
+        tensors(4);
+        scalars(4);
     }
 
     size_t checked = 0;
@@ -294,6 +309,49 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneTopServeAllPerClass)
 /// one arch, dtype and causal flag, each width's default outranks every wider width's, and
 /// its companions rank below every width's default: a graph several buckets serve gets the
 /// narrowest, which does the least wasted matrix work, unless autotune measures otherwise.
+/// The exact-f32 objects (vendored-kernel modification 35), the first wave on every arch: the
+/// buckets up to 64 and 128, and up to 256 on gfx950 (head_dim 256 exactly elsewhere, where it
+/// splits O's columns), each causal and not, with no bias, sink or dropout, on the generic
+/// kernel only.
+TEST(TestFlydslSdpaCdnaPacks, ShipsTheF32FirstWave)
+{
+    const auto& set = loadedSet(GENERIC.name);
+    std::map<std::string, std::set<std::tuple<int64_t, int64_t, int64_t>>> classes;
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto* dtype = tryGetMetadataField<std::string>(kernel.metadata, "dtype");
+            ASSERT_NE(dtype, nullptr) << kernel.name;
+            if(*dtype != "f32")
+            {
+                continue;
+            }
+            const auto value = [&kernel](const char* name) {
+                const auto* field = tryGetMetadataField<int64_t>(kernel.metadata, name);
+                return field == nullptr ? int64_t{-1} : *field;
+            };
+            EXPECT_EQ(value("has_bias"), 0) << kernel.name;
+            EXPECT_EQ(value("has_sink"), 0) << kernel.name;
+            EXPECT_EQ(value("has_dropout"), 0) << kernel.name;
+            EXPECT_EQ(value("head_dim_v"), value("head_dim")) << kernel.name;
+            const auto& arches = kernel.arch.empty() ? pack.arch : kernel.arch;
+            for(const auto& arch : arches)
+            {
+                classes[arch].emplace(value("head_dim"), value("qk_mask"), value("causal"));
+            }
+        }
+    }
+    ASSERT_FALSE(classes.empty()) << "no f32 object loaded";
+    for(const auto& [arch, shipped] : classes)
+    {
+        const int64_t wide = arch == "gfx950" ? 1 : 0;
+        const std::set<std::tuple<int64_t, int64_t, int64_t>> expected{
+            {64, 1, 0}, {64, 1, 1}, {128, 1, 0}, {128, 1, 1}, {256, wide, 0}, {256, wide, 1}};
+        EXPECT_EQ(shipped, expected) << arch;
+    }
+}
+
 TEST(TestFlydslSdpaCdnaPacks, RanksTheNarrowerBucketFirst)
 {
     const auto& set = loadedSet(GENERIC.name);

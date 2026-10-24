@@ -59,6 +59,7 @@ inline constexpr PackSymbols FLYDSL_SDPA_AIW{"hipkernel:flydsl_sdpa_aiw",
 constexpr const char* FLYDSL_SDPA_AIW_BIAS_F32_FIELD = "bias_f32";
 constexpr const char* FLYDSL_SDPA_AIW_BIAS_KSTRIDED_FIELD = "bias_kstrided";
 constexpr const char* FLYDSL_SDPA_AIW_BLOCK_THREADS_FIELD = "block_threads";
+constexpr const char* FLYDSL_SDPA_AIW_HAS_DROPOUT_FIELD = "has_dropout";
 
 /// The split-KV decode kernel's engine: a kernel family of its own, sharing the prefill
 /// engine's graph matcher (registered under its own symbol) and bound tokens.
@@ -82,6 +83,15 @@ constexpr const char* FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN
 constexpr const char* FLYDSL_SDPA_RDNA_STATS_TOKEN = "flydsl_sdpa_rdna.stats.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_rdna.scale_source";
 constexpr const char* FLYDSL_SDPA_RDNA_SCALE_TOKEN = "flydsl_sdpa_rdna.scale";
+constexpr const char* FLYDSL_SDPA_RDNA_SEQ_LEN_Q_TOKEN = "flydsl_sdpa_rdna.seq_len_q.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_SEQ_LEN_KV_TOKEN = "flydsl_sdpa_rdna.seq_len_kv.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_P_TOKEN = "flydsl_sdpa_rdna.dropout_p";
+constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_SEED_TOKEN = "flydsl_sdpa_rdna.dropout_seed.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_rdna.dropout_offset.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_TOKEN
+    = "flydsl_sdpa_rdna.ragged_offset_q.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_TOKEN
+    = "flydsl_sdpa_rdna.ragged_offset_kv.uid";
 
 constexpr const char* FLYDSL_SDPA_RDNA_DTYPE_FIELD = "dtype";
 constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_FIELD = "head_dim";
@@ -96,6 +106,8 @@ constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD = "head_dim_max";
 constexpr const char* FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD = "merge_symbol";
 constexpr const char* FLYDSL_SDPA_RDNA_HD_PAIR_FIELD = "hd_pair";
 constexpr const char* FLYDSL_SDPA_RDNA_HAS_SINK_FIELD = "has_sink";
+/// The aiw objects' padded-row fill kernel (aiw modification 10).
+constexpr const char* FLYDSL_SDPA_AIW_FILL_SYMBOL_FIELD = "fill_symbol";
 
 /// The stats token's value when the graph asks for no LSE output.
 constexpr int64_t FLYDSL_SDPA_RDNA_NO_STATS = -1;
@@ -118,6 +130,15 @@ constexpr int64_t FLYDSL_SDPA_RDNA_SINK_UID = 99;
 /// An f32 [1] device tensor a graph carries when a case names it from a field the spec has
 /// no member for (a page table, a dropout seed, a descale), so the field refers to something.
 constexpr int64_t FLYDSL_SDPA_RDNA_AUX_UID = 111;
+/// The per-batch query and key lengths a padded graph carries.
+constexpr int64_t FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID = 122;
+constexpr int64_t FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID = 133;
+/// The Philox seed and offset of a graph that drops attention probabilities.
+constexpr int64_t FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID = 144;
+constexpr int64_t FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID = 155;
+/// The ragged-offset tables a packed (THD) graph's Q/O and K/V go through.
+constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID = 166;
+constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID = 177;
 
 /// Physical arrangement of a (B, H, S, D) logical tensor.
 enum class SdpaLayout
@@ -251,8 +272,53 @@ struct SdpaGraphSpec
     /// values, both device harnesses).
     bool biasNegativeInfinityRows = false;
     bool withDropout = false;
+    /// Per-batch query and key lengths (one per batch), each a tensor the graph carries when
+    /// set: INT32 [B, 1, 1, 1] unless overridden below. With paddingMask, cuDNN's padding.
+    std::vector<int32_t> seqLensQ;
+    std::vector<int32_t> seqLensKv;
+    /// The length tensors' dtype, dims and batch stride as the graph declares them (graph only).
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> seqLenDataType;
+    std::vector<int64_t> seqLenDims;
+    std::optional<int64_t> seqLenBatchStride;
+    /// Dropout, cuDNN's first form: a probability with a seed and an offset tensor, each one
+    /// value, INT64 [1, 1, 1, 1] on the device unless overridden (pass-by-value through
+    /// passByValueTensors). withDropout above is a probability alone.
+    std::optional<float> dropoutProbability;
+    bool withDropoutSeed = false;
+    bool withDropoutOffset = false;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dropoutSeedDataType;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dropoutOffsetDataType;
+    std::vector<int64_t> dropoutSeedDims;
+    /// The seed's and offset's values (device values, or the host value given at execute).
+    uint64_t dropoutSeed = 0;
+    uint64_t dropoutOffset = 0;
+    /// Device values only: V the identity on its first head_dim keys (V[j][e] = 1 iff j == e)
+    /// and Q zero, so each O element is one probability: the dropout mask, read off O.
+    bool exposeDropoutMask = false;
     /// Marks Q as ragged (THD), which the kernel would read as dense.
     bool raggedQuery = false;
+    /// Packed (THD), compact (setPacked): each sequence's query and key token counts. Q and O
+    /// are ragged through FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID, K and V through
+    /// FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID, each table the cumulative token counts and each
+    /// multiplier the tensor's own sequence stride; the LSE packed through Q's table too when
+    /// packedStats. The sequence extents stay the longest sequences.
+    std::vector<int32_t> packedSeqLensQ;
+    std::vector<int32_t> packedSeqLensKv;
+    bool packedStats = false;
+    /// Under packing, per tensor uid: left dense, the table it is ragged through, and its
+    /// multiplier.
+    std::set<int64_t> unpackedTensors;
+    std::map<int64_t, int64_t> raggedOffsetOf;
+    std::map<int64_t, int64_t> raggedMultiplierOf;
+    /// The tables' dtype, dims and batch stride, over INT32, [B + 1, 1, 1, 1] and 1.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> raggedOffsetDataType;
+    std::vector<int64_t> raggedOffsetDims;
+    std::optional<int64_t> raggedOffsetBatchStride;
+
+    bool packed() const
+    {
+        return !packedSeqLensQ.empty();
+    }
 
     // Every other field a graph can carry, so each has a case that sets it.
     /// The node's compute type.
@@ -283,6 +349,9 @@ struct SdpaGraphSpec
     // Device values only (the graph is unchanged), for the RDNA device harness.
     /// V = 1 on every key below this one and 0 from it on, every head and column.
     std::optional<int64_t> valueOnesBelowKey;
+    /// Every V element multiplied by this (device values only), e.g. into f32's denormal
+    /// range (the CDNA harness).
+    std::optional<float> valueScale;
     /// Q's first column NaN at this query position, every batch and head.
     std::optional<int64_t> queryNanPosition;
     /// K's first column NaN at this key, every batch and KV head.
@@ -294,6 +363,37 @@ struct SdpaGraphSpec
     /// no operand but the scale can be.
     std::set<int64_t> passByValueTensors;
 };
+
+/// @p spec padded, cuDNN's way: padding_mask with each batch's query and key lengths.
+inline void
+    setPadding(SdpaGraphSpec& spec, std::vector<int32_t> seqLensQ, std::vector<int32_t> seqLensKv)
+{
+    spec.paddingMask = true;
+    spec.seqLensQ = std::move(seqLensQ);
+    spec.seqLensKv = std::move(seqLensKv);
+}
+
+/// @p spec packed (THD), compact: sequence b has @p seqLensQ[b] query and @p seqLensKv[b] key
+/// tokens, stored end to end, the stats (when asked for) packed alike in the [T, H] layout.
+inline void
+    setPacked(SdpaGraphSpec& spec, std::vector<int32_t> seqLensQ, std::vector<int32_t> seqLensKv)
+{
+    spec.packedSeqLensQ = std::move(seqLensQ);
+    spec.packedSeqLensKv = std::move(seqLensKv);
+    spec.layout = SdpaLayout::BSHD;
+    spec.statsSequenceMajor = true;
+    spec.packedStats = true;
+}
+
+/// @p spec dropping attention probabilities with @p p, from a device INT64 seed and offset.
+inline void setDropout(SdpaGraphSpec& spec, float p, uint64_t seed = 1234, uint64_t offset = 77)
+{
+    spec.dropoutProbability = p;
+    spec.withDropoutSeed = true;
+    spec.withDropoutOffset = true;
+    spec.dropoutSeed = seed;
+    spec.dropoutOffset = offset;
+}
 
 /// The bias's dims and strides as @p spec declares them to the graph.
 inline std::pair<std::vector<int64_t>, std::vector<int64_t>>
@@ -353,6 +453,23 @@ inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
     {
         ragged = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID;
     }
+    // Packed: Q, O (and the stats when packed too) through Q's table, K and V through K's,
+    // offsets counting tokens.
+    int64_t multiplier = 1;
+    const bool queryPacked = uid == FLYDSL_SDPA_RDNA_Q_UID || uid == FLYDSL_SDPA_RDNA_O_UID
+                             || (uid == FLYDSL_SDPA_RDNA_STATS_UID && spec.packedStats);
+    const bool keyPacked = uid == FLYDSL_SDPA_RDNA_K_UID || uid == FLYDSL_SDPA_RDNA_V_UID;
+    if(spec.packed() && (queryPacked || keyPacked) && spec.unpackedTensors.count(uid) == 0)
+    {
+        const auto table = spec.raggedOffsetOf.find(uid);
+        const int64_t ownTable = queryPacked ? FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID
+                                             : FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID;
+        ragged = table != spec.raggedOffsetOf.end() ? table->second : ownTable;
+        const auto declaredMultiplier = spec.raggedMultiplierOf.find(uid);
+        multiplier = declaredMultiplier != spec.raggedMultiplierOf.end()
+                         ? declaredMultiplier->second
+                         : (*strides)[2];
+    }
     const auto declared = spec.alignment.find(uid);
     return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
@@ -366,7 +483,8 @@ inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
         value,
         runtime || spec.passByValueTensors.count(uid) != 0,
         ragged,
-        declared == spec.alignment.end() ? 16 : declared->second);
+        declared == spec.alignment.end() ? 16 : declared->second,
+        multiplier);
 }
 
 /// A single SDPA-forward node built to @p spec.
@@ -488,6 +606,82 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                      data_objects::DataType::FLOAT,
                                      &scalarDims,
                                      &scalarDims));
+    }
+
+    const std::vector<int64_t> seqLenDims
+        = spec.seqLenDims.empty() ? std::vector<int64_t>{spec.batch, 1, 1, 1} : spec.seqLenDims;
+    std::vector<int64_t> seqLenStrides(seqLenDims.size(), 1);
+    if(spec.seqLenBatchStride.has_value())
+    {
+        seqLenStrides[0] = *spec.seqLenBatchStride;
+    }
+    for(const auto& [uid, name, lengths] :
+        {std::tuple{FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID, "seq_len_q", &spec.seqLensQ},
+         std::tuple{FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID, "seq_len_kv", &spec.seqLensKv}})
+    {
+        if(!lengths->empty())
+        {
+            tensors.push_back(
+                sdpaTensor(spec,
+                           builder,
+                           uid,
+                           name,
+                           spec.seqLenDataType.value_or(data_objects::DataType::INT32),
+                           &seqLenStrides,
+                           &seqLenDims));
+        }
+    }
+
+    // A packed graph's two ragged-offset tables.
+    const std::vector<int64_t> raggedOffsetDims
+        = spec.raggedOffsetDims.empty() ? std::vector<int64_t>{spec.batch + 1, 1, 1, 1}
+                                        : spec.raggedOffsetDims;
+    std::vector<int64_t> raggedOffsetStrides(raggedOffsetDims.size(), 1);
+    if(spec.raggedOffsetBatchStride.has_value())
+    {
+        raggedOffsetStrides[0] = *spec.raggedOffsetBatchStride;
+    }
+    for(const auto& [uid, name] :
+        {std::pair{FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID, "ragged_offset_q"},
+         std::pair{FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID, "ragged_offset_kv"}})
+    {
+        if(spec.packed())
+        {
+            tensors.push_back(
+                sdpaTensor(spec,
+                           builder,
+                           uid,
+                           name,
+                           spec.raggedOffsetDataType.value_or(data_objects::DataType::INT32),
+                           &raggedOffsetStrides,
+                           &raggedOffsetDims));
+        }
+    }
+
+    const std::vector<int64_t> philoxDims = {1, 1, 1, 1};
+    const auto seedDims = spec.dropoutSeedDims.empty() ? philoxDims : spec.dropoutSeedDims;
+    const std::vector<int64_t> seedStrides(seedDims.size(), 1);
+    if(spec.withDropoutSeed)
+    {
+        tensors.push_back(
+            sdpaTensor(spec,
+                       builder,
+                       FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID,
+                       "dropout_seed",
+                       spec.dropoutSeedDataType.value_or(data_objects::DataType::INT64),
+                       &seedStrides,
+                       &seedDims));
+    }
+    if(spec.withDropoutOffset)
+    {
+        tensors.push_back(
+            sdpaTensor(spec,
+                       builder,
+                       FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID,
+                       "dropout_offset",
+                       spec.dropoutOffsetDataType.value_or(data_objects::DataType::INT64),
+                       &philoxDims,
+                       &philoxDims));
     }
 
     const auto [biasDims, biasStrides] = sdpaBiasLayout(spec);
@@ -621,6 +815,14 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     {
         attributesBuilder.add_sink_token_tensor_uid(FLYDSL_SDPA_RDNA_SINK_UID);
     }
+    if(!spec.seqLensQ.empty())
+    {
+        attributesBuilder.add_seq_len_q_tensor_uid(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID);
+    }
+    if(!spec.seqLensKv.empty())
+    {
+        attributesBuilder.add_seq_len_kv_tensor_uid(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID);
+    }
     if(withStatsTensor)
     {
         attributesBuilder.add_generate_stats(spec.generateStats.value_or(true));
@@ -637,6 +839,18 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     if(spec.withDropout)
     {
         attributesBuilder.add_dropout_probability(0.1F);
+    }
+    else if(spec.dropoutProbability.has_value())
+    {
+        attributesBuilder.add_dropout_probability(*spec.dropoutProbability);
+    }
+    if(spec.withDropoutSeed)
+    {
+        attributesBuilder.add_seed_tensor_uid(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    }
+    if(spec.withDropoutOffset)
+    {
+        attributesBuilder.add_offset_tensor_uid(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
     }
 
     attributesBuilder.add_alibi_mask(spec.alibiMask);
@@ -678,11 +892,70 @@ struct SdpaFieldDecline
     std::function<void(SdpaGraphSpec&)> control;
 };
 
+/// A case that writes one SdpaAttributes field the spec has no member for.
+inline SdpaFieldDecline sdpaAttributeField(
+    std::string name,
+    std::function<void(hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder&)> write)
+{
+    return {std::move(name),
+            [write = std::move(write)](SdpaGraphSpec& spec) { spec.extraAttributes = write; },
+            {}};
+}
+
+/// The variable-length fields every FlyDSL SDPA engine declines (FlydslSdpaVarlen.hpp): per-batch
+/// lengths, the padding switch and ragged Q/K/V/O. A form an engine comes to serve moves from here
+/// to that engine's own accept and decline tables.
+inline std::vector<SdpaFieldDecline> sdpaVarlenFieldDeclines()
+{
+    using Builder = hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder;
+    constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
+    std::vector<SdpaFieldDecline> cases;
+    cases.push_back(
+        sdpaAttributeField("SeqLenQ", [](Builder& b) { b.add_seq_len_q_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("SeqLenKv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(AUX); }));
+    cases.push_back({"PaddingMask", [](SdpaGraphSpec& s) { s.paddingMask = true; }, {}});
+    for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
+                                   std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},
+                                   std::pair{"V", FLYDSL_SDPA_RDNA_V_UID},
+                                   std::pair{"O", FLYDSL_SDPA_RDNA_O_UID}})
+    {
+        const int64_t operand = uid;
+        cases.push_back({std::string("Ragged") + name,
+                         [operand](SdpaGraphSpec& s) { s.raggedTensors.insert(operand); },
+                         {}});
+    }
+    return cases;
+}
+
+/// The dropout fields every FlyDSL SDPA engine declines (FlydslSdpaDropout.hpp): a probability
+/// with no seed or offset, a seed or offset with no probability, the mask and scale form, and the
+/// RNG dump. (A probability of 0 is the undropped result, accepted by the RDNA/aiw matcher.)
+inline std::vector<SdpaFieldDecline> sdpaDropoutFieldDeclines()
+{
+    using Builder = hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder;
+    constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
+    std::vector<SdpaFieldDecline> cases;
+    cases.push_back(
+        sdpaAttributeField("DropoutSeed", [](Builder& b) { b.add_seed_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("DropoutOffset", [](Builder& b) { b.add_offset_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("DropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); }));
+    cases.push_back(sdpaAttributeField("DropoutScale",
+                                       [](Builder& b) { b.add_dropout_scale_tensor_uid(AUX); }));
+    cases.push_back(
+        sdpaAttributeField("RngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); }));
+    cases.push_back({"Dropout", [](SdpaGraphSpec& s) { s.withDropout = true; }, {}});
+    return cases;
+}
+
 /// A field set to a value no FlyDSL SDPA engine handles, one case per field (or per value
 /// class of a field), applied on top of a spec each engine otherwise accepts. Every field of
 /// SdpaAttributes, the node and each tensor appears here or in an engine's own accept and
 /// decline tables: a matcher that never reads a field accepts every value of it, which looks
-/// exactly like support, so each one is pinned by a case.
+/// exactly like support, so each one is pinned by a case. The variable-length and dropout
+/// cases are their own lists, appended here.
 inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
@@ -690,17 +963,9 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
     std::vector<SdpaFieldDecline> cases;
     const auto field = [&cases](std::string name, const std::function<void(Builder&)>& write) {
-        cases.push_back(
-            {std::move(name), [write](SdpaGraphSpec& spec) { spec.extraAttributes = write; }, {}});
+        cases.push_back(sdpaAttributeField(std::move(name), write));
     };
     // Optional tensors naming features the kernels do not implement.
-    field("SeqLenQ", [](Builder& b) { b.add_seq_len_q_tensor_uid(AUX); });
-    field("SeqLenKv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(AUX); });
-    field("DropoutSeed", [](Builder& b) { b.add_seed_tensor_uid(AUX); });
-    field("DropoutOffset", [](Builder& b) { b.add_offset_tensor_uid(AUX); });
-    field("DropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); });
-    field("DropoutScale", [](Builder& b) { b.add_dropout_scale_tensor_uid(AUX); });
-    field("DropoutProbabilityZero", [](Builder& b) { b.add_dropout_probability(0.0F); });
     field("PageTableK", [](Builder& b) { b.add_page_table_k_tensor_uid(AUX); });
     field("PageTableV", [](Builder& b) { b.add_page_table_v_tensor_uid(AUX); });
     field("MaxSeqLenKv", [](Builder& b) { b.add_max_seq_len_kv(4096); });
@@ -715,7 +980,6 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     field("AmaxO", [](Builder& b) { b.add_amax_o_tensor_uid(AUX); });
     field("MaxOutput", [](Builder& b) { b.add_max_tensor_uid(AUX); });
     field("SumExpOutput", [](Builder& b) { b.add_sum_exp_tensor_uid(AUX); });
-    field("RngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); });
 
     const auto edit = [&cases](std::string name,
                                std::function<void(SdpaGraphSpec&)> apply,
@@ -730,9 +994,7 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     };
     const auto withStats = [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; };
     const auto withSink = [](SdpaGraphSpec& s) { s.withSink = true; };
-    edit("Dropout", [](SdpaGraphSpec& s) { s.withDropout = true; });
     edit("AlibiMask", [](SdpaGraphSpec& s) { s.alibiMask = true; });
-    edit("PaddingMask", [](SdpaGraphSpec& s) { s.paddingMask = true; });
     edit("MmaCoreModeFp8",
          [](SdpaGraphSpec& s) { s.mmaCoreMode = data_objects::DataType::FP8_E4M3; });
     edit("MmaCoreModeInt8", [](SdpaGraphSpec& s) { s.mmaCoreMode = data_objects::DataType::INT8; });
@@ -792,8 +1054,6 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         const int64_t operand = uid;
         edit(std::string("Virtual") + name,
              [operand](SdpaGraphSpec& s) { s.virtualTensors.insert(operand); });
-        edit(std::string("Ragged") + name,
-             [operand](SdpaGraphSpec& s) { s.raggedTensors.insert(operand); });
     }
     for(const auto& [name, uid, feature] :
         {std::tuple{
@@ -978,6 +1238,14 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
                 s.sinkDims[wide] = 2;
             },
             rank4Sink);
+    }
+    for(auto& varlen : sdpaVarlenFieldDeclines())
+    {
+        cases.push_back(std::move(varlen));
+    }
+    for(auto& dropout : sdpaDropoutFieldDeclines())
+    {
+        cases.push_back(std::move(dropout));
     }
     return cases;
 }

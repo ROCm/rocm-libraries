@@ -59,10 +59,18 @@ TEST(TestFlydslSdpaAiwPacks, ShipsEveryVariantOnce)
 {
     const auto& set = loadedSet(FLYDSL_SDPA_AIW.engineName);
 
-    // dtype x head_dim x head_dim_v x masked x has_bias x bias_f32 x head_dim_max x has_sink
-    // is the whole instance key; the schedule fields beside it are what the kernel's tuning
-    // table chose for each.
-    std::set<std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>>
+    // dtype x head_dim x head_dim_v x masked x has_bias x bias_f32 x head_dim_max x has_sink x
+    // has_dropout is the whole instance key; the schedule fields beside it are what the
+    // kernel's tuning table chose for each.
+    std::set<std::tuple<std::string,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t>>
         classes;
     size_t kernels = 0;
     for(const auto& pack : set.packs)
@@ -84,7 +92,8 @@ TEST(TestFlydslSdpaAiwPacks, ShipsEveryVariantOnce)
                             field(FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD),
                             field(FLYDSL_SDPA_AIW_BIAS_F32_FIELD),
                             field(FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD),
-                            field(FLYDSL_SDPA_RDNA_HAS_SINK_FIELD));
+                            field(FLYDSL_SDPA_RDNA_HAS_SINK_FIELD),
+                            field(FLYDSL_SDPA_AIW_HAS_DROPOUT_FIELD));
             EXPECT_GT(field(FLYDSL_SDPA_RDNA_BLOCK_M_FIELD), 0) << kernel.name;
             EXPECT_GT(field(FLYDSL_SDPA_AIW_BLOCK_THREADS_FIELD), 0) << kernel.name;
             ++kernels;
@@ -105,24 +114,53 @@ TEST(TestFlydslSdpaAiwPacks, ShipsEveryVariantOnce)
                 for(const auto& [hasBias, f32] :
                     {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
                 {
-                    EXPECT_EQ(
-                        classes.count({dtype, headDim, headDim, masked, hasBias, f32, headDim, 0}),
-                        1U)
+                    EXPECT_EQ(classes.count(
+                                  {dtype, headDim, headDim, masked, hasBias, f32, headDim, 0, 0}),
+                              1U)
                         << dtype << " head_dim=" << headDim << " masked=" << masked
                         << " bias=" << hasBias << " f32=" << f32;
                 }
             }
+            // Sinks: plain, with a mask in Q's dtype and with an f32 one.
             for(const int64_t headDim : {64, 128})
             {
-                EXPECT_EQ(classes.count({dtype, headDim, headDim, masked, 0, 0, headDim, 1}), 1U)
-                    << dtype << " sink head_dim=" << headDim << " masked=" << masked;
+                for(const auto& [hasBias, f32] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(classes.count(
+                                  {dtype, headDim, headDim, masked, hasBias, f32, headDim, 1, 0}),
+                              1U)
+                        << dtype << " sink head_dim=" << headDim << " masked=" << masked
+                        << " bias=" << hasBias << " f32=" << f32;
+                }
             }
-            EXPECT_EQ(classes.count({dtype, 192, 128, masked, 0, 0, 192, 0}), 1U)
-                << dtype << " MLA masked=" << masked;
-            for(const int64_t tier : {64, 96, 128, 160, 224, 256})
+            // Dropout twins: the exact head dims, no sink; without a mask, with one in Q's
+            // dtype and with an f32 one (R1).
+            for(const int64_t headDim : {64, 128, 256})
             {
-                EXPECT_EQ(classes.count({dtype, 0, 0, masked, 0, 0, tier, 0}), 1U)
-                    << dtype << " padded tier " << tier << " masked=" << masked;
+                for(const auto& [hasBias, f32] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(classes.count(
+                                  {dtype, headDim, headDim, masked, hasBias, f32, headDim, 0, 1}),
+                              1U)
+                        << dtype << " dropout head_dim=" << headDim << " masked=" << masked
+                        << " bias=" << hasBias << " f32=" << f32;
+                }
+            }
+            EXPECT_EQ(classes.count({dtype, 192, 128, masked, 0, 0, 192, 0, 0}), 1U)
+                << dtype << " MLA masked=" << masked;
+            // Padded tiers: plain, with a mask in Q's dtype and with an f32 one; 384 and 512
+            // serve the head dims past 256.
+            for(const int64_t tier : {64, 96, 128, 160, 224, 256, 384, 512})
+            {
+                for(const auto& [hasBias, f32] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(classes.count({dtype, 0, 0, masked, hasBias, f32, tier, 0, 0}), 1U)
+                        << dtype << " padded tier " << tier << " masked=" << masked
+                        << " bias=" << hasBias << " f32=" << f32;
+                }
             }
         }
     }

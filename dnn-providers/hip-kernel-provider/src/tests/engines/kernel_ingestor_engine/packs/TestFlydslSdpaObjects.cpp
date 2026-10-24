@@ -206,6 +206,8 @@ struct ObjectTraits
     /// The bias in the query's dtype (RDNA `bias_q`; every CDNA bias) rather than f32.
     bool biasInQueryType = false;
     bool sink = false;
+    /// The object drops attention probabilities (aiw `has_dropout`).
+    bool dropout = false;
     bool qkMask = false;
     int64_t kvAlign = 0;
     bool anyDiagonal = true;
@@ -223,6 +225,7 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     traits.causal = intField(kernel, "causal") == 1;
     traits.bias = intField(kernel, "has_bias") == 1;
     traits.sink = intField(kernel, "has_sink") == 1;
+    traits.dropout = intField(kernel, "has_dropout") == 1;
     traits.qkMask = intField(kernel, "qk_mask") == 1;
     traits.kvAlign = intField(kernel, "kv_align");
     traits.anyDiagonal = intField(kernel, "any_diagonal", 1) == 1;
@@ -234,7 +237,9 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     }
     else if(isCdna(kind))
     {
-        traits.biasInQueryType = true;
+        // The strided bias objects (vendored-kernel modification 31) are the CDNA ones that
+        // read an f32 bias; they run one, the others a bias in the query's dtype.
+        traits.biasInQueryType = intField(kernel, "bias_kstrided") == 0;
     }
     else
     {
@@ -311,6 +316,11 @@ std::vector<ShapeAlternatives>
     {
         SdpaGraphSpec spec;
         spec.dataType = traits.dtype == "f16" ? DataType::HALF : DataType::BFLOAT16;
+        if(traits.dtype == "f32")
+        {
+            // The CDNA generic objects' exact f32 (vendored-kernel modification 35).
+            spec.dataType = DataType::FLOAT;
+        }
         spec.headDim = width;
         spec.scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(width)));
         spec.stats = SdpaStats::LSE;
@@ -322,6 +332,10 @@ std::vector<ShapeAlternatives>
 
         spec.withSink = traits.sink;
         spec.withBias = traits.bias;
+        if(traits.dropout)
+        {
+            setDropout(spec, 0.2F);
+        }
         if(traits.bias)
         {
             spec.biasDataType = traits.biasInQueryType ? spec.dataType : DataType::FLOAT;
@@ -454,7 +468,8 @@ std::string describe(const SdpaGraphSpec& spec)
            + " Hk=" + std::to_string(spec.kvHeads) + " Sq=" + std::to_string(spec.seqLenQ)
            + " Skv=" + std::to_string(spec.seqLenKv) + " D=" + std::to_string(spec.headDim)
            + " Dv=" + std::to_string(spec.valueHeadDim.value_or(spec.headDim)) + " mask=" + mask
-           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "");
+           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "")
+           + (spec.dropoutProbability.value_or(0.0F) > 0.0F ? " dropout" : "");
 }
 
 /// @p kernels in name order, or one per form when @p selection asks for that: the first of
