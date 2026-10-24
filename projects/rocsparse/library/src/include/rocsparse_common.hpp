@@ -926,6 +926,10 @@ namespace rocsparse
                     while(atomicCAS(&g_fp16_lock, 0U, 1U) != 0U)
                         ;
 
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __threadfence();
+
                     // Handle unpaired last element
                     half old_val = *addr;
                     *addr        = __hadd(old_val, __float2half(tmp));
@@ -1041,6 +1045,10 @@ namespace rocsparse
                     // Acquire spinlock
                     while(atomicCAS(&g_bf16_lock, 0U, 1U) != 0U)
                         ;
+
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __threadfence();
 
                     // Handle unpaired last element
                     rocsparse_bfloat16 old_val = *addr;
