@@ -523,6 +523,42 @@ if(BUILD_TESTING)
                  rocke_wgrad_streamk_host)
   endif()
 
+  # Shared dense attention spec (validator, preflight, kernel name): the reject
+  # reasons never reach the emitted IR, so the byte-identity gate cannot see a
+  # divergence in them. Both engines are pinned to one vectors file owned by the
+  # library test test_attention_dense_spec_vectors.py; it is embedded into this
+  # binary at configure time so the installed test needs no data path. Guarded on
+  # the sibling library tree, like the other library-backed entries.
+  set(_rocke_dense_spec_vectors
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests/golden/attention_dense_spec_vectors.json")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp"
+     AND EXISTS "${_rocke_dense_spec_vectors}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_dense_spec_vectors}")
+    file(READ "${_rocke_dense_spec_vectors}" _rocke_dense_spec_hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_dense_spec_bytes
+                         "${_rocke_dense_spec_hex}")
+    string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                         "\\1\n" _rocke_dense_spec_bytes "${_rocke_dense_spec_bytes}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
+         "${_rocke_dense_spec_bytes}\n")
+    add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
+    target_include_directories(rocke_attention_dense_spec
+                               PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(rocke_attention_dense_spec PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_attention_dense_spec PRIVATE m)
+    endif()
+    add_test(NAME rocke_attention_dense_spec COMMAND rocke_attention_dense_spec)
+    set_tests_properties(rocke_attention_dense_spec PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec)
+    set_target_properties(rocke_attention_dense_spec
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_attention_dense_spec
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_attention_dense_spec)
+  endif()
+
   # RDNA split-KV WMMA decode host helpers (split count, pack groups, row
   # tiles, grids, workspace layout, spec resolution, kernel names, LDS budget):
   # the C API mirrors the Python launch plan for C callers, and the
