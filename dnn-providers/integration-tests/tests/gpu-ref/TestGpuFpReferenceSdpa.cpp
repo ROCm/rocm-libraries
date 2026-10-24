@@ -2348,8 +2348,6 @@ std::vector<float> fp8EncodeProbes()
             xs.push_back(std::nextafter(mid, -1e9f));
         }
     }
-    // No -0.0: P @ V accumulates from +0, so a -0 value reaches the encoder as +0 (-1e-30 still
-    // probes the negative-zero encoding).
     for(const float x : {1000.0f, -1000.0f, 1e-30f, -1e-30f, 0.0f})
     {
         xs.push_back(x);
@@ -2360,6 +2358,11 @@ std::vector<float> fp8EncodeProbes()
     {
         xs.push_back(random.getHostValue(i));
     }
+    // No -0.0 (OCP code 0x80 decodes to it): P @ V accumulates from +0, so it reaches the encoder
+    // as +0. -1e-30 still probes the negative-zero encoding.
+    xs.erase(
+        std::remove_if(xs.begin(), xs.end(), [](float x) { return x == 0.0f && std::signbit(x); }),
+        xs.end());
     return xs;
 }
 
