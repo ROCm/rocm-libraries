@@ -622,6 +622,16 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("is_store") = false,
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store)")
         .def(
+            "set_tensor",
+            [](LogicalInstruction& inst, int scope, int th, bool nv, bool isStore) {
+                inst.tensor =
+                    TENSORModifiers(static_cast<MUBUFScope>(scope), static_cast<TemporalHint>(th),
+                                    nv ? NonVolatile::NV : NonVolatile::NV_NONE, isStore);
+            },
+            nb::arg("scope") = 0, nb::arg("th") = -1, nb::arg("nv") = false,
+            nb::arg("is_store") = false,
+            "Set tensor-op cache-policy modifiers (scope, th, nv, is_store) for tensor_load_to_lds")
+        .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
             nb::arg("reg"), "Add an additional source register operand")

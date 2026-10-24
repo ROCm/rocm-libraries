@@ -245,6 +245,20 @@ inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod
     return os;
 }
 
+// Match rocisa TENSORModifiers::toString() and the LLVM printer: th, scope, nv.
+inline std::ostream& operator<<(std::ostream& os, const TENSORModifiers& mod) {
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th, mod.isStore);
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mod.nv);
+    }
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     if (mod.offset != 0) {
         os << " offset:" << mod.offset;
@@ -793,6 +807,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
             EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
             EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
+            EMIT_TRAILING_MODIFIER(TENSOR, TENSOR);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);

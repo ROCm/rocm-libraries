@@ -1663,6 +1663,59 @@ class GLOBALModifiers(Container):
         self.scope = CacheScope(scope_val)
 
 
+class TENSORModifiers(Container):
+    """Tensor-op cache-policy bundle (``rocisa::TENSORModifiers``).
+
+    Printed in the LLVM order th, scope, nv; default fields are omitted.
+    """
+
+    __slots__ = ("scope", "th", "nv", "isStore")
+
+    def __init__(
+        self,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        th: TemporalHint = TemporalHint.TH_NONE,
+        nv: NonVolatile = NonVolatile.NV_NONE,
+        isStore: bool = False,
+    ) -> None:
+        self.scope = scope
+        self.th = th
+        self.nv = nv
+        self.isStore = isStore
+
+    def toString(self) -> str:
+        caps = _asm_caps()
+        k_str = ""
+        if bool(caps.get("HasTHModifier")) and _has_temporal_hint(self.th):
+            k_str += " th:" + _temporal_hint_to_string(self.th, self.isStore)
+        if bool(caps.get("HasSCOPEModifier")) and self.scope != CacheScope.SCOPE_NONE:
+            k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        if bool(caps.get("HasNVModifier")) and self.nv != NonVolatile.NV_NONE:
+            k_str += " " + _non_volatile_to_string(self.nv)
+        return k_str
+
+    def __repr__(self) -> str:
+        return (
+            f"TENSORModifiers(scope={self.scope!r}, th={self.th!r}, "
+            f"nv={self.nv!r}, isStore={self.isStore!r})"
+        )
+
+    def __copy__(self) -> "TENSORModifiers":
+        return TENSORModifiers(self.scope, self.th, self.nv, self.isStore)
+
+    def __deepcopy__(self, memo: dict) -> "TENSORModifiers":
+        return self.__copy__()
+
+    def __getstate__(self) -> Tuple[int, int, int, bool]:
+        return (int(self.scope), int(self.th), int(self.nv), self.isStore)
+
+    def __setstate__(self, state: Tuple[int, int, int, bool]) -> None:
+        scope_val, th_val, nv_val, self.isStore = state
+        self.scope = CacheScope(scope_val)
+        self.th = TemporalHint(th_val)
+        self.nv = NonVolatile(nv_val)
+
+
 class MUBUFModifiers(Container):
     """MUBUF memory modifier bundle (``rocisa::MUBUFModifiers``)."""
 

@@ -48,6 +48,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     MUBUFModifiers,
     SDWAModifiers,
     SMEMModifiers,
+    TENSORModifiers,
     VOP3PModifiers,
     Holder,
     HolderContainer,
@@ -1782,6 +1783,21 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
             str(GLOBALModifiers(16, TemporalHint.TH_NT, CacheScope.SCOPE_SE)),
             " offset:16 th:TH_LOAD_NT scope:SCOPE_SE",
         )
+
+    def test_tensor_modifiers(self):
+        self.assertEqual(str(TENSORModifiers()), "")
+        self.assertEqual(
+            str(TENSORModifiers(scope=CacheScope.SCOPE_DEV, th=TemporalHint.TH_NT_HT,
+                                nv=NonVolatile.NV)),
+            " th:TH_LOAD_NT_HT scope:SCOPE_DEV nv",
+        )
+        self.assertEqual(str(TENSORModifiers(th=TemporalHint.TH_LU, isStore=True)),
+                         " th:TH_STORE_WB")
+        mods = TENSORModifiers(scope=CacheScope.SCOPE_SE, th=TemporalHint.TH_NT)
+        self.assertEqual(str(copy.deepcopy(mods)), str(mods))
+        clone = TENSORModifiers()
+        clone.__setstate__(mods.__getstate__())
+        self.assertEqual(str(clone), " th:TH_LOAD_NT scope:SCOPE_SE")
 
     def test_flat_modifiers_gfx1250(self):
         # gfx1250: HasGLCModifier=0, HasSC0Modifier=0 -> glc/slc bits are silent.

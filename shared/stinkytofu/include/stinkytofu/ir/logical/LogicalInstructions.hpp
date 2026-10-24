@@ -89,6 +89,7 @@ class LogicalInstruction : public IRBase {
     std::optional<SDWAModifiers> sdwa;         ///< Sub-dword addressing modifier
     std::optional<DSModifiers> ds;             ///< LDS/GDS modifier
     std::optional<MUBUFModifiers> mubuf;       ///< MUBUF (buffer load/store) modifier
+    std::optional<TENSORModifiers> tensor;     ///< Tensor op (tensor_load_to_lds) cache policy
     std::optional<VOP3PModifiers> vop3;        ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;     ///< True16 (.l/.h half-select) modifier
     std::optional<std::vector<int>> memtoken;  ///< Memory token IDs for LDS dependency tracking
