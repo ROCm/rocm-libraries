@@ -160,6 +160,14 @@ void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const c
  * core/ir.py::_refuse_unsigned_operands. */
 void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead);
 
+/* Throw ckc::TypeError unless the source of `op`, a u8 -> float conversion, is
+ * a u8 scalar. rocke_b_uitofp_f32 checks its input when the op is built; the
+ * lowerings call this for IR that did not come through it (hand-assembled or
+ * deserialized), because they would read any other source differently: LLVM's
+ * uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0. The twin
+ * of core/ir.py::_refuse_non_u8_source, with the same message. */
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
+
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 

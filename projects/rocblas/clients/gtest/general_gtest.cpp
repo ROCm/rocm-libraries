@@ -34,6 +34,10 @@
 #include "../../library/src/include/check_numerics_matrix.hpp"
 #include "../../library/src/include/check_numerics_vector.hpp"
 
+#ifdef BUILD_WITH_TENSILE
+#include "../../library/src/include/tensile_host.hpp"
+#endif
+
 namespace
 {
     template <typename T>
@@ -352,6 +356,64 @@ namespace
         CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_get_string<>{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(get_string);
+
+    // Tensile library-file name matching
+#ifdef BUILD_WITH_TENSILE
+    template <typename...>
+    struct testing_tensile_library_filename : rocblas_test_valid
+    {
+        void operator()(const Arguments&)
+        {
+            // Lazy-loading scheme: only TensileLibrary_lazy* filenames match.
+            EXPECT_TRUE(
+                rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", true));
+            EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_lazy.dat", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", true));
+
+            // Per-arch scheme: only TensileLibrary_gfx* filenames match.
+            EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", false));
+            EXPECT_FALSE(
+                rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", false));
+
+            // Unrelated names never match, in either scheme.
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("README.md", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("README.md", false));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("", true));
+
+            // The filename is only ever compared literally — characters that are
+            // regex metacharacters (the original crash trigger) are treated as
+            // plain text and must not match the library prefixes.
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("x-deploy", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("\\x-deploy", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("c:\\deploy", false));
+        }
+    };
+
+    struct tensile_library_filename
+        : RocBLAS_Test<tensile_library_filename, testing_tensile_library_filename>
+    {
+        static bool type_filter(const Arguments&)
+        {
+            return true;
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_library_filename");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return RocBLAS_TestName<tensile_library_filename>(arg.name);
+        }
+    };
+
+    TEST_P(tensile_library_filename, auxiliary)
+    {
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_tensile_library_filename<>{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_library_filename);
+#endif // BUILD_WITH_TENSILE
 
     //
     // check numerics

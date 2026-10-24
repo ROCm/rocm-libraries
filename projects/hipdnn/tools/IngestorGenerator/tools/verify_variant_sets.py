@@ -13,6 +13,12 @@ installed trees. Exits non-zero on any failure. The numbered sections in
   5. VOCABULARY -- metadata uses the matcher's spelling ("BF16"), the spec the
      builder's ("bf16").
 
+A descriptor with `sources` (several launches under one metadata tuple) is checked
+launch by launch: its binary identity is the launch names with each launch's
+(builder, spec, role), a failure of a spec, symbol or code object names the launch,
+and the checks that read only metadata (2, 3, 5) run once per descriptor. A
+descriptor is one selection, so it pins a knob when ANY launch spec pins it.
+
 `--mode` is required, not defaulted: the two modes make different claims.
 Schemas are reached by reference through the id chain the documents declare,
 never by filename.
@@ -67,6 +73,7 @@ from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
 from hkp_pack import generic_targets as gtmod  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
+from hkp_pack.sources import kernel_sources  # noqa: E402
 
 
 class GateError(RuntimeError):
@@ -212,24 +219,54 @@ def select(
     return bundles
 
 
-def _binary_key(descriptor: dict) -> str:
-    """Identity of the compiled artifact this descriptor names: a packed
-    descriptor's symbol sha256, or, pre-build, the builder plus the spec as
-    written, where an omitted key stays omitted."""
-    source = descriptor["kernel_source"]
+def _launch_label(descriptor: dict, launch: str | None) -> str:
+    """The descriptor's name, with its launch when it has several."""
+    name = descriptor.get("name")
+    return name if launch is None else f"{name} launch '{launch}'"
+
+
+def _source_key(source: dict, with_role: bool) -> str:
+    """Identity of the compiled artifact one `kernel_source` names: a packed
+    entry's symbol sha256, or, pre-build, the builder plus the spec as written,
+    where an omitted key stays omitted. A launch of a multi-launch descriptor also
+    names its role, the kernel of the builder's module it takes."""
     if source.get("sha256") or source.get("symbol"):
         return json.dumps(
             {"sha256": source.get("sha256"), "symbol": source.get("symbol")},
             sort_keys=True,
         )
     spec = dict(source.get("spec") or {})
-    return json.dumps(
-        {
-            "builder": source.get("builder"),
-            "spec": sorted((k, repr(v)) for k, v in spec.items()),
-        },
-        sort_keys=True,
+    key = {
+        "builder": source.get("builder"),
+        "spec": sorted((k, repr(v)) for k, v in spec.items()),
+    }
+    if with_role:
+        key["role"] = source.get("role")
+    return json.dumps(key, sort_keys=True)
+
+
+def _binary_key(descriptor: dict):
+    """Identity of what this descriptor ships. A single-launch descriptor's key is
+    its one artifact's string; a multi-launch descriptor's is the tuple of
+    `(launch name, per-launch key)` sorted by name, so the two never match and two
+    multi-launch descriptors match only when every launch does."""
+    launches = kernel_sources(descriptor)
+    if None in launches:
+        return _source_key(launches[None], with_role=False)
+    return tuple(
+        (name, _source_key(launches[name], with_role=True)) for name in sorted(launches)
     )
+
+
+def _launch_specs(descriptor: dict) -> list[dict]:
+    """The spec of every launch of the descriptor."""
+    return [source.get("spec") or {} for source in kernel_sources(descriptor).values()]
+
+
+def _pins(descriptor: dict, knob: str) -> bool:
+    """A descriptor is one selection, so it pins `knob` when any launch spec does
+    and leaves it to the kernel when none does."""
+    return any(spec.get(knob) is not None for spec in _launch_specs(descriptor))
 
 
 def _shape_key(descriptor: dict, knob: str) -> str:
@@ -261,8 +298,7 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
             for c in big_descs:
                 big_by_shape.setdefault(_shape_key(c, knob), []).append(c)
             for d in small_descs:
-                spec = d["kernel_source"].get("spec") or {}
-                if not spec or spec.get(knob) is not None:
+                if not any(_launch_specs(d)) or _pins(d, knob):
                     continue  # nothing to settle, or this descriptor pins it itself
                 candidates = big_by_shape.get(_shape_key(d, knob))
                 if not candidates:
@@ -270,10 +306,7 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
                 candidate_keys = {_binary_key(c) for c in candidates}
                 if _binary_key(d) in candidate_keys:
                     continue  # the twin is present, or the override resolves the same
-                if any(
-                    (c["kernel_source"].get("spec") or {}).get(knob) is None
-                    for c in candidates
-                ):
+                if any(not _pins(c, knob) for c in candidates):
                     continue  # a differently-settled twin already covers it
                 shape = {k: v for k, v in d["metadata"].items() if k != knob}
                 violations.append(
@@ -362,26 +395,30 @@ class Payloads:
             self._archives[key] = self._module.PackedKernelArchive.read(path)
         return self._archives[key]
 
-    def read(self, entry: descriptor_context.Entry, arch: str) -> bytes:
-        source = entry.ukd["kernel_source"]
+    def read(
+        self, entry: descriptor_context.Entry, arch: str, launch: str | None = None
+    ) -> bytes:
+        """The code object of `launch` (None for a single-launch descriptor)."""
+        source = kernel_sources(entry.ukd)[launch]
+        who = _launch_label(entry.ukd, launch)
         kind = source.get("kind")
         if kind != "kpack":
             raise GateError(
-                f"{entry.ukd.get('name')}: --mode full needs the packed dialect, and "
+                f"{who}: --mode full needs the packed dialect, and "
                 f"kernel_source.kind is {kind!r}. The producing compiler's evidence "
                 f"exists only once the bytes do; check the packed tree."
             )
         library, toc_key = source.get("library"), source.get("toc_key")
         if not library or not toc_key:
             raise GateError(
-                f"{entry.ukd.get('name')}: packed kernel_source names no "
+                f"{who}: packed kernel_source names no "
                 f"library/toc_key, so there are no payload bytes to bind the "
                 f"evidence to."
             )
         archive_path = (Path(entry.origin_dir) / library).resolve()
         if not archive_path.is_file():
             raise GateError(
-                f"{entry.ukd.get('name')}: kernel_source.library resolves to "
+                f"{who}: kernel_source.library resolves to "
                 f"{archive_path}, which does not exist."
             )
         # A generic document's archive is keyed by the generic's name.
@@ -393,13 +430,10 @@ class Payloads:
         except (HkpPackError, KpackUnavailable):
             raise
         except Exception as exc:
-            raise GateError(
-                f"{entry.ukd.get('name')}: cannot read {archive_path}: {exc}"
-            ) from exc
+            raise GateError(f"{who}: cannot read {archive_path}: {exc}") from exc
         if blob is None:
             raise GateError(
-                f"{entry.ukd.get('name')}: {archive_path} carries no member "
-                f"{toc_key!r} for {key}."
+                f"{who}: {archive_path} carries no member " f"{toc_key!r} for {key}."
             )
         return blob
 
@@ -445,6 +479,8 @@ def check(
     kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
+    for descriptor in descriptors:
+        kernel_sources(descriptor)  # refuses both or neither before any check reads one
     failures: list[str] = []
     unchecked: list[str] = []
     unverified: list[str] = []
@@ -549,8 +585,12 @@ def check(
 
     plain_mismatches = []
     undeclared_string_fields = set()
-    for descriptor in descriptors:
-        spec = descriptor["kernel_source"].get("spec") or {}
+    plain_checks = [
+        (descriptor, launch, source.get("spec") or {})
+        for descriptor in descriptors
+        for launch, source in kernel_sources(descriptor).items()
+    ]
+    for descriptor, launch, spec in plain_checks:
         if not spec:
             continue
         for field, meta_value in descriptor["metadata"].items():
@@ -576,7 +616,7 @@ def check(
                     continue
             if _comparable(spec_value) != _comparable(meta_value):
                 plain_mismatches.append(
-                    f"{descriptor['name']}: {field} spec={spec_value!r} "
+                    f"{_launch_label(descriptor, launch)}: {field} spec={spec_value!r} "
                     f"metadata={meta_value!r}"
                 )
     if plain_mismatches:
@@ -616,12 +656,16 @@ def check(
                 agreement.select_declaration(
                     entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
                 )
-                kind = entry.ukd.get("kernel_source", {}).get("kind")
-                if kind != "kpack":
-                    failures.append(
-                        f"{name}: --mode full needs the packed dialect, and "
-                        f"kernel_source.kind is {kind!r}. Check the packed tree."
-                    )
+                launches = kernel_sources(entry.ukd)
+                unpacked = [
+                    f"{_launch_label(entry.ukd, launch)}: --mode full needs the "
+                    f"packed dialect, and kernel_source.kind is "
+                    f"{source.get('kind')!r}. Check the packed tree."
+                    for launch, source in launches.items()
+                    if source.get("kind") != "kpack"
+                ]
+                if unpacked:
+                    failures.extend(unpacked)
                     continue
                 if entry.ukd["id"] not in records:
                     failures.append(
@@ -662,13 +706,21 @@ def check(
                     )
                     continue
                 try:
-                    payload = payloads.read(entry, arch)
-                    agreement.verify(entry.ukd, bound, payload)
-                except GateError as exc:
-                    # Already names the descriptor it is about; the payload reader
-                    # is reached from other callers too and says so itself.
-                    failures.append(str(exc))
-                    continue
+                    # One code object per launch; each read names its launch.
+                    read = {}
+                    for launch in launches:
+                        try:
+                            read[launch] = payloads.read(entry, arch, launch)
+                        except GateError as exc:
+                            # Already names the descriptor and launch it is about;
+                            # the payload reader is reached from other callers too
+                            # and says so itself.
+                            failures.append(str(exc))
+                    if len(read) != len(launches):
+                        continue
+                    agreement.verify(
+                        entry.ukd, bound, read[None] if None in read else read
+                    )
                 except HkpPackError as exc:
                     failures.append(f"{name}: {exc}")
                     continue

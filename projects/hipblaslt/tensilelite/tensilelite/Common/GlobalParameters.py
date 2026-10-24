@@ -426,6 +426,13 @@ globalParameters["StinkyTofuModuleOptions"] = {}
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
+# StinkyTofu register-allocation dump, for debugging a colouring. Each kernel that
+# runs allocation writes what it saw and did -- the IR before the lift, the SSA form,
+# its live ranges, and each attempt's placement table -- to
+# <StinkyTofuCostOutputDir>/<kernel>/ra/, or ./<kernel>/ra/ when that is unset.
+# Changes no code, so it is global rather than part of the kernel name.
+globalParameters["StinkyTofuRegisterAllocationDump"] = False
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
@@ -667,6 +674,10 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel: a mode 0..3, or a StinkyTofu config
+    # string such as "apply,classes=vs". See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
