@@ -42,6 +42,12 @@ struct TileFmhaTraits
     static constexpr bool kHasSink          = kHasSink_;
 };
 
+// batch_prefill page sizes taken at run time (gfx125 TDM pipelines) instead of a compile-time
+// kPageBlockSize: with page views (each warp's K/V rows lie in one page), or with TDM
+// gathers (any page size).
+inline constexpr index_t kFmhaRuntimePageSize       = 0;
+inline constexpr index_t kFmhaRuntimePageSizeGather = -1;
+
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kPadSeqLenK_ /* padding for seqlen_k */,
           bool kPadHeadDimQ_ /* padding for hdim_q */,
@@ -83,9 +89,11 @@ struct TileFmhaBatchPrefillTraits : public TileFmhaTraits<kPadSeqLenQ_,
     static_assert(kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT ||
                       kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
                   "Batch prefill only supports vectorized or linear KV cache layout.");
-    static_assert(kPageBlockSize > 0 && ((kPageBlockSize & (kPageBlockSize - 1)) == 0),
+    static_assert(kPageBlockSize == kFmhaRuntimePageSize ||
+                      kPageBlockSize == kFmhaRuntimePageSizeGather ||
+                      (kPageBlockSize > 0 && ((kPageBlockSize & (kPageBlockSize - 1)) == 0)),
                   "kPageBlockSize should be a power of 2 to support efficient page-based KV cache "
-                  "addressing.");
+                  "addressing, or taken at run time.");
 };
 
 template <index_t kPadHeadDimQ_ /* paddding for hdim_q */,

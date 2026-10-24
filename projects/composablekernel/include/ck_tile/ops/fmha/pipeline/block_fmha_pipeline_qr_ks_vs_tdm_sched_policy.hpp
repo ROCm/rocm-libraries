@@ -455,7 +455,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Mapping = typename Softmax::Mapping;
 
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 
@@ -498,7 +497,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Mapping = typename Softmax::Mapping;
 
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 

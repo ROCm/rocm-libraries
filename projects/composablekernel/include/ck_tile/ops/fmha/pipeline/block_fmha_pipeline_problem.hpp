@@ -5,7 +5,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
+#include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 
 namespace ck_tile {
 
@@ -142,7 +144,9 @@ template <typename QDataType_,
           typename FmhaMask_,
           bool kUseTrLoad_,
           int kPageBlockSize_,
-          typename Traits_>
+          typename Traits_,
+          bool kUseDoubleKVLdsBuffer_ = false,
+          bool kProgressiveDsLoadK_   = false>
 struct BlockFmhaBatchPrefillPipelineProblem
     : public BlockFmhaPipelineProblem<QDataType_,
                                       KDataType_,
@@ -160,12 +164,17 @@ struct BlockFmhaBatchPrefillPipelineProblem
                                       AttentionVariant_,
                                       FmhaMask_,
                                       kUseTrLoad_,
-                                      Traits_>
+                                      Traits_,
+                                      kUseDoubleKVLdsBuffer_,
+                                      kProgressiveDsLoadK_>
 {
     static constexpr index_t kPageBlockSize = kPageBlockSize_;
-    static_assert(kPageBlockSize > 0, "kPageBlockSize must be positive");
-    static_assert((kPageBlockSize & (kPageBlockSize - 1)) == 0,
-                  "kPageBlockSize must be power of two");
+    // kFmhaRuntimePageSize(Gather): the page size comes from the kernel arguments
+    static constexpr bool kIsRuntimePageSize = kPageBlockSize <= kFmhaRuntimePageSize;
+    static constexpr bool kRuntimePageGather = kPageBlockSize == kFmhaRuntimePageSizeGather;
+    static_assert(kIsRuntimePageSize ||
+                      (kPageBlockSize > 0 && (kPageBlockSize & (kPageBlockSize - 1)) == 0),
+                  "kPageBlockSize must be a power of two, or taken at run time");
 
     // KV cache load addressing mode. GLOBAL_LOAD_LDS handles >2GB pools via
     // 64-bit addressing; BUFFER_LOAD (default) uses SRD buffer_load for the
@@ -183,12 +192,62 @@ struct BlockFmhaBatchPrefillPipelineProblem
                   "kQKHeaddim must be divisible by kVectorSize");
     static_assert(!(kPageBlockSize == 1 && kIsVectorizedLayout),
                   "page_size=1 only supports linear KV cache layout");
-    static_assert(!kIsVectorizedLayout || kPageBlockSize % kVectorSize == 0,
+    static_assert(!kIsVectorizedLayout || kIsRuntimePageSize || kPageBlockSize % kVectorSize == 0,
                   "kPageBlockSize must be divisible by kVectorSize for vectorized layout");
     static_assert(kIsGroupMode_, "Batch prefill requires group mode");
 
     static_assert(BlockFmhaShape_::IsVLayoutRowMajor,
                   "Batch prefill kernel requires RowMajor VLayout");
+};
+
+// pagedkv_prefill on the TDM pipelines of fmha_fwd (gfx125): the paged K/V rows are mapped
+// by BlockFmhaPagedKVRows, with the page size taken at run time. kKVGather reads the K/V rows
+// with TDM gathers (any page size) instead of a view of each warp's page.
+template <typename QDataType_,
+          typename KDataType_,
+          typename VDataType_,
+          typename SaccDataType_,
+          typename SMPLComputeDataType_,
+          typename BiasDataType_,
+          typename RandValOutputDataType_,
+          typename LSEDataType_,
+          typename PDataType_,
+          typename OaccDataType_,
+          typename ODataType_,
+          typename BlockFmhaShape_,
+          bool kIsGroupMode_,
+          typename AttentionVariant_,
+          typename FmhaMask_,
+          typename Traits_,
+          bool kKVGather_,
+          bool kUseDoubleKVLdsBuffer_ = false,
+          bool kProgressiveDsLoadK_   = false>
+struct BlockFmhaFwdPagedKVTdmPipelineProblem
+    : public BlockFmhaPipelineProblem<QDataType_,
+                                      KDataType_,
+                                      VDataType_,
+                                      SaccDataType_,
+                                      SMPLComputeDataType_,
+                                      BiasDataType_,
+                                      RandValOutputDataType_,
+                                      LSEDataType_,
+                                      PDataType_,
+                                      OaccDataType_,
+                                      ODataType_,
+                                      BlockFmhaShape_,
+                                      kIsGroupMode_,
+                                      AttentionVariant_,
+                                      FmhaMask_,
+                                      false,
+                                      Traits_,
+                                      kUseDoubleKVLdsBuffer_,
+                                      kProgressiveDsLoadK_>
+{
+    static constexpr bool kDoFp8StaticQuant = false;
+    static constexpr bool kIsPagedKV        = true;
+    static constexpr bool kKVGather         = kKVGather_;
+
+    static_assert(BlockFmhaShape_::IsVLayoutRowMajor, "TDM pagedkv_prefill needs row-major V");
 };
 
 template <typename QDataType_,
@@ -296,6 +355,71 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits::kMergeNumHeadGroupsSeqLenQ;
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
+};
+
+// split-KV attention on the TDM pipelines of fmha_fwd (gfx125): the pipeline sees one split
+// of the K axis through SplitKVTileMask, and the kernel the split-KV attributes of Traits_
+// (TileFmhaFwdSplitKVTraits). No fp8 static quant, no sink.
+template <typename QDataType_,
+          typename KDataType_,
+          typename VDataType_,
+          typename SaccDataType_,
+          typename SMPLComputeDataType_,
+          typename BiasDataType_,
+          typename RandValOutputDataType_,
+          typename LSEDataType_,
+          typename PDataType_,
+          typename OaccDataType_,
+          typename ODataType_,
+          typename BlockFmhaShape_,
+          bool kIsGroupMode_,
+          typename AttentionVariant_,
+          typename FmhaMask_,
+          typename Traits_,
+          bool kUseDoubleKVLdsBuffer_ = false,
+          bool kProgressiveDsLoadK_   = false>
+struct BlockFmhaFwdSplitKVTdmPipelineProblem
+    : public BlockFmhaPipelineProblem<
+          QDataType_,
+          KDataType_,
+          VDataType_,
+          SaccDataType_,
+          SMPLComputeDataType_,
+          BiasDataType_,
+          RandValOutputDataType_,
+          LSEDataType_,
+          PDataType_,
+          OaccDataType_,
+          ODataType_,
+          BlockFmhaShape_,
+          kIsGroupMode_,
+          AttentionVariant_,
+          SplitKVTileMask<remove_cvref_t<FmhaMask_>, BlockFmhaShape_::kN0>,
+          false,
+          TileFmhaTraits<Traits_::kPadSeqLenQ,
+                         Traits_::kPadSeqLenK,
+                         Traits_::kPadHeadDimQ,
+                         Traits_::kPadHeadDimV,
+                         Traits_::kHasLogitsSoftCap,
+                         Traits_::BiasEnum,
+                         false,
+                         Traits_::kStoreLSE,
+                         false,
+                         BlockAttentionQuantScaleEnum::NO_SCALE,
+                         Traits_::kBlockPerCu,
+                         false,
+                         Traits_::kHasSink>,
+          kUseDoubleKVLdsBuffer_,
+          kProgressiveDsLoadK_>
+{
+    static constexpr bool kDoFp8StaticQuant          = Traits_::kDoFp8StaticQuant;
+    static constexpr bool kIsPagedKV                 = Traits_::kIsPagedKV;
+    static constexpr bool kHasUnevenSplits           = true;
+    static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits_::kMergeNumHeadGroupsSeqLenQ;
+    static constexpr bool kKVGather                  = false;
+
+    static_assert(!kDoFp8StaticQuant, "split-KV on TDM: no fp8 static quant");
+    static_assert(BlockFmhaShape_::IsVLayoutRowMajor, "split-KV on TDM needs row-major V");
 };
 
 // extract tile size attributes to remove dependency on traits

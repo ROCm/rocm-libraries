@@ -337,6 +337,22 @@ struct ComposedAttention
     }
 };
 
+// The logits soft cap of a variant as the score transform the gfx125 TDM pipelines apply after
+// gemm0: LogitsTransform(QueryTransform(s)), as the other pipelines apply it. They take it in
+// place of their position encoding (a logits soft cap comes without a bias).
+template <typename Variant, typename Params>
+struct LogitsSoftCapTransform
+{
+    Variant variant;
+    Params params;
+
+    template <typename T>
+    __device__ __forceinline__ T operator()(T s) const
+    {
+        return variant.LogitsTransform(params, variant.QueryTransform(params, s), 0, 0, 0);
+    }
+};
+
 } // namespace ck_tile
 
 #if __clang_major__ >= 23

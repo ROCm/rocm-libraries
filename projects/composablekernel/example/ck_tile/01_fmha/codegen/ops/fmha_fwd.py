@@ -144,10 +144,7 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
 using fmha_pipeline = {F_pipeline}<
     fmha_pipeline_problem{F_pipeline_extra_args}>;
 
-using fmha_epilogue =
-    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
-                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
-                               {F_spad}, {F_dvpad}>>;
+{F_epilogue}
 
 using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
 
@@ -280,7 +277,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 
 FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>"""
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
@@ -310,15 +307,29 @@ FMHA_FWD_API_KVSCALE_ROW = """        {{"{F_arch.name}", "{F_dtype_name}", {F_hd
 @dataclass
 class CppConstraint:
     bool_expr: str = None
+    # Only chooses between pipelines (e.g. a grid or length threshold): skipped when the
+    # caller names the pipeline in fmha_fwd_traits::pipeline. bool_expr must hold for the
+    # kernel to be correct, or picks a tile within the pipeline, and always applies.
+    select_expr: str = None
 
     def __str__(self):
-        if self.bool_expr is None:
-            return "true"
-        else:
-            return f"{self.bool_expr}"
+        expr = "true" if self.bool_expr is None else f"{self.bool_expr}"
+        if self.select_expr is None:
+            return expr
+        return f"({expr}) && (!t.pipeline.empty() || ({self.select_expr}))"
 
     def __and__(self, other):
-        return CppConstraint(f"({str(self)}) && ({str(other)})")
+        def both(a, b):
+            if a is None:
+                return b
+            if b is None:
+                return a
+            return f"({a}) && ({b})"
+
+        return CppConstraint(
+            both(self.bool_expr, other.bool_expr),
+            both(self.select_expr, other.select_expr),
+        )
 
 
 @dataclass
@@ -373,6 +384,7 @@ class FmhaFwdApiTrait:
             "qr_async_trload_v3",
             "qr_tdm",
             "qr_tdm_sched",
+            "qr_tdm_pingpong",
         ]:
             if self.spad == "t":
                 return "true"  # always support
@@ -408,6 +420,14 @@ class FmhaFwdApiTrait:
                 return f"true /*a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+        elif self.pipeline_tag == "qr_tdm_pingpong":
+            # It zero-fills the K/V rows past seqlen_k and masks the last S tile,
+            # so the unpadded instance serves any seqlen_k; an elementwise bias
+            # is vector-loaded and still needs whole tiles.
+            if self.skpad == "t" or self.bias != "bias":
+                return "true"
+            else:
+                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
         elif self.pipeline_tag == "qr_tdm" or (
             self.pipeline_tag == "qr_tdm_sched" and self.hdim == "64"
         ):
@@ -434,7 +454,7 @@ class FmhaFwdApiTrait:
                 return "a.hdim_q % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag == "qr_tdm":
+        elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
@@ -461,7 +481,7 @@ class FmhaFwdApiTrait:
                 return "a.hdim_v % 8 == 0"
             else:
                 assert False
-        elif self.pipeline_tag == "qr_tdm":
+        elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
@@ -596,6 +616,7 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
         F_mode=MODE_MAP[trait.mode],
         F_vlayout=LAYOUT_MAP[trait.vlayout],
         F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
+        F_pipeline_tag=trait.pipeline_tag,
         F_logits=BOOL_MAP[trait.logits],
         F_mask=get_mask_cpp_type(trait.mask),
         F_mask_check=get_mask_cpp_check_expr(trait.mask),
@@ -789,6 +810,9 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    # The pipeline tag that owns this tile: an owned tile pairs with that pipeline
+    # only (see check_tile_owner). None: any pipeline without tiles of its own.
+    F_pipeline_tag: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -833,6 +857,29 @@ class FmhaFwdKernel:
         else:
             return "fmha_fwd_create_kargs_and_grids"
 
+    def _get_epilogue_decl(self) -> str:
+        spad = BOOL_MAP[self.F_pipeline.F_spad]
+        dvpad = BOOL_MAP[self.F_pipeline.F_dvpad]
+        if self.F_pipeline.tag == "qr_tdm_pingpong":
+            return (
+                "using fmha_epilogue = ck_tile::LdsShuffle2DEpilogue<\n"
+                "    ck_tile::LdsShuffle2DEpilogueProblem<\n"
+                "        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+                "        typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+                "        fmha_shape::NumWarps,\n"
+                f"        {self.F_tile.F_bm0},\n"
+                f"        {self.F_tile.F_bn1},\n"
+                f"        {spad},\n"
+                f"        {dvpad}>>;"
+            )
+        return (
+            "using fmha_epilogue =\n"
+            "    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<"
+            "typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+            "                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+            f"                               {spad}, {dvpad}>>;"
+        )
+
     def render(self) -> str:
         body = type(self)._get_kernel_header(self.F_pipeline.tag) + type(
             self
@@ -860,7 +907,11 @@ class FmhaFwdKernel:
             F_wn1=self.F_tile.F_wn1,
             F_wk1=self.F_tile.F_wk1,
             F_vlayout=LAYOUT_MAP[self.F_pipeline.F_vlayout],
-            F_use_tdm_ceil=("true" if self.F_pipeline.tag == "qr_tdm" else "false"),
+            F_use_tdm_ceil=(
+                "true"
+                if self.F_pipeline.tag in ("qr_tdm", "qr_tdm_pingpong")
+                else "false"
+            ),
             F_spad=BOOL_MAP[self.F_pipeline.F_spad],
             F_skpad=BOOL_MAP[self.F_pipeline.F_skpad],
             F_dpad=BOOL_MAP[self.F_pipeline.F_dpad],
@@ -897,6 +948,7 @@ class FmhaFwdKernel:
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_epilogue=self._get_epilogue_decl(),
         )
         if emits_kvscale_align(self.F_pipeline.tag, self.F_pipeline.F_qscale):
             body += FMHA_FWD_KVSCALE_ALIGN_TEMPLATE.format(F_arch=self.F_arch)
@@ -1535,6 +1587,19 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
 # divided by batch. Logical member lengths still come from their sequence metadata.
 GFX125_D192_N128_MIN_AVERAGE_K = 512
 
+# d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
+# and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
+# softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
+# a tile ahead. Measured on gfx1250, pingpong wins below 640 rows once there are at
+# least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
+# with fewer, or with longer aligned queries, it loses up to 21%. A block count does
+# not draw that line: 16 x 16 heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1
+# heads of 32 rows (1792 blocks) win 1.5x.
+GFX125_QR_TDM_PINGPONG_RANGE = (
+    "a.max_seqlen_q < 640"
+    " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
+)
+
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
     return CppConstraint(
@@ -1550,7 +1615,12 @@ def _validate_qr_tdm_bm0_crossover_pairs(tile_dict):
     # other factories legitimately gate non-final tiles by CU count instead of seqlen.
     for (hdim, hdim_v), tiles in tile_dict.items():
         for tile, next_tile in zip(tiles, tiles[1:]):
-            assert tile.F_constraint.bool_expr is not None, (
+            # A select_expr is skipped when the caller names the pipeline, so only
+            # bool_expr keeps a tile from shadowing the next tile of its own pipeline.
+            assert (
+                tile.F_constraint.bool_expr is not None
+                or tile.F_pipeline_tag != next_tile.F_pipeline_tag
+            ), (
                 f"({hdim},{hdim_v}): bm0={tile.F_bm0} has no CppConstraint but is "
                 f"followed by bm0={next_tile.F_bm0} -- it would shadow every tile "
                 "after it in dispatch order"
@@ -1564,6 +1634,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _DT_FP16_BF16 = ("fp16", "bf16")
     _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
     _DT_FP8FP32 = ("fp8fp32",)
+
+    # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
+    _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
     # Define scheduled tile configurations once. Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
@@ -1674,7 +1747,35 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return k0_loops == 1
             return k0_loops >= 2
 
-        rules.extend([check_gemm0_k, check_qr_tdm_sched_codegen_compatibility])
+        def check_tile_owner(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # A tile with an owner pairs with that pipeline only, and a pipeline
+            # that owns tiles runs on its own tiles only.
+            owner = kernel_ctx.tile.F_pipeline_tag
+            if owner is not None:
+                return kernel_ctx.pipeline.tag == owner
+            return kernel_ctx.pipeline.tag not in cls._PIPELINES_WITH_OWN_TILES
+
+        def check_tdm_skip_group_only(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # The kernel skips short sequences in group mode only.
+            return (
+                kernel_ctx.pipeline.F_skip == "f"
+                or kernel_ctx.pipeline.tag == "qr"
+                or problem_ctx.mode == "group"
+            )
+
+        rules.extend(
+            [
+                check_gemm0_k,
+                check_tile_owner,
+                check_tdm_skip_group_only,
+                # last: the codegen tests take it as get_rules()[-1]
+                check_qr_tdm_sched_codegen_compatibility,
+            ]
+        )
         return rules
 
     @classmethod
@@ -1711,7 +1812,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                # qr_tdm_pingpong's tiles. Up to 16 rows the 64-row tile would idle 3/4 of
+                # its M rows, so this one spends its four warps on N instead.
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16", GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(select_expr=GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
@@ -1783,9 +1888,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx125 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # NOTE: dropout is not yet implemented in qr_tdm - only emit
-            # dropout="f" so dropout workloads fall through to qr.
-            # Logits soft cap is not implemented either, so pin logits="f".
+            # Dropout runs on every TDM pipeline; qr_tdm's and qr_tdm_pingpong's with a
+            # soft cap or sink unpadded and fully padded only.
+            # Logits soft cap comes without a bias, as everywhere.
             if (hdim, hdim_v) in {
                 (32, 32),
                 (64, 64),
@@ -1808,13 +1913,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     # Avoid carrying general-window mask state through the
                     # causal main loop. Keep the simplified fallback for windows.
                     tdm_masks.insert(0, "causal")
+                # logits soft cap: without a bias (check_feature)
                 for logits, mask, bias, lse, sink in itertools.product(
-                    ["f"],
+                    ["f", "t"],
                     tdm_masks,
                     BIAS_MAP.keys(),
                     ["t", "f"],
                     ["t", "f"],
                 ):
+                    if logits == "t" and bias != "no":
+                        continue
                     mask_constraint = CppConstraint()
                     if mask_impl == "simplified" and mask == "causal":
                         if bias != "no" or lse != "f" or sink != "f":
@@ -1828,24 +1936,70 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                    if (hdim, hdim_v) == (128, 128):
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                for logits, mask, bias, lse, sink in itertools.product(
+                    ["f", "t"],
+                    get_mask_map(mask_impl).keys(),
+                    BIAS_MAP.keys(),
+                    ["t", "f"],
+                    ["f", "t"],
+                ):
+                    if logits == "t" and bias != "no":
+                        continue
+                    plain = logits == "f" and sink == "f"
+                    for spad, dpad in itertools.product(["f", "t"], ["f", "t"]):
+                        if not plain and spad != dpad:
+                            continue
+                        pipelines.append(FmhaFwdPipeline("qr_tdm", "row", spad, spad, dpad, dpad, logits, bias, lse, "t", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                        # with dropout, qr_tdm_pingpong measured ahead of qr_tdm on masked
+                        # grids only
+                        if (hdim, hdim_v) == (128, 128) and mask not in ("no", "s_no"):
+                            pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", spad, spad, dpad, dpad, logits, bias, lse, "t", qscale, mask, "f", "f", sink))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
+                sched_seqlen_q = "a.max_seqlen_q >= 128"
+                if (hdim, hdim_v) == (128, 128):
+                    sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
                     f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
-                    "a.max_seqlen_q >= 128 && "
-                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
+                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}",
+                    sched_seqlen_q,
                 )
-                for mask, lse in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["t", "f"]
+                # With dropout qr_tdm_sched measured ahead of qr_tdm on masked attention
+                # from 1024 rows only.
+                sched_dropout_constraint = CppConstraint(
+                    sched_constraint.bool_expr,
+                    f"{sched_seqlen_q} && a.max_seqlen_q >= 1024",
+                )
+                for logits, mask, lse, dropout in itertools.product(
+                    ["f", "t"], get_mask_map(mask_impl).keys(), ["t", "f"], ["f", "t"]
                 ):
+                    if dropout == "t" and mask in ("no", "s_no"):
+                        continue
+                    constraint = (
+                        sched_dropout_constraint if dropout == "t" else sched_constraint
+                    )
                     head_pad = "f" if hdim == 64 else "t"
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, logits, "no", lse, dropout, qscale, mask, "f", "f", "f", F_constraint=constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, logits, "no", lse, dropout, qscale, mask, "f", "f", "f", F_constraint=constraint))  # fmt: skip
+
+            # min_seqlen_q (aiter's mha_varlen_fwd) only skips whole group-mode
+            # sequences in the kernel, so qr_tdm and qr_tdm_pingpong take it too: a
+            # "_skip" copy of each of their group-mode (padded) instances.
+            pipelines += [
+                replace(p, F_skip="t")
+                for p in pipelines
+                if p.tag in ("qr_tdm", "qr_tdm_pingpong") and p.F_spad == "t"
+            ]
 
             # qr: generic pipeline fallback for the trait combos qr_tdm does
-            # not emit -- dropout, skip, logits soft cap -- and for head dim
+            # not emit -- dropout, logits soft cap -- and for head dim
             # pairs outside the qr_tdm table above. Capped at 256: qr keeps
             # its own kSubQKHeaddim <= 256 assert, and only qr_tdm has the LDS
             # arena accounting that lets a 512 head dim fit. Head dim 512 is

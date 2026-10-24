@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -564,6 +565,30 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                             detail::kQrTdmLdsAccessBytes>();
     }
 
+    // V tile in LDS from a vectorized KV cache: [kN0/v][kN1][v] (v = 16 bytes of elements),
+    // as (hdim_v, seq), the coordinates of the transposed V read.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsVectorizedDescriptor()
+    {
+        using VDataType          = remove_cvref_t<typename Problem::VDataType>;
+        constexpr index_t kVec   = 16 / sizeof(VDataType);
+        constexpr index_t kSeq   = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kHdimV = Problem::BlockFmhaShape::kN1;
+        static_assert(kSeq % kVec == 0);
+
+        constexpr auto desc = make_naive_tensor_descriptor(
+            make_tuple(number<kSeq / kVec>{}, number<kHdimV>{}, number<kVec>{}),
+            make_tuple(number<kHdimV * kVec>{}, number<kVec>{}, number<1>{}),
+            number<kVec>{},
+            number<1>{});
+        return transform_tensor_descriptor(
+            desc,
+            make_tuple(make_pass_through_transform(number<kHdimV>{}),
+                       make_merge_transform(make_tuple(number<kSeq / kVec>{}, number<kVec>{}))),
+            make_tuple(sequence<1>{}, sequence<0, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {
@@ -961,7 +986,7 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
-    static constexpr index_t kArenaBytes = [] {
+    static constexpr index_t kKVArenaBytes = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
             return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
@@ -971,6 +996,22 @@ struct QrTdmLdsArenaLayout
             return integer_least_multiple(max(kQBytes, kV0Offset + kVBytes), kArenaAlignment);
         }
     }();
+    // Dropout: the random values of a P step go through LDS (BlockDropout::Run)
+    // while K/V tiles are in flight, so they get their own region past the K/V buffers.
+    static constexpr index_t kRandValOffset = kKVArenaBytes;
+    static constexpr index_t kRandValBytes  = [] {
+        if constexpr(Problem::kHasDropout)
+        {
+            using BlockGemm = remove_cvref_t<decltype(BlockFmhaPipelineQRKSVSTdmDefaultPolicy::
+                                                          template GetQKBlockGemm<Problem>())>;
+            return BlockDropout::template MakeRandValLdsBlockDescriptor<BlockGemm>()
+                .get_element_space_size();
+        }
+        else
+            return 0;
+    }();
+    static constexpr index_t kArenaBytes =
+        integer_least_multiple(kRandValOffset + kRandValBytes, kArenaAlignment);
 
     static constexpr bool kHasProductionAlignment =
         kQOffset % kRegionAlignment == 0 && kK0Offset % kRegionAlignment == 0 &&

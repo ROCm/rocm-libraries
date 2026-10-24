@@ -48,6 +48,16 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
 
+// Whether the K/V views take the NT_HT cache hint on gfx1250 (see
+// FmhaFwdKernel::kKVCoherence): TDM pipelines that stage K/V in their LDS arena,
+// fp16/bf16, head dims below 256, tiles of at most 64 rows.
+template <typename Pipeline>
+inline constexpr bool uses_kv_nt_ht_hint_v =
+    uses_qr_tdm_lds_arena_v<Pipeline> && Pipeline::kM0 <= 64 &&
+    Pipeline::BlockFmhaShape::kQKHeaddim < 256 &&
+    (std::is_same_v<typename Pipeline::KDataType, half_t> ||
+     std::is_same_v<typename Pipeline::KDataType, bf16_t>);
+
 // A helper struct for detecting n0loop
 template <typename T, typename = void>
 struct has_n0loop_flag : std::false_type
@@ -155,6 +165,24 @@ static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
         return false;
 }();
 
+// Whether an epilogue takes the kernel's LDS as a 4th operator() argument
+// (kUsesSmem). An arity probe would also match Default2DEpilogue's defaulted
+// `void*` parameter, and GetSmemSize() != 0 would match DynamicQuantEpilogue,
+// which reserves its own LDS.
+template <typename Epilogue, typename = void>
+struct epilogue_uses_smem : std::false_type
+{
+};
+
+template <typename Epilogue>
+struct epilogue_uses_smem<Epilogue, std::void_t<decltype(Epilogue::kUsesSmem)>>
+    : std::bool_constant<Epilogue::kUsesSmem>
+{
+};
+
+template <typename Epilogue>
+inline constexpr bool epilogue_uses_smem_v = epilogue_uses_smem<Epilogue>::value;
+
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -211,6 +239,22 @@ struct FmhaFwdKernel
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
+
+    // Cache hint for the K/V tensor views. qr_tdm moves K/V straight from HBM into
+    // LDS through the TDM and never reads them back through the vector path, so
+    // allocating them in the near cache only evicts other data. NT_HT drops the
+    // near-cache allocation and keeps K/V high priority in the far cache, where
+    // the m-tiles of one (batch, head) share them. Only the bm0 <= 64 tiles take
+    // it: the bm0=128 tile of long sequences relies on K/V reuse in the near cache
+    // and is slower with the hint. Measured on fp16/bf16 below d256 only (d256 is
+    // neutral, fp8 unmeasured); see detail::uses_kv_nt_ht_hint_v.
+#if defined(__gfx125__)
+    static constexpr auto kKVCoherence = detail::uses_kv_nt_ht_hint_v<FmhaPipeline>
+                                             ? amd_buffer_coherence_enum::NT_HT
+                                             : amd_buffer_coherence_enum::coherence_default;
+#else
+    static constexpr auto kKVCoherence = amd_buffer_coherence_enum::coherence_default;
+#endif
 
     static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
     static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
@@ -1566,6 +1610,20 @@ struct FmhaFwdKernel
         }
     }
 
+#if CK_TILE_XCD_REMAP_NUM_XCDS
+    // Whether every (batch, head) has the same work. The grid is sized by the
+    // longest sequence, so with per-batch lengths (group mode, or cu_seqlen_q/k
+    // in batch mode) the short batches' blocks exit early and whole-batch XCD
+    // segments would leave the XCDs unbalanced; those keep the round-robin.
+    CK_TILE_DEVICE static bool HasUniformWork([[maybe_unused]] const Kargs& kargs)
+    {
+        if constexpr(kIsGroupMode)
+            return false;
+        else
+            return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
+    }
+#endif
+
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
     {
         bool has_padded_seqlen_k = false;
@@ -1692,6 +1750,7 @@ struct FmhaFwdKernel
                 {
                     // Square causal tiles have monotonically increasing work along Q.
                     // Visit the longest tiles across all heads within each batch first.
+                    // Takes precedence over the XCD remap below.
                     if(kargs.seqlen_q == kargs.seqlen_k && kargs.window_size_left < 0 &&
                        kargs.window_size_right == 0 && num_tile_n1 == 1)
                     {
@@ -1705,8 +1764,14 @@ struct FmhaFwdKernel
                 const index_t num_tile_total   = has_padded_seqlen_k ? gridDim.z : gridDim.y;
                 const index_t num_head         = gridDim.x;
                 const index_t blocks_per_batch = num_head * num_tile_total;
-                const index_t linear_id =
-                    blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+                index_t linear_id = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+
+#if CK_TILE_XCD_REMAP_NUM_XCDS
+                // The m-tiles of one (batch, head) are consecutive in linear_id
+                // and read the same K/V; keep them on one XCD (see remap_xcd).
+                if(HasUniformWork(kargs))
+                    linear_id = remap_xcd_grid(linear_id);
+#endif
 
                 const index_t i_batch = linear_id / blocks_per_batch;
                 const index_t rem0    = linear_id - i_batch * blocks_per_batch;
@@ -1761,9 +1826,39 @@ struct FmhaFwdKernel
             const index_t num_tile_n1 =
                 ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
-            const index_t i_block = blockIdx.y; // blockIdx.x
-            const index_t i_nhead = blockIdx.x; // blockIdx.y
-            const index_t i_batch = blockIdx.z;
+            index_t i_block = blockIdx.y; // blockIdx.x
+            index_t i_nhead = blockIdx.x; // blockIdx.y
+            index_t i_batch = blockIdx.z;
+
+#if CK_TILE_XCD_REMAP_NUM_XCDS
+            // bshd inputs take this path. Dispatch order is blockIdx.x (head)
+            // fastest, so the m-tiles of one (batch, head) sit num_head apart in
+            // linear_id and scatter over the XCDs just like above. Apply the same
+            // bijection, then decode with the m-tile fastest so each (batch, head)
+            // is contiguous inside its XCD segment.
+            //
+            // Masked grids reverse the m-tile order below (long tiles first). Their
+            // round-robin runs every head's long tiles first; remapped, each XCD
+            // runs its heads one after another, which keeps the tail short only
+            // when each XCD holds several heads. This is a locality heuristic, not
+            // a grouping guarantee: an XCD segment need not be a multiple of
+            // gridDim.y, so a head can straddle two segments (3 x 10 heads x 3
+            // m-tiles: segments of 12, 12, then 11). A single m-tile per
+            // (batch, head) (gridDim.y == 1) has no K/V to share, and per-batch
+            // lengths keep the round-robin (see HasUniformWork).
+            const bool remap_masked =
+                gridDim.x * gridDim.z >= CK_TILE_XCD_REMAP_NUM_XCDS * gridDim.y;
+            if(HasUniformWork(kargs) && gridDim.y > 1 && (!kHasMask || remap_masked))
+            {
+                const index_t linear_id =
+                    remap_xcd_grid(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+
+                const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
+                i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
+                i_batch            = rest / static_cast<index_t>(gridDim.x);
+                i_nhead            = rest - i_batch * static_cast<index_t>(gridDim.x);
+            }
+#endif
 
             const auto f = [](index_t dividend, index_t divisor) {
                 index_t quotient = dividend / divisor;
@@ -2030,6 +2125,13 @@ struct FmhaFwdKernel
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
@@ -2710,6 +2812,7 @@ struct FmhaFwdKernel
             // index_t kv_l2p_offset =
             //     0; // logical-to-physical offset of seqlen_k coordinate. only used for
             //     paged-kvcache
+            [[maybe_unused]] long_index_t batch_offset_randval = 0;
 
             if constexpr(kIsGroupMode)
             {
@@ -2737,6 +2840,10 @@ struct FmhaFwdKernel
                 // LSE layout is [nhead, total_seqlen] following the physical layout for Q/O
                 batch_offset_lse = query_start;
                 batch_offset_o   = query_start * kargs.stride_o;
+                if constexpr(kHasDropout)
+                {
+                    batch_offset_randval = query_start * kargs.stride_randval;
+                }
 
                 // get real # queries & # keys under group mode
                 if(kargs.seqlen_q_ptr != nullptr)
@@ -2792,12 +2899,24 @@ struct FmhaFwdKernel
                     batch_offset_bias =
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_bias;
                 }
+                if constexpr(kHasDropout)
+                {
+                    batch_offset_randval =
+                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_randval;
+                }
 
                 // If cumulative seqlen pointers are provided, override per-batch effective lengths
                 if(kargs.cu_seqlen_q_ptr != nullptr)
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
@@ -2980,7 +3099,9 @@ struct FmhaFwdKernel
             }();
 
             const auto make_k_dram = [&](const KDataType* data, index_t height) {
-                const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global,
+                                                                 memory_operation_enum::set,
+                                                                 kKVCoherence>(
                     data, // will update this pointer if using paged-kvcache
                     make_tuple(height, kargs.hdim_q),
                     make_tuple(kargs.stride_k, 1),
@@ -3133,7 +3254,9 @@ struct FmhaFwdKernel
             }();
 
             const auto make_v_dram = [&](const VDataType* data, index_t length) {
-                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global,
+                                                                 memory_operation_enum::set,
+                                                                 kKVCoherence>(
                     data, // will update this pointer if using paged-kvcache
                     make_tuple(length, kargs.hdim_v),
                     make_tuple(kargs.stride_v, 1),
@@ -3449,6 +3572,68 @@ struct FmhaFwdKernel
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
 
+            // Dropout: the BlockDropout of the block and its randval window, as the generic
+            // path builds them. The window is bounds-checked element by element: unpadded
+            // qr_tdm_pingpong instances also take unaligned sequences.
+            [[maybe_unused]] const auto dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
+                if constexpr(kHasDropout)
+                {
+                    const auto num_head_q_total =
+                        (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
+                    return BlockDropout{i_batch_,
+                                        kargs.head_start + i_nhead_,
+                                        num_head_q_total,
+                                        kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
+                                                                            : *kargs.drop_seed.ptr,
+                                        kargs.is_drop_seed_offset_from_host
+                                            ? kargs.drop_offset.val
+                                            : *kargs.drop_offset.ptr,
+                                        kargs.rp_undrop,
+                                        kargs.p_undrop_in_uint8_t,
+                                        kargs.is_store_randval};
+                }
+                else
+                    return NullBlockDropout{};
+            }();
+            [[maybe_unused]] const auto randval_dram_window = [&, i_nhead_ = i_nhead]() {
+                constexpr auto lengths =
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
+                if constexpr(kHasDropout)
+                {
+                    RandValOutputDataType* rand_val_ptr =
+                        reinterpret_cast<RandValOutputDataType*>(kargs.rand_val_ptr) +
+                        static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_randval +
+                        batch_offset_randval;
+                    const auto randval_dram =
+                        pad_tensor_view(make_naive_tensor_view<address_space_enum::global>(
+                                            rand_val_ptr,
+                                            make_tuple(kargs.seqlen_q, kargs.seqlen_k),
+                                            make_tuple(kargs.stride_randval, 1),
+                                            number<1>{},
+                                            number<1>{}),
+                                        lengths,
+                                        sequence<true, true>{});
+                    return make_tile_window(randval_dram, lengths, {i_m0, 0});
+                }
+                else
+                    return make_null_tile_window(lengths);
+            }();
+
+            // A logits soft cap reaches the TDM pipelines in place of their position encoding
+            // (a soft cap comes without a bias; see LogitsSoftCapTransform).
+            const auto score_transform = [&]() {
+                if constexpr(kHasLogitsSoftCap)
+                {
+                    using Params =
+                        ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>;
+                    return LogitsSoftCapTransform<AttentionVariant, Params>{
+                        AttentionVariant{},
+                        Params{mask, scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp}};
+                }
+                else
+                    return position_encoding;
+            }();
+
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPipelineName == "qr_tdm" && kBlockQScale)
                 {
@@ -3469,43 +3654,86 @@ struct FmhaFwdKernel
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
             };
 
+            // Declared here so the epilogue can reuse the pipeline's LDS. The
+            // non-arena prefill pipelines and the fixed segmented arena declare
+            // their own arrays.
+            constexpr bool kPipelineDeclaresLds =
+                PrefillCase &&
+                (kUsesFixedSegmentedLdsArena || !detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>);
+            char* smem_ptr = nullptr;
+            if constexpr(!kPipelineDeclaresLds)
+            {
+                alignas(256) __shared__ char smem[GetSmemSize()];
+                smem_ptr = smem;
+            }
+
             auto o_acc_tile = [&]() {
                 if constexpr(PrefillCase)
                 {
                     if constexpr(kUsesFixedSegmentedLdsArena)
                     {
                         using Policy = typename FmhaPipeline::Policy;
-                        static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
-                        __shared__ char smem_arena[Policy::GetLdsArenaSize()];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    sink_value,
-                                                    smem_arena + Policy::GetLdsOffsetK0(),
-                                                    smem_arena + Policy::GetLdsOffsetK1(),
-                                                    smem_arena + Policy::GetLdsOffsetV0(),
-                                                    smem_arena + Policy::GetLdsOffsetV1());
+                        // Dropout adds its random-value LDS past the arena.
+                        static_assert(FmhaPipeline::GetSmemSize() >= Policy::GetLdsArenaSize());
+                        __shared__ char smem_arena[FmhaPipeline::GetSmemSize()];
+                        if constexpr(kHasDropout)
+                            return FmhaPipeline{}(q_dram_window,
+                                                  k_dram_window,
+                                                  v_dram_window,
+                                                  bias_dram_window,
+                                                  randval_dram_window,
+                                                  lse_dram_window,
+                                                  mask,
+                                                  score_transform,
+                                                  scale_s,
+                                                  sink_value,
+                                                  smem_arena + Policy::GetLdsOffsetK0(),
+                                                  smem_arena + Policy::GetLdsOffsetK1(),
+                                                  smem_arena + Policy::GetLdsOffsetV0(),
+                                                  smem_arena + Policy::GetLdsOffsetV1(),
+                                                  dropout);
+                        else
+                            return invoke_fmha_pipeline(q_dram_window,
+                                                        k_dram_window,
+                                                        v_dram_window,
+                                                        bias_dram_window,
+                                                        lse_dram_window,
+                                                        mask,
+                                                        score_transform,
+                                                        scale_s,
+                                                        sink_value,
+                                                        smem_arena + Policy::GetLdsOffsetK0(),
+                                                        smem_arena + Policy::GetLdsOffsetK1(),
+                                                        smem_arena + Policy::GetLdsOffsetV0(),
+                                                        smem_arena + Policy::GetLdsOffsetV1());
+                    }
+                    else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> && kHasDropout)
+                    {
+                        return FmhaPipeline{}(q_dram_window,
+                                              k_dram_window,
+                                              v_dram_window,
+                                              bias_dram_window,
+                                              randval_dram_window,
+                                              lse_dram_window,
+                                              mask,
+                                              score_transform,
+                                              scale_s,
+                                              sink_value,
+                                              smem_ptr,
+                                              dropout);
                     }
                     else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
                     {
-                        using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
-                            typename FmhaPipeline::Problem>;
-                        alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
                                                     v_dram_window,
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     sink_value,
-                                                    smem_arena);
+                                                    smem_ptr);
                     }
                     else
                     {
@@ -3528,7 +3756,7 @@ struct FmhaFwdKernel
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     sink_value,
                                                     smem_ptrk0,
@@ -3539,36 +3767,32 @@ struct FmhaFwdKernel
                 }
                 else
                 {
-                    if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
-                    {
-                        using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
-                            typename FmhaPipeline::Problem>;
-                        alignas(256) __shared__ char smem_arena[Layout::kArenaBytes];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    position_encoding,
-                                                    scale_s,
-                                                    smem_arena,
-                                                    sink_value);
-                    }
+                    // The arena pipeline and the single-buffer ones both take
+                    // one LDS block here: the hoisted smem_ptr.
+                    if constexpr(kHasDropout)
+                        return FmhaPipeline{}(q_dram_window,
+                                              k_dram_window,
+                                              v_dram_window,
+                                              bias_dram_window,
+                                              randval_dram_window,
+                                              lse_dram_window,
+                                              mask,
+                                              score_transform,
+                                              scale_s,
+                                              sink_value,
+                                              smem_ptr,
+                                              dropout);
                     else
-                    {
-                        __shared__ char smem_ptr[GetSmemSize()];
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
                                                     v_dram_window,
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     smem_ptr,
                                                     sink_value);
-                    }
                 }
             }();
 
@@ -3595,7 +3819,20 @@ struct FmhaFwdKernel
                 o_dram,
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                 {i_m0, i_n1});
-            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+
+            if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
+            {
+                // The pipeline is done with its LDS; pipelines that declare
+                // their own arrays leave none to the epilogue (direct store).
+                if constexpr(kPipelineDeclaresLds)
+                    EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr, nullptr);
+                else
+                    EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr, smem_ptr);
+            }
+            else
+            {
+                EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+            }
         }
     }
 };

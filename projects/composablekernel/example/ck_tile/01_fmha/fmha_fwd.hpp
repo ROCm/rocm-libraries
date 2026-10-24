@@ -443,6 +443,9 @@ struct fmha_fwd_pagedkv_args
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
     ck_tile::index_t min_seqlen_q;
+
+    // If not null, receives the name of the kernel that runs.
+    std::string* selected_kernel_name = nullptr;
 };
 
 struct fmha_fwd_splitkv_args
@@ -534,6 +537,9 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
+
+    // If not null, receives the name of the split-KV kernel that runs.
+    std::string* selected_kernel_name = nullptr;
 };
 
 struct fmha_fwd_appendkv_args
@@ -683,6 +689,9 @@ struct fmha_batch_prefill_args
     // v_descale_ptr: [num_block, num_kv_head] - points to v block descale
     ck_tile::index_t nblock_stride_kv_block_descale = 0; // Stride along num_block dimension
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
+
+    // set to the name of the kernel that ran, if not null
+    std::string* selected_kernel_name = nullptr;
 };
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
@@ -745,6 +754,23 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
 
     return srd_would_overflow ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
                               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+}
+
+// Archs without GLOBAL_LOAD_LDS kernels (gfx125) always run BUFFER_LOAD. Their K/V loads
+// take a 64-bit base, so only the int32 page offsets (physical_page * page_stride +
+// within_page) limit the KV pool.
+inline bool fmha_batch_prefill_kv_fits_int32_offset(ck_tile::index_t num_total_pages,
+                                                    ck_tile::index_t batch_stride_k,
+                                                    ck_tile::index_t batch_stride_v,
+                                                    ck_tile::index_t element_bytes)
+{
+    const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_k) *
+                              static_cast<uint64_t>(element_bytes);
+    const auto v_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_v) *
+                              static_cast<uint64_t>(element_bytes);
+    return k_pool_bytes <= INT32_MAX && v_pool_bytes <= INT32_MAX;
 }
 
 template <typename FmhaKernel>
@@ -1607,7 +1633,8 @@ template <ck_tile::index_t HDim_,
           bool kPadDv_,
           bool kSkipMinSeqlenQ_ = false,
           bool kHasSink_        = false,
-          int kOccupancy_       = -1>
+          int kOccupancy_       = -1,
+          bool kKVGather_       = false>
 struct fmha_fwd_pagedkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1636,6 +1663,8 @@ struct fmha_fwd_pagedkv_traits_
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
     static constexpr int kOccupancy = kOccupancy_;
+    // TDM pipelines (gfx125): K/V rows read with TDM gathers instead of a page view
+    static constexpr bool kKVGather = kKVGather_;
 };
 
 template <typename Traits_, typename Arch = void>
@@ -1778,6 +1807,10 @@ struct fmha_fwd_traits
     quant_scale_enum qscale_type;
     bool skip_min_seqlen_q = false;
     bool has_sink          = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 float fmha_fwd(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
@@ -1803,6 +1836,10 @@ struct fmha_fwd_pagedkv_traits
     bool do_fp8_static_quant = false;
     bool skip_min_seqlen_q   = false;
     bool has_sink            = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 
@@ -1823,6 +1860,10 @@ struct fmha_fwd_splitkv_traits
     bool has_lse;
     bool do_fp8_static_quant = false;
     bool has_sink            = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,
@@ -1841,13 +1882,31 @@ float fmha_fwd_appendkv(fmha_fwd_appendkv_traits,
                         fmha_fwd_appendkv_args,
                         const ck_tile::stream_config&);
 
-struct fmha_batch_prefill_traits : public fmha_fwd_traits
+// The fields of fmha_fwd_traits up to has_sink, then the paged KV ones. Callers initialize it
+// as a flat aggregate (aiter: {hdim_q, ..., has_sink, kv_memory_layout, kv_lookup_table,
+// page_size}), so new fields go at the end.
+struct fmha_batch_prefill_traits
 {
+    int hdim_q;
+    int hdim_v;
+    std::string data_type;
+    bool is_group_mode;
+    bool is_v_rowmajor;
+    bool has_logits_soft_cap;
+    mask_enum mask_type;
+    bias_enum bias_type;
+    bool has_lse;
+    bool has_dropout;
+    quant_scale_enum qscale_type;
+    bool skip_min_seqlen_q = false;
+    bool has_sink          = false;
     ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kv_memory_layout =
         ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
     ck_tile::BlockAttentionKVCacheLookupTableEnum kv_lookup_table =
         ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
     int page_size = 1;
+    // as fmha_fwd_traits::pipeline
+    std::string pipeline;
 };
 
 float fmha_batch_prefill(fmha_batch_prefill_traits,

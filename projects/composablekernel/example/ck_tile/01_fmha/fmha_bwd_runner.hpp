@@ -102,8 +102,10 @@ bwd_result fmha_bwd_run(mode_enum mode,
                         uint32_t seed,
                         int do_validation,
                         const ck_tile::stream_config& stream_config,
-                        std::optional<std::string> json = std::nullopt,
-                        sink_regime sink_values         = sink_regime::sensitive)
+                        std::optional<std::string> json   = std::nullopt,
+                        sink_regime sink_values           = sink_regime::sensitive,
+                        std::string pipeline              = "",
+                        std::string* selected_kernel_name = nullptr)
 {
     const std::string data_type = []() {
         if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp32>)
@@ -418,7 +420,10 @@ bwd_result fmha_bwd_run(mode_enum mode,
         p_drop > 0.0f,
         s_randval,
         deterministic,
+        pipeline,
     });
+    if(selected_kernel_name != nullptr)
+        *selected_kernel_name = launcher.selected_kernel_name();
     const auto t1_launcher = std::chrono::high_resolution_clock::now();
     const double launcher_ctor_ms =
         std::chrono::duration<double, std::milli>(t1_launcher - t0_launcher).count();

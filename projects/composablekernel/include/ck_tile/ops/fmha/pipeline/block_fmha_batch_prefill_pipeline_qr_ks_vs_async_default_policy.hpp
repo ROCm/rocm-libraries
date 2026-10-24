@@ -63,11 +63,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsyncDefaultPolicy
         if constexpr(Problem::kKVMemoryLayout ==
                      BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT)
         {
-            // For VECTORIZED_LAYOUT, kKPack should match GEMM's kKPerThread
-            // to ensure correct LDS access pattern
+            // For VECTORIZED_LAYOUT, kKPack follows GEMM's kKPerThread, capped at the base
+            // kKPack: the K LDS descriptors and GetSmemSize of the base policy use the base
+            // buffer size, so V must not need a larger one (gfx125 WMMA has kKPerThread 16).
             constexpr auto gemm_k_decomp  = GetGemmKDecomposition<Problem>();
             constexpr index_t kKPerThread = gemm_k_decomp.template at<1>();
-            return kKPerThread;
+            return min(kKPerThread, Base::template GetSmemKPackV<Problem>());
         }
         else
         {
@@ -140,6 +141,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsyncDefaultPolicy
             constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
             static_assert(kNPerBlock % NPerRow == 0);
             static_assert(kKPerBlock % kKPack == 0);
+            static_assert(GetSingleSmemElementSpaceSize<Problem>() ==
+                              Base::template GetSingleSmemElementSpaceSize<Problem>(),
+                          "K and V LDS buffers must share the base buffer size");
 
             constexpr auto v_lds_block_desc_0 = make_naive_tensor_descriptor(
                 make_tuple(number<Base::NumKVLdsBuffers>{},

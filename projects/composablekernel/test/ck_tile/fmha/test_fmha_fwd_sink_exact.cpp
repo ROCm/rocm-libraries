@@ -107,7 +107,8 @@ SinkExactResult run_sink_exact(
                            false, // no dropout
                            quant_scale_enum::pertensor,
                            false, // no skip_min_seqlen_q
-                           has_sink};
+                           has_sink,
+                           ""}; // pipeline: let the dispatch choose
 
     if(fmha_fwd(traits, args, ck_tile::stream_config{nullptr, false}) < 0)
         return result; // dispatched stays false: no instance for this trait set

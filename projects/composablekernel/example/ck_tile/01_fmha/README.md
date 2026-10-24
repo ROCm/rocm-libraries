@@ -41,9 +41,9 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
 Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
-or D192/V128, and row-major V. They use no bias, dropout, logits
-soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
-the existing pipeline candidates.
+or D192/V128, and row-major V. They use no bias, quantization, or sink tokens; dropout,
+a logits soft cap and LSE output are optional. Other configurations retain the existing
+pipeline candidates.
 Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
@@ -247,7 +247,12 @@ Since FA/xformer style with window_size_left/right is more popular, we accept wi
 Note FA use bottom-right by default to express swa case, here we require you explicitly specify top-left/bottom-right.
 
 ### dropout
-TBD
+`-p_drop` sets the dropout probability, `-drop_seed`/`-drop_offset` the Philox seed and offset
+(`-drop_prefs=1` reads them from device memory). With validation on, the kernel also stores its
+random values and the check compares them with the reference. On gfx1250 fp16/bf16 dropout runs
+on the TDM pipelines (`qr_tdm`, `qr_tdm_sched`, `qr_tdm_pingpong`) of fmha_fwd and
+batch_prefill, also with sink or a logits soft cap; split-KV and pagedkv_prefill take no
+dropout.
 
 ### sequence padding and variable length support
 We support sequence padding and variable-length processing in both batch and group modes fmha forward to handle real-world scenarios where sequences have different lengths.
@@ -257,6 +262,38 @@ We support sequence padding and variable-length processing in both batch and gro
 **Batch Mode Variable Length**: Use `-q_eff_lens` and `-kv_eff_lens` to specify effective sequence lengths per batch. All batches share the same physical sequence length, but the kernel processes only the effective portions. This enables efficient variable-length attention without memory waste.
 
 Both approaches optimize memory access patterns while supporting flexible sequence length requirements commonly found in transformer inference scenarios.
+
+### Running one API and one pipeline
+Each attention API the forward example links can be run on its own, and within it one pipeline, without going through a framework such as aiter:
+
+| option | values |
+|---|---|
+| `-api` | `auto` (default: batch_prefill, pagedkv, splitkv, then fwd, as the arguments allow), `fwd`, `splitkv`, `pagedkv` or `batch_prefill`. A named API does not fall back to another one; its arguments are checked (splitkv: `-num_splits` > 1 or a KV cache; pagedkv: `-page_block_size` > 0; batch_prefill: `-mode=1` and `-page_block_size` > 0). Each paged instance checks its page size (on gfx1250 the TDM pipelines take pages of a warp's K/V rows or, in pagedkv and batch_prefill, any size; the other pipelines pages of a multiple of 128). |
+| `-pipeline` | the pipeline tag of the kernel name within that API, e.g. `qr`, `qr_async`, `qr_tdm`, `qr_tdm_sched`, `qr_tdm_pingpong`, `qr_pagedkv`. The dispatch conditions that only choose between pipelines (grid and length thresholds) are skipped; the ones a kernel needs still apply, so a pipeline without a kernel for the arguments reports `not supported yet`. Not needed for an API with one pipeline. |
+| `-min_seqlen_q` | group mode, fwd/pagedkv: the `_skip` kernels leave the sequences of at most this many query rows unwritten (aiter's `mha_varlen_fwd`); the validation skips them too |
+
+`fmha_fwd_traits`, `fmha_batch_prefill_traits`, `fmha_fwd_pagedkv_traits` and `fmha_fwd_splitkv_traits` carry the same choice as `std::string pipeline` (empty: let the dispatch choose).
+
+### pagedkv_prefill (paged KV cache)
+`fmha_fwd_pagedkv()` reads K/V through `block_table[batch, max_pages]` in batch and group mode (`-page_block_size=<n>`, K/V `[num_pages, page_block_size, nhead_k, hdim]` with `-iperm=0`). On gfx1250, fp16/bf16 run the TDM pipelines of `fmha_fwd` (`qr_tdm_pingpong`, `qr_tdm_sched`, `qr_tdm`, chosen as in `fmha_fwd`) with any page size: pages that hold the K/V rows of a warp are read with TDM box loads, other pages with TDM gathers (`_gather` in the kernel name). `qr_pagedkv` needs pages of a multiple of 128. With `-api=pagedkv` the example takes any page size.
+
+### batch_prefill (paged KV cache)
+`fmha_batch_prefill()` is the group-mode, paged-KV forward that aiter's `mha_batch_prefill` calls. It is not part of `all`; enable it explicitly, e.g. `-DFMHA_FWD_ENABLE_APIS="fwd;batch_prefill"` (test builds, `BUILD_TESTING`, take the instances its gtests use). `tile_example_fmha_fwd` then runs it for `-mode=1 -page_block_size=<n>`:
+
+| option | values |
+|---|---|
+| `-page_block_size` | page size: 1, 16 or 1024 on gfx9; on gfx1250 the TDM pipelines take any page size (`vec`: a multiple of x; fp8bf16 `kvbs`: 1024 or a multiple of 128) |
+| `-kv_layout` | `nhd`: K/V `[num_pages, page_block_size, nhead_k, hdim]`; `hnd`: K/V `[num_pages, nhead_k, page_block_size, hdim]`; `vec`: K `[num_pages, nhead_k, hdim/x, page_block_size, x]`, V `[num_pages, nhead_k, page_block_size/x, hdim, x]`, x = 16 bytes of elements; `auto` (default): `nhd` with `-iperm=0`, `hnd` with `-iperm=1`. `nhd`/`hnd` also apply to pagedkv and splitkv |
+| `-kv_lookup` | `block_table` (default): int32 `block_table[batch, max_pages_per_seq]` + per-sequence `seqlen_k`; `indptr`: int32 `kv_indptr[batch + 1]` into `kv_page_indices[num_pages_used]` + `kv_last_page_lens[batch]` |
+| `-qscale` | `pt` or `kvbs` for `-prec=fp8bf16` |
+| `-kv_pad` | `-api=batch_prefill` or `pagedkv`: `nhd`/`hnd` K/V whose strides are not their packed sizes, as aiter allows: rows of hdim + kv_pad elements and pages kv_pad elements longer (a multiple of x) |
+
+Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For example, an `nhd` KV cache with an `indptr` page table and a causal mask:
+```
+./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
+    -page_block_size=1024 -kv_layout=nhd -kv_lookup=indptr -iperm=0 -mask=b
+```
+On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (fp16/bf16 hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), for `nhd`, `hnd` and `vec` KV; fp8bf16 then falls back to the async pipeline (the only one on gfx9). Logits soft cap and dropout run on all of them. Page sizes are taken at run time, except the compiled page 1024: pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction, for any page and row strides (the gather row indices count their greatest common divisor). A vectorized KV cache: a 3D TDM box puts K row-major in LDS and V as `[rows/x][hdim][x]`, which plain LDS loads read for the PV gemm; pages smaller than a warp's rows take one box per vector of rows. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
 
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:
@@ -323,9 +360,9 @@ arguments match `tile_example_fmha_fwd`, with these differences:
 |---|---|
 | `-scale` | named `-scale_s` in the forward example |
 | `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
-| `-p_drop` | dropout probability; the forward example has no dropout argument |
 | `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
 | `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
+| `-pipeline` | run only this dq/dk/dv pipeline: `kr_ktr_vr`, `trload_kr_ktr_vr`, `trload_qr_qtr_dor` (decode, at most 32 query rows) or `tdm_kr_ktr`; skips the grid threshold that chooses the gfx1250 TDM decode pipeline (`fmha_bwd_traits::pipeline`) |
 | absent | `-vlayout`, `-lse`, `-qscale`, `-num_splits`, `-q_eff_lens`, `-kv_eff_lens` |
 
 Example 1: `./bin/tile_example_fmha_bwd -b=1 -h=16 -s=4096 -d=128` runs batch mode, nhead=16,
