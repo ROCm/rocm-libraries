@@ -98,6 +98,7 @@ namespace rocisa
 
         void init(const nb::tuple& arch, const std::string& assemblerPath, bool debug = false)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             IsaVersion isaVersion
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             if(m_isainfo.find(isaVersion) != m_isainfo.end())
@@ -113,28 +114,30 @@ namespace rocisa
 
         bool isInit()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return (m_isainfo.size() > 0);
         }
 
         void setKernel(const nb::tuple& arch, const int wavefrontSize)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             std::thread::id id = std::this_thread::get_id();
             IsaVersion      isaVersion
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
-            m_mutex.lock();
             m_threads[id] = std::move(KernelInfo(isaVersion, wavefrontSize));
             m_vgpridx[id] = std::move(std::map<std::string, int>());
             m_vgprmsb[id] = 0;
-            m_mutex.unlock();
         }
 
         KernelInfo getKernel()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_threads[std::this_thread::get_id()];
         }
 
         IsaInfo getIsaInfo(const nb::tuple& arch)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             IsaVersion isaVersion
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             return m_isainfo[isaVersion];
@@ -142,41 +145,49 @@ namespace rocisa
 
         IsaInfo getIsaInfo(const IsaVersion& isaVersion)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo[isaVersion];
         }
 
         const std::map<std::string, int>& getAsmCaps()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].asm_caps;
         }
 
         const std::map<std::string, int>& getRegCaps()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].reg_caps;
         }
 
         const std::map<std::string, int>& getArchCaps()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].arch_caps;
         }
 
         std::map<std::string, bool> getAsmBugs()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].asm_bugs;
         }
 
         std::map<IsaVersion, IsaInfo> getData() const
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_isainfo;
         }
 
         std::map<std::string, int> getVgprIdx()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_vgpridx[std::this_thread::get_id()];
         }
 
         int getVgprMsb()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return m_vgprmsb[std::this_thread::get_id()];
         }
 
@@ -198,17 +209,20 @@ namespace rocisa
 
         void setData(const std::map<IsaVersion, IsaInfo>& data)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_isainfo = data;
         }
 
         void setOutputOptions(const OutputOptions& options)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             std::thread::id id  = std::this_thread::get_id();
             m_outputOptions[id] = options;
         }
 
         OutputOptions getOutputOptions()
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             std::thread::id id = std::this_thread::get_id();
             if(m_outputOptions.find(id) == m_outputOptions.end())
                 m_outputOptions[id] = OutputOptions();
@@ -217,20 +231,16 @@ namespace rocisa
 
         void setVgprIdx(const std::string& s, const int idx)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             std::thread::id id = std::this_thread::get_id();
-            // need lock here?
-            m_mutex.lock();
             m_vgpridx[id][s] = idx;
-            m_mutex.unlock();
         }
 
         void setVgprMsb(const int msb)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             std::thread::id id = std::this_thread::get_id();
-            // need lock here?
-            m_mutex.lock();
             m_vgprmsb[id] = msb;
-            m_mutex.unlock();
         }
 
         void setForceScaledWMMA(const bool v)
@@ -244,7 +254,7 @@ namespace rocisa
     private:
         rocIsa() = default;
 
-        std::mutex                            m_mutex;
+        mutable std::recursive_mutex          m_mutex;
         std::map<std::thread::id, KernelInfo> m_threads;
         std::map<IsaVersion, IsaInfo>         m_isainfo;
         std::map<std::thread::id, OutputOptions> m_outputOptions;
