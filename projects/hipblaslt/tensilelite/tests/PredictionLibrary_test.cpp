@@ -285,3 +285,9 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
 }
+
+// W4A16 Prediction libraries rank problems whose A is Int4.
+TEST(PredictionLibraryTest, Int4MapsToOrigamiInt4)
+{
+    EXPECT_EQ(datatypeToAnalyticalDatatype(rocisa::DataType::Int4), origami::data_type_t::Int4);
+}
