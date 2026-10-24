@@ -1775,9 +1775,9 @@ TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
     spec = {};
     spec.withFullScaling().descaleS = false;
     EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
-    for(auto graphs::SdpaGraphSpec::*field : {&graphs::SdpaGraphSpec::scaleO,
-                                              &graphs::SdpaGraphSpec::amaxS,
-                                              &graphs::SdpaGraphSpec::amaxO})
+    for(auto graphs::SdpaGraphSpec::*const field : {&graphs::SdpaGraphSpec::scaleO,
+                                                    &graphs::SdpaGraphSpec::amaxS,
+                                                    &graphs::SdpaGraphSpec::amaxO})
     {
         spec = {};
         spec.*field = true;

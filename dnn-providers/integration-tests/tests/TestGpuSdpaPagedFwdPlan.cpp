@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -117,12 +119,13 @@ TEST(TestGpuSdpaPagedFwdPlan, GpuExecutorMatchesCpuExecutor)
     seqLenKv.setHostValue(3, 1, 0, 0, 0);
     // Batch 0 keys 0..5 live in blocks 4, 0, 2; batch 1 keys 0..2 in blocks 1 and 3 (slot 0).
     Tensor<int32_t> pageTable(TABLE_DIMS);
-    const int32_t blocks[2][3] = {{4, 0, 2}, {1, 3, 0}};
+    const std::array<std::array<int32_t, 3>, 2> blocks = {{{4, 0, 2}, {1, 3, 0}}};
     for(int64_t b = 0; b < 2; ++b)
     {
         for(int64_t t = 0; t < 3; ++t)
         {
-            pageTable.setHostValue(blocks[b][t], b, 0, t, 0);
+            pageTable.setHostValue(
+                blocks[static_cast<size_t>(b)][static_cast<size_t>(t)], b, 0, t, 0);
         }
     }
     // Block 3 slot 1 holds no live key: NaN there shows up in O if either reference reads it.

@@ -215,7 +215,7 @@ public:
             const auto* stats = tensorMap.at(attrs->stats_tensor_uid());
             const auto* dims = stats->dims();
             if(stats->data_type() != DataType::FLOAT || dims == nullptr
-               || (dims->size() != 3 && !(dims->size() == 4 && dims->Get(3) == 1)))
+               || (dims->size() != 3 && (dims->size() != 4 || dims->Get(3) != 1)))
             {
                 return false;
             }

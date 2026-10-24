@@ -295,21 +295,22 @@ public:
                 *shallowOTensor,
                 utilities::SdpaFwdOptions<Mask>{}
                     .setScale(effectiveScale)
-                    .setMask(shallowAttnMaskTensor.get())
+                    .setMask(rawPointer(shallowAttnMaskTensor))
                     .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
-                    .setSeqLens(shallowSeqLenQ.get(), shallowSeqLenKv.get())
-                    .setSink(shallowSink.get())
-                    .setDropout(shallowDropoutMask.get(), dropoutScale)
+                    .setSeqLens(rawPointer(shallowSeqLenQ), rawPointer(shallowSeqLenKv))
+                    .setSink(rawPointer(shallowSink))
+                    .setDropout(rawPointer(shallowDropoutMask), dropoutScale)
                     .setAlibi(_params.alibi)
-                    .setBlockMask(shallowBlockMask.get())
-                    .setLse(shallowLseTensor.get())
-                    .setRowStats(shallowMaxTensor.get(), shallowSumExpTensor.get())
-                    .setDescales(
-                        shallowDescaleQ.get(), shallowDescaleK.get(), shallowDescaleV.get())
+                    .setBlockMask(rawPointer(shallowBlockMask))
+                    .setLse(rawPointer(shallowLseTensor))
+                    .setRowStats(rawPointer(shallowMaxTensor), rawPointer(shallowSumExpTensor))
+                    .setDescales(rawPointer(shallowDescaleQ),
+                                 rawPointer(shallowDescaleK),
+                                 rawPointer(shallowDescaleV))
                     .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
                                       scalar(_params.descaleSTensor, "SDPA descale_s"))
                     .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
-                    .setAmax(shallowAmaxS.get(), shallowAmaxO.get()));
+                    .setAmax(rawPointer(shallowAmaxS), rawPointer(shallowAmaxO)));
     }
 
 private:

@@ -220,12 +220,12 @@ public:
             *shallowDVTensor,
             utilities::SdpaBwdOptions<Mask>{}
                 .setScale(effectiveScale)
-                .setLse(shallowStatsTensor.get())
-                .setMask(shallowAttnMaskTensor.get())
-                .setDBias(shallowDBiasTensor.get())
+                .setLse(rawPointer(shallowStatsTensor))
+                .setMask(rawPointer(shallowAttnMaskTensor))
+                .setDBias(rawPointer(shallowDBiasTensor))
                 .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
-                .setSeqLens(shallowSeqLenQ.get(), shallowSeqLenKv.get())
-                .setDropout(shallowDropoutMask.get(), dropoutScale, dropoutScaleInv)
+                .setSeqLens(rawPointer(shallowSeqLenQ), rawPointer(shallowSeqLenKv))
+                .setDropout(rawPointer(shallowDropoutMask), dropoutScale, dropoutScaleInv)
                 .setAlibi(_params.alibi));
     }
 
@@ -280,7 +280,7 @@ public:
             const auto* statsDims = stats->dims();
             if(stats->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
                || statsDims == nullptr
-               || (statsDims->size() != 3 && !(statsDims->size() == 4 && statsDims->Get(3) == 1)))
+               || (statsDims->size() != 3 && (statsDims->size() != 4 || statsDims->Get(3) != 1)))
             {
                 return false;
             }

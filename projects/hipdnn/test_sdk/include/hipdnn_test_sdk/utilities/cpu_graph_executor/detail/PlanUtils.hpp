@@ -4,7 +4,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -94,6 +96,15 @@ bool isSupportedSdpaAlibi(const SdpaAttributesType& nodeAttributes)
     {
         return false;
     }
+}
+
+/// The raw pointer an options setter takes, or nullptr. (Calling get() inline inside the
+/// templated options chains trips clang-tidy-20's readability-redundant-smartptr-get, a false
+/// positive in dependent calls.)
+template <typename T>
+T* rawPointer(const std::unique_ptr<T>& owner)
+{
+    return owner.get();
 }
 
 /// Whether the SDPA node's padding attributes are ones the references implement. Padding is
@@ -473,7 +484,7 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
         return false;
     }
     const auto p = attrs.dropout_probability().value();
-    if(!(p >= 0.0F && p < 1.0F))
+    if(std::isnan(p) || p < 0.0F || p >= 1.0F)
     {
         return false;
     }
