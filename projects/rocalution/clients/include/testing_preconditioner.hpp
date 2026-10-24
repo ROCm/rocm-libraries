@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,16 +25,16 @@
 
 #include "utility.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
 
 template <typename T>
-void getTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
+static void getLaplacianTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
 {
-    int         size        = argus.size;
-    std::string matrix_type = argus.matrix_type;
+    int size = argus.size;
 
     // Generate A
     int* csr_ptr = NULL;
@@ -55,7 +55,7 @@ void testing_preconditioner_all(Arguments argus)
     std::string precond = argus.precond;
 
     LocalMatrix<T> matrix;
-    getTestMatrix<T>(argus, matrix);
+    getLaplacianTestMatrix<T>(argus, matrix);
     GMRES<LocalMatrix<T>, LocalVector<T>, T> ls;
 
     std::cout << "Testing preconditioner: " << precond << std::endl;
@@ -376,5 +376,69 @@ void testing_preconditioner_all(Arguments argus)
     if(vp != NULL)
     {
         delete[] vp;
+    }
+}
+
+template <typename T>
+void testing_itilu0_convergence_history(Arguments argus)
+{
+    LocalMatrix<T> matrix;
+    getLaplacianTestMatrix<T>(argus, matrix);
+
+    // The host backend falls back to ILU0 and records no history
+    matrix.MoveToAccelerator();
+
+    const int maxiter = 30;
+    const int option  = ItILU0Option::StoppingCriteria | ItILU0Option::ComputeNrmCorrection
+                       | ItILU0Option::ComputeNrmResidual | ItILU0Option::ConvergenceHistory;
+
+    for(ItILU0Algorithm alg :
+        {ItILU0Algorithm::AsyncInPlace, ItILU0Algorithm::AsyncSplit, ItILU0Algorithm::SyncSplit})
+    {
+        SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg);
+
+        ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+        p.SetAlgorithm(alg);
+        p.SetOptions(option);
+        p.SetMaxIter(maxiter);
+        p.SetTolerance(1e-6);
+        p.SetOperator(matrix);
+        p.Build();
+
+        int           niter   = 0;
+        const double* history = p.GetConvergenceHistory(&niter);
+
+        ASSERT_NE(history, nullptr);
+        ASSERT_GT(niter, 0);
+        ASSERT_LE(niter, maxiter);
+
+        // history holds niter correction norms followed by niter residual norms. rocSPARSE
+        // does not record correction norms for every algorithm, so only residuals are checked.
+        for(int i = niter; i < 2 * niter; ++i)
+        {
+            EXPECT_TRUE(std::isfinite(history[i])) << "history[" << i << "]";
+            EXPECT_GE(history[i], 0.0) << "history[" << i << "]";
+        }
+
+        EXPECT_GT(history[niter], 0.0);
+    }
+
+    // rocSPARSE rejects the history query for the in-place algorithm when residual norms are
+    // not computed; the factorization must still succeed and report an empty history
+    for(ItILU0Algorithm alg : {ItILU0Algorithm::Default, ItILU0Algorithm::AsyncInPlace})
+    {
+        SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg << " without residual");
+
+        ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+        p.SetAlgorithm(alg);
+        p.SetOptions(ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory);
+        p.SetMaxIter(maxiter);
+        p.SetTolerance(1e-6);
+        p.SetOperator(matrix);
+        p.Build();
+
+        int niter = -1;
+        p.GetConvergenceHistory(&niter);
+        EXPECT_EQ(niter, 0);
     }
 }

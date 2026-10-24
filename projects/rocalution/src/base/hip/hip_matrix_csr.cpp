@@ -1491,7 +1491,7 @@ namespace rocalution
                 if(std::is_same<ValueType, double>{}
                    || std::is_same<ValueType, std::complex<double>>{})
                 {
-                    rocsparseTcsritilu0_history<double>(
+                    status = rocsparseTcsritilu0_history<double>(
                         ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                         itilu0_alg,
                         niter,
@@ -1501,20 +1501,32 @@ namespace rocalution
                 }
                 else
                 {
-                    int    num_iter      = max_iter;
-                    float* local_history = new float[num_iter * 2];
-                    rocsparseTcsritilu0_history<float>(
+                    int                num_iter = max_iter;
+                    std::vector<float> local_history(num_iter * 2);
+                    status = rocsparseTcsritilu0_history<float>(
                         ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                         itilu0_alg,
                         niter,
-                        local_history,
+                        local_history.data(),
                         buffer_size,
                         buffer);
 
-                    for(int i = 0; i < num_iter * 2; ++i)
+                    if(status == rocsparse_status_success)
                     {
-                        history[i] = local_history[i];
+                        for(int i = 0; i < num_iter * 2; ++i)
+                        {
+                            history[i] = local_history[i];
+                        }
                     }
+                }
+
+                // The factorization is valid even if no history could be retrieved
+                if(status != rocsparse_status_success)
+                {
+                    LOG_INFO("*** warning: HIPAcceleratorMatrixCSR::ItILU0Factorize() convergence "
+                             "history is not available, rocsparse_csritilu0_history returned "
+                             << status);
+                    niter[0] = 0;
                 }
             }
 
