@@ -1,14 +1,24 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=0 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wait-alu-scoreboard --prefetch-lead-wmmas=0 --print-output
 #
-# Lead off (dag_prefetch_lead.stir has it on): the prefetch issues once the 32-cycle
-# ValuVgprToVmemAddr gap after its address VALUs has passed, after 5 WMMAs.
+# Lead off (dag_prefetch_lead.stir has it on): no level places the prefetch, so it waits until
+# WaitAluTracker says its address VALUs need no va_vdst: 12 WMMAs after them for this form.
 
 # CHECK-LABEL: @prefetch_lead
 # CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
+# CHECK: v300 = "st.v_add_f32"
+# CHECK-NEXT: v301 = "st.v_add_f32"
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
+# CHECK-NEXT: v_wmma_scale
 # CHECK-NEXT: "st.global_prefetch_b8"(v[300:301]
 st.func @prefetch_lead() {
 ^entry:
