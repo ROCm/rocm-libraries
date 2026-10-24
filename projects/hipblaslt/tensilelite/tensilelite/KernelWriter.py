@@ -11845,14 +11845,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if isPersistentDataParallel(kernel):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "PersistentGrid")
+    elif hasDynamicAssignment(kernel):
+      _reg("uint32", "ItersPerTile")
+      _reg("uint32", "TotalItems")
+      _reg("uint32", "SKTiles")
+      _reg("uint32", "SKSplit")
+      _reg("uint32", "SKItersPerWI")
+      _reg("uint32", "SKGrid")
+    elif hasHybridAssignment(kernel):
+      _reg("uint32", "ItersPerTile")
+      _reg("uint32", "HybridMagicNumberItersPerTileOrTotalItems")
+      _reg("uint32", "HybridMagicShiftItersPerTileOrSKTiles")
+      _reg("uint32", "HybridSKItersPerWGOrSKSplit")
+      _reg("uint32", "HybridSKGridOrSKItersPerWI")
+      _reg("uint32", "HybridSKTilesAndSplitOrSKGrid")
     elif isStreamK(kernel):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "MagicNumberItersPerTile")
       _reg("uint32", "MagicShiftItersPerTile")
       _reg("uint32", "SKItersPerWG")
-      if isPersistent(kernel):
-        _reg("uint32", "SKGrid")
-        _reg("uint32", "SKTilesAndSplit")
+      _reg("uint32", "SKGrid")
+      _reg("uint32", "SKTilesAndSplit")
 
     if isPersistentDataParallel(kernel):
       # DataParallel uses KernArgsVersion=3, including its permanent beta slot.
