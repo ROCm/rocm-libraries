@@ -116,7 +116,11 @@ namespace TensileLite
                 int index;
 
                 if(iot::outputting(io))
-                    index = lib.solution->index;
+                {
+                    index = lib.solutionIndex();
+                    if(lib.solution == nullptr && index < 0)
+                        iot::setError(io, "SingleSolutionLibrary has no solution to write.");
+                }
 
                 iot::mapRequired(io, "index", index);
 
@@ -275,13 +279,28 @@ namespace TensileLite
                 // Read above the format branch so both layouts pick it up, and
                 // so an indexed file does not leave the key unconsumed for
                 // checkUsedKeys() to flag under TENSILE_DB=0x1000.
-                iot::mapOptional(io, "version", lib.version);
+                // An empty version is not a version, so it is the value an
+                // absent key stands for and the key is omitted on output.
+                if(iot::outputting(io))
+                {
+                    iot::mapOptional(io, "version", lib.version, std::string());
+                }
+                else if(iot::hasKey(io, "version"))
+                {
+                    iot::mapOptional(io, "version", lib.version);
+                    if(lib.version.empty())
+                        iot::setError(io, "library version must not be empty");
+                }
 
                 // Absent (legacy) or 1 means the eager layout below. 2 is the
                 // indexed layout. Anything higher is a format this build does
                 // not know: fail rather than misread it as 2.
+                //
+                // 0 is the absent value, so eager output omits the key. Indexed
+                // files are emitted by MessagePackWriteIndexedLibraryData, not
+                // this mapping.
                 int formatVersion = 0;
-                iot::mapOptional(io, "format_version", formatVersion);
+                iot::mapOptional(io, "format_version", formatVersion, 0);
 
                 if(!iot::outputting(io) && formatVersion > IndexedFormatVersion)
                 {
@@ -300,8 +319,35 @@ namespace TensileLite
 
                 if(iot::outputting(io))
                 {
-                    solutions.reserve(lib.solutions.size());
-                    for(auto const& pair : lib.solutions)
+                    // MessagePackWriteLibraryData expands an indexed library into
+                    // the eager solutions array, so the blob is parsed here.
+                    // Indexed files keep format_version 2 via
+                    // MessagePackWriteIndexedLibraryData.
+                    SolutionMap<MySolution> written;
+                    {
+                        std::lock_guard<std::mutex> lock(lib.solutionsGuard);
+                        written = lib.solutions;
+                    }
+                    if(lib.blobCache)
+                    {
+                        for(int index : lib.blobCache->indices())
+                        {
+                            if(written.count(index))
+                                continue;
+
+                            auto solution = lib.blobCache->get(index);
+                            if(solution == nullptr)
+                                iot::setError(io,
+                                              concatenate("Solution ",
+                                                          index,
+                                                          " in solutions_blob does not parse."));
+                            else
+                                written.emplace(index, solution);
+                        }
+                    }
+
+                    solutions.reserve(written.size());
+                    for(auto const& pair : written)
                         solutions.push_back(pair.second);
                 }
 

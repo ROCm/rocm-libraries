@@ -276,15 +276,58 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-if(NOT HIPBLASLT_ENABLE_YAML)
+# Device-library generation writes MessagePack even when the host library
+# itself is compiled for YAML, so find msgpack in that configuration too.
+if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    set(hipblaslt_msgpack_fetched FALSE)
     find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
+        # TODO: set minimum version required for *-cxx library
+        find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+        if(msgpackc-cxx_FOUND)
+            set(hipblaslt_msgpack_target "msgpackc-cxx")
+            message(STATUS "Found msgpack (<=5.x)")
+        elseif(HIPBLASLT_ENABLE_FETCH)
+            # Header-only, downloaded at configure time. Opt-in, so a machine
+            # with no msgpack package and no network still gets an immediate,
+            # legible configure failure instead of a silent download.
+            message(STATUS "msgpack-cxx was not found; fetching 6.1.0")
+            include(FetchContent)
+            FetchContent_Declare(
+                msgpack-cxx
+                URL https://github.com/msgpack/msgpack-c/releases/download/cpp-6.1.0/msgpack-cxx-6.1.0.tar.gz
+                URL_HASH SHA256=23ede7e93c8efee343ad8c6514c28f3708207e5106af3b3e4969b3a9ed7039e7
+            )
+            set(MSGPACK_USE_BOOST OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_CXX17 ON CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            # msgpack-cxx 6.1.0 still calls cmake_minimum_required(VERSION 3.1).
+            # CMake 4 rejects that. The floor applies only while that project is added.
+            set(_hipblaslt_saved_policy_minimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+            set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+            FetchContent_MakeAvailable(msgpack-cxx)
+            if(_hipblaslt_saved_policy_minimum STREQUAL "")
+                unset(CMAKE_POLICY_VERSION_MINIMUM)
+            else()
+                set(CMAKE_POLICY_VERSION_MINIMUM "${_hipblaslt_saved_policy_minimum}")
+            endif()
+            set(hipblaslt_msgpack_target "msgpack-cxx")
+            set(hipblaslt_msgpack_fetched TRUE)
+        else()
+            message(FATAL_ERROR
+                "msgpack-cxx was not found. Install msgpack-cxx (>=6.x) or "
+                "msgpackc-cxx (<=5.x), or configure with "
+                "-DHIPBLASLT_ENABLE_FETCH=ON to download it at configure time. "
+                "A msgpack package is required whenever the host library is "
+                "built against MessagePack or device libraries are generated.")
+        endif()
     endif()
 endif()
 
@@ -602,9 +645,21 @@ if(_hipblaslt_export_targets)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(NOT HIPBLASLT_ENABLE_YAML
-           AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
-            if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+        if(NOT HIPBLASLT_ENABLE_YAML AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+            if(hipblaslt_msgpack_fetched)
+                # A static archive carries msgpack into INTERFACE_LINK_LIBRARIES
+                # as $<LINK_ONLY:msgpack-cxx>, so the export set references it.
+                # A fetched msgpack-cxx is a build-tree target, not an imported
+                # one, and cannot be exported; downstream static consumers would
+                # also have no msgpack to link against. Say so here rather than
+                # at generate time.
+                message(FATAL_ERROR
+                    "A static, exported hipBLASLt needs an installed msgpack "
+                    "package: a fetched msgpack-cxx is a build-tree target and "
+                    "cannot be exported. Install msgpack-cxx (>=6.x) or "
+                    "msgpackc-cxx (<=5.x), or build shared with "
+                    "-DHIPBLASLT_BUILD_SHARED_LIBS=ON.")
+            elseif(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()
                 list(APPEND _hipblaslt_static_depends
