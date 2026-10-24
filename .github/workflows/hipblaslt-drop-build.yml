@@ -59,8 +59,90 @@ env:
   ROCM_VERSION: 7.0.2
 
 jobs:
+  configure:
+    name: Configure drop build
+    runs-on: ubuntu-24.04
+    outputs:
+      test_matrix: ${{ steps.matrix.outputs.test_matrix }}
+    steps:
+      - name: Build test matrix
+        id: matrix
+        env:
+          REQUESTED_GPU_TARGETS: ${{ inputs.gpu_targets || 'gfx942;gfx950' }}
+          GFX942_RUNNER: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+          GFX950_RUNNER: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
+          GFX950_MULTI_GPU_RUNNER: ${{ inputs.gfx950_2gpu_runner || 'linux-gfx950-8gpu-ccs-ossci-rocm' }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          requested = {
+              item.split(":", 1)[0]
+              for item in re.split(r"[;,]", os.environ["REQUESTED_GPU_TARGETS"])
+              if item.strip()
+          }
+          supported = {"gfx942", "gfx950"}
+          unsupported = requested - supported
+          if unsupported:
+              names = ", ".join(sorted(unsupported))
+              raise SystemExit(f"Unsupported drop-build GPU target(s): {names}")
+          if not requested:
+              raise SystemExit("At least one GPU target is required")
+
+          include = []
+          common_filter = "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
+          if "gfx942" in requested:
+              include.extend([
+                  {
+                      "name": "hipBLASLt tests (gfx942)",
+                      "runner": os.environ["GFX942_RUNNER"],
+                      "binary": "hipblaslt-test",
+                      "artifact_suffix": "gfx942",
+                      "filter": common_filter,
+                  },
+                  {
+                      "name": "hipSPARSELt tests (gfx942)",
+                      "runner": os.environ["GFX942_RUNNER"],
+                      "binary": "hipsparselt-test",
+                      "artifact_suffix": "gfx942",
+                      "filter": common_filter,
+                  },
+              ])
+          if "gfx950" in requested:
+              include.extend([
+                  {
+                      "name": "hipBLASLt tests (gfx950)",
+                      "runner": os.environ["GFX950_RUNNER"],
+                      "binary": "hipblaslt-test",
+                      "artifact_suffix": "gfx950",
+                      "filter": common_filter,
+                  },
+                  {
+                      "name": "hipSPARSELt tests (gfx950)",
+                      "runner": os.environ["GFX950_RUNNER"],
+                      "binary": "hipsparselt-test",
+                      "artifact_suffix": "gfx950",
+                      "filter": common_filter,
+                  },
+                  {
+                      "name": "hipBLASLt multi-GPU tests (2 x gfx950)",
+                      "runner": os.environ["GFX950_MULTI_GPU_RUNNER"],
+                      "binary": "hipblaslt-test",
+                      "artifact_suffix": "2xgfx950",
+                      "hip_visible_devices": "0,1",
+                      "filter": "*multi_gpu*",
+                  },
+              ])
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"test_matrix={json.dumps({'include': include}, separators=(',', ':'))}\n")
+          PY
+
   build-rpms:
     name: Build hipBLASLt and hipSPARSELt RPMs
+    needs: configure
     if: github.repository == 'ROCm/rocm-libraries'
     runs-on: ${{ inputs.build_runner || 'aws-linux-scale-rocm-prod' }}
     timeout-minutes: 600
@@ -99,13 +181,15 @@ jobs:
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
           EOF
-          dnf -y install cmake git git-lfs gzip tar unzip wget which \
+          dnf -y install cmake gcc gcc-c++ git git-lfs gzip tar unzip wget which \
             python3.11 python3.11-pip python3.11-devel
           # These are base SDK prerequisites that invoke --install-deps
           # expects the build image to provide.
           dnf -y install \
             amd-smi-lib \
             hip-devel \
+            hipsparse-devel \
+            lapack-devel \
             numactl-devel \
             rocm-llvm-devel \
             rocm-openmp \
@@ -129,6 +213,18 @@ jobs:
           cmake --build /tmp/googletest-build --parallel
           cmake --install /tmp/googletest-build
           rm -rf /tmp/googletest /tmp/googletest-build
+
+          # Match the AOCL BLIS layout used by Jenkins. hipSPARSELt's unmodified
+          # BLIS finder searches this location for its CPU reference library.
+          curl -fL \
+            https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-centos-2.0.tar.gz \
+            -o /tmp/aocl-blis.tar.gz
+          tar -xzf /tmp/aocl-blis.tar.gz -C /tmp
+          aocl_root=/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc
+          mkdir -p "$aocl_root/include_ILP64" "$aocl_root/lib_ILP64"
+          cp -a /tmp/amd-blis-mt/include/blis/. "$aocl_root/include_ILP64/"
+          cp /tmp/amd-blis-mt/lib/libblis-mt.a "$aocl_root/lib_ILP64/"
+          rm -rf /tmp/amd-blis-mt /tmp/aocl-blis.tar.gz
 
       - name: Check out the requested revision
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -187,14 +283,20 @@ jobs:
           invoke build \
             --install-deps \
             --clients \
-            --install-pkg \
             --gemm-a2a-fusion \
             --architecture="$GPU_TARGETS"
+          cmake --build build/release --target package
 
       - name: Build hipSPARSELt packages
         working-directory: projects/hipsparselt
         run: |
           set -euo pipefail
+          # The legacy driver treats AlmaLinux like RHEL but does not yet list
+          # its distro ID. Keep the source tree clean and restore os-release
+          # when the step exits.
+          cp /etc/os-release /tmp/os-release.drop-build
+          trap 'cp /tmp/os-release.drop-build /etc/os-release' EXIT
+          sed -i 's/^ID=.*/ID="rhel"/' /etc/os-release
           python3 -m venv build/venv
           source build/venv/bin/activate
           python -m pip install --upgrade pip wheel
@@ -202,8 +304,8 @@ jobs:
           invoke build \
             --install-deps \
             --clients \
-            --install-pkg \
             --architecture="$GPU_TARGETS"
+          cmake --build build/release --target package
 
       - name: Collect RPMs
         id: artifact
@@ -242,40 +344,13 @@ jobs:
 
   test-rpms:
     name: ${{ matrix.name }}
-    needs: build-rpms
+    needs: [configure, build-rpms]
     if: github.repository == 'ROCm/rocm-libraries'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: hipBLASLt tests (gfx942)
-            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
-            binary: hipblaslt-test
-            artifact_suffix: gfx942
-            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
-          - name: hipSPARSELt tests (gfx942)
-            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
-            binary: hipsparselt-test
-            artifact_suffix: gfx942
-            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
-          - name: hipBLASLt tests (gfx950)
-            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
-            binary: hipblaslt-test
-            artifact_suffix: gfx950
-            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
-          - name: hipSPARSELt tests (gfx950)
-            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
-            binary: hipsparselt-test
-            artifact_suffix: gfx950
-            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
-          - name: hipBLASLt multi-GPU tests (2 x gfx950)
-            runner: ${{ inputs.gfx950_2gpu_runner || 'linux-gfx950-8gpu-ccs-ossci-rocm' }}
-            binary: hipblaslt-test
-            artifact_suffix: 2xgfx950
-            hip_visible_devices: "0,1"
-            filter: "*multi_gpu*"
+      matrix: ${{ fromJSON(needs.configure.outputs.test_matrix) }}
     container:
       image: quay.io/almalinuxorg/almalinux@sha256:02d6626076a835e964e0ace5bedfe81e74269d8c11492c86e72612b8be81bdd9
       options: >-
@@ -318,7 +393,13 @@ jobs:
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
           EOF
-          dnf -y install rocm-hip-runtime tar gzip findutils
+          dnf -y install \
+            amd-smi-lib \
+            hipblas-common-devel \
+            lapack \
+            rocm-hip-runtime \
+            roctracer \
+            tar gzip findutils
           dnf -y clean all
 
       - name: Download RPM archive
@@ -338,7 +419,7 @@ jobs:
             echo "::error::The downloaded artifact contains no RPMs"
             exit 1
           fi
-          dnf -y install "${rpms[@]}"
+          rpm -iv --force "${rpms[@]}"
 
       - name: Run ${{ matrix.binary }}
         env:
