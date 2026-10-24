@@ -108,6 +108,20 @@ assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
 
+The instruction takes A and B as sixteen 32-bit words per lane. Each operand may
+arrive in any shape its own matrix format allows:
+
+| Operand holds | Shape | Reaches the register by |
+|---|---|---|
+| the sixteen register words | `vec<i32x16>` | nothing (passed unchanged) |
+| 64 fp8 or bf8 values | `vec<fp8e4m3x64>`, `vec<bf8e5m2x64>` | one bitcast |
+| the packed words of 64 fp6 or bf6 values | `vec<i32x12>` | four zero words appended |
+| the packed words of 64 fp4 values | `vec<i32x8>` | eight zero words appended |
+
+A mixed op such as fp8 x fp4 takes `vec<fp8e4m3x64>` for A and `vec<i32x8>` for
+B. Any other shape is refused with an error naming the operand and the register
+type. These operations lower with LLVM 23 only.
+
 For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
 example selects FP8 A and FP4 B, with independent E8M0 scales over K32:
 
@@ -220,8 +234,9 @@ and for a reproducible comparison through both engines.
 ## FP64 operands
 
 On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
-(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks). A/B take
-one f64 element per lane, as `f64` or a one-element `vec<f64x1>` (reinterpreted
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks); gfx90a
+and gfx950 list only `mfma_f64_16x16x4_f64`. A/B take one f64 element per lane,
+as `f64` or a one-element `vec<f64x1>` (reinterpreted
 with one bitcast); another number format is rejected. C/D take four and one, so
 `IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
 follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see

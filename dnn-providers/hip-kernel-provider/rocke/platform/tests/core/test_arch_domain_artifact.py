@@ -116,6 +116,24 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
 
+    def test_the_tool_measures_the_table_the_lowerer_resolves(self):
+        """The generator's own copy of the per-flavor merge must equal the
+        lowerer's, items and order, for every flavor.
+
+        The tool keeps an independent copy so it stays honest about what it
+        measured. Without this check a declaration added by a new resolution
+        rung would reach the lowerer but never the measured columns, and the
+        arch-domain lane would stay silent on it while every test passed.
+        """
+        from rocke.core.lower_llvm import LLVM_FLAVORS, _decls_for_flavor
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self.assertEqual(
+                    list(G._decl_table(flavor).items()),
+                    list(_decls_for_flavor(flavor).items()),
+                )
+
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
         opinion on, in JSON that is still valid and still looks authoritative.
@@ -198,6 +216,33 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                     "the probed call, so its `ok` cells prove nothing",
                 )
                 self.assertGreater(tc.get("probe_timeout_s", 0), 0)
+
+
+class ArchDomainProcessorSupportTest(unittest.TestCase):
+    """Each column says, per target, whether its compiler accepts the name."""
+
+    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                doc = json.loads(path.read_text())
+                processors = doc.get("processors", {})
+                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
+                for arch, entry in processors.items():
+                    self.assertIsInstance(entry.get("accepted"), bool, arch)
+                    if not entry["accepted"]:
+                        self.assertTrue(entry.get("evidence"), arch)
+
+    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
+        """The two answers agree: a name the compiler rejects was never probed
+        successfully for any declaration."""
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            for arch, entry in doc.get("processors", {}).items():
+                if entry["accepted"]:
+                    continue
+                for key, row in doc["keys"].items():
+                    with self.subTest(flavor=flavor, arch=arch, key=key):
+                        self.assertNotEqual(row[arch]["status"], G.STATUS_OK)
 
 
 class AvailableCpusTest(unittest.TestCase):

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """How an MMA operand reaches the instruction's register type.
 
-An MMA instruction takes its A and B operands as one fixed register type, such
-as ``f32`` for the f32 MFMAs or ``vec<i32x4>`` for the gfx11 iu8 WMMA. A kernel
+An MMA instruction takes each operand -- A, B and the accumulator C -- as one
+fixed register type, such as ``f32`` for the A and B of the f32 MFMAs or
+``vec<i32x4>`` for those of the gfx11 iu8 WMMA. A kernel
 may hold the same bits in another shape: a one-element ``vec<f32x1>``, or the
 instruction's packed values as ``vec<i8x16>``. Reading such an operand as the
 register type is a reinterpretation of the same bits, never a conversion.
@@ -22,14 +23,14 @@ from typing import Literal
 from .arch import ArchTarget
 from .ir import Op, Type, Value, VectorType, dtype_to_ir_type, is_packed_only, type_bits
 
-MmaOperandRole = Literal["a", "b"]
+MmaOperandRole = Literal["a", "b", "c"]
 
-# Position of each multiplicand among an MMA op's operands (A, B, C).
-_OPERAND_INDEX = {"a": 0, "b": 1}
+# Position of each operand among an MMA op's operands (A, B, C).
+_OPERAND_INDEX = {"a": 0, "b": 1, "c": 2}
 
 
 def mma_operand_value(op: Op, role: MmaOperandRole) -> Value:
-    """MMA operand ``role`` ("a" or "b") of ``op``."""
+    """MMA operand ``role`` ("a", "b" or the accumulator "c") of ``op``."""
     return op.operands[_OPERAND_INDEX[role]]
 
 
@@ -54,7 +55,11 @@ def _admitted_elements(
     elements = {_element_type(register_type)}
     catalog_op = arch.mma.by_op_id(op_id)
     if catalog_op is not None:
-        dtype = catalog_op.a_dtype if role == "a" else catalog_op.b_dtype
+        dtype = {
+            "a": catalog_op.a_dtype,
+            "b": catalog_op.b_dtype,
+            "c": catalog_op.c_dtype,
+        }[role]
         catalog_element = dtype_to_ir_type(dtype)
         if not is_packed_only(catalog_element):
             elements.add(catalog_element)

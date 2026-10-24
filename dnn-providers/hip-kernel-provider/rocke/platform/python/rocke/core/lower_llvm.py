@@ -569,9 +569,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
     # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
-    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
-    # matrix operand and a trailing i1 clamp. Emission goes through
-    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    # signature carries an i1 signedness flag (1 = signed) before each matrix
+    # operand and a trailing i1 clamp. Emitted from its MATRIX_CALLS entries
+    # (core/isa/matrix_calls.py). LLVM-lowered to v_wmma_i32_16x16x16_iu8.
     "wmma.i32.16x16x16.iu8": (
         "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
         "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"
@@ -948,17 +948,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
         "i32 immarg, i32 immarg, i32, i32 immarg, i32, i32 immarg)"
     ),
-    # P52: fp4 / fp6 MX MFMA atoms (gfx950+). Operand widths follow the
-    # OCP MX spec: ``16 x fp4`` packs into i64 per lane, ``16 x fp6``
-    # is a 96-bit value modelled here as `<3 x i32>`.
-    "mfma.f32.16x16x128.fp4": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x128.fp4("
-        "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
-    ),
-    "mfma.f32.16x16x96.fp6": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6("
-        "<3 x i32>, <3 x i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
-    ),
     # L6: UNSCALED fp8 16x16x128 hero atom. gfx950 has no dense plain
     # ``mfma.f32.16x16x128.fp8.fp8``; the dense wide-K f8 MFMA is the
     # ``f8f6f4`` scale-MFMA, which on LLVM22 (ROCm 7.2) takes the 9-arg
@@ -1157,9 +1146,14 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
-# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
-# already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
-# differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
+# Per-flavor declaration overrides. Each table holds only the entries whose
+# text changed AT that flavor; a flavor inherits every older flavor's overrides
+# in :data:`LLVM_FLAVORS` order (see :func:`_decls_for_flavor`), so an entry is
+# written once, at the flavor where its ABI changed. Keys MUST already exist in
+# :data:`_INTRINSIC_DECLS`; only the declaration TEXT differs, so call-site
+# ``_need(...)`` lookups stay flavor-agnostic.
+#
+# LLVM 21+ hosts (ROCm 7.2+).
 _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     "mfma.f32.16x16x32.fp8.fp8": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1183,10 +1177,9 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
-# intrinsic's ABI changed again.
+# LLVM 23 (ROCm 7.13+): only the intrinsics whose ABI changed again; the
+# LLVM 22 overrides reach llvm23 through inheritance, never by copying.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
-    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
     "mfma.scale.f32.16x16x128.f8f6f4": (
         "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
@@ -1195,21 +1188,45 @@ _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
 }
 
 
+# Each flavor's own overrides, one entry per member of :data:`LLVM_FLAVORS`
+# (llvm20 is the base table itself, so it overrides nothing). A dict, not a
+# flavor list: the order of inheritance comes from ``LLVM_FLAVORS`` alone.
+_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR: Dict[str, Dict[str, str]] = {
+    LLVM_FLAVOR_LLVM20: {},
+    LLVM_FLAVOR_LLVM22: _INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    LLVM_FLAVOR_LLVM23: _INTRINSIC_DECLS_LLVM23_OVERRIDES,
+}
+
+
 def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
+
+    The rule, in one place: the base table, then the overrides of every flavor
+    up to and including ``flavor``, oldest first in :data:`LLVM_FLAVORS` order,
+    then the declaration of every :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS`
+    entry whose key is not already present (``MatrixCall.declaration`` derives
+    it for ``flavor``). A newer flavor's entry replaces an older one's text; a
+    key keeps the position it first appeared at.
 
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
 
     Kept as one copy because there are two readers -- ``_Lowerer.__init__``
     and :func:`check_arch_domain_in_ir`, which needs the table without a
-    lowerer to ask.
+    lowerer to ask. The C++ engine resolves the same chain in
+    ``rocke_ll_decl_text`` / ``rocke_ll_decl_at`` (``cpp/core/lower_llvm/data.cpp``).
     """
+    if flavor not in LLVM_FLAVORS:
+        raise ValueError(
+            f"unknown LLVM flavor {flavor!r}; expected one of {LLVM_FLAVORS}"
+        )
+    from .isa.matrix_calls import MATRIX_CALLS
+
     decls = dict(_INTRINSIC_DECLS)
-    if flavor == LLVM_FLAVOR_LLVM22:
-        decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == LLVM_FLAVOR_LLVM23:
-        decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    for inherited in LLVM_FLAVORS[: LLVM_FLAVORS.index(flavor) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 
@@ -4300,17 +4317,6 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
-    def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.32x32x16.f16")
-        self._current().emit(
-            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
-            f"<8 x half> {self._operand(a)}, "
-            f"<8 x half> {self._operand(b)}, "
-            f"<16 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
-
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
@@ -4404,61 +4410,6 @@ class _Lowerer:
                 f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
                 f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
             )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.16x16x128.fp4")
-        # fp4 mantissa packs 16 nibbles into i64 per lane; arrive at
-        # this op in `<8 x i8>` form (caller's :meth:`unpack_fp4_byte`
-        # produces the right shape).
-        a_cast = self._fresh("a_fp4")
-        b_cast = self._fresh("b_fp4")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "i64":
-            self._current().emit(
-                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to i64"
-            )
-        else:
-            a_cast = self._operand(a)
-        if b_ty != "i64":
-            self._current().emit(
-                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to i64"
-            )
-        else:
-            b_cast = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.f32.16x16x128.fp4(i64 {a_cast}, "
-            f"i64 {b_cast}, <4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.16x16x96.fp6")
-        a_cast = self._fresh("a_fp6")
-        b_cast = self._fresh("b_fp6")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to <3 x i32>"
-            )
-        else:
-            a_cast = self._operand(a)
-        if b_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to <3 x i32>"
-            )
-        else:
-            b_cast = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32> {a_cast}, "
-            f"<3 x i32> {b_cast}, <4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
 
     def _op_tile_mfma_f32_16x16x128_fp8(self, op: Op) -> None:
         """Lower the UNSCALED fp8 16x16x128 hero atom (L6).

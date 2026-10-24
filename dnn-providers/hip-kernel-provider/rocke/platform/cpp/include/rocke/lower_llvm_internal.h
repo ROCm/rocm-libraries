@@ -101,18 +101,31 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
- * different decl text. */
+/* Per-flavor overrides: each array holds only the entries whose text changed
+ * AT that flavor (same keys as the base table, different decl text). A flavor
+ * inherits every older flavor's array in flavor-ladder order. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
-
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
- * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+/* One flavor's own override array (NULL/0 for LLVM20, which is the base). */
+const rocke_ll_decl_t* rocke_ll_flavor_own_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+
+/* The resolved declaration table of one flavor (Python _decls_for_flavor):
+ * rocke_ll_decl_text gives one key's text -- the newest override at or below
+ * `flavor`, else the base text, else a matrix call's derived declaration; NULL
+ * for an unknown key or a flavor off the ladder. rocke_ll_decl_at gives entry
+ * `index` in emit order, which is the base table's order, index in
+ * [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key);
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index);
+
+/* The keys the matrix-call table adds after the base table, in emit order
+ * (Python _decls_for_flavor's last rung): the first call per key, in table
+ * order, skipping keys the base table holds. NULL past the end;
+ * rocke_ll_decl_text resolves each key's text. */
+const char* rocke_ll_matrix_decl_key_at(int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 

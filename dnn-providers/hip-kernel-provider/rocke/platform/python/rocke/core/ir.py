@@ -525,8 +525,6 @@ def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
 # hints that must be preserved verbatim.
 _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
-    "mfma_f32_16x16x128_fp4": "acc4",
-    "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
 }
@@ -662,14 +660,15 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_dtype(op_id: str) -> str:
-    """The accumulator dtype of ``op_id``, from the arch catalog.
+def _mma_dst_dtype(op_id: str) -> str:
+    """The result dtype of ``op_id``, from the arch catalog.
 
     Sourced from ``core/arch/data/arch_specs.json`` via
-    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    ``target._op_id_dst_dtype``: the accumulator dtype, except for an atom
+    whose result dtype differs from it. Op_ids absent from the catalog return
     fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id, "fp32")
+    return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -2840,9 +2839,10 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x C>``: the per-lane
-        accumulator length the atom produces, with C the instruction's
-        accumulator dtype from the arch catalog. When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x D>``: the per-lane
+        accumulator length the atom produces, with D the instruction's result
+        dtype from the arch catalog (``dst_dtype``; the accumulator dtype for
+        every atom whose result is its accumulator). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table;
         an emulated atom's op_id resolves through the physical atom it expands
         into.
@@ -2870,10 +2870,10 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: the atom's own c_dtype when ``op`` is an
-        # MmaOp, else the catalog's accumulator dtype for the op_id.
-        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
-        c_elem = dtype_to_ir_type(c_dtype)
+        # Result element type: the atom's own dst_dtype when ``op`` is an
+        # MmaOp, else the catalog's result dtype for the op_id.
+        dst_dtype = getattr(op, "dst_dtype", None) or _mma_dst_dtype(op_id)
+        dst_elem = dtype_to_ir_type(dst_dtype)
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
@@ -2882,7 +2882,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(c_elem, c_frag_len)],
+            [VectorType(dst_elem, c_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
@@ -3251,20 +3251,6 @@ class IRBuilder:
         with that atom and both scales. See ``reference/mma_metadata.md``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
-
-    def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
-        """fp4 MX MFMA (gfx950+, P52).
-
-        Operands are 64-bit packed `<16 x fp4>` per lane;
-        accumulator is `<4 x float>`. Scales are applied separately
-        via :meth:`mfma_scale_f32_16x16x128_f8f6f4` for the
-        production MX path.
-        """
-        return self.mma("mfma_f32_16x16x128_fp4", a, b, c)
-
-    def mfma_f32_16x16x96_fp6(self, a: Value, b: Value, c: Value) -> Value:
-        """fp6 MX MFMA (gfx950+, P52)."""
-        return self.mma("mfma_f32_16x16x96_fp6", a, b, c)
 
     def register_p_from_qk_c(self, qk_c: Value, target_dtype: Type) -> Value:
         """Lane-XOR + bit-transpose to convert a `<16 x f32>` QK-MFMA

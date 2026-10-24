@@ -3290,10 +3290,12 @@ void case_wmma_result_count()
             }
             else
             {
+                /* The integer WMMA is a matrix call, which names its op_id. */
                 char expected[80];
                 snprintf(expected,
                          sizeof(expected),
-                         "tile.mma: expected exactly one result, got %d",
+                         "%s: expected exactly one result, got %d",
+                         integer ? "tile.wmma_i32_16x16x16_iu8" : "tile.mma",
                          count);
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);
@@ -3319,12 +3321,25 @@ void case_lowbit_dtype_aliases()
         if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
            || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
             fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        /* gfx950 reaches fp4 / fp6 through its scaled 32x32x64 MFMA with an fp8 A
+         * operand; the short and the explicit B name must select the same row. */
         const auto* arch = rocke_arch_target_from_gfx("gfx950");
-        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
         if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
-           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+           && !(rocke_mma_catalog_has_shape(
+                    &arch->mma, "mfma_scaled", "fp8", pair[0], "fp32", 32, 32, 64)
+                && rocke_mma_catalog_has_shape(
+                    &arch->mma, "mfma_scaled", "fp8", pair[1], "fp32", 32, 32, 64)))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
+    /* gfx950 has no fp6 16x16x96 MFMA instruction; its unscaled fp4 16x16x128
+     * MFMA is the f8f6f4 instruction, reached through the short name too. */
+    const auto* gfx950 = rocke_arch_target_from_gfx("gfx950");
+    if(rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp6", "fp6", "fp32", 16, 16, 96))
+        fail("gfx950 must not list an fp6 16x16x96 MFMA", __LINE__);
+    const rocke_mma_op_t* fp4
+        = rocke_mma_catalog_op_for_shape(&gfx950->mma, "mma", "fp4", "fp4", "fp32", 16, 16, 128);
+    if(!fp4 || strcmp(fp4->op_id, "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1") != 0)
+        fail("gfx950 fp4 16x16x128 must select the f8f6f4 MFMA", __LINE__);
 }
 
 /* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but

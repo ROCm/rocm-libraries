@@ -161,11 +161,44 @@ processor's members, mirrored by `rocke_ati_generic_targets` in
 [`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
 `generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
 maps any device or processor name to that generic target.
-`base_arch_from_target_id()` uses the generic row only for a member without its
-own catalog row (gfx1100 -> `gfx11-generic`, gfx1200 -> `gfx12-generic`), so an
-explicit processor name with a row (`gfx1151`, `gfx1201`) still builds
-processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
+`base_arch_from_target_id()` keeps a processor that has a row of its own, and
+every member of a catalogued generic target has one (see below), so `gfx1100`
+lowers as `gfx1100`; only a processor with no row falls back to the generic row
+that lists it. Capability tables (`intrinsic_arch_domain.*.json`) need
 the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
+
+Every member of a generic target that rocKE supports gets a row of its own, so
+support for a processor is explicit rather than implied by `generic_targets`. A
+member whose recorded facts differ from the generic's holds them in full. A member
+whose every recorded field equals the generic's holds no facts and points at the
+generic instead, so each fact has one home:
+
+```json
+"gfx1151": { "_comment": "why the row exists", "facts_of": "gfx11-generic" }
+```
+
+The loader resolves every pointer before any reader sees it, so
+`ArchTarget.from_gfx("gfx1151")` is the generic's target under the name
+`gfx1151`. A pointer holds nothing but `facts_of` and an optional `_comment`, and
+must name the generic target that `generic_targets` lists the processor under,
+which itself holds facts; the loader refuses anything else. In C++ the processor's
+`rocke_arch_target_t` is the generic's `constexpr` target with only `gfx` replaced
+(`facts_of(k_target_gfx11_generic, "gfx1151")` in `data.cpp`), sharing its `mma`
+array. Grouping is decided by the recorded fields only: a member points at its
+generic exactly when every field this file records matches.
+
+Each target compiles for itself where the LLVM flavor's compiler accepts its
+processor name. `tools/gen_arch_domain.py` records that per target in each
+column's `processors`; where a flavor rejects a member's name,
+`compiler_target_for_flavor()` (C++: `rocke_compiler_target_for_flavor()`,
+whose rejection list `rocke_ati_rejected_processors` mirrors the columns; the
+`rocke_arch_data_mirror` ctest fails when the two differ) compiles it as the
+generic its row points at, with a message saying so, and refuses a target with
+no such generic. Each compile helper passes the flavor of the compiler it runs:
+the one COMGR loads for `compile_kernel`, hipcc's own clang for the hipcc helpers.
+`compiler_target_from_target_id()` only removes the profile and never replaces
+the processor. The C++ engine has no compile path yet; its function exists for
+API parity.
 
 ## 2 · ISA backend
 
@@ -180,8 +213,8 @@ The C++ side needs **two** rows: the `REGISTRY` table in
 `rocke_ll_backend_for` in
 [`cpp/core/lower_llvm/core.cpp`](../../cpp/core/lower_llvm/core.cpp).
 
-A backend row may legitimately land **before** the arch metadata — `gfx908` and
-`gfx90a` are such forward declarations today. `backend_for()` resolves the
+A backend row may legitimately land **before** the arch metadata (a forward
+declaration; none is registered today). `backend_for()` resolves the
 `ArchTarget` first, so that case reports "forward-declared but has no
 arch_specs.json metadata yet" instead of leaking a raw `KeyError`, and
 `wired_arches()` returns only the rows that can actually build a backend.

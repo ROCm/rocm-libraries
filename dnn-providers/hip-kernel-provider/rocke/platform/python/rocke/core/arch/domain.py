@@ -104,6 +104,7 @@ class ArchDomain:
         self.toolchain: dict[str, object] = doc.get("toolchain", {})
         self.canonical: dict[str, str] = doc.get("canonical", {})
         self._keys: dict[str, dict[str, dict]] = keys
+        self._processors: dict[str, dict] = doc.get("processors", {})
 
     def lookup(self, key: str, arch: str) -> Cell | None:
         """The cell for ``(key, arch)``, or ``None`` when it was not measured.
@@ -130,6 +131,15 @@ class ArchDomain:
     def keys(self) -> tuple:
         """Every declaration key this column covers, in file order."""
         return tuple(self._keys)
+
+    def accepts_processor(self, arch: str) -> bool | None:
+        """Whether this flavor's compiler accepts ``arch`` as a processor name.
+
+        ``None`` when the column has no answer for ``arch`` (a target the
+        generator never probed, or a column written before it recorded this).
+        """
+        entry = self._processors.get(arch)
+        return None if entry is None else bool(entry["accepted"])
 
 
 def is_negative(status: str) -> bool:

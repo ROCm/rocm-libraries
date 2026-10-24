@@ -227,8 +227,10 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 
 # Explicit gfx targets rather than a cdna/rdna family label. Family does not
 # imply wave size -- gfx1250 is cdna at wave32 -- so a family gate would admit a
-# wave32 target into these wave64 MFMA candidates. An arch absent from a list is
-# a target the candidate was never built or run against.
+# wave32 target into these wave64 MFMA candidates. A candidate admits a target
+# when its list names the target or its generic (the row arch_specs.json points
+# the target at); any other target is one the candidate was never built or run
+# against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
