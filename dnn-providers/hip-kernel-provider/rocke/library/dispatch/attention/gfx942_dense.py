@@ -41,30 +41,25 @@ _GFX942_NUM_PERSISTENT = 304
 
 
 # Sliding-window geometry. A causal band of width W visits about block_m + W keys
-# per query row, so a block_m well above W spends most of its tiles on masked
-# work, and a short sequence leaves the 256-row grid below one CTA per CU.
-# Window widths up to this many keys count as narrow.
+# per query row, so a 256-row block over a narrow band spends most of its tiles on
+# masked work. Window widths up to this many keys count as narrow.
 _NARROW_WINDOW = 256
 
 
-def _window_geometry(window, sq, heads, head_size, dtype, bm, persistent):
-    """``(block_m, persistent)`` for a sliding-window request.
+def _narrow_window_geometry(head_size, dtype):
+    """``(block_m, block_n)`` for a narrow sliding-window band.
 
-    Narrow band (``window <= _NARROW_WINDOW``): 128-row query blocks on the
-    one-CTA-per-block grid; bf16 D64 goes to 64 rows (its waves-per-eu 4 build
-    is small enough in VGPRs and LDS to keep several CTAs resident per CU). Wide
-    band whose default grid has fewer query blocks than CUs: 128-row blocks, grid
-    choice unchanged. Otherwise, or when Sq is not a multiple of the smaller block,
-    the default geometry stands.
+    128-row query blocks on the one-CTA-per-block grid. D128 halves the KV tile to
+    32 keys, which halves its K/V LDS footprint so two CTAs fit per CU; bf16 D64
+    goes to 64-row blocks (its waves-per-eu 4 build is small enough to keep several
+    CTAs resident per CU). Depends only on compile-time fields, so one binary
+    still serves every runtime shape.
     """
-    if window <= _NARROW_WINDOW:
-        narrow_bm = 64 if (head_size == 64 and dtype == "bf16") else 128
-        if sq % narrow_bm == 0:
-            return narrow_bm, False
-        return bm, persistent
-    if sq % 128 == 0 and (sq // bm) * heads < _GFX942_NUM_PERSISTENT:
-        return 128, persistent
-    return bm, persistent
+    if head_size == 128:
+        return 128, 32
+    if dtype == "bf16":
+        return 64, _DENSE_BLOCK_N
+    return 128, _DENSE_BLOCK_N
 
 
 def _base_spec(req: AttentionRequest):
@@ -80,10 +75,6 @@ def _base_spec(req: AttentionRequest):
     the concrete spec's default; the knob space varies them.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
-    from kernels.gfx942.attention_dense import (
-        Gfx942AttentionDenseSpec,
-        _tuned_waves_per_eu,
-    )
 
     # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
     # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
@@ -92,29 +83,39 @@ def _base_spec(req: AttentionRequest):
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
-    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    mask_type = _parse_attention_mask_type(req.mask_type)
-    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
-    dtype = req.dtype.lower()
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did.
-    persistent = head_size == 128
-    if int(req.sliding_window) > 0:
-        bm, persistent = _window_geometry(
-            int(req.sliding_window),
-            sq,
-            int(req.nhead_q) * int(req.batch),
-            head_size,
-            dtype,
-            bm,
-            persistent,
-        )
-        ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    spec = _make_spec(
+        req,
+        int(DENSE_TILE_GEOMETRIES["default"]["block_m"]),
+        _DENSE_BLOCK_N,
+        persistent=head_size == 128,
+    )
+    if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
+        bm, bn = _narrow_window_geometry(head_size, req.dtype.lower())
+        narrow = _make_spec(req, bm, bn, persistent=False)
+        # Keep the default geometry for any request the narrow one cannot serve.
+        if _supports(narrow, arch="gfx942")[0]:
+            spec = narrow
+    return spec
+
+
+def _make_spec(req: AttentionRequest, bm: int, bn: int, *, persistent: bool):
+    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry."""
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        _tuned_waves_per_eu,
+    )
+
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    head_size = int(req.hdim_q)
+    dtype = req.dtype.lower()
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
+    # not a block_m/block_n multiple). Cross-attention ragged is left to the
+    # validator.
+    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -173,8 +174,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # LSE output; no moving bottom-right diagonal. Head size stays out:
         # D64/D128 coverage is ``supports_attention_dense``'s call.
         features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
-        # _base_spec picks these from the dtype and head size.
-        recorded=frozenset({"persistent", "waves_per_eu"}),
+        # _base_spec picks these from the dtype, head size and window.
+        recorded=frozenset({"persistent", "waves_per_eu", "block_m", "block_n"}),
     )
 
 
