@@ -2063,16 +2063,16 @@ struct FmhaBwdDQDKDVKernel
                 slope *= ck_tile::log2e_v<>;
                 if constexpr(kHasMask)
                 {
-                    return make_alibi_from_lr_mask<AccDataType, false>(slope,
-                                                                       kargs.window_size_left,
-                                                                       kargs.window_size_right,
-                                                                       kargs.seqlen_q,
-                                                                       kargs.seqlen_k,
-                                                                       kargs.mask_type);
+                    return make_alibi_from_lr_mask<AccDataType, false, 32>(slope,
+                                                                           kargs.window_size_left,
+                                                                           kargs.window_size_right,
+                                                                           kargs.seqlen_q,
+                                                                           kargs.seqlen_k,
+                                                                           kargs.mask_type);
                 }
                 else
                 {
-                    return Alibi<AccDataType, false>{
+                    return Alibi<AccDataType, false, 32>{
                         slope, kargs.seqlen_q, kargs.seqlen_k, AlibiMode::FROM_BOTTOM_RIGHT};
                 }
             }
