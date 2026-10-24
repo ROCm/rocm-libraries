@@ -242,10 +242,55 @@ def _evaluate_asymmetric(state):
                           % (activeTC, base // SEG, (base + pre) // SEG)}
 
 
-def evaluate(state):
+def _evaluate_divergent(state, thinTC, thickSpan):
+    # Divergent decoupled pair (owner-grouped LDS). The double-buffered tensor swaps between two
+    # blocks that keep their baseline layout, so only the single-buffered one can be active; one
+    # double-buffered block is the gap that pushes its comp1 into the next segment:
+    #   [S0][T block 0][S1][S scales][T block 1]   no more LDS than the owner-grouped layout.
+    if state.get("TDMFuse") in (2, 3):
+        return _no("divergent pair: TDMFuse=%d puts an MX scale in the other tensor's blocks" % state["TDMFuse"])
+    wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
+    if not ((wgM == 1) ^ (wgN == 1)):
+        return _no("divergent pair: MIWaveGroup [%d,%d] interleaves both tensors" % (wgM, wgN))
+    activeTC = "A" if wgM > 1 else "B"
+    if activeTC != thinTC:
+        return _no("divergent pair: the double-buffered %s is the active tensor" % activeTC)
+    if state.get("TDMSplit"):
+        return _no("divergent pair: TDMSplit")
+    if not _coarse(state, thinTC):
+        return _no("%s active: VW must be WaveTile (coarse)" % thinTC)
+    thickTC = "B" if thinTC == "A" else "A"
+    fAct = _footprint(state, thinTC)
+    fActData = _data_bytes(state, thinTC)
+    # The owner-grouped baseline puts A at 0 and B after both A blocks and MXSB.
+    base = 0 if thinTC == "A" else 2 * thickSpan + int(state["LdsNumElementsAlignedMXSB"])
+    if base % SEG + fActData <= SEG and (base + fAct) // SEG != base // SEG:
+        return _no("baseline already separates %s component 0 and component 1 into different "
+                   "segments" % thinTC)
+    stride = fAct + thickSpan
+    if stride // SEG <= (fActData - 1) // SEG:
+        return _no("divergent pair: one %s block does not push %s comp1 into the next segment"
+                   % (thickTC, thinTC))
+    # A double-buffered block keeps its owner-grouped order, [A|MXSA] or [MXSB|B].
+    first, second = ("A", "MXSA") if thickTC == "A" else ("MXSB", "B")
+    offsets = {"ldsBase%s" % thinTC: 0, "ldsBase%s" % first: fAct,
+               "ldsBase%s" % second: fAct + int(state["LdsNumElementsAligned%s" % first]),
+               "ldsBaseMXS%s" % thinTC: 2 * fAct + thickSpan,
+               "writeStrideBytes": stride, "footprintPacked": True,
+               "%sBaseline" % thickTC.lower(): True, "activeTC": thinTC,
+               "dcpThickStride": stride + int(state["LdsNumElementsAlignedMXS%s" % thinTC])}
+    return {"applicable": True, "aligned": False, "offsets": offsets, "blockSpan": 0,
+            "reason": "divergent-asym",
+            "segmentMap": "DIVERGENT-ASYM active=%s seg0={c0,%s block 0} seg%d={c1}"
+                          % (thinTC, thickTC, stride // SEG)}
+
+
+def evaluate(state, divergent=None):
     pt = state["ProblemType"]
     # Tri-state knob: -1 = auto (default), 0 = force baseline, 1 = force on where applicable.
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
+    # divergent = (single-buffered tensor, bytes of one double-buffered block) for a divergent
+    # decoupled pair, whose owner-grouped layout the A/B layouts below do not describe.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
@@ -274,6 +319,8 @@ def evaluate(state):
     # fp8/fp4 cover mxf8/mxf4; MX scales are relocated as a trailing block (see _mx_scale_bases).
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat() or _dt.isFloat4()):
         return _no("bf16/fp16/fp8/fp4 only")
+    if divergent:
+        return _evaluate_divergent(state, *divergent)
 
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
