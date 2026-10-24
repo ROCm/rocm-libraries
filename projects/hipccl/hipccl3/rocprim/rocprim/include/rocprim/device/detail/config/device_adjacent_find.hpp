@@ -40,628 +40,745 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 // TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 512, 'ipt': 2}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {512, 2}
-        };
+        return adjacent_find_config_params{ { 512, 2 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {256, 16}
-        };
+        return adjacent_find_config_params{ { 256, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {256, 16}
-        };
+        return adjacent_find_config_params{ { 256, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 2}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {512, 2}
-        };
+        return adjacent_find_config_params{ { 512, 2 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {256, 8}
-        };
+        return adjacent_find_config_params{ { 256, 8 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {256, 16}
-        };
+        return adjacent_find_config_params{ { 256, 16 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 2}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {512, 2}
-        };
+        return adjacent_find_config_params{ { 512, 2 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 512, 'ipt': 2}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {512, 2}
-        };
+        return adjacent_find_config_params{ { 512, 2 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {512, 8}
-        };
+        return adjacent_find_config_params{ { 512, 8 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {512, 16}
-        };
+        return adjacent_find_config_params{ { 512, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {512, 8}
-        };
+        return adjacent_find_config_params{ { 512, 8 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 512, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {512, 8}
-        };
+        return adjacent_find_config_params{ { 512, 8 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 512, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {512, 16}
-        };
+        return adjacent_find_config_params{ { 512, 16 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 128, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {128, 32}
-        };
+        return adjacent_find_config_params{ { 128, 32 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 4}
-        };
+        return adjacent_find_config_params{ { 1024, 4 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1200', 'gpu': 'rx9060', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 64, 'ipt': 2}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 2}
-        };
+        return adjacent_find_config_params{ { 64, 2 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {128, 4}
-        };
+        return adjacent_find_config_params{ { 128, 4 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 64}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {64, 64}
-        };
+        return adjacent_find_config_params{ { 64, 64 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 64, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 4}
-        };
+        return adjacent_find_config_params{ { 64, 4 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 128, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {128, 32}
-        };
+        return adjacent_find_config_params{ { 128, 32 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 256, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {256, 32}
-        };
+        return adjacent_find_config_params{ { 256, 32 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 256, 'ipt': 64}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {256, 64}
-        };
+        return adjacent_find_config_params{ { 256, 64 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 64, 'ipt': 2}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 2}
-        };
+        return adjacent_find_config_params{ { 64, 2 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 64, 'ipt': 32}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {64, 32}
-        };
+        return adjacent_find_config_params{ { 64, 32 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {256, 16}
-        };
+        return adjacent_find_config_params{ { 256, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 2}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {512, 2}
-        };
+        return adjacent_find_config_params{ { 512, 2 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 256, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {256, 8}
-        };
+        return adjacent_find_config_params{ { 256, 8 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target, comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 64, 'ipt': 32}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 32}
-        };
+        return adjacent_find_config_params{ { 64, 32 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {128, 4}
-        };
+        return adjacent_find_config_params{ { 128, 4 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 4}
-        };
+        return adjacent_find_config_params{ { 1024, 4 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 128, 'ipt': 8}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {128, 8}
-        };
+        return adjacent_find_config_params{ { 128, 8 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 128, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {128, 32}
-        };
+        return adjacent_find_config_params{ { 128, 32 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 512, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {512, 4}
-        };
+        return adjacent_find_config_params{ { 512, 4 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 4}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 4}
-        };
+        return adjacent_find_config_params{ { 1024, 4 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 64, 'ipt': 8}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 8}
-        };
+        return adjacent_find_config_params{ { 64, 8 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {128, 32}
-        };
+        return adjacent_find_config_params{ { 128, 32 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 64, 'ipt': 8}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {64, 8}
-        };
+        return adjacent_find_config_params{ { 64, 8 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 128, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {128, 16}
-        };
+        return adjacent_find_config_params{ { 128, 16 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {64, 16}
-        };
+        return adjacent_find_config_params{ { 64, 16 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
-
-template<class Target, class input_type>
-
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>,
-        adjacent_find_config_params>
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>, adjacent_find_config_params>
 {
     // CONFIG: {'input_type': 'double', 'block_size_x': 1024, 'ipt': 16}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 16}
-        };
+        return adjacent_find_config_params{ { 1024, 16 } };
     }
     // CONFIG: {'input_type': 'float', 'block_size_x': 512, 'ipt': 32}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {512, 32}
-        };
+        return adjacent_find_config_params{ { 512, 32 } };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 32}
-    if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 2))
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {512, 32}
-        };
+        return adjacent_find_config_params{ { 512, 32 } };
     }
     // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
-                 && (sizeof(input_type) <= 16))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 16}
-        };
+        return adjacent_find_config_params{ { 1024, 16 } };
     }
     // CONFIG: {'input_type': 'int64_t', 'block_size_x': 1024, 'ipt': 16}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
-                 && (sizeof(input_type) <= 8))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
     {
-        return adjacent_find_config_params{
-            {1024, 16}
-        };
+        return adjacent_find_config_params{ { 1024, 16 } };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 512, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
-                 && (sizeof(input_type) <= 4))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
     {
-        return adjacent_find_config_params{
-            {512, 32}
-        };
+        return adjacent_find_config_params{ { 512, 32 } };
     }
     // CONFIG: {'input_type': 'short', 'block_size_x': 512, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 1)
-                 && (sizeof(input_type) <= 2))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
     {
-        return adjacent_find_config_params{
-            {512, 32}
-        };
+        return adjacent_find_config_params{ { 512, 32 } };
     }
     // CONFIG: {'input_type': 'int8_t', 'block_size_x': 512, 'ipt': 32}
-    if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
     {
-        return adjacent_find_config_params{
-            {512, 32}
-        };
+        return adjacent_find_config_params{ { 512, 32 } };
+    }
+    // Default case if none of the conditions match
+    return adjacent_find_config_params_base<input_type>();
+}
+
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi350x', 'rep': 'amdgcn'}
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>>, adjacent_find_config_params>
+{
+    // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 8) 
+    && (sizeof(input_type) <= 16)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 8 } };
+    }
+    // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 16}
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
+    {
+        return adjacent_find_config_params{ { 512, 16 } };
+    }
+    // CONFIG: {'input_type': 'int', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 16 } };
+    }
+    // CONFIG: {'input_type': 'short', 'block_size_x': 512, 'ipt': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 1) 
+    && (sizeof(input_type) <= 2)
+)
+    {
+        return adjacent_find_config_params{ { 512, 32 } };
+    }
+    // CONFIG: {'input_type': 'int8_t', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr(
+    (!rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 1)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 8 } };
+    }
+    // CONFIG: {'input_type': 'double', 'block_size_x': 1024, 'ipt': 8}
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 4) 
+    && (sizeof(input_type) <= 8)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 8 } };
+    }
+    // CONFIG: {'input_type': 'float', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) > 2) 
+    && (sizeof(input_type) <= 4)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 16 } };
+    }
+    // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 1024, 'ipt': 16}
+    if constexpr(
+    (rocprim::is_floating_point<input_type>::value) 
+    && (sizeof(input_type) <= 2)
+)
+    {
+        return adjacent_find_config_params{ { 1024, 16 } };
     }
     // Default case if none of the conditions match
     return adjacent_find_config_params_base<input_type>();
 }
 
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
-template<class Target, class... Args>
-constexpr auto adjacent_find_config_picker()
-    -> std::enable_if_t<
-        std::is_same_v<Target,
-                       comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>,
-        adjacent_find_config_params>
-{
-    return adjacent_find_config_picker<
-        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
-        Args...>();
-}
+template<class Target, 
+    class input_type
+>
+constexpr auto adjacent_find_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>, adjacent_find_config_params>
+{return adjacent_find_config_picker<comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>, input_type>();}
 
 // All the existing configs should be auto generated
-using adjacent_find_targets
-    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
-                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
-                   comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
-                   comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
-                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
-                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
-                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
-                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
-                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
+using adjacent_find_targets = comp_targets<
+    comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+    comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+    comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
+    comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
+    comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+    comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+    comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+    comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 
