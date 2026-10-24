@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,46 @@ hipsparseStatus_t hipsparseSgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               ldb,
                                                 size_t*           pBufferSizeInBytes);
 
+/*! \ingroup precond_module
+*  \details
+*  \p hipsparseSgtsv2_bufferSizeExt returns the size of the temporary storage buffer
+*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary
+*  storage buffer must be allocated by the user.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  size of the tridiagonal linear system. Must be at least 2.
+*  @param[in]
+*  n                  number of columns in the dense matrix B. Must be non-negative.
+*  @param[in]
+*  dl                 lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d                  main diagonal of the tridiagonal system.
+*  @param[in]
+*  du                 upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[in]
+*  B                  dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb                leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B, or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2, \p n is negative,
+*          or \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               m,
@@ -91,6 +131,46 @@ hipsparseStatus_t hipsparseDgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               ldb,
                                                 size_t*           pBufferSizeInBytes);
 
+/*! \ingroup precond_module
+*  \details
+*  \p hipsparseSgtsv2_bufferSizeExt returns the size of the temporary storage buffer
+*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary
+*  storage buffer must be allocated by the user.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  size of the tridiagonal linear system. Must be at least 2.
+*  @param[in]
+*  n                  number of columns in the dense matrix B. Must be non-negative.
+*  @param[in]
+*  dl                 lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d                  main diagonal of the tridiagonal system.
+*  @param[in]
+*  du                 upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[in]
+*  B                  dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb                leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B, or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2, \p n is negative,
+*          or \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               m,
@@ -102,6 +182,46 @@ hipsparseStatus_t hipsparseCgtsv2_bufferSizeExt(hipsparseHandle_t handle,
                                                 int               ldb,
                                                 size_t*           pBufferSizeInBytes);
 
+/*! \ingroup precond_module
+*  \details
+*  \p hipsparseSgtsv2_bufferSizeExt returns the size of the temporary storage buffer
+*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary
+*  storage buffer must be allocated by the user.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  size of the tridiagonal linear system. Must be at least 2.
+*  @param[in]
+*  n                  number of columns in the dense matrix B. Must be non-negative.
+*  @param[in]
+*  dl                 lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d                  main diagonal of the tridiagonal system.
+*  @param[in]
+*  du                 upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[in]
+*  B                  dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb                leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B, or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2, \p n is negative,
+*          or \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
                                                 int                     m,
@@ -176,6 +296,56 @@ hipsparseStatus_t hipsparseSgtsv2(hipsparseHandle_t handle,
                                   int               ldb,
                                   void*             pBuffer);
 
+/*! \ingroup precond_module
+*  \brief Tridiagonal solver with pivoting
+*
+*  \details
+*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right-hand sides using pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal, and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system involves two steps. First, the user calls
+*  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" to determine the size of the required
+*  temporary storage buffer. After this is determined, the user allocates the buffer and passes it to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
+*  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m           size of the tridiagonal linear system (must be >= 2).
+*  @param[in]
+*  n           number of columns in the dense matrix B.
+*  @param[in]
+*  dl          lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d           main diagonal of the tridiagonal system.
+*  @param[in]
+*  du          upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[inout]
+*  B           Dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb         Leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[in]
+*  pBuffer     temporary storage buffer allocated by the user.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
+*              \p du, \p B, or \p pBuffer pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDgtsv2(hipsparseHandle_t handle,
                                   int               m,
@@ -187,6 +357,56 @@ hipsparseStatus_t hipsparseDgtsv2(hipsparseHandle_t handle,
                                   int               ldb,
                                   void*             pBuffer);
 
+/*! \ingroup precond_module
+*  \brief Tridiagonal solver with pivoting
+*
+*  \details
+*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right-hand sides using pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal, and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system involves two steps. First, the user calls
+*  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" to determine the size of the required
+*  temporary storage buffer. After this is determined, the user allocates the buffer and passes it to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
+*  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m           size of the tridiagonal linear system (must be >= 2).
+*  @param[in]
+*  n           number of columns in the dense matrix B.
+*  @param[in]
+*  dl          lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d           main diagonal of the tridiagonal system.
+*  @param[in]
+*  du          upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[inout]
+*  B           Dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb         Leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[in]
+*  pBuffer     temporary storage buffer allocated by the user.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
+*              \p du, \p B, or \p pBuffer pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCgtsv2(hipsparseHandle_t handle,
                                   int               m,
@@ -198,6 +418,56 @@ hipsparseStatus_t hipsparseCgtsv2(hipsparseHandle_t handle,
                                   int               ldb,
                                   void*             pBuffer);
 
+/*! \ingroup precond_module
+*  \brief Tridiagonal solver with pivoting
+*
+*  \details
+*  \p hipsparseXgtsv2 solves a tridiagonal system for multiple right-hand sides using pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal, and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system involves two steps. First, the user calls
+*  \ref hipsparseSgtsv2_bufferSizeExt "hipsparseXgtsv2_bufferSizeExt()" to determine the size of the required
+*  temporary storage buffer. After this is determined, the user allocates the buffer and passes it to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
+*  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
+*  \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  This routine supports execution in a hipGraph context.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m           size of the tridiagonal linear system (must be >= 2).
+*  @param[in]
+*  n           number of columns in the dense matrix B.
+*  @param[in]
+*  dl          lower diagonal of the tridiagonal system. The first entry must be zero.
+*  @param[in]
+*  d           main diagonal of the tridiagonal system.
+*  @param[in]
+*  du          upper diagonal of the tridiagonal system. The last entry must be zero.
+*  @param[inout]
+*  B           Dense matrix of size ( \p ldb, \p n ).
+*  @param[in]
+*  ldb         Leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  @param[in]
+*  pBuffer     temporary storage buffer allocated by the user.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
+*              \p du, \p B, or \p pBuffer pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZgtsv2(hipsparseHandle_t       handle,
                                   int                     m,
