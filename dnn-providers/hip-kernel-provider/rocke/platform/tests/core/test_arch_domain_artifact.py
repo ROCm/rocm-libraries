@@ -1116,6 +1116,61 @@ class ValidityGateTest(unittest.TestCase):
                 self.assertFalse(F.requires_newer_flavor(other))
 
 
+class ValiditySkipListTest(unittest.TestCase):
+    """`--strict` accepts an UNVALIDATED case only when the flavor lists it."""
+
+    def test_a_listed_unvalidated_case_is_expected(self):
+        import check_ir_validity as V
+
+        cid = "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2"
+        results = {cid: ("UNVALIDATED", ""), "other": ("OK", "")}
+        self.assertEqual(V._skip_list_verdict("llvm22", results), ([], []))
+
+    def test_an_unlisted_unvalidated_case_is_unexpected(self):
+        import check_ir_validity as V
+
+        results = {"gemm/gfx950/new_case": ("UNVALIDATED", "")}
+        self.assertEqual(
+            V._skip_list_verdict("llvm22", results),
+            (["gemm/gfx950/new_case"], []),
+        )
+
+    def test_a_listed_case_that_now_validates_is_stale(self):
+        """A fixed case must leave the list in the change that fixed it."""
+        import check_ir_validity as V
+
+        cid = "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2"
+        self.assertEqual(V._skip_list_verdict("llvm22", {cid: ("OK", "")}), ([], [cid]))
+
+    def test_a_listed_case_outside_the_selection_is_not_stale(self):
+        import check_ir_validity as V
+
+        self.assertEqual(V._skip_list_verdict("llvm22", {"x": ("OK", "")}), ([], []))
+
+    def test_a_flavor_without_an_entry_expects_no_unvalidated_case(self):
+        import check_ir_validity as V
+
+        results = {"gemm/gfx1250/t32x32x32": ("UNVALIDATED", "")}
+        self.assertEqual(
+            V._skip_list_verdict("llvm99", results),
+            (["gemm/gfx1250/t32x32x32"], []),
+        )
+
+    def test_every_entry_names_a_corpus_case_and_a_reason(self):
+        import check_ir_validity as V
+
+        V._bootstrap_sys_path()
+        from rocke_ir_parity_harness import cases
+
+        corpus = {c["case_id"] for c in cases()}
+        for flavor, skipped in V.SKIP_UNVALIDATED.items():
+            for cid, reason in skipped.items():
+                with self.subTest(flavor=flavor, case=cid):
+                    self.assertIn(cid, corpus)
+                    self.assertTrue(reason.strip())
+                    self.assertNotIn(cid, V.KNOWN_BAD)
+
+
 class ArchDomainRegenerationTest(unittest.TestCase):
     """Re-probe this host's flavor and require the committed column to match."""
 
