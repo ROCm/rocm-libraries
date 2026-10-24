@@ -211,7 +211,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 One of these checks, sibling-`DeviceNames` consistency, is implemented in
-`Tensile.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
+`tensilelite.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy also lives in
@@ -384,7 +384,7 @@ Relative to the build, the logic YAML is compiler input rather than build output
 `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
-[`hipblaslt_codegen.cmake`](cmake/hipblaslt_codegen.cmake) that runs ahead of
+[`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
 `TensileCreateLibrary` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every
@@ -722,7 +722,7 @@ and Windows are not tracked separately. The exclusions in
 rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
 they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
-including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
+including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
 **No C++ coverage target exists** for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
