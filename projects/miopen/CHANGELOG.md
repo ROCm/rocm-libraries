@@ -14,6 +14,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
   first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
   one applicable CK instance the enumeration never terminated.
+* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
+  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
+  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
+  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
+  The problem now uses the next recorded solver, `GemmWrwUniversal`.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
@@ -47,11 +52,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `DeviceGroupedConvBwdWeight_Xdl_CShuffleV3` wave32 instances by removing the gfx1200 system
   database entries that the CK host-side support check now rejects. Affected problems use the
   next recorded solver instead.
-* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
-  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
-  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
-  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
-  The problem now uses the next recorded solver, `GemmWrwUniversal`.
 * [BatchNorm] Fixed just-in-time compilation failures for the batch normalization kernels on
   non-GFX9 targets by restricting the Welford reduction's DPP inline assembly to GFX9 instead
   of a per-architecture denylist.
