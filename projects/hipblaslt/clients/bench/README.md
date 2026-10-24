@@ -42,6 +42,7 @@ cd hipBLASLt; cd build/release
 --HMM                      Parameter requesting the use of HipManagedMemory
 --verify |-v               Validate GPU results with CPU?
 --verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Implies --verify.
+--post_bench_verify_iters <value> After timing, relaunch each solution this many more times, untimed and back to back, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. 0 turns it off. Implies --verify. (Default value is: 0)
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
 --adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
@@ -132,6 +133,10 @@ allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + r
 ```
 
 By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
+To catch a solution that is wrong only on some launches, add `--post_bench_verify_iters N`. After timing each solution, the bench relaunches it N more times, untimed and without a co-tenant or cache flush, and compares each relaunch's D bit for bit with the first launch's D, which the checks above compared with the CPU. The timed launches themselves are not checked, so a fast timing says nothing about whether those launches were right. The comparison runs on the GPU after each relaunch, and nothing waits on the host until the last one, so the relaunches run back to back. It needs a second copy of D in device memory.
+
+When a relaunch differs, the bench prints how many of the N relaunches differed and, for the first one, how many elements changed and the first changed element with its old and new values. A solution whose summation order changes from launch to launch can differ by a few units in the last place and still be right; the values show how large the difference is. A difference counts as a failed check for `--verify_strict`. Relaunches use the first rotation block only, and `--c_equal_d` with a nonzero beta is refused, since each launch then reads the D the previous launch wrote. With `--adaptive`, N stays the number given; it doesn't follow the number of timed launches.
 
 Show the frequency with environment variable
 ```

@@ -63,6 +63,8 @@ For example, to run ``fp32`` GEMM with validation, use this command:
 
 The norm check of D fails when any one batch's ``norm_error`` reaches the limit for the output type, the same limit ``hipblaslt-test`` uses (1e-5 for f32, 0.01 for f16, 0.1 for bf16), and the bench then prints the batch and its error to stderr. By default the exit code is 0 whether or not a check fails. With ``--verify_strict``, the bench exits with code 2 when any check of D failed. Only the first launch of each solution is compared with the reference; the launches timed by ``--iters`` and ``--cold_iters`` are not checked.
 
+To catch a solution that is wrong only on some launches, add ``--post_bench_verify_iters N``. After timing each solution, the bench relaunches it N more times, untimed and back to back, and compares each relaunch's D bit for bit with the first launch's D on the GPU. The timed launches themselves are not checked. When a relaunch differs, the bench prints how many relaunches differed and the first element that changed, with its old and new values; a solution whose summation order changes from launch to launch can differ slightly and still be right. A difference counts as a failed check for ``--verify_strict``.
+
 For more information, run the command with the ``--help`` option. The output of this command is shown below.
 
 .. code-block:: bash
@@ -103,6 +105,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --HMM                              Parameter requesting the use of HipManagedMemory
    --verify |-v                       Validate GPU results with CPU?
    --verify_strict                    Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Implies --verify.
+   --post_bench_verify_iters <value>  After timing, relaunch each solution this many more times, untimed and back to back, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. 0 turns it off. Implies --verify.  (Default value is: 0)
    --iters |-i <value>                Iterations to run inside timing loop                                                (Default value is: 10)
    --cold_iters |-j <value>           Cold Iterations to run before entering the timing loop                              (Default value is: 2)
    --algo_method <value>              Use different algorithm search API. Options: heuristic, all, index.                 (Default value is: heuristic)
