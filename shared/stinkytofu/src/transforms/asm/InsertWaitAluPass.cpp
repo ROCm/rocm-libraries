@@ -1621,25 +1621,27 @@ static void latchFormIfUnset(WaitcntBrackets& sb, const StinkyInstruction* formW
     sb.latchXdlForm(*formWmma, hasMatrixScalePair(*formWmma) ? 2u : 1u);
 }
 
-// Bare ops of `op`'s kind issued on a copy of `sb` until `inst` no longer needs the counter
-// they hide; -1 past the arch's largest hide count.
-static int countUntilFree(WaitcntBrackets sb, const StinkyInstruction& inst,
-                          const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op) {
+// Bare ops of `op`'s kind issued on a copy of `start` until `inst` no longer needs the counter
+// they hide; -1 past the arch's largest hide count. `formWmma` as in latchFormIfUnset.
+static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
+                          const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op,
+                          const StinkyInstruction* formWmma) {
     if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return 0;
     const CounterType c = op == WaitAluHideOp::Wmma ? CT_VA_VDST : CT_VM_VSRC;
+    if (isNoWait(computeWaitForInst(inst, start, keyer), c)) return 0;
+    WaitcntBrackets sb = start;
+    latchFormIfUnset(sb, formWmma);
     const int maxOps = maxHideOps(ctx, op);
-    for (int n = 0; n <= maxOps; ++n) {
+    for (int n = 1; n <= maxOps; ++n) {
+        sb.countBareOp(op);
         if (isNoWait(computeWaitForInst(inst, sb, keyer), c)) return n;
-        if (n < maxOps) sb.countBareOp(op);
     }
     return -1;
 }
 
 int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
                               const StinkyInstruction* formWmma) const {
-    WaitcntBrackets sb = impl_->sb;
-    latchFormIfUnset(sb, formWmma);
-    return countUntilFree(std::move(sb), inst, impl_->ctx, impl_->keyer, op);
+    return countUntilFree(impl_->sb, inst, impl_->ctx, impl_->keyer, op, formWmma);
 }
 
 int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
@@ -1649,7 +1651,7 @@ int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
     if (impl_->sb.formLatched()) sb.copyFormFrom(impl_->sb);
     latchFormIfUnset(sb, formWmma);
     stepInstruction(sb, producer, impl_->keyer);
-    return countUntilFree(std::move(sb), consumer, impl_->ctx, impl_->keyer, op);
+    return countUntilFree(sb, consumer, impl_->ctx, impl_->keyer, op, nullptr);
 }
 
 void WaitAluTracker::commit(const StinkyInstruction& inst) {

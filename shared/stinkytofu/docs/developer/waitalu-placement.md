@@ -123,9 +123,14 @@ Each step is one commit, checked with the GPU-less A/B on the 21 gfx1250 perf ke
 strict `s_wait_alu`, `vm_vsrc(0)`, kernels changed, barrier positions.
 
 0. `untilFree` and `requiredGap` on `WaitAluTracker`, with unit tests. No asm change.
-1. Swap: in `pickFreeBest`, a filler that `query()` says would wait ranks below every one that
-   would not. Measured: 1 kernel changed (medium mxf8), loop `s_wait_alu` 577 -> 575, no barrier
-   moves. VALUs are sparse, so a slot rarely has two candidates to swap between.
+1. Swap: in `pickFreeBest`, a filler whose wait a later slot would drop (`untilFree` finite) ranks
+   below every filler of its queue that needs none. Not demoted: a wait no move removes (an EXEC
+   writer's `va_vdst(0)` drain), and the producer of a fixed consumer (`feedsPrefetch`,
+   `unblocksWork`), since moving it later only brings it closer to that consumer. Measured: 4
+   kernels changed, loop `s_wait_alu` 577 -> 575, no barrier moves. VALUs are sparse, so a slot
+   rarely has two candidates. The same rank across the VALU and SALU picks was tried and cost 4
+   waits in mab mxf8 (it reshuffled the prefetch-address VALUs against SALUs); ordering across
+   filler kinds belongs to the pacer's init plan, which sees the whole region.
 2. Filler pacer, replacing the fill quota, critical fillers and the strict-count hold; producers
    of fixed consumers released `requiredGap` WMMAs ahead. This is where most loop waits (a
    `va_vdst` in front of a ds) can go.
