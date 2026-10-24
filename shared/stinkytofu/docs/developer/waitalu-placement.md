@@ -150,6 +150,14 @@ memory-address pairs under 8 cycles.
    address under 8 cycles: 0 of 369 pairs before and after. No DAG barrier moves past its
    threshold; two barriers in medium mxf8 that already issue about 10 WMMAs late (their ds are
    late, rule-conflicts P1) issue one WMMA later still.
+3b. Prefetch bridge over the back edge. Step 3's +5 strict loop waits were the prefetch-address
+   VALUs: `PrefetchBridgeSubstitutionPass` declined any prefetch group that reaches an address
+   overwrite around a back edge, so one address add moving past the loop's mid label lost the
+   `flat_prefetch` anchor and each add took its own `vm_vsrc`. The gap over a back edge is now the
+   fewest LDS ops along any CFG path. Loop `s_wait_alu` 545 -> 484, strict 66 -> 43 (develop 577 /
+   61); whole kernels 26693 -> 26630, strict 16937 -> 16914. On b8-3 (interleaved reps) the PR
+   alone was +0.49% slower on mxf4 medium; with this step +0.18%, mxf8 maf -0.13%, f8 maf
+   finetune +0.14% (15 reps, within noise).
 4. Next: filler pacer (catch-up instead of the per-window quota), replacing the critical fillers
    and the strict-count hold; cross-queue order in its init plan.
 5. Rule 2 as a hold, once the pacer gives held VALUs a later slot. Tried alone it made things
@@ -161,5 +169,8 @@ memory-address pairs under 8 cycles.
   loop-carried producers are not seen at the top of the loop body. Seed the tracker from the
   pass's BB entry state.
 - When a candidate needs both `va_vdst` and `vm_vsrc`, how their two counts combine in the rank.
-- Loop strict waits rose by 5 in step 3 (mab f8, maf mxf4 x2, medium mxf4, medium mxf8) and
-  medium mxf4's loop total by 3; not yet traced.
+- Loop strict waits rose by 5 in step 3: traced and fixed in step 3b (medium mxf8 stays at 5).
+- The 5 left in medium mxf8 are the LDS read-address swap `v_xor` after the last ds that reads the
+  old address (`vm_vsrc(0)`). Its need-by window (4-8) is far behind the region (WMMA 12-20), so
+  holding it only delays the ds that need the new address. The cause is ds issuing late
+  (rule-conflicts P1), not filler placement.
