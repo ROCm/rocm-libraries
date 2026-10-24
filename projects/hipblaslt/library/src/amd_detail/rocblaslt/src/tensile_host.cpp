@@ -3507,6 +3507,67 @@ namespace
 
 } // namespace
 
+// What a launch-time re-selection depends on: the launch problem (which holds
+// the launch hint and the caller's workspace), the tagged solution, the hint
+// it was ranked under and the workspace limit of that ranking.
+struct AdaptiveReselectionKey
+{
+    TensileLite::ContractionProblemGemm launchProblem;
+    int                                 taggedSolution = -1;
+    uint32_t                            queryHint      = 0;
+    size_t                              rankWorkspace  = 0;
+
+    bool operator==(const AdaptiveReselectionKey& o) const
+    {
+        return taggedSolution == o.taggedSolution && queryHint == o.queryHint
+               && rankWorkspace == o.rankWorkspace && launchProblem == o.launchProblem;
+    }
+};
+
+// The solution a launch runs for an AdaptiveReselectionKey.
+struct AdaptiveReselection
+{
+    AdaptiveReselectionKey key;
+    int                    solution = -1;
+    // The tagged solution runs at the query hint: at the launch hint, neither
+    // the heuristic's pick nor the tagged solution fits the caller's
+    // workspace (or keeps uniform summation order).
+    bool atQueryHint = false;
+};
+
+// The last c_reselectMemo re-selections of one TensileDataGemm, the oldest
+// replaced first.
+class AdaptiveReselectionMemo
+{
+public:
+    const AdaptiveReselection* find(const AdaptiveReselectionKey& key) const
+    {
+        for(auto const& r : m_entries)
+            if(r.key == key)
+                return &r;
+        return nullptr;
+    }
+
+    const AdaptiveReselection& insert(AdaptiveReselection r)
+    {
+        using rocblaslt::adaptive_sm::c_reselectMemo;
+        AdaptiveReselection& slot = m_entries.size() < c_reselectMemo
+                                        ? m_entries.emplace_back()
+                                        : m_entries[m_inserted % c_reselectMemo];
+        ++m_inserted;
+        return slot = std::move(r);
+    }
+
+    size_t size() const
+    {
+        return m_entries.size();
+    }
+
+private:
+    std::vector<AdaptiveReselection> m_entries;
+    size_t                           m_inserted = 0;
+};
+
 struct TensileDataGemm
 {
     bool                                       enableEpilogue = true;
@@ -3519,6 +3580,9 @@ struct TensileDataGemm
     // by the same builder the C API uses, so both APIs look up the same key.
     // Only set while a tuning file is in play.
     TensileLite::ProblemOverride tuningKey;
+
+    // Recent launch-time re-selections of an adaptive heuristic algo.
+    AdaptiveReselectionMemo adaptiveReselections;
 };
 
 struct TensileDataGroupedGemm
@@ -5409,6 +5473,114 @@ void tuningInjectFailureForTest(int stage)
     g_injectedTuningFailure.store(stage, std::memory_order_relaxed);
 }
 
+size_t adaptiveReselectionCount(std::shared_ptr<void> gemmData)
+{
+    auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    return data ? data->adaptiveReselections.size() : 0;
+}
+
+namespace
+{
+    // The heuristic's pick at the launch hint, ranked with the query's
+    // workspace limit, if it fits the caller's workspace there; otherwise the
+    // tagged solution, at the launch hint if it fits there, else at the query
+    // hint.
+    AdaptiveReselection chooseForLaunchHint(
+        rocblaslt_handle                                                               handle,
+        const RocblasltContractionProblem&                                             prob,
+        std::shared_ptr<void>                                                          gemmData,
+        const TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>& library,
+        const TensileLite::Hardware&                                                   hardware,
+        AdaptiveReselectionKey                                                         key)
+    {
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+        // getBestRawSolutions takes its workspace limit from the problem and
+        // rewrites data->problem, restored after.
+        RocblasltContractionProblem rankProblem = prob;
+        rankProblem.workspaceSize               = key.rankWorkspace;
+
+        auto picked   = getBestRawSolutions(rankProblem, handle, gemmData, 1, 0);
+        data->problem = key.launchProblem;
+
+        // Fits the caller's workspace at the launch hint and, under uniform
+        // summation order, keeps that order there.
+        auto fits = [&](const std::shared_ptr<TensileLite::ContractionSolution>& s) {
+            return s && s->requiredWorkspaceSize(data->problem, hardware) <= prob.workspaceSize
+                   && s->uniformSummationOrderSupported(data->problem, hardware);
+        };
+
+        AdaptiveReselection choice;
+        const bool          pickFits = !picked.empty() && fits(picked[0]);
+        if(pickFits)
+            choice.solution = picked[0]->index;
+        else
+        {
+            choice.solution = key.taggedSolution;
+            choice.atQueryHint
+                = !fits(library.getSolutionByIndex(data->problem, hardware, key.taggedSolution));
+        }
+
+        if(rocblaslt_adaptive_sm_config().log)
+        {
+            const char* noFit = "";
+            if(!pickFits)
+                noFit = choice.atQueryHint ? " (no fit, query hint)" : " (no fit)";
+            std::ostringstream msg;
+            msg << "reselect m=" << prob.m << " n=" << prob.n << " k=" << prob.k
+                << " hint=" << key.queryHint << "->" << prob.adaptive_launch->hint
+                << " solution=" << key.taggedSolution << "->" << choice.solution
+                << " workspace=" << prob.workspaceSize << noFit;
+            rocblaslt_adaptive_sm_log(msg.str());
+        }
+
+        choice.key = std::move(key);
+        return choice;
+    }
+
+    // Swaps a heuristic algo tagged with the hint it was ranked under
+    // (rocblaslt::adaptive_sm::tagAlgo) for the solution the heuristic picks
+    // at the adaptive launch's hint, when the two hints differ. Memoised per
+    // TensileDataGemm. Returns the algo to launch: `algo`, or `reselectedAlgo`
+    // holding the swapped solution.
+    const rocblaslt_matmul_algo* reselectForAdaptiveHint(
+        rocblaslt_handle                                                               handle,
+        const rocblaslt_matmul_algo*                                                   algo,
+        const RocblasltContractionProblem&                                             prob,
+        std::shared_ptr<void>                                                          gemmData,
+        const TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>& library,
+        const TensileLite::Hardware&                                                   hardware,
+        rocblaslt_matmul_algo& reselectedAlgo)
+    {
+        const auto* launch    = prob.adaptive_launch;
+        uint32_t    queryHint = 0;
+        if(!launch || !rocblaslt::adaptive_sm::algoTag(algo->data, &queryHint)
+           || queryHint == launch->hint)
+            return algo;
+
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        // Ranked with the workspace limit the query used.
+        AdaptiveReselectionKey key{data->problem,
+                                   *(const int*)algo->data,
+                                   queryHint,
+                                   std::max(prob.workspaceSize, algo->max_workspace_bytes)};
+
+        const AdaptiveReselection* choice = data->adaptiveReselections.find(key);
+        if(!choice)
+            choice = &data->adaptiveReselections.insert(
+                chooseForLaunchHint(handle, prob, gemmData, library, hardware, std::move(key)));
+
+        // The only launch whose hint is not its Launch's.
+        if(choice->atQueryHint)
+            data->problem.setParams().setSmCountTarget(int(queryHint));
+        if(choice->solution == choice->key.taggedSolution)
+            return algo;
+        reselectedAlgo             = *algo;
+        *(int*)reselectedAlgo.data = choice->solution;
+        return &reselectedAlgo;
+    }
+} // namespace
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -5504,6 +5676,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             algo = &heuristicResult.algo;
         }
         updateTensileProblem(prob, data->problem);
+
+        // A re-selected solution runs through a copy of the caller's algo with
+        // its index replaced; the caller's algo stays as queried.
+        rocblaslt_matmul_algo reselectedAlgo;
+        algo = reselectForAdaptiveHint(
+            handle, algo, prob, gemmData, *library, *hardware, reselectedAlgo);
 
         // Get the values of static member variables flush and rotating size from UserClientArguments
         UserClientArguments ClientArguments;
