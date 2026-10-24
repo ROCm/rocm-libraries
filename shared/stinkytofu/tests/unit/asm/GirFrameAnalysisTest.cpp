@@ -919,8 +919,7 @@ TEST(GirFrameAnalysisTest, HazardBecomesAnOrdinaryDagEdge) {
     GirFrameHazardAnalysis::Result hazards;
     hazards.hazards.push_back({GirHazardKind::RAW, copy, read, block, block, 0, 1, GirFrame{},
                                GirFrame{}, 0, false, 0, 1});
-    GirFrameAnalysis::Result frames;
-    dag::addGirFrameHazardEdges(graph, hazards, frames);
+    dag::addGirFrameHazardEdges(graph, hazards, GirPlanFenceCoverage{});
 
     ASSERT_TRUE(graph.graph[0].contains(1));
     EXPECT_EQ(graph.nodes[0].inDegree, 0u);
@@ -940,8 +939,7 @@ TEST(GirFrameAnalysisTest, PhysicalSplitFenceSignalAlwaysPrecedesWait) {
     wait->addSrcReg(StinkyRegister(-1));
 
     dag::RegionDAG graph = dag::buildRegisterDependencyDAG({signal, filler, wait});
-    dag::addGirFrameHazardEdges(graph, GirFrameHazardAnalysis::Result{},
-                                GirFrameAnalysis::Result{});
+    dag::addGirFrameHazardEdges(graph, GirFrameHazardAnalysis::Result{}, GirPlanFenceCoverage{});
 
     ASSERT_TRUE(graph.graph[0].contains(2));
     EXPECT_EQ(graph.nodes[2].inDegree, 1u);

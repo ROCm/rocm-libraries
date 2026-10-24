@@ -118,6 +118,41 @@ static void orderInRegion(RegionDAG& dag, StinkyInstruction* before, StinkyInstr
     addEdgeById(&dag.nodes[from->second], &dag.nodes[to->second], dag.graph);
 }
 
+/// `orderInRegion` for a pair the incoming order may already hold the other way round. Ids are
+/// assigned in program order, so a forward edge can never close a cycle, and a backward one asks
+/// for a window this trip does not own.
+static void orderForwardInRegion(RegionDAG& dag, StinkyInstruction* before,
+                                 StinkyInstruction* after, const char* what) {
+    auto from = dag.instToId.find(before);
+    auto to = dag.instToId.find(after);
+    if (from == dag.instToId.end() || to == dag.instToId.end()) return;
+    if (from->second >= to->second) return;
+    orderInRegion(dag, before, after, what);
+}
+
+/// Pin the fence a cross-agent hazard is covered by between the two ends. Scheduling honours
+/// register edges and memory tokens only; a loop-carried pair shares neither, because its ends
+/// name two generations of one slot and therefore two different tokens. Without this the fence
+/// leaves the window and the wait pass finds an unfenced path.
+static void pinGirFenceWindows(RegionDAG& dag, const GirFrameHazardAnalysis::Result& hazards,
+                               const GirPlanFenceCoverage& fenceCoverage) {
+    const size_t covered = std::min(hazards.hazards.size(), fenceCoverage.byHazard.size());
+    for (size_t h = 0; h < covered; ++h) {
+        const GirFrameHazard& hazard = hazards.hazards[h];
+        if (!hazard.crossAgent) continue;
+        for (const GirHazardFenceOwner& owner : fenceCoverage.byHazard[h].owners) {
+            if (owner.anchor == nullptr) continue;
+            const BasicBlock* anchorBlock = owner.anchor->getParent();
+            if (anchorBlock == hazard.producerBlock)
+                orderForwardInRegion(dag, hazard.producer, owner.anchor,
+                                     "GIR fence cannot be pinned after its hazard producer");
+            if (anchorBlock == hazard.consumerBlock)
+                orderForwardInRegion(dag, owner.anchor, hazard.consumer,
+                                     "GIR fence cannot be pinned before its hazard consumer");
+        }
+    }
+}
+
 /// Keep the pieces of one fence in their emitted order.  The two halves of the barrier share no
 /// register, so nothing else stops the wait from being issued first.
 static void chainGirFencePieces(RegionDAG& dag) {
@@ -142,12 +177,13 @@ static void chainGirFencePieces(RegionDAG& dag) {
 }
 
 void addGirFrameHazardEdges(RegionDAG& dag, const GirFrameHazardAnalysis::Result& hazards,
-                            const GirFrameAnalysis::Result& frames) {
+                            const GirPlanFenceCoverage& fenceCoverage) {
     for (const GirFrameHazard& hazard : hazards.hazards) {
         if (hazard.gap != 0 || hazard.producer == hazard.consumer) continue;
         orderInRegion(dag, hazard.producer, hazard.consumer,
                       "GIR frame hazard introduces a scheduling DAG cycle");
     }
+    pinGirFenceWindows(dag, hazards, fenceCoverage);
     chainGirFencePieces(dag);
 }
 

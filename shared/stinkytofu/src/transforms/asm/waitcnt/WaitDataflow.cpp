@@ -206,7 +206,8 @@ bool girOwnsOrdering(const StinkyInstruction& inst) {
 }
 
 /// A fence GirFencePlacementPass placed, found in the record it left. Placement names the WAIT
-/// half; a split signal is the same fence, so it answers for its pair.
+/// half; a split signal is the same fence, so it answers for its pair -- found by walking to the
+/// next BARRIER, since the scheduler issues ordinary work between the two halves.
 bool girPlacedFence(const StinkyInstruction& inst) {
     const BasicBlock* block = inst.getParent();
     const Function* function = block ? block->getParentFunc() : nullptr;
@@ -223,7 +224,7 @@ bool girPlacedFence(const StinkyInstruction& inst) {
             after = true;
             continue;
         }
-        if (!after) continue;
+        if (!after || !isBarrier(*other)) continue;
         return isBarrierWait(*other) && isSplitBarrierAllWave(*other) &&
                placed->fences.count(other) != 0;
     }

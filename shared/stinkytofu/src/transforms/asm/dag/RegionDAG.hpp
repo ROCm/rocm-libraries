@@ -86,10 +86,11 @@ RegionDAG buildRegisterDependencyDAG(const std::vector<StinkyInstruction*>& inst
 RegionDAG buildRegisterDependencyDAG(IRList::iterator regionStart, IRList::iterator regionEnd);
 
 /// Merge required same-trip frame-hazard edges whose endpoints are both in this region, and pin
-/// each GIR fence between the ends of the cross-agent hazards it owns.
+/// each GIR fence between the ends of the cross-agent hazards it owns. \p fenceCoverage names
+/// that ownership, and is built once on the incoming order -- the order placement decided on.
 /// A cycle is a frame-model integration error, not an optional scheduler constraint.
 void addGirFrameHazardEdges(RegionDAG& dag, const GirFrameHazardAnalysis::Result& hazards,
-                            const GirFrameAnalysis::Result& frames);
+                            const GirPlanFenceCoverage& fenceCoverage);
 
 /// Print each DAG node and its successor IDs. \p hardConstraintEdges, if given, marks which
 /// edges are scheduler-policy links (not real register dependencies) merged into \p dag by

@@ -16,6 +16,8 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <sstream>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -127,6 +129,19 @@ CounterKind counterFor(const GirFrameHazard& hazard) {
     return CK_Tensor;
 }
 
+/// Which hazard a fatal frame-graph check is about; without it the abort names a rule and no case.
+std::string hazardText(const GirFrameHazard& hazard) {
+    std::ostringstream out;
+    out << (hazard.kind == GirHazardKind::RAW   ? "RAW"
+            : hazard.kind == GirHazardKind::WAR ? "WAR"
+                                                : "WAW")
+        << " LDS" << hazard.storage << " gap=" << hazard.gap
+        << " prod=" << hazard.producerBlock->getLabel() << "#" << hazard.producerIndex << "/act"
+        << hazard.producerAction << " cons=" << hazard.consumerBlock->getLabel() << "#"
+        << hazard.consumerIndex << "/act" << hazard.consumerAction;
+    return out.str();
+}
+
 size_t indexInBlock(StinkyInstruction& inst);
 FeasibleDomainMap computeFeasibleDomains(Function& function,
                                          const GirFrameAnalysis::Result& frames);
@@ -184,9 +199,14 @@ PotentialMap buildPotentials(Function& function, const GirFrameAnalysis::Result&
 
         const GirHazardFenceCover& cover = plan.byHazard[h];
         if (!cover.hasHazardPath)
-            STINKY_UNREACHABLE("Cross-agent GIR hazard has no exact frame-graph path");
+            STINKY_UNREACHABLE(
+                ("Cross-agent GIR hazard has no exact frame-graph path -- " + hazardText(hazard))
+                    .c_str());
         if (cover.hasUnfencedPath)
-            STINKY_UNREACHABLE("Cross-agent GIR hazard has an unfenced exact frame-graph path");
+            STINKY_UNREACHABLE(
+                ("Cross-agent GIR hazard has an unfenced exact frame-graph path -- " +
+                 hazardText(hazard))
+                    .c_str());
         for (const GirHazardFenceOwner& owner : cover.owners)
             addPotential(owner.anchor, owner.anchorNode.frame, owner.producerToAnchorGap);
     }
