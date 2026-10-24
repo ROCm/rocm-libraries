@@ -108,7 +108,6 @@ typedef struct rocke_attn_unified_build_ctx
     const rocke_type_t* dtype; /* spec.dtype_ir (F16 / BF16)    */
     int num_segments; /* 3D/reduce; 0 for 2D           */
     int num_queries_per_kv; /* p->num_query_heads / kv       */
-    int max_blocks; /* ceil(max_seqlen_k/block_size) */
 
     /* ---------- kernel result + extra outputs ---------- */
     rocke_kernel_def_t* kernel; /* == b->kernel; returned by the driver          */
@@ -139,11 +138,12 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_value_t* abi_v_scale; /* "v_scale"              (F32)                */
 
     /* ---------- kernel-specific tail params (after the ABI prefix) ----------
-     * 2D appends out_scale, softcap, num_seqs. 3D appends softcap (unused) +
-     * num_seqs. reduce appends none. */
+     * 2D appends out_scale, softcap, num_seqs, block_table_stride. 3D appends
+     * softcap (unused), num_seqs, block_table_stride. reduce appends none. */
     rocke_value_t* out_scale; /* 2D "out_scale" (F32; unused by body)        */
     rocke_value_t* softcap; /* 2D/3D "softcap" (F32; 3D unused)            */
     rocke_value_t* num_seqs; /* 2D/3D "num_seqs" (I32)                       */
+    rocke_value_t* block_table_stride; /* 2D/3D "block_table_stride" (I32)  */
 
     /* ---------- grid ids + thread predicate (prologue) ---------- */
     rocke_value_t* q_tok; /* block_id_x()                                 */
