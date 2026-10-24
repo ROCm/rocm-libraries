@@ -38,6 +38,10 @@ struct data_descriptor_test_access
     {
         layout.reorder_length_axes(order);
     }
+    static void set_embedding(data_descriptor_t& layout, const std::vector<size_t>& embedding)
+    {
+        layout.embedding = embedding;
+    }
 };
 
 namespace
@@ -514,4 +518,232 @@ TEST_F(data_descriptor_test, subset_of_axes_rejects_bad_input)
     auto layout = data_descriptor_t::default_full_layout({4, 8, 2}, 3);
     EXPECT_THROW(layout.get_layout_for_len_axes({}), std::invalid_argument);
     EXPECT_THROW(layout.get_layout_for_len_axes({0, 7}), std::invalid_argument);
+}
+
+namespace
+{
+    std::vector<data_descriptor_t> compress(const std::vector<data_descriptor_t>& ds)
+    {
+        return data_descriptor_t::compress_batch_axes_consistently_in(ds);
+    }
+
+    void expect_same(const std::vector<data_descriptor_t>& actual,
+                     const std::vector<data_descriptor_t>& expected)
+    {
+        ASSERT_EQ(actual.size(), expected.size());
+        for(size_t n = 0; n < actual.size(); n++)
+            EXPECT_TRUE(actual[n] == expected[n])
+                << "descriptor " << n << ": " << actual[n].str() << " vs " << expected[n].str();
+    }
+
+    // For every batch coordinate (relative to the lower bounds, shared by all
+    // descriptors), the in-buffer location of its first element in each descriptor;
+    // sorted. Equal before and after compression iff every logical element keeps
+    // its location consistently across descriptors (length axes being unchanged).
+    std::vector<std::vector<size_t>> batch_locations(const std::vector<data_descriptor_t>& ds)
+    {
+        std::vector<std::vector<size_t>> ret;
+        const auto                       spans = ds.front().batches();
+        std::vector<size_t>              r(spans.size(), 0);
+        for(bool done = false; !done;)
+        {
+            std::vector<size_t> loc;
+            for(const auto& d : ds)
+            {
+                const auto lower = d.lower();
+                const auto dist  = d.distances();
+                size_t     off   = 0;
+                for(size_t k = 0; k < r.size(); k++)
+                    off += (lower[d.get_len_rank() + k] + r[k]) * dist[k];
+                loc.push_back(off);
+            }
+            ret.push_back(loc);
+            size_t k = 0;
+            for(; k < r.size() && ++r[k] == spans[k]; k++)
+                r[k] = 0;
+            done = k == r.size();
+        }
+        std::sort(ret.begin(), ret.end());
+        return ret;
+    }
+}
+
+// TreeNode::CollapseContiguousDims cases, with the node's high lengths and batch
+// as batch axes, inStride/iDist (resp. outStride/oDist) as input (resp. output) strides.
+TEST_F(data_descriptor_test, compress_batch_axes_mirrors_collapse_contiguous_dims)
+{
+    // contiguous in both input and output (output padded): collapses fully
+    const data_descriptor_t in({0, 0, 0, 0}, {64, 8, 4, 3}, {1, 64, 512, 2048}, 3);
+    const data_descriptor_t out({0, 0, 0, 0}, {64, 8, 4, 3}, {1, 66, 528, 2112}, 3);
+    expect_same(compress({in, out}),
+                {data_descriptor_t({0, 0}, {64, 96}, {1, 64}),
+                 data_descriptor_t({0, 0}, {64, 96}, {1, 66})});
+
+    // contiguous in input only: refused
+    const data_descriptor_t in2({0, 0, 0}, {64, 8, 3}, {1, 64, 512}, 2);
+    const data_descriptor_t out_gap({0, 0, 0}, {64, 8, 3}, {1, 64, 600}, 2);
+    expect_same(compress({in2, out_gap}), {in2, out_gap});
+
+    // contiguous in both but with opposite outer/inner roles (transposed batch): refused
+    const data_descriptor_t out_transposed({0, 0, 0}, {64, 8, 3}, {1, 192, 64}, 2);
+    expect_same(compress({in2, out_transposed}), {in2, out_transposed});
+
+    // differing multipliers (input and output spans differ along a batch axis):
+    // not consistent descriptors, rejected
+    const data_descriptor_t out_other_multiplier({0, 0, 0}, {64, 4, 3}, {1, 64, 256}, 2);
+    EXPECT_THROW(compress({in2, out_other_multiplier}), std::invalid_argument);
+
+    // unit spans merge regardless of their stride, unless their lower bound is not 0
+    const data_descriptor_t unit({0, 0, 0}, {64, 1, 5}, {1, 999, 64}, 2);
+    expect_same(compress({unit}), {data_descriptor_t({0, 0}, {64, 5}, {1, 64})});
+    const data_descriptor_t shifted_unit({0, 3, 0}, {64, 4, 5}, {1, 999, 64}, 2);
+    expect_same(compress({shifted_unit}), {shifted_unit});
+}
+
+TEST_F(data_descriptor_test, compress_batch_axes_nominal)
+{
+    // single descriptor, partial collapse: the padded outermost axis stays
+    const data_descriptor_t padded({0, 0, 0, 0}, {64, 8, 4, 3}, {1, 64, 512, 4096}, 3);
+    expect_same(compress({padded}), {data_descriptor_t({0, 0, 0}, {64, 32, 3}, {1, 64, 4096}, 2)});
+
+    // non-adjacent pair: merged at the higher-indexed position, the other one erased
+    const data_descriptor_t apart({0, 0, 0, 0}, {64, 8, 5, 3}, {1, 64, 10000, 512}, 3);
+    expect_same(compress({apart}), {data_descriptor_t({0, 0, 0}, {64, 5, 24}, {1, 10000, 64}, 2)});
+
+    // nothing merges: no-op
+    const data_descriptor_t loose({0, 0, 0}, {64, 8, 3}, {1, 100, 1000}, 2);
+    expect_same(compress({loose}), {loose});
+    const auto one_batch = data_descriptor_t::default_full_layout({64}, 3);
+    expect_same(compress({one_batch}), {one_batch});
+
+    // length axes are never touched, even if contiguous with batch axes
+    const auto lens = data_descriptor_t::default_full_layout({4, 8}, 3);
+    expect_same(compress({lens}), {lens});
+
+    // three descriptors: a third one that does not allow the merge blocks it...
+    const data_descriptor_t a({0, 0, 0}, {16, 8, 3}, {1, 16, 128}, 2);
+    const data_descriptor_t b({0, 0, 0}, {9, 8, 3}, {1, 9, 72}, 2);
+    const data_descriptor_t c_gap({0, 0, 0}, {16, 8, 3}, {1, 16, 129}, 2);
+    expect_same(compress({a, b, c_gap}), {a, b, c_gap});
+    // ... and is compressed along with the others when it does
+    const data_descriptor_t c({0, 0, 0}, {16, 8, 3}, {2, 32, 256}, 2);
+    expect_same(compress({a, b, c}),
+                {data_descriptor_t({0, 0}, {16, 24}, {1, 16}),
+                 data_descriptor_t({0, 0}, {9, 24}, {1, 9}),
+                 data_descriptor_t({0, 0}, {16, 24}, {2, 32})});
+
+    EXPECT_TRUE(compress({}).empty());
+}
+
+TEST_F(data_descriptor_test, compress_batch_axes_partial_ranges)
+{
+    // batch axes [2, 6) x [1, 3) of strides 10 and 40 (= 10 * 4): merged into
+    // [2 + 4 * 1, 6 + 8) of stride 10, first element still at 60
+    const data_descriptor_t partial({0, 2, 1}, {5, 6, 3}, {1, 10, 40}, 2);
+    expect_same(compress({partial}), {data_descriptor_t({0, 6}, {5, 14}, {1, 10})});
+    // sub-range of a wider axis (40 != 10 * span): not contiguous, refused
+    const data_descriptor_t strided({0, 2, 1}, {5, 6, 3}, {1, 10, 50}, 2);
+    expect_same(compress({strided}), {strided});
+    // different lower bounds across descriptors (same spans) are fine
+    const data_descriptor_t other({0, 0, 0}, {5, 4, 2}, {1, 5, 20}, 2);
+    expect_same(
+        compress({partial, other}),
+        {data_descriptor_t({0, 6}, {5, 14}, {1, 10}), data_descriptor_t({0, 0}, {5, 8}, {1, 5})});
+}
+
+TEST_F(data_descriptor_test, compress_batch_axes_embedded)
+{
+    // sub has batch axes [8 (length axis 1 of L), 3, 5]: the first one is a length
+    // axis of the embedding data set, so it is kept even if contiguous with the 3
+    const auto L   = data_descriptor_t::default_full_layout({4, 8}, {3, 5});
+    const auto sub = L.get_layout_for_len_axes({0});
+    const auto out = compress({sub});
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_TRUE(out[0] == data_descriptor_t({0, 0, 0}, {4, 8, 15}, {1, 4, 32}, 2)) << out[0].str();
+    EXPECT_TRUE(out[0].get_embedding_layout()
+                == data_descriptor_t({0, 0, 0}, {4, 8, 15}, {1, 4, 32}))
+        << out[0].get_embedding_layout().str();
+    EXPECT_EQ(out[0].corresponding_axes_in_embedding(), std::vector<size_t>({0}));
+    // the same axes without embedding collapse fully
+    expect_same(compress({data_descriptor_t({0, 0, 0, 0}, {4, 8, 3, 5}, {1, 4, 32, 96}, 3)}),
+                {data_descriptor_t({0, 0}, {4, 120}, {1, 4})});
+
+    // embedding axis after the erased one: its index in the map is shifted down
+    data_descriptor_t shifted({0, 0, 0, 0}, {4, 3, 5, 7}, {1, 4, 12, 1000}, 3);
+    data_descriptor_test_access::set_embedding(shifted, {0, 3});
+    const auto out2 = compress({shifted});
+    ASSERT_EQ(out2.size(), 1u);
+    EXPECT_TRUE(out2[0] == data_descriptor_t({0, 0, 0}, {4, 15, 7}, {1, 4, 1000}, 2))
+        << out2[0].str();
+    EXPECT_TRUE(out2[0].get_embedding_layout()
+                == data_descriptor_t({0, 0, 0}, {4, 7, 15}, {1, 1000, 4}))
+        << out2[0].get_embedding_layout().str();
+    EXPECT_EQ(out2[0].corresponding_axes_in_embedding(), std::vector<size_t>({0}));
+}
+
+TEST_F(data_descriptor_test, compress_batch_axes_rejects_bad_input)
+{
+    const data_descriptor_t two_batch({0, 0, 0}, {4, 8, 3}, {1, 4, 32}, 2);
+    const data_descriptor_t one_batch({0, 0, 0}, {4, 8, 3}, {1, 4, 32}, 1);
+    EXPECT_THROW(compress({two_batch, one_batch}), std::invalid_argument);
+    const data_descriptor_t other_span({0, 0, 0}, {4, 8, 2}, {1, 4, 32}, 2);
+    EXPECT_THROW(compress({two_batch, other_span}), std::invalid_argument);
+    EXPECT_THROW(compress({two_batch, two_batch, other_span}), std::invalid_argument);
+}
+
+TEST_F(data_descriptor_test, compress_batch_axes_preserves_locations)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // 1 to 3 descriptors sharing batch spans, batch axes laid out in a shared
+        // (or, sometimes, their own) random order, sometimes padded, random lower bounds
+        const auto                     len_rank     = uniform(1, 2);
+        const auto                     batch_rank   = uniform(1, 4);
+        const auto                     batch_spans  = random_vec(batch_rank, 1, 4);
+        const auto                     shared_order = random_permutation(batch_rank);
+        std::vector<data_descriptor_t> ds;
+        std::string                    trace;
+        for(auto n = uniform(1, 3); n > 0; n--)
+        {
+            const auto order = uniform(0, 3) == 0 ? random_permutation(batch_rank) : shared_order;
+            auto       spans = random_vec(len_rank, 1, 4);
+            spans.insert(spans.end(), batch_spans.begin(), batch_spans.end());
+            std::vector<size_t> strides(spans.size());
+            size_t              next = 1;
+            for(size_t d = 0; d < len_rank; d++)
+            {
+                strides[d] = next;
+                next       = next * spans[d] + uniform(0, 1);
+            }
+            for(auto b : order)
+            {
+                strides[len_rank + b] = next;
+                next                  = next * spans[len_rank + b] + (uniform(0, 2) == 0 ? 1 : 0);
+            }
+            const auto          lower = random_vec(spans.size(), 0, 2);
+            std::vector<size_t> upper(spans.size());
+            for(size_t d = 0; d < spans.size(); d++)
+                upper[d] = lower[d] + spans[d];
+            ds.emplace_back(lower, upper, strides, batch_rank);
+            trace += " " + ds.back().str();
+        }
+        SCOPED_TRACE(trace);
+
+        const auto out = compress(ds);
+        ASSERT_EQ(out.size(), ds.size());
+        EXPECT_EQ(batch_locations(out), batch_locations(ds));
+        for(size_t n = 0; n < ds.size(); n++)
+        {
+            EXPECT_LE(out[n].get_batch_rank(), batch_rank);
+            EXPECT_EQ(out[n].get_batch_rank(), out[0].get_batch_rank());
+            EXPECT_EQ(out[n].lengths(), ds[n].lengths());
+            EXPECT_EQ(out[n].strides(), ds[n].strides());
+            const auto out_lower = out[n].lower();
+            const auto ds_lower  = ds[n].lower();
+            EXPECT_TRUE(
+                std::equal(ds_lower.begin(), ds_lower.begin() + len_rank, out_lower.begin()));
+        }
+        // nothing is left to merge
+        expect_same(compress(out), out);
+    }
 }
