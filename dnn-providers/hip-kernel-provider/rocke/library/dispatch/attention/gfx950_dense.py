@@ -12,9 +12,11 @@ persistent body). Each candidate is identified the same way as a unified
 tuning geometry: ``spec_id`` names it and ``tuning_id`` names one
 configuration from its knob space -- the tile (``block_m`` / ``block_n``)
 included -- with ``auto`` being the candidate's default spec. The candidates
-are opt-in: only an explicit ``algorithm`` + ``spec_id`` selects one.
-Admission is the kernel's own ``supports_attention_dense``; dispatch adds no
-stricter gate.
+are opt-in: only an explicit ``algorithm`` + ``spec_id`` selects one, except
+that an unpinned request for contiguous tensors (``layout='dense'``) with more
+than one query row is pinned to the body :func:`dense_auto_order` names (see
+:func:`dispatch.attention.dispatch_attention`). Admission is the kernel's own
+``supports_attention_dense``; dispatch adds no stricter gate.
 """
 
 from __future__ import annotations
@@ -38,7 +40,15 @@ _DENSE_TILE = "default"
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {
+        "causal",
+        "sliding_window",
+        "full_attention",
+        "band",
+        "sinks",
+        "lse",
+        "layout_dense",
+    }
 )
 
 
@@ -206,6 +216,44 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
     )
+
+
+def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
+    """Candidate names, best first, for an unpinned contiguous-layout request.
+
+    The persistent body pays off once the default tile yields at least one
+    work item per persistent CTA and the causal diagonal is fixed (the moving
+    bottom-right diagonal runs only on the grid body). Wide DMA additionally
+    needs a plain causal D128 problem whose lengths are tile multiples. Each
+    later entry is a fallback for when an earlier body refuses the request.
+    """
+    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+
+    try:
+        causal, _right_bound, moving_bottom_right = _dense_band(req)
+    except ValueError:
+        return ()
+    geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
+    bm, bn = int(geometry["block_m"]), int(geometry["block_n"])
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
+    persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
+    wide = (
+        persistent
+        and int(req.hdim_q) == int(req.hdim_v) == 128
+        and causal
+        and not int(req.sliding_window)
+        and not bool(req.use_sinks)
+        and sq % bm == 0
+        and sk % bn == 0
+    )
+    by_id = {v.variant_id: v.candidate_name for v in GFX950_DENSE_VARIANTS}
+    order = (
+        ("persist_widedma", "persist", "grid")
+        if wide
+        else ("persist", "grid") if persistent else ("grid",)
+    )
+    return tuple(by_id[v] for v in order)
 
 
 def _supports(spec, *, arch):

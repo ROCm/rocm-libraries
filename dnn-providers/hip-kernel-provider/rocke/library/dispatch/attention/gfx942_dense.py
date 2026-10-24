@@ -13,11 +13,15 @@ gfx950 body.
 One candidate, identified like every other tuned candidate: ``spec_id``
 (``gfx942_dense``) names it and ``tuning_id`` names one configuration
 from its knob space, geometry included (``auto`` is the default spec). It is
-opt-in: only an explicit ``spec_id`` selects it. Admission is the kernel's own
-``supports_attention_dense``.
+opt-in: only an explicit ``spec_id`` selects it, except that an unpinned
+request for contiguous tensors (``layout='dense'``) with more than one query
+row is pinned to it (see :func:`dispatch.attention.dispatch_attention`).
+Admission is the kernel's own ``supports_attention_dense``.
 """
 
 from __future__ import annotations
+
+from typing import Tuple
 
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
@@ -134,10 +138,18 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # Dense: causal, sliding-window and sinks (alone or combined), optional
         # LSE output; no moving bottom-right diagonal. Head size stays out:
         # D64/D128 coverage is ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        features=frozenset(
+            {"causal", "sliding_window", "sinks", "lse", "layout_dense"}
+        ),
         # _base_spec picks these from the dtype and head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )
+
+
+def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
+    """Candidate names for an unpinned contiguous-layout request: the single
+    dense candidate, whose default spec already picks its body."""
+    return (CANDIDATE_NAME,)
 
 
 def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
