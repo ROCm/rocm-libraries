@@ -2628,6 +2628,27 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+# Run every TN solution so the 128x256 tile is checked even when the heuristic
+# selects a smaller tile. Cover both tile edges, a K tail, and padded layouts.
+- name: matmul_gemm_i8_dst_i32_tn_gfx1201
+  category: pre_checkin
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M: 256, N: 512, K: 256 }
+    - { M: 257, N: 513, K: 257 }
+    - { M: 257, N: 513, K: 257, lda: 272, ldb: 288, ldc: 272, ldd: 272 }
+  transA: T
+  transB: N
+  alpha: [1, -2]
+  beta: [0, 2]
+  c_equal_d: [false, true]
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '1201'
+
 - name: matmul_gemm_i8_dst_i8
   category: pre_checkin
   function:
