@@ -354,6 +354,19 @@ static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     return cpuWorkQueueAddr;
 }
 
+// The host must update cpuWorkQueue.pushCount with hipStreamWriteValue32, not hipMemcpyToSymbolAsync: on Navi4 (gfx12)
+// under Windows, a running threading_main never observes a pushCount written by hipMemcpyToSymbolAsync, so it never
+// exits and anything that synchronizes with mainStream (e.g. a null-stream copy) hangs forever. This is the same
+// problem that led sendToGPU to publish queue entries with hipStreamWriteValue64.
+static __host__ uint32_t *getCPUWorkQueuePushCountAddr() {
+    static uint32_t * const pushCountAddr = [](){
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
+        return &static_cast<decltype(cpuWorkQueue) *>(temp)->pushCount;
+    }();
+    return pushCountAddr;
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
@@ -376,8 +389,7 @@ static __host__ void prepDeviceForWork() {
 
     bool isFirstTime = false;
     // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
-    // variable for the trick anyways, and we also need some persistent memory to copy from when setting
-    // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
+    // variable for the trick anyways, we'll also use temp as the -1U value written to cpuWorkQueue.pushCount.
     static uint32_t temp = ([&isFirstTime]() {
         // TODO: investigate using hipExtStreamCreateWithCUMask for this
         __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
@@ -390,10 +402,10 @@ static __host__ void prepDeviceForWork() {
         __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
-        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
+        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its write in that stream, and we need to make
         // sure the change made by the last wthread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), temp, 0));
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
@@ -421,13 +433,11 @@ static __host__ void prepDeviceForWork() {
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
-    // Needs to be static because the copy might not be done before we return
-    static uint32_t temp;
-    temp = cpuWorkQueuePushCount;
-    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), cpuWorkQueuePushCount, 0));
+    // Make sure the write is actually submitted: on Windows, queued work may not reach the GPU until the stream is
+    // synchronized (see the kicker thread in prepDeviceForWork), and threading_main can't exit until it sees it.
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     if (blocking) {
-        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
-        // synchronizing on mainStream, but there's no need.
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
     }
 }
