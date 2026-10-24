@@ -2,7 +2,8 @@
 2D/3D selector picks 2D (large-batch grids, short KV); windowed decode, other
 head sizes, prefill, other arches and caches past the gfx942 3D K/V loader keep
 the shared selector. Head-size-256 decode keeps two pages per segment (gfx942
-also about 2 CTAs per CU)."""
+also about 2 CTAs per CU), and gfx942 decode counts one q-block per sequence in
+its pre-bump segment ceiling."""
 
 from __future__ import annotations
 
@@ -94,4 +95,13 @@ def test_gfx950_few_cta_d256_decode_keeps_two_pages_per_segment(skv, segments):
 )
 def test_gfx942_d256_decode_split(hq, hkv, skv, segments):
     p = _decode("gfx942", 1, hq, hkv, skv, head_size=256)
+    assert _num_segments(p, "gfx942") == segments
+
+
+@pytest.mark.parametrize("hq,segments", [(32, 64), (64, 64), (128, 64)])
+def test_gfx942_decode_pre_bump_counts_one_q_block_per_sequence(hq, segments):
+    # B1, 8 KV heads, 16K KV: outside the decode split rule; the ceiling is the
+    # pre-bump split of 8 CTAs (64) at every GQA ratio, including 16 query heads
+    # per KV head (one query row per q-block).
+    p = _decode("gfx942", 1, hq, 8, 16384)
     assert _num_segments(p, "gfx942") == segments

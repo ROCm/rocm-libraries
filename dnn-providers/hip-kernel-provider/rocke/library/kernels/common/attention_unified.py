@@ -3446,14 +3446,22 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
 _PRE_BUMP_CUS = 120
 
 
-def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+def _pre_bump_segments(
+    problem: UnifiedAttentionProblem, *, decode_grid: bool = False
+) -> int:
     """Segment count the split-KV formula produced at the historical
     ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
     ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
     over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
-    gfx1250 when it lands) rather than pasted per arch.
+    gfx1250 when it lands) rather than pasted per arch. ``decode_grid`` counts
+    one q-block per sequence (the all-decode launch grid) instead of the
+    prefill upper bound, which doubles the count at one query row per q-block.
     """
-    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    num_2d = (
+        _num_q_blocks(problem, 1, decode_grid=True)
+        if decode_grid
+        else problem.total_num_q_blocks_upper_bound
+    ) * problem.num_kv_heads
     min_seg = 16 if problem.block_size <= 16 else 8
     return max(
         min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
@@ -3496,7 +3504,7 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
                 2,
                 min(2 * problem.num_cus // ctas, 128, problem.max_seqlen_k // 32),
             )
-        pre_bump = _pre_bump_segments(problem)
+        pre_bump = _pre_bump_segments(problem, decode_grid=problem.all_decode)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
