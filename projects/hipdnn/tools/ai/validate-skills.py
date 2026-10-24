@@ -42,6 +42,13 @@ EXPECTED_SCRIPTS = {
         "windows_rocm_setup.py",
     ),
     "hipdnn-trigger-ci": ("trigger_ci.py",),
+    "hipdnn-uhd": (
+        "candidate_tree.py",
+        "decide.py",
+        "eval_slice.py",
+        "validate_l1.py",
+        "validate_l2.py",
+    ),
 }
 
 REQUIRED_CLAUDE_COMMAND_FIELDS = ("argument-hint", "allowed-tools")
@@ -57,6 +64,7 @@ CLAUDE_COMMAND_SKILLS = frozenset(
         "hipdnn-superbuild-test",
         "hipdnn-tidy",
         "hipdnn-trigger-ci",
+        "hipdnn-uhd",
         "rfc-backlog",
         "rfc-review",
         "rfc-review-compatibility",

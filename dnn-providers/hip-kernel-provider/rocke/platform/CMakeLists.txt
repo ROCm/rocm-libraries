@@ -374,9 +374,9 @@ if(ROCKE_INSTALL_TESTS)
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), the WaveScope sidecar
     # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
-    # and the arch-domain artifact gate (imports tools/gen_arch_domain.py, which
-    # is not installed -- and an unresolvable import is a collection error that
-    # aborts the whole installed pytest session, not one skipped test).
+    # and the arch-domain artifact unit tests. The latter remain source-only
+    # units, while the full regeneration sweep is installed below as its own
+    # CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -403,6 +403,30 @@ if(ROCKE_INSTALL_TESTS)
 
     endblock()
 
+    # The top-level developer runner is not part of the standalone platform
+    # component, but its command-plan regression tests run in the relocated
+    # full-repository pytest suite. Stage a test-only copy when the sibling
+    # exists; a verbatim platform-only copy must still configure and install.
+    set(_ROCKE_RUN_CHECKS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_checks.py")
+    if(EXISTS "${_ROCKE_RUN_CHECKS}")
+      install(FILES "${_ROCKE_RUN_CHECKS}"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    else()
+      message(STATUS
+              "rocKE: top-level run_checks.py not found; skipping its test-only install")
+    endif()
+
+    # Test-only implementation for the installed arch-domain reproduction gate.
+    # Keep it outside the production package: CTest owns the external compiler
+    # sweep, while package resources provide the committed columns being checked.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
+
     # This GPU test lives alongside its benchmark helpers in the Python package.
     # Stage it under tests/ so rocke_pytest collects it in both install layouts.
     install(FILES
@@ -421,6 +445,17 @@ if(ROCKE_INSTALL_TESTS)
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
+    # Provider artifacts co-locate the package with their CTest manifest. A
+    # standalone install keeps it in the configured site-packages directory;
+    # derive that relative path so the installed tree remains relocatable.
+    if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+      set(_ROCKE_INSTALLED_PYTHONPATH ".")
+    else()
+      file(RELATIVE_PATH _ROCKE_INSTALLED_PYTHONPATH
+           "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rocke"
+           "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_INSTALL_DIR}")
+    endif()
+
     # Python test entries invoke via "python" (resolved from PATH at test time)
     # rather than executing the .py directly, so they work on Windows where
     # shebangs are not supported. The CI test environment activates a venv with
@@ -435,22 +470,54 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
+    # Reproduce the committed host-flavor column from the relocated artifact.
+    # This mirrors the build-tree CTest in tests/CMakeLists.txt, but deliberately
+    # uses the installed package data that downstream/provider CI consumes.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_arch_domain_reproducibility PROPERTIES\n"
+           "  LABELS \"ckc;python;host;integration;toolchain;generated-artifact;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  RUN_SERIAL TRUE\n"
+           "  SKIP_RETURN_CODE 77\n"
+           "  TIMEOUT 1800)\n")
+
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
-      # Native helpers some Python tests drive, as paths relative to the
-      # CTestTestfile: the portable-IR replay CLI, and the C API program whose
-      # --print-llvm output test_unsigned_int_ops.py compares with the Python
-      # builder's text.
-      set(_rocke_pytest_env
-          "PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX};ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
-      if("rocke_unsigned_int_ops" IN_LIST _ROCKE_INSTALL_TEST_TARGETS)
-        rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
-        string(APPEND _rocke_pytest_env
-               ";ROCKE_UNSIGNED_INT_OPS_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}")
-      endif()
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
       # directory (which contains the installed rocke package) so `import rocke`
       # resolves without the source-tree sys.path shims. The library tests have
       # their own CTest entry below and must not be collected twice.
+      #
+      # Some pytest files compare the Python engine with a native C++ test
+      # binary named by an environment variable, and skip without it. Point
+      # each variable at its installed binary, as tests/run_all.py does for a
+      # source build (its NATIVE_PARITY_TESTS), so those cases run here too.
+      # Paths are relative to the CTestTestfile. ROCKE_REPLAY_CLI is the
+      # portable-IR replay CLI and ROCKE_PROVENANCE_MANIFEST its provenance
+      # manifest; ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
+      # --print-llvm output test_unsigned_int_ops.py compares with the Python
+      # builder's text.
+      set(_ROCKE_PYTEST_ENVIRONMENT
+          "PYTHONPATH=."
+          "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
+          "ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
+      foreach(_rocke_native_parity
+              "ROCKE_STORAGE_TEST=rocke_storage"
+              "ROCKE_IR_TYPES_TEST=rocke_ir_types"
+              "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
+              "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
+              "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
+              "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
+        string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")
+        list(GET _rocke_native_parity 0 _rocke_parity_var)
+        list(GET _rocke_native_parity 1 _rocke_parity_target)
+        if(_rocke_parity_target IN_LIST _ROCKE_INSTALL_TEST_TARGETS)
+          rocke_cxx_test_installed_name(_rocke_installed_name ${_rocke_parity_target})
+          list(APPEND _ROCKE_PYTEST_ENVIRONMENT
+               "${_rocke_parity_var}=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}")
+        endif()
+      endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -460,7 +527,7 @@ if(ROCKE_INSTALL_TESTS)
              "endif()\n"
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"${_rocke_pytest_env}\${_rocke_compiler_env}\"\n"
+             "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -474,8 +541,12 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_conv_aot_grid_limits.py"
+        "tests/library/tests/test_direct_dgrad_wmma.py"
+        "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -574,7 +645,8 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
     # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
-    # automatically; the RDNA WMMA spec tests sit outside it and are named beside it.
+    # automatically; the RDNA WMMA spec tests and the unified LSE host contract sit
+    # outside it and are named beside it.
     # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
@@ -587,6 +659,7 @@ if(ROCKE_INSTALL_TESTS)
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")
@@ -694,7 +767,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
+        "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_conv_dgrad_4c.py"
+        "tests/library/tests/test_conv_dgrad_fused_weights.py"
+        "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
