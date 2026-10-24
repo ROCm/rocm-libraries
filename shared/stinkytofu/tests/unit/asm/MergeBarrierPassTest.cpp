@@ -402,3 +402,27 @@ TEST_F(MergeBarrierPassTest, NonLoopBlockUntouched) {
 TEST(MergeBarrierConstants, KnownDefault) {
     EXPECT_EQ(kCdna5MergeBarrierThreshold, 11);
 }
+
+TEST_F(MergeBarrierPassTest, EarlierTensorContractPreventsMerge) {
+    auto* signal0 = createSignal(0);
+    createWait(0);
+    auto* signal1 = createSignal(1);
+    createWait(1);
+    signal0->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
+    runPasses(0);
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_LT(getPos(signal0), getPos(signal1));
+}
+
+TEST_F(MergeBarrierPassTest, LaterTensorContractPreventsMerge) {
+    auto* signal0 = createSignal(0);
+    createWait(0);
+    auto* signal1 = createSignal(1);
+    createWait(1);
+    signal1->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
+    runPasses(0);
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_LT(getPos(signal0), getPos(signal1));
+}
