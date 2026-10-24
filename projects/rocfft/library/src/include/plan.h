@@ -283,9 +283,7 @@ private:
 
 struct rocfft_plan_description_t
 {
-    rocfft_array_type inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type outArrayType = rocfft_array_type_unset;
-
+    // Array types of the I/O data sets are stored in input_layout/output_layout
     data_descriptor_t input_layout;
     data_descriptor_t output_layout;
 
@@ -329,7 +327,10 @@ struct rocfft_plan_description_t
     /**
      * @brief Finalizes the plan description by
      * 
-     * - assigning default values for structure members that have not been explicitly set yet;
+     * - assigning default values for structure members that have not been explicitly set yet
+     *   (including unset I/O array types in `input_layout` and `output_layout`);
+     * 
+     * - setting the precision of `input_layout` and `output_layout`;
      * 
      * - gathering all the fields' bricks on all processes involved in the description's
      *   communicator, if any;
@@ -364,6 +365,7 @@ struct rocfft_plan_description_t
      *
      * @param[in] dft_type user-provided type of transform for the owning plan.
      * @param[in] placement user-provided placement of transform results for the owning plan.
+     * @param[in] precision user-provided precision of the owning plan.
      * @param[in] user_lengths user-provided lengths of the transform for the owning plan.
      * @param[in] len_rank user-provided number of length dimensions for the owning plan.
      * @param[in] number_of_transforms user-provided batch size for the owning plan.
@@ -374,6 +376,7 @@ struct rocfft_plan_description_t
      */
     rocfft_status finalize_and_validate_for(rocfft_transform_type   dft_type,
                                             rocfft_result_placement placement,
+                                            rocfft_precision        precision,
                                             const size_t*           user_lengths,
                                             const size_t            len_rank,
                                             const size_t            number_of_transforms);

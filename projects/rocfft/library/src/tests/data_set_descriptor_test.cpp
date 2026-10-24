@@ -38,6 +38,21 @@ struct data_descriptor_test_access
     {
         layout.reorder_length_axes(order);
     }
+    static void clear(data_descriptor_t& layout)
+    {
+        layout.clear();
+    }
+    static void full_range_reset(data_descriptor_t&         layout,
+                                 const std::vector<size_t>& lengths,
+                                 size_t                     batch)
+    {
+        layout.full_range_reset(lengths, {}, {batch}, {}, false);
+    }
+    // mimics friends setting an array type without a precision
+    static void set_array_type(data_descriptor_t& layout, rocfft_array_type array_type)
+    {
+        layout.array_type = array_type;
+    }
 };
 
 namespace
@@ -56,6 +71,18 @@ namespace
         for(auto x : v)
             ret += " " + std::to_string(x);
         return ret + " }";
+    }
+
+    // copy of a full layout (no embedding) with a precision and an array type
+    data_descriptor_t
+        with_type(const data_descriptor_t& layout, rocfft_precision p, rocfft_array_type t)
+    {
+        return data_descriptor_t(p,
+                                 t,
+                                 layout.lower(),
+                                 layout.upper(),
+                                 layout.strides_and_distances(),
+                                 layout.get_batch_rank());
     }
 }
 
@@ -514,4 +541,317 @@ TEST_F(data_descriptor_test, subset_of_axes_rejects_bad_input)
     auto layout = data_descriptor_t::default_full_layout({4, 8, 2}, 3);
     EXPECT_THROW(layout.get_layout_for_len_axes({}), std::invalid_argument);
     EXPECT_THROW(layout.get_layout_for_len_axes({0, 7}), std::invalid_argument);
+}
+
+TEST_F(data_descriptor_test, type_and_precision_unset_by_default)
+{
+    for(const auto& layout : {data_descriptor_t({0, 0}, {4, 3}, {1, 4}),
+                              data_descriptor_t::full_layout({4}, {1}, 3, 4),
+                              data_descriptor_t::default_full_layout({4, 8}, 3),
+                              data_descriptor_t::default_full_layout({4, 8}, {3, 2}, true)})
+    {
+        SCOPED_TRACE(layout.str());
+        EXPECT_EQ(layout.get_array_type(), rocfft_array_type_unset);
+        EXPECT_FALSE(layout.has_precision());
+        EXPECT_THROW(layout.get_precision(), std::logic_error);
+        EXPECT_THROW(layout.element_size(), std::logic_error);
+        EXPECT_THROW(layout.buffer_size_bytes(), std::logic_error);
+    }
+}
+
+TEST_F(data_descriptor_test, type_and_precision_constructor)
+{
+    const data_descriptor_t layout(
+        rocfft_precision_double, rocfft_array_type_complex_planar, {0, 1}, {4, 3}, {1, 4});
+    EXPECT_EQ(layout.get_array_type(), rocfft_array_type_complex_planar);
+    ASSERT_TRUE(layout.has_precision());
+    EXPECT_EQ(layout.get_precision(), rocfft_precision_double);
+    EXPECT_EQ(layout.lower(), (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(layout.upper(), (std::vector<size_t>{4, 3}));
+    EXPECT_EQ(layout.strides_and_distances(), (std::vector<size_t>{1, 4}));
+    EXPECT_EQ(layout.get_batch_rank(), 1u);
+
+    // same input validation as the overload without precision and array type
+    EXPECT_THROW(data_descriptor_t(
+                     rocfft_precision_single, rocfft_array_type_real, {0, 0}, {4, 8}, {1, 4}, 0),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        data_descriptor_t(rocfft_precision_single, rocfft_array_type_real, {5, 0}, {4, 8}, {1, 4}),
+        std::invalid_argument);
+}
+
+TEST_F(data_descriptor_test, type_and_precision_pass_through_subsets_and_embeddings)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        const auto L = with_type(
+            random_full_layout(), rocfft_precision_half, rocfft_array_type_hermitian_planar);
+        SCOPED_TRACE("L " + L.str());
+
+        auto S_vec = random_permutation(L.get_len_rank());
+        S_vec.resize(uniform(1, L.get_len_rank()));
+        const auto sub = L.get_layout_for_len_axes(std::set<size_t>(S_vec.begin(), S_vec.end()));
+        EXPECT_EQ(sub.get_array_type(), rocfft_array_type_hermitian_planar);
+        EXPECT_EQ(sub.get_precision(), rocfft_precision_half);
+        // strict equality: the embedding layout carries both values too
+        EXPECT_TRUE(sub.get_embedding_layout() == L);
+    }
+
+    // unset stays unset
+    const auto sub = data_descriptor_t::default_full_layout({4, 8}, 3).get_layout_for_len_axes({1});
+    EXPECT_EQ(sub.get_array_type(), rocfft_array_type_unset);
+    EXPECT_FALSE(sub.has_precision());
+    EXPECT_EQ(sub.get_embedding_layout().get_array_type(), rocfft_array_type_unset);
+    EXPECT_FALSE(sub.get_embedding_layout().has_precision());
+}
+
+TEST_F(data_descriptor_test, type_and_precision_inplace_mapping)
+{
+    // real <-> hermitian_interleaved for real transforms, precision kept
+    const auto real = with_type(data_descriptor_t::default_full_layout({16}, 4, true),
+                                rocfft_precision_single,
+                                rocfft_array_type_real);
+    for(auto [fft_type, herm_io] :
+        {std::pair{rocfft_transform_type_real_forward, io_data_label::OUTPUT},
+         std::pair{rocfft_transform_type_real_inverse, io_data_label::INPUT}})
+    {
+        const auto herm = real.get_other_inplace_layout_for(herm_io, fft_type);
+        ASSERT_TRUE(herm.has_value());
+        EXPECT_EQ(herm->get_array_type(), rocfft_array_type_hermitian_interleaved);
+        EXPECT_EQ(herm->get_precision(), rocfft_precision_single);
+
+        const auto back = herm->get_other_inplace_layout_for(other(herm_io), fft_type);
+        ASSERT_TRUE(back.has_value());
+        EXPECT_TRUE(*back == real) << back->str();
+    }
+
+    // complex transforms keep the array type and precision
+    for(auto type : {rocfft_array_type_complex_interleaved, rocfft_array_type_complex_planar})
+    {
+        const auto in = with_type(
+            data_descriptor_t::default_full_layout({16}, 4), rocfft_precision_double, type);
+        const auto out = in.get_other_inplace_layout_for(io_data_label::OUTPUT,
+                                                         rocfft_transform_type_complex_inverse);
+        ASSERT_TRUE(out.has_value());
+        EXPECT_TRUE(*out == in) << out->str();
+    }
+
+    // unset stays unset
+    const auto unset = data_descriptor_t::default_full_layout({16}, 4, true)
+                           .get_other_inplace_layout_for(io_data_label::OUTPUT,
+                                                         rocfft_transform_type_real_forward);
+    ASSERT_TRUE(unset.has_value());
+    EXPECT_EQ(unset->get_array_type(), rocfft_array_type_unset);
+    EXPECT_FALSE(unset->has_precision());
+}
+
+TEST_F(data_descriptor_test, type_and_precision_intersection)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const std::pair<rocfft_array_type, rocfft_array_type> accepted[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_real, rocfft_array_type_real}};
+    for(auto [a, b] : accepted)
+    {
+        const auto xsect = data_descriptor_t::make_contiguous_intersection_of(
+            with_type(base, rocfft_precision_single, a),
+            with_type(base, rocfft_precision_single, b));
+        EXPECT_EQ(xsect.get_array_type(), a);
+        EXPECT_EQ(xsect.get_precision(), rocfft_precision_single);
+    }
+
+    // unset matches unset only
+    const auto unset = data_descriptor_t::make_contiguous_intersection_of(base, base);
+    EXPECT_EQ(unset.get_array_type(), rocfft_array_type_unset);
+    EXPECT_FALSE(unset.has_precision());
+    const auto ci_single
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_interleaved);
+    EXPECT_THROW(data_descriptor_t::make_contiguous_intersection_of(base, ci_single),
+                 std::invalid_argument);
+
+    // precision mismatch
+    EXPECT_THROW(
+        data_descriptor_t::make_contiguous_intersection_of(
+            ci_single,
+            with_type(base, rocfft_precision_double, rocfft_array_type_complex_interleaved)),
+        std::invalid_argument);
+
+    // interleaved vs planar, real vs complex
+    const std::pair<rocfft_array_type, rocfft_array_type> rejected[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_planar},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_real, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_real}};
+    for(auto [a, b] : rejected)
+    {
+        EXPECT_THROW(data_descriptor_t::make_contiguous_intersection_of(
+                         with_type(base, rocfft_precision_single, a),
+                         with_type(base, rocfft_precision_single, b)),
+                     std::invalid_argument);
+    }
+}
+
+TEST_F(data_descriptor_test, type_and_precision_equality_is_strict)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const auto ci_single
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_interleaved);
+    EXPECT_TRUE(ci_single
+                == with_type(base, rocfft_precision_single, rocfft_array_type_complex_interleaved));
+    EXPECT_FALSE(ci_single == base);
+    EXPECT_FALSE(base == ci_single);
+    EXPECT_FALSE(
+        ci_single
+        == with_type(base, rocfft_precision_double, rocfft_array_type_complex_interleaved));
+    EXPECT_FALSE(
+        ci_single
+        == with_type(base, rocfft_precision_single, rocfft_array_type_hermitian_interleaved));
+
+    auto ci_only = base;
+    data_descriptor_test_access::set_array_type(ci_only, rocfft_array_type_complex_interleaved);
+    EXPECT_FALSE(ci_only == base);
+    EXPECT_FALSE(ci_only == ci_single);
+}
+
+TEST_F(data_descriptor_test, type_and_precision_in_str)
+{
+    const auto base = data_descriptor_t::default_full_layout({8}, 2);
+    EXPECT_NE(base.str().find("precision unset"), std::string::npos) << base.str();
+    EXPECT_NE(base.str().find("array type unset"), std::string::npos) << base.str();
+
+    const auto typed = with_type(base, rocfft_precision_double, rocfft_array_type_hermitian_planar);
+    EXPECT_NE(typed.str().find("precision double"), std::string::npos) << typed.str();
+    EXPECT_NE(typed.str().find("array type hermitian_planar"), std::string::npos) << typed.str();
+}
+
+TEST_F(data_descriptor_test, type_and_precision_survive_clear_and_reset)
+{
+    auto layout = with_type(data_descriptor_t::default_full_layout({8, 4}, 2),
+                            rocfft_precision_half,
+                            rocfft_array_type_real);
+
+    data_descriptor_test_access::clear(layout);
+    EXPECT_EQ(layout.get_full_rank(), 0u);
+    EXPECT_EQ(layout.get_array_type(), rocfft_array_type_real);
+    EXPECT_EQ(layout.get_precision(), rocfft_precision_half);
+
+    data_descriptor_test_access::full_range_reset(layout, {16}, 3);
+    EXPECT_EQ(layout.lengths(), std::vector<size_t>{16});
+    EXPECT_EQ(layout.batches(), std::vector<size_t>{3});
+    EXPECT_EQ(layout.get_array_type(), rocfft_array_type_real);
+    EXPECT_EQ(layout.get_precision(), rocfft_precision_half);
+}
+
+TEST_F(data_descriptor_test, element_and_buffer_sizes)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    ASSERT_EQ(base.buffer_element_count(), 64u);
+    const struct
+    {
+        rocfft_precision  precision;
+        rocfft_array_type array_type;
+        size_t            bytes;
+    } cases[] = {{rocfft_precision_single, rocfft_array_type_complex_interleaved, 8},
+                 {rocfft_precision_double, rocfft_array_type_hermitian_interleaved, 16},
+                 {rocfft_precision_half, rocfft_array_type_complex_interleaved, 4},
+                 {rocfft_precision_single, rocfft_array_type_real, 4},
+                 {rocfft_precision_double, rocfft_array_type_real, 8},
+                 // planar: bytes per plane
+                 {rocfft_precision_single, rocfft_array_type_complex_planar, 4},
+                 {rocfft_precision_double, rocfft_array_type_hermitian_planar, 8}};
+    for(const auto& c : cases)
+    {
+        const auto layout = with_type(base, c.precision, c.array_type);
+        SCOPED_TRACE(layout.str());
+        EXPECT_EQ(layout.element_size(), c.bytes);
+        EXPECT_EQ(layout.buffer_size_bytes(), 64 * c.bytes);
+    }
+
+    // padding inside the buffer is counted, trailing padding is not
+    const auto padded = with_type(data_descriptor_t::default_full_layout({8}, 2, true),
+                                  rocfft_precision_single,
+                                  rocfft_array_type_real);
+    EXPECT_EQ(padded.buffer_size_bytes(), (10 + 8) * 4u);
+
+    // either value unset throws
+    const auto no_type = with_type(base, rocfft_precision_single, rocfft_array_type_unset);
+    EXPECT_THROW(no_type.element_size(), std::logic_error);
+    EXPECT_THROW(no_type.buffer_size_bytes(), std::logic_error);
+    auto no_precision = base;
+    data_descriptor_test_access::set_array_type(no_precision, rocfft_array_type_real);
+    EXPECT_THROW(no_precision.element_size(), std::logic_error);
+    EXPECT_THROW(no_precision.buffer_size_bytes(), std::logic_error);
+}
+
+TEST_F(data_descriptor_test, reinterpret_as)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+
+    // relabeling only, precision unchanged
+    const std::pair<rocfft_array_type, rocfft_array_type> allowed[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_real, rocfft_array_type_real}};
+    for(auto [from, to] : allowed)
+    {
+        const auto src = with_type(base, rocfft_precision_double, from);
+        const auto dst = src.reinterpret_as(to);
+        EXPECT_EQ(dst.get_array_type(), to);
+        EXPECT_EQ(dst.get_precision(), rocfft_precision_double);
+        EXPECT_TRUE(dst.reinterpret_as(from) == src) << dst.str();
+    }
+
+    // an unset precision stays unset
+    auto no_precision = base;
+    data_descriptor_test_access::set_array_type(no_precision,
+                                                rocfft_array_type_complex_interleaved);
+    EXPECT_FALSE(
+        no_precision.reinterpret_as(rocfft_array_type_hermitian_interleaved).has_precision());
+
+    // real <-> complex is not implemented yet (AIFFT-566)
+    const std::pair<rocfft_array_type, rocfft_array_type> not_implemented[]
+        = {{rocfft_array_type_real, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_real, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_real, rocfft_array_type_complex_planar},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_real},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_real}};
+    for(auto [from, to] : not_implemented)
+    {
+        const auto src = with_type(base, rocfft_precision_single, from);
+        try
+        {
+            src.reinterpret_as(to);
+            ADD_FAILURE() << "no exception for " << from << " -> " << to;
+        }
+        catch(const std::invalid_argument& e)
+        {
+            ADD_FAILURE() << "unexpected std::invalid_argument: " << e.what();
+        }
+        catch(const std::logic_error& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("not implemented yet"), std::string::npos)
+                << e.what();
+        }
+    }
+
+    // interleaved <-> planar and unset source/target are rejected
+    const std::pair<rocfft_array_type, rocfft_array_type> rejected[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_unset}};
+    for(auto [from, to] : rejected)
+    {
+        EXPECT_THROW(with_type(base, rocfft_precision_single, from).reinterpret_as(to),
+                     std::invalid_argument);
+    }
+    EXPECT_THROW(base.reinterpret_as(rocfft_array_type_complex_interleaved), std::invalid_argument);
 }

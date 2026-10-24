@@ -20,13 +20,17 @@
 
 #include "data_set_descriptor.h"
 #include "../../shared/arithmetic.h"
+#include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
+#include "../../shared/rocfft_enums_vs_fft_enums.h"
+#include "rocfft/rocfft.h"
 #include "rocfft_current_function.h"
 
 #include <algorithm>
 #include <iterator>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 
 namespace
 {
@@ -43,6 +47,15 @@ namespace
         auto ret = a;
         ret.push_back(b);
         return ret;
+    }
+
+    // true iff a and b are identical or are the hermitian and complex variants
+    // of the same format (interleaved or planar)
+    bool same_format_up_to_hermitian(rocfft_array_type a, rocfft_array_type b)
+    {
+        return a == b
+               || (array_type_is_complex(a) && array_type_is_complex(b)
+                   && array_type_is_interleaved(a) == array_type_is_interleaved(b));
     }
 }
 
@@ -125,6 +138,18 @@ data_descriptor_t::data_descriptor_t(const std::vector<size_t>& lower,
     }
 }
 
+data_descriptor_t::data_descriptor_t(rocfft_precision           precision,
+                                     rocfft_array_type          array_type,
+                                     const std::vector<size_t>& lower,
+                                     const std::vector<size_t>& upper,
+                                     const std::vector<size_t>& strides,
+                                     size_t                     batch_rank)
+    : data_descriptor_t(lower, upper, strides, batch_rank)
+{
+    this->array_type = array_type;
+    set_precision(precision);
+}
+
 data_descriptor_t data_descriptor_t::full_layout(const std::vector<size_t>& lengths,
                                                  const std::vector<size_t>& strides,
                                                  size_t                     batch,
@@ -162,6 +187,32 @@ size_t data_descriptor_t::get_batch_rank() const
 size_t data_descriptor_t::get_full_rank() const
 {
     return len_axes.size() + batch_axes.size();
+}
+
+rocfft_array_type data_descriptor_t::get_array_type() const
+{
+    return array_type;
+}
+
+rocfft_precision data_descriptor_t::get_precision() const
+{
+    if(!has_precision())
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " called on a descriptor without precision.");
+    }
+
+    return static_cast<rocfft_precision>(precision);
+}
+
+bool data_descriptor_t::has_precision() const
+{
+    return precision != precision_unset;
+}
+
+void data_descriptor_t::set_precision(rocfft_precision p)
+{
+    precision = static_cast<std::underlying_type_t<rocfft_precision>>(p);
 }
 
 std::vector<size_t> data_descriptor_t::lengths_and_batches() const
@@ -287,6 +338,35 @@ size_t data_descriptor_t::buffer_element_count() const
     return compute_ptrdiff(lengths_and_batches(), strides_and_distances());
 }
 
+size_t data_descriptor_t::element_size() const
+{
+    if(array_type == rocfft_array_type_unset)
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " called on a descriptor without array type.");
+    return ::element_size(get_precision(), array_type);
+}
+
+size_t data_descriptor_t::buffer_size_bytes() const
+{
+    return buffer_element_count() * element_size();
+}
+
+data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_type) const
+{
+    if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " requires set array types.");
+    if(array_type_is_real(array_type) != array_type_is_real(new_array_type))
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + ": reinterpreting real data as complex data (or vice versa)"
+                                 " is not implemented yet.");
+    if(!same_format_up_to_hermitian(array_type, new_array_type))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " cannot switch between interleaved and planar formats.");
+    auto ret       = *this;
+    ret.array_type = new_array_type;
+    return ret;
+}
+
 bool data_descriptor_t::is_contiguous() const
 {
     return buffer_element_count() == logical_count();
@@ -294,7 +374,8 @@ bool data_descriptor_t::is_contiguous() const
 
 bool data_descriptor_t::operator==(const data_descriptor_t& other) const
 {
-    return len_axes == other.len_axes && batch_axes == other.batch_axes;
+    return len_axes == other.len_axes && batch_axes == other.batch_axes
+           && array_type == other.array_type && precision == other.precision;
 }
 
 bool data_descriptor_t::has_same_logical_range_as(const data_descriptor_t& other) const
@@ -319,6 +400,12 @@ data_descriptor_t
     if(first.embedding != second.embedding)
         throw std::invalid_argument("Different embeddings for arguments of "
                                     + ROCFFT_CURRENT_FUNCTION);
+    if(first.precision != second.precision)
+        throw std::invalid_argument("Different precisions for arguments of "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    if(!same_format_up_to_hermitian(first.array_type, second.array_type))
+        throw std::invalid_argument("Incompatible array types for arguments of "
+                                    + ROCFFT_CURRENT_FUNCTION);
 
     data_descriptor_t ret;
     ret.len_axes.resize(first.len_axes.size());
@@ -332,7 +419,9 @@ data_descriptor_t
         else
             ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
     }
-    ret.embedding = first.embedding;
+    ret.embedding  = first.embedding;
+    ret.array_type = first.array_type;
+    ret.precision  = first.precision;
     return ret;
 }
 
@@ -467,6 +556,11 @@ std::string data_descriptor_t::str() const
         ret += std::to_string(s_or_d);
     }
 
+    ret += " precision ";
+    ret += has_precision() ? precision_name(get_precision()) : "unset";
+    ret += " array type ";
+    ret += fft_enum_to_string(fft_array_type_from_rocfft_array_type(array_type));
+
     if(is_embedded())
     {
         ret += " embedded within a " + std::to_string(embedding->size()) + "-dimensional data set";
@@ -589,6 +683,10 @@ std::optional<data_descriptor_t>
     }
     // copy layout and modify what needs be
     auto ret = std::make_optional<data_descriptor_t>(*this);
+    if(array_type != rocfft_array_type_unset)
+        ret->array_type = is_real_domain(fft_type, other_io)
+                              ? rocfft_array_type_real
+                              : rocfft_array_type_hermitian_interleaved;
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
               ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
@@ -618,6 +716,8 @@ data_descriptor_t
         return *this;
 
     data_descriptor_t ret;
+    ret.array_type = array_type;
+    ret.precision  = precision;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
     // Turn non-desired length axes into additional batch axes
@@ -675,6 +775,8 @@ data_descriptor_t data_descriptor_t::get_embedding_layout() const
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
 
     data_descriptor_t ret;
+    ret.array_type = array_type;
+    ret.precision  = precision;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
     // all other batch axes that aren't part of the embedding remain batch axes
