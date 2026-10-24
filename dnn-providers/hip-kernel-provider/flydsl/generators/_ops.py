@@ -27,4 +27,7 @@ OP_KERNEL_DIRS = {
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),
     "sdpa_aiw": ("attention_rdna4",),
+    # The RNG dump's keep-mask writer draws the attention kernels' counters through the same
+    # Philox, so that file is its input too; its own directory keeps it out of sdpa_aiw's.
+    "sdpa_dropout_mask": ("dropout_mask", "attention_rdna4/philox.py"),
 }

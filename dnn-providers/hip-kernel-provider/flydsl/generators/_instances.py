@@ -1992,6 +1992,22 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
     return instances
 
 
+def sdpa_dropout_mask_instances() -> list[Instance]:
+    """The RNG dump's keep-mask writer: one object per target, every value at runtime.
+
+    Not an attention axis and never selected for a graph: the dropping SDPA engines' natives
+    launch it after the attention launch when the graph names an RNG dump. f32 is the dump's
+    dtype, the only one hipDNN's references read."""
+    return [
+        Instance(
+            op="sdpa_dropout_mask",
+            dtype="f32",
+            priority=PRIORITY_SPECIALIZED,
+            knobs={"block_threads": 256},
+        )
+    ]
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -2001,6 +2017,7 @@ OPS = {
     "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
     "sdpa_aiw": sdpa_aiw_instances,
+    "sdpa_dropout_mask": sdpa_dropout_mask_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS = {
