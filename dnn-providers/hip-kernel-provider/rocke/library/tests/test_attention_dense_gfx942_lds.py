@@ -29,7 +29,7 @@ under ``library/tests/``, which ``platform/tests/run_all.py`` does not collect; 
 with the library lane:
 
     cd rocke/library
-    PYTHONPATH=../platform/python:. python -m pytest \
+    PYTHONPATH=../platform/python:. python -m pytest \\\\
         tests/test_attention_dense_gfx942_lds.py
 """
 
@@ -117,6 +117,9 @@ _TUNING_VARIANTS = (
     dict(lds_row_pad=16, v_row_pad=16),
     dict(use_cfvst=False),
     dict(use_cfvst=True),
+    dict(use_cfvst=True, lds_num_buffers=2),
+    dict(use_cfvst=True, v_reg_prefetch=True),
+    dict(use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True),
     dict(use_cfvst=False, v_row_pad=32),
     dict(block_m=128),
 )
@@ -200,6 +203,29 @@ def test_cohort_is_not_vacuous():
     assert {s.dtype for s in specs} == {"bf16", "fp16"}
     assert {s.block_n for s in specs} >= {32, 64, 128}
     assert {s.resolved_use_cfvst() for s in specs} == {False, True}
+    assert any(
+        s.dtype == "bf16"
+        and s.head_size == 128
+        and s.resolved_use_cfvst()
+        and s.lds_num_buffers == 2
+        for s in specs
+    ), "cohort must exercise the BF16 D128 CFVST KDB allocation"
+    assert any(
+        sp.dtype == "bf16"
+        and sp.head_size == 128
+        and sp.resolved_use_cfvst()
+        and sp.lds_num_buffers == 1
+        and sp.v_reg_prefetch
+        for sp in specs
+    ), "cohort must exercise V register prefetch without K double buffering"
+    assert any(
+        sp.dtype == "bf16"
+        and sp.head_size == 128
+        and sp.resolved_use_cfvst()
+        and sp.lds_num_buffers == 2
+        and sp.v_reg_prefetch
+        for sp in specs
+    ), "cohort must exercise the combined KDB + VPF pipeline"
     assert {s.lds_row_pad for s in specs} > {_DEFAULT_LDS_ROW_PAD}
     # v_row_pad is tri-state: None ("ask the policy") is its shipped default.
     assert {s.v_row_pad for s in specs} > {None}
@@ -299,3 +325,33 @@ def test_capacity_boundary_allocation_is_exactly_capacity():
     assert ok, why
     assert _lds_bytes(spec) == _CAPACITY
     assert _lds_pool_bytes(spec) == _CAPACITY
+
+
+def test_bf16_d128_kdb_and_vpf_have_independent_lds_footprints():
+    """KDB allocates one additional K slot; VPF adds no LDS slot.
+    V LDS remains single-buffered for every mode.
+    """
+    cfvst = _spec(
+        dtype="bf16",
+        head_size=128,
+        block_n=64,
+        lds_row_pad=8,
+        use_cfvst=True,
+        lds_num_buffers=1,
+        v_reg_prefetch=False,
+    )
+    kdb = dataclasses.replace(cfvst, lds_num_buffers=2)
+    vpf = dataclasses.replace(cfvst, v_reg_prefetch=True)
+    both = dataclasses.replace(kdb, v_reg_prefetch=True)
+    for spec in (cfvst, kdb, vpf, both):
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        assert ok, why
+    assert _lds_bytes(cfvst) == _lds_pool_bytes(cfvst) == 33792
+    assert _lds_bytes(kdb) == _lds_pool_bytes(kdb) == 51200
+    assert _lds_bytes(vpf) == _lds_pool_bytes(vpf) == 33792
+    assert _lds_bytes(both) == _lds_pool_bytes(both) == 51200
+    extra_k_slot = 64 * (128 + 8) * 2
+    assert _lds_pool_bytes(kdb) - _lds_pool_bytes(cfvst) == extra_k_slot
+    assert _lds_pool_bytes(both) - _lds_pool_bytes(vpf) == extra_k_slot
+    assert _lds_pool_bytes(vpf) == _lds_pool_bytes(cfvst)
+    assert _lds_pool_bytes(both) == _lds_pool_bytes(kdb)

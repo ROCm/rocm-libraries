@@ -32,6 +32,7 @@ import pytest
 from kernels.gfx942.attention_dense import (
     _as_gfx942_spec,
     run_attention_dense_torch,
+    supports_attention_dense,
 )
 
 
@@ -222,7 +223,10 @@ def _sdpa_reference(q, k, v, scale, *, causal=True, attn_mask=None):
 def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     import torch
 
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    # Element-wise atol + rtol*|ref| rather than a raw max-abs bound: rounding the
+    # fp32 reference to the output dtype alone consumes most of a fixed absolute
+    # budget on randn inputs, which would leave the check seed-sensitive.
+    tol = 2e-3 if dtype == "fp16" else 1e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
     B, S = 1, 512
     scale = 1.0 / math.sqrt(d)
@@ -241,9 +245,15 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     ref = _sdpa_reference(q, k, v, scale, causal=causal)
 
     max_abs = (ref - out.float()).abs().max().item()
-    assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
-        f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=tol,
+        rtol=tol,
+        msg=lambda m: (
+            f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}\n{m}"
+        ),
     )
 
 
@@ -1209,6 +1219,219 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
     )
 
 
+# Persistent grid size for independent CFVST, KDB and VPF tests. At the shipped
+# NP (304) every
+# shape below has fewer work items than workgroups, so no workgroup ever runs a
+# second item and the LDS hand-off between items (the next item's prologue writing
+# K slot 0 and V_lds after the previous item's epilogue) is never exercised.
+_MULTI_ITEM_NP = 3
+
+
+def _multi_item_persistent(spec):
+    """``spec`` on a small persistent grid: more than two work items per workgroup
+    and a ragged last round, the same preconditions as
+    ``test_one_persistent_binary_serves_every_shape_and_head_config``."""
+    spec = dataclasses.replace(spec, num_persistent=_MULTI_ITEM_NP)
+    work = (spec.seqlen_q // spec.block_m) * spec.num_query_heads * spec.batch
+    assert work > 2 * spec.num_persistent, (work, spec.num_persistent)
+    assert work % spec.num_persistent, (work, spec.num_persistent)
+    return spec
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("persistent", [False, True])
+@pytest.mark.parametrize(
+    "sq,skv",
+    [
+        (256, 64),  # n_up=1: zero-trip pipeline main loop
+        (256, 192),  # n_up=3: the loop runs, then the last tile is in K slot 0
+        (512, 512),  # Multiple KV tiles (even n_up: last tile in K slot 1)
+    ],
+)
+def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
+    import torch
+
+    B, Hq, Hkv, D = 1, 16, 4, 128
+    tol = 1e-2 if dtype == "bf16" else 2e-3
+    dt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(D)
+
+    torch.manual_seed(42)
+
+    q = torch.randn(B, sq, Hq, D, device="cuda", dtype=dt)
+    k = torch.randn(B, skv, Hkv, D, device="cuda", dtype=dt)
+    v = torch.randn_like(k)
+
+    # Explicit global causal mask, including non-square Sq/Skv.
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    mask = ki <= qi
+
+    ref = _sdpa_reference(
+        q,
+        k,
+        v,
+        scale,
+        causal=False,
+        attn_mask=mask,
+    )
+
+    base = _as_gfx942_spec(_spec(dtype, D, Hq, Hkv, persistent, batch=B, sq=sq))
+
+    variants = (
+        [
+            # Original BF16 baseline plus the independently selectable pipeline modes.
+            {"use_cfvst": False, "lds_num_buffers": 1, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": True},
+            {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True},
+        ]
+        if dtype == "bf16"
+        else [{}]  # Preserve the existing FP16 path
+    )
+
+    for knobs in variants:
+        spec = dataclasses.replace(base, seqlen_kv=skv, **knobs)
+        if persistent:
+            spec = _multi_item_persistent(spec)
+
+        out = torch.full_like(q, float("nan"))
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+
+        assert torch.isfinite(out).all(), (
+            f"Non-finite output: {dtype}, {knobs}, "
+            f"persistent={persistent}, Sq={sq}, Skv={skv}"
+        )
+
+        torch.testing.assert_close(
+            out.float(),
+            ref,
+            atol=tol,
+            rtol=tol,
+        )
+
+
+# Representative BF16 D128 CFVST numeric tests covering tile, scheduling,
+# output-store, and persistent-grid configurations with independently enabled
+# K double buffering and V register prefetch. Not an exhaustive sweep.
+# Each row is (id, (Hq, Hkv), Skv, persistent, knobs).
+_CFVST_KNOB_ROWS = [
+    ("bn32", (16, 4), 512, False, {"block_n": 32}),
+    ("bm128", (16, 4), 512, False, {"block_m": 128}),
+    # block_m=64 -> n_up = 1..8 across query blocks, so odd n_up > 1 is covered.
+    ("bm64", (16, 4), 512, False, {"block_m": 64}),
+    ("iglp0", (16, 4), 512, False, {"iglp": True}),
+    ("iglp1", (16, 4), 512, False, {"iglp": True, "iglp_mode": 1}),
+    ("kmajor", (16, 4), 512, False, {"pv_loop_order": "k_major"}),
+    ("ostore1", (16, 4), 512, False, {"o_store_width": 1}),
+    ("ostore2", (16, 4), 512, False, {"o_store_width": 2}),
+    ("pvprio", (16, 4), 512, False, {"pv_priority": 1}),
+    ("pvfence", (16, 4), 512, False, {"pv_sched_fence_mask": 0}),
+    ("persist_intl", (16, 4), 512, True, {"interleave": True}),
+    ("persist_qbmaj", (16, 4), 512, True, {"persist_decode": "qb_major"}),
+    ("persist_hkvmaj", (16, 4), 512, True, {"persist_decode": "hkv_major"}),
+    ("skv_gt_sq", (16, 4), 1024, False, {}),
+    ("mha", (16, 16), 512, False, {}),
+    ("gqa8", (32, 4), 512, False, {}),
+]
+
+
+# KDB and VPF each require block_n=64, so the block_n=32 row exercises
+# CFVST only; the others cover the two individual knobs and their combination.
+_CFVST_PIPELINE_MODES = (
+    (1, False, "cfvst_only"),
+    (2, False, "kdb_only"),
+    (1, True, "vpf_only"),
+    (2, True, "kdb_vpf"),
+)
+_CFVST_KNOB_CASES = [
+    pytest.param(*row[1:], nbuf, vpf, id=f"{row[0]}-{mode}")
+    for row in _CFVST_KNOB_ROWS
+    for nbuf, vpf, mode in _CFVST_PIPELINE_MODES
+    if (nbuf == 1 and not vpf) or row[4].get("block_n", 64) == 64
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "heads,skv,persistent,knobs,lds_num_buffers,v_reg_prefetch",
+    _CFVST_KNOB_CASES,
+)
+def test_cfvst_knob_matrix_numeric(
+    heads, skv, persistent, knobs, lds_num_buffers, v_reg_prefetch
+):
+    import torch
+
+    hq, hkv = heads
+    sq, d = 512, 128
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(5)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, skv, hkv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn_like(k)
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    ref = _sdpa_reference(q, k, v, scale, causal=False, attn_mask=ki <= qi)
+
+    base = _as_gfx942_spec(_spec("bf16", d, hq, hkv, persistent, batch=1, sq=sq))
+    spec = dataclasses.replace(
+        base,
+        seqlen_kv=skv,
+        use_cfvst=True,
+        lds_num_buffers=lds_num_buffers,
+        v_reg_prefetch=v_reg_prefetch,
+        **knobs,
+    )
+    if persistent:
+        spec = _multi_item_persistent(spec)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, f"gate no longer accepts a row it used to open: {why}"
+    out = torch.full_like(q, float("nan"))
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=1e-2,
+        rtol=1e-2,
+    )
+    # KDB and VPF are performance-only changes. Compare their outputs
+    # against the same CFVST kernel with both optimizations disabled.
+    if lds_num_buffers == 2 or v_reg_prefetch:
+        baseline_spec = dataclasses.replace(
+            spec,
+            lds_num_buffers=1,
+            v_reg_prefetch=False,
+        )
+
+        baseline_out = torch.full_like(q, float("nan"))
+
+        run_attention_dense_torch(
+            spec=baseline_spec,
+            q=q,
+            k=k,
+            v=v,
+            out=baseline_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+
+        assert torch.equal(
+            out.view(torch.int16),
+            baseline_out.view(torch.int16),
+        ), (
+            f"KDB/VPF changed BF16 output bits: "
+            f"{knobs}, nbuf={lds_num_buffers}, "
+            f"vpf={v_reg_prefetch}"
+        )
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 class TestDenseLseNumericGfx942:
@@ -1238,6 +1461,47 @@ class TestDenseLseNumericGfx942:
         ref, lse_ref = _lse_reference(q, k, v, scale, causal=causal)
         assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
         assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize(
+        "sq,skv", [(256, 64), (512, 512)], ids=["zero_trip", "multi_tile"]
+    )
+    @pytest.mark.parametrize(
+        "lds_num_buffers,v_reg_prefetch",
+        [(1, False), (2, False), (1, True), (2, True)],
+        ids=["cfvst_only", "kdb_only", "vpf_only", "kdb_vpf"],
+    )
+    def test_cfvst_pipeline_lse_modes(
+        self, persistent, sq, skv, lds_num_buffers, v_reg_prefetch
+    ):
+        """LSE uses the final tile's row max in all independent pipeline modes.
+
+        A stale max shifts LSE by (m_new - m_old) * ln2; at n_up=1
+        (zero_trip) the pipeline loop does not run at all. Both grids are
+        exercised, including the persistent multi-work-item handoff.
+        """
+        spec = dataclasses.replace(
+            _lse_spec("bf16", 128, 8, 2, persistent, batch=1, sq=512),
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            use_cfvst=True,
+            lds_num_buffers=lds_num_buffers,
+            v_reg_prefetch=v_reg_prefetch,
+        )
+        if persistent:
+            spec = _multi_item_persistent(spec)
+        scale = 1.0 / math.sqrt(128)
+        torch.manual_seed(7)
+        q = torch.randn(1, sq, 8, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 2, 128, device=q.device, dtype=torch.bfloat16)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert (lse - lse_ref).abs().max().item() < 1e-3
         assert torch.equal(out, off_out)
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])

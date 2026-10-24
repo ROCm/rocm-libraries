@@ -173,7 +173,7 @@ DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # ``lazy_rescale``) the body never reads the field and only the name changes.
 DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"lds_num_buffers"}),
-    "gfx942": frozenset({"lds_num_buffers", "lazy_rescale"}),
+    "gfx942": frozenset({"lazy_rescale"}),
 }
 # Axes whose values are relative to the base spec (request or policy derived),
 # so a choice may equal a dataclass default; the base-equal choice is pruned.
@@ -260,13 +260,18 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
 # as the tile (block_m, block_n). The LDS-saving knobs
 # lead as enablers: they can bring an otherwise over-budget tile under the LDS
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
-# prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads
+# prerequisites-first: BF16 CFVST is the required enabling choice for
+# independent K double buffering and V register prefetch. The production
+# tuning walk pairs each knob with that prerequisite, without requiring the
+# combined KDB+VPF variant. Exp2 policy reads persistent, v_row_pad policy reads
 # block_n, a non-derived v_row_pad needs the swizzle off, interleave is read
 # only on the resolved qb_major decode, and iglp_mode / the PV fence follow iglp.
 _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("use_cfvst", None, (True, False), enabler=True),
     _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
     _values("lds_k_group_pad", 8, _DENSE_LDS_PADS, enabler=True),
+    _values("lds_num_buffers", 1, (2,)),
+    _flag("v_reg_prefetch"),
     _choices_axis("persistent", (True, False)),
     _choices_axis("block_m", _GFX942_BLOCK_M),
     _choices_axis("block_n", _GFX942_BLOCK_N),

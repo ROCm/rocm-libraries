@@ -15,7 +15,10 @@ fixture is re-blessed.
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
 combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here.
+gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128 CFVST
+and independent K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
+(``v_reg_prefetch=True``) knobs are pinned individually and together on the default,
+persistent, and LSE paths; no shipped default reaches these code paths.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -100,9 +103,10 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        spec_type = (
-            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
+        gfx942_only = d.get("emit_lse", False) or any(
+            k in d for k in ("use_cfvst", "lds_num_buffers", "v_reg_prefetch")
         )
+        spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
@@ -272,6 +276,52 @@ def _cases():
             seqlen_q=256,
             seqlen_kv=64,
             sliding_window=64,
+        ),
+        # --- Opt-in BF16 D128 CFVST with independently enabled K double buffering
+        #     and V register prefetch. Each IR path must be covered, on the default
+        #     grid, persistent grid, and LSE epilogue. V LDS stays single-buffered. ---
+        "attention_dense_gfx942/cfvst_d128_bf16_causal": mk(use_cfvst=True),
+        "attention_dense_gfx942/kdb_d128_bf16_causal": mk(
+            use_cfvst=True, lds_num_buffers=2
+        ),
+        "attention_dense_gfx942/vpf_d128_bf16_causal": mk(
+            use_cfvst=True, v_reg_prefetch=True
+        ),
+        "attention_dense_gfx942/kdbvpf_d128_bf16_causal": mk(
+            use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True
+        ),
+        "attention_dense_gfx942/persist_kdb_d128_bf16_qbmaj": mk(
+            use_cfvst=True,
+            lds_num_buffers=2,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/persist_vpf_d128_bf16_qbmaj": mk(
+            use_cfvst=True,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj": mk(
+            use_cfvst=True,
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        # The last KV tile is folded in after the loop; the LSE epilogue must
+        # use the final row max independently for both pipeline levers.
+        "attention_dense_gfx942/lse_kdb_d128_bf16_causal": mk(
+            emit_lse=True, use_cfvst=True, lds_num_buffers=2
+        ),
+        "attention_dense_gfx942/lse_vpf_d128_bf16_causal": mk(
+            emit_lse=True, use_cfvst=True, v_reg_prefetch=True
+        ),
+        "attention_dense_gfx942/lse_kdbvpf_d128_bf16_causal": mk(
+            emit_lse=True, use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True
         ),
     }
 
