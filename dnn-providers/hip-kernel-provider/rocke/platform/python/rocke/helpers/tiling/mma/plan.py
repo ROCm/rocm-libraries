@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from ....core.dtypes import normalize_dtype
 from ..encoding import WarpDistributionEncoding
 from ..fragments import TileDesc
 from ..traits import MmaTraits, MmaTraitsCatalog, load_mma_traits
@@ -113,17 +114,16 @@ class TileMmaPlan:
 
         self._traits: MmaTraits
         if atom_override is not None:
-            # Name a specific intrinsic and DERIVE its M/N/K + dtypes from the traits (target still
-            # required, to validate/resolve). `shape`, if given, is the wave tile (a multiple of the
-            # atom); otherwise it IS the atom -- a single MMA. Any a/b/c passed are overridden.
+            # Name a specific intrinsic and DERIVE its M/N/K + dtypes from the catalog row (target
+            # still required, to validate/resolve). `shape`, if given, is the wave tile (a multiple of
+            # the atom); otherwise it IS the atom -- a single MMA. Any a/b/c passed are overridden.
             if tiling.atom_shape is not None:
                 raise ValueError(
                     "specify the atom via atom_override OR tiling.atom_shape, not both"
                 )
             self._traits = self._resolve_atom(catalog, atom_override, target)
             atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-            a = b = self._traits.input_dtype
-            c = self._traits.output_dtype
+            a, b, c = self._traits.a_dtype, self._traits.b_dtype, self._traits.c_dtype
             shape = tuple(shape) if shape is not None else atom_shape
         else:
             if shape is None:
@@ -140,18 +140,22 @@ class TileMmaPlan:
                     f"MFMA requires matching A/B dtypes -- a={a!r}, b={b!r}"
                 )
             # Resolve the atom + its traits from the knob: explicit intrinsic NAME, atom SHAPE,
-            # or (None) the wave shape itself. Both paths end with a resolved traits row.
+            # or (None) the wave shape itself. Both paths end with a resolved traits row. The
+            # author's dtype strings are kept as given; they are normalised to canonical names
+            # only here, where they meet the catalog.
+            dtypes = tuple(normalize_dtype(name) for name in (a, b, c))
             atom_knob = tiling.atom_shape
             if isinstance(atom_knob, str):
-                self._traits = self._resolve_by_name(catalog, atom_knob, target, a, c)
+                self._traits = self._resolve_by_name(catalog, atom_knob, target, dtypes)
                 atom_shape = (self._traits.m, self._traits.n, self._traits.k)
             else:
                 atom_shape = atom_knob if atom_knob is not None else shape
                 m, n, k = atom_shape
                 self._traits = catalog.select(
                     target=target,
-                    input_dtype=a,
-                    output_dtype=c,
+                    a=dtypes[0],
+                    b=dtypes[1],
+                    c=dtypes[2],
                     m=m,
                     n=n,
                     k=k,
@@ -198,21 +202,26 @@ class TileMmaPlan:
 
     @staticmethod
     def _resolve_by_name(
-        catalog: MmaTraitsCatalog, op_id: str, target: str, a: str, c: str
+        catalog: MmaTraitsCatalog,
+        op_id: str,
+        target: str,
+        dtypes: tuple[str, str, str],
     ) -> MmaTraits:
         """Resolve an EXPLICIT intrinsic name (escape hatch) to its traits, validating that it
-        exists, runs on ``target``, and matches the requested dtypes. ``catalog.get`` already
-        fails fast for unknown/reserved op_ids."""
+        exists, runs on ``target``, and takes the requested canonical A/B/C ``dtypes``.
+        ``catalog.get`` already fails fast for an unknown op_id."""
         traits = catalog.get(op_id)
         if not traits.supports(target):
             raise ValueError(
                 f"MMA intrinsic not available on target -- op_id={op_id!r}, "
                 f"target={target!r}, supported={list(traits.supported_targets)}"
             )
-        if traits.input_dtype != a or traits.output_dtype != c:
+        a, b, c = dtypes
+        if not traits.accepts(a=a, b=b, c=c, d=traits.d_dtype):
             raise ValueError(
                 f"MMA intrinsic dtype mismatch -- op_id={op_id!r}, intrinsic "
-                f"in/out=({traits.input_dtype},{traits.output_dtype}), requested ({a},{c})"
+                f"a/b/c=({traits.a_dtype},{traits.b_dtype},{traits.c_dtype}), "
+                f"requested ({a},{b},{c})"
             )
         return traits
 
@@ -376,9 +385,6 @@ class TileMmaPlan:
                 f"atom-derived descriptor cannot express is not supported."
             )
 
-    # SOT dtype token -> arch-catalog token (naming-convention alias only).
-    _ARCH_DTYPE_ALIAS = {"f16": "fp16", "bf16": "bf16", "f32": "fp32", "f64": "fp64"}
-
     def emit_op(self):
         """Resolve the backend ``MmaOp`` for ``b.mma`` from the arch op-registry -- keyed by
         the ATOM shape (one ``b.mma`` consumes one atom).
@@ -392,9 +398,9 @@ class TileMmaPlan:
         m, n, k = self._atom_shape
         op = target.mma.op_for_shape(
             family="mma",
-            a_dtype=self._ARCH_DTYPE_ALIAS.get(self._a_dtype, self._a_dtype),
-            b_dtype=self._ARCH_DTYPE_ALIAS.get(self._b_dtype, self._b_dtype),
-            c_dtype=self._ARCH_DTYPE_ALIAS.get(self._c_dtype, self._c_dtype),
+            a_dtype=self._traits.a_dtype,
+            b_dtype=self._traits.b_dtype,
+            c_dtype=self._traits.c_dtype,
             m=m,
             n=n,
             k=k,
@@ -405,26 +411,6 @@ class TileMmaPlan:
                 f"{self._a_dtype}->{self._c_dtype} on target={self._target!r}"
             )
         return op
-
-    def _ir_type(self, token: str):
-        """SOT dtype token (``f16``/``f32``/...) -> rocke ``ir.Type`` (lazy import seam)."""
-        from rocke.core import ir
-
-        try:
-            return getattr(
-                ir,
-                {
-                    "f16": "F16",
-                    "bf16": "BF16",
-                    "f32": "F32",
-                    "f8": "FP8E4M3",
-                    "bf8": "BF8E5M2",
-                }[token],
-            )
-        except KeyError as exc:
-            raise NotImplementedError(
-                f"no ir.Type for dtype token -- token={token!r}"
-            ) from exc
 
     def __repr__(self) -> str:
         return (

@@ -170,5 +170,5 @@ def test_mma_mismatched_ab_dtype_fails_fast() -> None:
 def test_mma_unsupported_shape_fails_fast_with_candidates() -> None:
     with pytest.raises(ValueError) as excinfo:
         TileMma((13, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
-    assert "no MMA intrinsic" in str(excinfo.value)
-    assert "available on 'gfx90a'" in str(excinfo.value)
+    assert "no MMA instruction" in str(excinfo.value)
+    assert "selectable on 'gfx90a'" in str(excinfo.value)
