@@ -459,7 +459,8 @@ if(ROCKE_INSTALL_TESTS)
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
-              "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity")
+              "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
+              "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
         string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")
         list(GET _rocke_native_parity 0 _rocke_parity_var)
         list(GET _rocke_native_parity 1 _rocke_parity_target)
@@ -492,8 +493,10 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -712,6 +715,10 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
+        "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_conv_dgrad_4c.py"
+        "tests/library/tests/test_conv_dgrad_fused_weights.py"
+        "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"

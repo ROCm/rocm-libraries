@@ -48,6 +48,7 @@ extern "C" {
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
+#include "rocke/instance_f64_mma_probe.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
@@ -1673,9 +1674,12 @@ std::vector<std::string> conv_implicit_gemm_verify(const py::dict& d, const std:
 
 /* ======================= conv_direct_grouped ======================== */
 
-/* The direct-grouped family has two distinct spec structs (16-channel and
- * 4-channel). The dict carries "kind" ("16c"|"4c") to select the path. */
-void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
+/* The direct-grouped family has three spec structs (16-channel, 4-channel and
+ * the generic DirectConvSpec). The dict carries "kind" ("16c"|"4c"|"generic")
+ * to select the path. */
+void fill_direct_conv_problem(rocke_direct_conv_problem_t* p,
+                              const py::dict& d,
+                              std::deque<std::string>* store = nullptr)
 {
     p->N = dict_int(d, "N", p->N);
     p->H = dict_int(d, "H", p->H);
@@ -1689,6 +1693,17 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->stride = dict_int(d, "stride", p->stride);
     p->dil_h = dict_int(d, "dil_h", p->dil_h);
     p->dil_w = dict_int(d, "dil_w", p->dil_w);
+    if(store != nullptr)
+    {
+        /* dtype is a borrowed C string; park it in `store` so it outlives the
+         * spec (same pattern as the spec name). */
+        std::string v;
+        if(dict_str(d, "dtype", v))
+        {
+            store->push_back(v);
+            p->dtype = store->back().c_str();
+        }
+    }
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)
@@ -1728,7 +1743,7 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     };
     rocke_direct_conv_4c_spec_t s = rocke_direct_conv_4c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), &store);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -1737,6 +1752,55 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     s.block_q = dict_int(d, "block_q", s.block_q);
     s.block_groups = dict_int(d, "block_groups", s.block_groups);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.dgrad_fused_weights = dict_bool(d, "dgrad_fused_weights", s.dgrad_fused_weights);
+    s.dgrad_weights_lds = dict_bool(d, "dgrad_weights_lds", s.dgrad_weights_lds);
+    s.stage_rows = dict_bool(d, "stage_rows", s.stage_rows);
+    s.waves_q = dict_int(d, "waves_q", s.waves_q);
+    return s;
+}
+
+/* The generic DirectConvSpec ("generic"): every dataclass field but the
+ * nested problem, so a knob the dict carries always reaches the C builder. */
+rocke_direct_conv_spec_t dgg_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_conv_spec_t s = rocke_direct_conv_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), &store);
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.block_q = dict_int(d, "block_q", s.block_q);
+    s.block_groups = dict_int(d, "block_groups", s.block_groups);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    s.block_h = dict_int(d, "block_h", s.block_h);
+    s.waves_q = dict_int(d, "waves_q", s.waves_q);
+    s.waves_k = dict_int(d, "waves_k", s.waves_k);
+    s.runtime_k_loop = dict_bool(d, "runtime_k_loop", s.runtime_k_loop);
+    s.persistent_grid = dict_bool(d, "persistent_grid", s.persistent_grid);
+    s.persistent_rounds = dict_int(d, "persistent_rounds", s.persistent_rounds);
+    s.fold_k32 = dict_bool(d, "fold_k32", s.fold_k32);
+    s.runtime_channels = dict_bool(d, "runtime_channels", s.runtime_channels);
+    s.k_atoms = dict_int(d, "k_atoms", s.k_atoms);
+    s.m_tiles = dict_int(d, "m_tiles", s.m_tiles);
+    s.preload_weights = dict_bool(d, "preload_weights", s.preload_weights);
+    s.dgrad_fused_weights = dict_bool(d, "dgrad_fused_weights", s.dgrad_fused_weights);
+    s.dgrad_weights_lds = dict_bool(d, "dgrad_weights_lds", s.dgrad_weights_lds);
+    s.waves_per_eu = dict_int(d, "waves_per_eu", s.waves_per_eu);
+    s.row_guard = dict_bool(d, "row_guard", s.row_guard);
+    s.prefetch_rows = dict_int(d, "prefetch_rows", s.prefetch_rows);
+    s.lds_only_sync = dict_bool(d, "lds_only_sync", s.lds_only_sync);
+    s.waves_m = dict_int(d, "waves_m", s.waves_m);
+    s.xcd_tiles = dict_bool(d, "xcd_tiles", s.xcd_tiles);
+    s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
+    s.stage_out = dict_bool(d, "stage_out", s.stage_out);
+    s.row_exit = dict_bool(d, "row_exit", s.row_exit);
     return s;
 }
 
@@ -1752,6 +1816,12 @@ std::string conv_direct_grouped_lower_llvm(const py::dict& d, const std::string&
     {
         rocke_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
         st = rocke_direct_conv_4c_lower_to_llvm(
+            &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    }
+    else if(conv_direct_grouped_kind(d) == "generic")
+    {
+        rocke_direct_conv_spec_t s = dgg_build_spec(d, store);
+        st = rocke_direct_conv_lower_to_llvm(
             &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     }
     else
@@ -1773,6 +1843,11 @@ std::string conv_direct_grouped_serialize_ir(const py::dict& d, const std::strin
     {
         rocke_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
         k = rocke_build_direct_conv_4c_new(&b, &s, arch.c_str());
+    }
+    else if(conv_direct_grouped_kind(d) == "generic")
+    {
+        rocke_direct_conv_spec_t s = dgg_build_spec(d, store);
+        k = rocke_build_direct_conv_new(&b, &s, arch.c_str());
     }
     else
     {
@@ -1802,6 +1877,11 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     {
         rocke_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
         k = rocke_build_direct_conv_4c_new(&b, &s, arch.c_str());
+    }
+    else if(conv_direct_grouped_kind(d) == "generic")
+    {
+        rocke_direct_conv_spec_t s = dgg_build_spec(d, store);
+        k = rocke_build_direct_conv_new(&b, &s, arch.c_str());
     }
     else
     {
@@ -4127,6 +4207,25 @@ PYBIND11_MODULE(rocke_engine, m)
         "engine_version",
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
+
+    m.def(
+        "f64_mma_probe_serialize_ir",
+        [](int m, int k) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("k") = 4);
 
     m.def(
         "tf32_mma_probe_serialize_ir",
