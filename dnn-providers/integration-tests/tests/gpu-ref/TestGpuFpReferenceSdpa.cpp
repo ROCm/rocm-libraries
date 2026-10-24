@@ -98,22 +98,20 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
         k,
         v,
         oCpu,
-        attnScaleValue,
-        static_cast<const TensorBase<MaskT>*>(attnMask),
-        leftBound,
-        rightBound,
-        topLeftAlignment);
+        SdpaFwdOptions<MaskT>{}
+            .setScale(attnScaleValue)
+            .setMask(static_cast<const TensorBase<MaskT>*>(attnMask))
+            .setBand(leftBound, rightBound, topLeftAlignment));
 
     GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskT>(
         q,
         k,
         v,
         oGpu,
-        attnScaleValue,
-        static_cast<TensorBase<MaskT>*>(attnMask),
-        leftBound,
-        rightBound,
-        topLeftAlignment);
+        GpuSdpaFwdOptions<MaskT>{}
+            .setScale(attnScaleValue)
+            .setMask(static_cast<TensorBase<MaskT>*>(attnMask))
+            .setBand(leftBound, rightBound, topLeftAlignment));
 
     assertAllClose(oCpu, oGpu, tolerance);
 }
@@ -235,24 +233,20 @@ void compareGpuVsCpuSdpaFwdWithLse(Tensor<QDataType>& q,
         k,
         v,
         oCpu,
-        attnScaleValue,
-        /*attnMask=*/nullptr,
-        leftBound,
-        rightBound,
-        topLeftAlignment,
-        &lseCpu);
+        SdpaFwdOptions<ComputeDataType>{}
+            .setScale(attnScaleValue)
+            .setBand(leftBound, rightBound, topLeftAlignment)
+            .setLse(&lseCpu));
 
     GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
         k,
         v,
         oGpu,
-        attnScaleValue,
-        /*attnMask=*/nullptr,
-        leftBound,
-        rightBound,
-        topLeftAlignment,
-        &lseGpu);
+        GpuSdpaFwdOptions<ComputeDataType>{}
+            .setScale(attnScaleValue)
+            .setBand(leftBound, rightBound, topLeftAlignment)
+            .setLse(&lseGpu));
 
     assertAllClose(oCpu, oGpu, tolerance);
     // LSE is always FP32 regardless of the output dtype, so it uses the float
@@ -334,13 +328,8 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
         k,
         v,
         oGpu,
-        /*attnScaleValue=*/1.0f,
-        /*attnMask=*/nullptr,
-        /*leftBound=*/-1,
-        /*rightBound=*/-1,
-        /*topLeftAlignment=*/true,
-        /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
+        GpuSdpaFwdOptions<float>{}.setScale(1.0f).setProbabilityMode(
+            SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE));
 
     const float actual = oGpu.memory().hostData()[0];
     EXPECT_NEAR(actual, providerExpected, 1e-2f);
@@ -377,13 +366,8 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv
         k,
         v,
         oGpu,
-        /*attnScaleValue=*/1.0f,
-        /*attnMask=*/nullptr,
-        /*leftBound=*/-1,
-        /*rightBound=*/-1,
-        /*topLeftAlignment=*/true,
-        /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ);
+        GpuSdpaFwdOptions<float>{}.setScale(1.0f).setProbabilityMode(
+            SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ));
 
     const float actual = oGpu.memory().hostData()[0];
     EXPECT_NEAR(actual, rtzExpected, 1e-2f);
@@ -771,9 +755,9 @@ TYPED_TEST(TestGpuSdpaFwdMaskDtype, MatchesFloatMaskBitwise)
     Tensor<float> oMask({1, 2, 8, 16});
     Tensor<float> oFloatMask({1, 2, 8, 16});
     GpuFpReferenceSdpa::fprop<float, float, float, float, float, MaskT>(
-        q, k, v, oMask, std::nullopt, &mask);
+        q, k, v, oMask, GpuSdpaFwdOptions<MaskT>{}.setMask(&mask));
     GpuFpReferenceSdpa::fprop<float, float, float, float, float, float>(
-        q, k, v, oFloatMask, std::nullopt, &floatMask);
+        q, k, v, oFloatMask, GpuSdpaFwdOptions<float>{}.setMask(&floatMask));
 
     const auto* actual = oMask.memory().hostData();
     const auto* expected = oFloatMask.memory().hostData();
@@ -1258,26 +1242,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
     k.memory().hostData();
     v.memory().hostData();
 
-    CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
-                                                   k,
-                                                   v,
-                                                   oCpu,
-                                                   std::nullopt,
-                                                   /*attnMask=*/nullptr,
-                                                   /*leftBound=*/-1,
-                                                   /*rightBound=*/0,
-                                                   /*topLeftAlignment=*/false,
-                                                   &lseCpu);
-    GpuFpReferenceSdpa::fprop<T, T, T, T, float>(q,
-                                                 k,
-                                                 v,
-                                                 oGpu,
-                                                 std::nullopt,
-                                                 /*attnMask=*/nullptr,
-                                                 /*leftBound=*/-1,
-                                                 /*rightBound=*/0,
-                                                 /*topLeftAlignment=*/false,
-                                                 &lseGpu);
+    CpuFpReferenceSdpa::forward<T, T, T, T, float>(
+        q, k, v, oCpu, SdpaFwdOptions<float>{}.setBand(-1, 0, false).setLse(&lseCpu));
+    GpuFpReferenceSdpa::fprop<T, T, T, T, float>(
+        q, k, v, oGpu, GpuSdpaFwdOptions<float>{}.setBand(-1, 0, false).setLse(&lseGpu));
 
     // Non-const TensorView triggers the device->host sync that getHostValue
     // (const) cannot; the GPU wrote lse on-device and only marked it modified.
@@ -1761,30 +1729,22 @@ TEST_P(TestGpuSdpaFwdPaddingFp32, MatchesCpuReference)
                                 k,
                                 v,
                                 oCpu,
-                                0.25f,
-                                static_cast<const TensorBase<float>*>(biasPtr),
-                                -1,
-                                p.rightBound,
-                                p.topLeft,
-                                &lseCpu,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.25f)
+                                    .setMask(static_cast<const TensorBase<float>*>(biasPtr))
+                                    .setBand(-1, p.rightBound, p.topLeft)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setLse(&lseCpu));
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
                               oGpu,
-                              0.25f,
-                              static_cast<TensorBase<float>*>(biasPtr),
-                              -1,
-                              p.rightBound,
-                              p.topLeft,
-                              &lseGpu,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              &seqLenQ,
-                              &seqLenKv);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(0.25f)
+                                  .setMask(static_cast<TensorBase<float>*>(biasPtr))
+                                  .setBand(-1, p.rightBound, p.topLeft)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setLse(&lseGpu));
 
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
     TensorView<float> lseCpuView(lseCpu);
@@ -1914,33 +1874,23 @@ TEST_P(TestGpuSdpaFwdPagedFp32, MatchesCpuReference)
                                 kDense,
                                 vDense,
                                 oCpu,
-                                0.3f,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                0,
-                                false,
-                                &lseCpu,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.3f)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setBand(-1, 0, false)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setLse(&lseCpu));
     GpuFpReferenceSdpa::fprop(q,
                               kCache,
                               vCache,
                               oGpu,
-                              0.3f,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              false,
-                              &lseGpu,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              &seqLenQ,
-                              &seqLenKv,
-                              &pageTable,
-                              &pageTable,
-                              MAX_KV);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(0.3f)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setBand(-1, 0, false)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setPaged(&pageTable, &pageTable, MAX_KV)
+                                  .setLse(&lseGpu));
 
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
     TensorView<float> lseCpuView(lseCpu);
@@ -2034,45 +1984,24 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
                                 k,
                                 v,
                                 oCpu,
-                                0.25f,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                -1,
-                                true,
-                                &lseCpu,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv,
-                                &sink,
-                                nullptr,
-                                std::nullopt,
-                                std::nullopt,
-                                &maxCpu,
-                                &sumExpCpu);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.25f)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setSink(&sink)
+                                    .setLse(&lseCpu)
+                                    .setRowStats(&maxCpu, &sumExpCpu));
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
                               oGpu,
-                              0.25f,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              -1,
-                              true,
-                              &lseGpu,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              &seqLenQ,
-                              &seqLenKv,
-                              nullptr,
-                              nullptr,
-                              0,
-                              &sink,
-                              nullptr,
-                              std::nullopt,
-                              std::nullopt,
-                              &maxGpu,
-                              &sumExpGpu);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(0.25f)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setSink(&sink)
+                                  .setLse(&lseGpu)
+                                  .setRowStats(&maxGpu, &sumExpGpu));
 
     // Max / Sum_exp: equal where infinite (dead rows: -inf / 0), close elsewhere, and for a live
     // row with no live key the sink alone (Max = sink, Sum_exp = 1).
@@ -2172,38 +2101,19 @@ TEST(TestGpuSdpaFwdDropoutFp32, MatchesCpuReference)
                                 k,
                                 v,
                                 oCpu,
-                                0.25f,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                0,
-                                false,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &keepMask,
-                                1.0f / 0.6f);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.25f)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setBand(-1, 0, false)
+                                    .setDropout(&keepMask, 1.0f / 0.6f));
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
                               oGpu,
-                              0.25f,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              false,
-                              nullptr,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              0,
-                              nullptr,
-                              &keepMask,
-                              1.0f / 0.6f);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(0.25f)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setBand(-1, 0, false)
+                                  .setDropout(&keepMask, 1.0f / 0.6f));
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
 }

@@ -154,20 +154,18 @@ public:
             dQ,
             dK,
             dV,
-            attnScale,
-            &stats,
-            mask.has_value() ? &mask.value() : nullptr,
-            _params.leftBound,
-            _params.rightBound,
-            _params.topLeftAlignment,
-            dBias.has_value() ? &dBias.value() : nullptr,
-            seqLenQ.has_value() ? &seqLenQ.value() : nullptr,
-            seqLenKv.has_value() ? &seqLenKv.value() : nullptr,
-            dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
-            dropoutScale,
-            dropoutScaleInv,
-            std::nullopt,
-            _params.alibi);
+            hipdnn_gpu_ref::GpuSdpaBwdOptions<MaskDataType>{}
+                .setScale(attnScale)
+                .setLse(&stats)
+                .setMask(mask.has_value() ? &mask.value() : nullptr)
+                .setDBias(dBias.has_value() ? &dBias.value() : nullptr)
+                .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                .setSeqLens(seqLenQ.has_value() ? &seqLenQ.value() : nullptr,
+                            seqLenKv.has_value() ? &seqLenKv.value() : nullptr)
+                .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+                            dropoutScale,
+                            dropoutScaleInv)
+                .setAlibi(_params.alibi));
     }
 
 private:

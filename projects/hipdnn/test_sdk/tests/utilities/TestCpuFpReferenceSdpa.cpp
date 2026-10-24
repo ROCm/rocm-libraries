@@ -136,7 +136,12 @@ TEST(TestCpuFpReferenceSdpaFp64, CustomScale)
     v.setHostValue(2.0, 0, 0, 1, 0);
 
     CpuFpReferenceSdpa::forward(q, k, v, oDefault); // default scale = 1.0
-    CpuFpReferenceSdpa::forward(q, k, v, oCustom, std::optional<float>{2.0f}); // custom scale = 2.0
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        oCustom,
+        SdpaFwdOptions<float>{}.setScale(std::optional<float>{2.0f})); // custom scale = 2.0
 
     // Expected with custom scale = 2.0: S[0]=2, S[1]=0
     const float customScale = 2.0f;
@@ -182,7 +187,7 @@ TEST(TestCpuFpReferenceSdpaFp64, WithAttnMask)
     mask.setHostValue(0.0f, 1, 0);
     mask.setHostValue(0.0f, 1, 1);
 
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask));
 
     // sq=0: kv=1 is masked → O ≈ V[0,0,0,:] = [1, 2]
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-3);
@@ -227,9 +232,9 @@ void expectTypedMaskMatchesFloatMask()
     }
 
     CpuFpReferenceSdpa::forward<float, float, float, float, float, float>(
-        q, k, v, oFloatMask, std::nullopt, &floatMask);
+        q, k, v, oFloatMask, SdpaFwdOptions<float>{}.setMask(&floatMask));
     CpuFpReferenceSdpa::forward<float, float, float, float, float, MaskT>(
-        q, k, v, oTypedMask, std::nullopt, &typedMask);
+        q, k, v, oTypedMask, SdpaFwdOptions<MaskT>{}.setMask(&typedMask));
 
     for(int sq = 0; sq < 2; ++sq)
     {
@@ -405,7 +410,7 @@ TEST(TestCpuFpReferenceSdpaFp64, AttnMaskBroadcastRank2)
     mask.setHostValue(0.0f, 0, 0);
     mask.setHostValue(-1e4f, 0, 1);
 
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask));
 
     // Both sq=0 and sq=1 should have O ≈ V[0,0,0,:] = [1, 2]
     const double tol = 1e-3;
@@ -451,7 +456,8 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     v.setHostValue(3.0, 0, 0, 2, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     const float scale = 1.0f; // no attention scale given
     const float eNeg = std::exp(-scale);
@@ -502,15 +508,8 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSkv)
     v.setHostValue(4.0, 0, 0, 3, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/-1,
-                                /*rightBound=*/0,
-                                /*topLeftAlignment=*/false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, false));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 6.0 / 3.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 10.0 / 4.0, 1e-5);
@@ -543,15 +542,8 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
     v.setHostValue(2.0, 0, 0, 1, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/-1,
-                                /*rightBound=*/0,
-                                /*topLeftAlignment=*/false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, false));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-5); // fully masked
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 0.0, 1e-5); // fully masked
@@ -575,13 +567,15 @@ TEST(TestCpuFpReferenceSdpaFp64, LeftBoundCountsTheDiagonalKey)
     }
     const TensorBase<float>* noMask = nullptr;
 
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, 1, 0, true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(1, 0, true));
     for(int64_t i = 0; i < 4; ++i)
     {
         EXPECT_NEAR(o.getHostValue(0, 0, i, 0), static_cast<double>(i + 1), 1e-12) << "row " << i;
     }
 
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, 2, 0, true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 0, true));
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-12);
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0) / 2.0, 1e-12);
 }
@@ -615,15 +609,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
     v.setHostValue(4.0, 0, 0, 3, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/2,
-                                /*rightBound=*/1,
-                                /*topLeftAlignment=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 1, true));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0) / 2.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
@@ -659,15 +646,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
     v.setHostValue(5.0, 0, 0, 4, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/3,
-                                /*rightBound=*/1,
-                                /*topLeftAlignment=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(3, 1, true));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0) / 2.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
@@ -705,15 +685,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
     v.setHostValue(5.0, 0, 0, 4, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/3,
-                                /*rightBound=*/1,
-                                /*topLeftAlignment=*/false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(3, 1, false));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0 + 4.0) / 4.0, 1e-5);
@@ -747,15 +720,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
     v.setHostValue(4.0, 0, 0, 3, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/2,
-                                /*rightBound=*/1,
-                                /*topLeftAlignment=*/false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 1, false));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (2.0 + 3.0 + 4.0) / 3.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (3.0 + 4.0) / 2.0, 1e-5);
@@ -787,15 +753,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
     v.setHostValue(2.0, 0, 0, 1, 0);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/2,
-                                /*rightBound=*/1,
-                                /*topLeftAlignment=*/false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 1, false));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-5); // fully masked
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0, 1e-5);
@@ -882,8 +841,10 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
     vAlt.setHostValue(999.0, 0, 0, 2, 1);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, vBase, oBase, std::nullopt, noMask, /*causalMask=*/true);
-    CpuFpReferenceSdpa::forward(q, k, vAlt, oAlt, std::nullopt, noMask, /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, vBase, oBase, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
+    CpuFpReferenceSdpa::forward(
+        q, k, vAlt, oAlt, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     // Outputs must be identical since kv=2 is always masked out
     const double tol = 1e-6;
@@ -971,7 +932,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-        q, k, v, o, std::nullopt, noMask, false, &lse);
+        q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lse));
 
     // Manually compute expected LSE
     const float scale = 1.0f; // no attention scale given
@@ -1007,7 +968,7 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
     v.fillWithRandomValues(safeTestTypeCast<InT>(-1.0f), safeTestTypeCast<InT>(1.0f), 102);
 
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setLse(&lse));
 
     // LSE values should be reasonable (not NaN, not inf for non-masked rows)
     for(int b = 0; b < 1; ++b)
@@ -1044,7 +1005,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-        q, k, v, o, std::nullopt, noMask, false, &lse);
+        q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lse));
 
     // Verify all LSE values are reasonable (no NaN, finite)
     for(int b = 0; b < 2; ++b)
@@ -1078,7 +1039,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-        q, k, v, o, std::nullopt, noMask, true, &lse);
+        q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setBand(-1, 0, true).setLse(&lse));
 
     // With uniform Q/K and causal mask:
     // sq=0: 1 valid position → smaller sumExp → smaller LSE
@@ -1119,7 +1080,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     mask.setHostValue(0.0f, 1, 1);
 
     const hipdnn_data_sdk::utilities::TensorBase<float>* maskPtr = &mask;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, maskPtr, false, &lse);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(maskPtr).setLse(&lse));
 
     // sq=0: all masked → O = 0 and LSE = -inf, never NaN (cuDNN contract, register SEM-010)
     const float lse0 = lse.getHostValue(0, 0, 0, 0);
@@ -1157,14 +1118,14 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
     // Forward without mask
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-        q, k, v, o1, std::nullopt, noMask, false, &lse1);
+        q, k, v, o1, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lse1));
 
     // Forward with mask that suppresses one position
     Tensor<float> mask({2, 2});
     mask.fillWithValue(0.0f);
     mask.setHostValue(-1e4f, 0, 1); // Block skv=1 for sq=0
 
-    CpuFpReferenceSdpa::forward(q, k, v, o2, std::nullopt, &mask, false, &lse2);
+    CpuFpReferenceSdpa::forward(q, k, v, o2, SdpaFwdOptions<float>{}.setMask(&mask).setLse(&lse2));
 
     // LSE should differ between masked and unmasked cases
     const float lseNomask = lse1.getHostValue(0, 0, 0, 0);
@@ -1193,7 +1154,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongRank)
             v.fillWithValue(1.0);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
             (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
+                q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lseWrong)));
         },
         std::invalid_argument);
 }
@@ -1215,7 +1176,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongShape)
             v.fillWithRandomValues(-1.0, 1.0, 44);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
             (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
+                q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lseWrong)));
         },
         std::invalid_argument);
 }
@@ -1237,7 +1198,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseMismatchedBatch)
             v.fillWithRandomValues(-1.0, 1.0, 52);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
             (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
-                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
+                q, k, v, o, SdpaFwdOptions<double>{}.setMask(noMask).setLse(&lseWrong)));
         },
         std::invalid_argument);
 }
@@ -1258,7 +1219,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
     v.fillWithRandomValues(-1.0, 1.0, 302);
 
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setLse(&lse));
 
     // All LSE values should be reasonable
     for(int h = 0; h < 8; ++h)
@@ -1492,11 +1453,24 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMask)
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
 
     // Forward pass with causal mask
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, causalMask);
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, (causalMask) ? 0 : -1, true));
 
     // Backward pass with causal mask
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, causalMask);
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, (causalMask) ? 0 : -1, true));
 
     // Check gradients are finite
     for(int sq = 0; sq < 4; ++sq)
@@ -1540,11 +1514,11 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardWithLSE)
     const TensorBase<float>* noMask = nullptr;
 
     // Forward pass with LSE
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setLse(&lse));
 
     // Backward pass WITH LSE (efficient)
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQWithLse, dKWithLse, dVWithLse, std::nullopt, &lse);
+        q, k, v, o, dO, dQWithLse, dKWithLse, dVWithLse, SdpaBwdOptions<float>{}.setLse(&lse));
 
     // Backward pass WITHOUT LSE (recompute from scratch)
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQNoLse, dKNoLse, dVNoLse);
@@ -1709,16 +1683,18 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CausalMask)
     dO.fillWithRandomValues(-0.5f, 0.5f, 3003);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, /*causalMask=*/true);
+        q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     auto fwdLoss = [&]() -> double {
-        CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
         return computeDotProductLoss(dO, o);
     };
 
@@ -1750,15 +1726,16 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CustomScale)
     dO.fillWithRandomValues(-0.5f, 0.5f, 4003);
 
     const auto customScale = std::optional<float>{0.3f};
-    CpuFpReferenceSdpa::forward(q, k, v, o, customScale);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setScale(customScale));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, customScale);
+    CpuFpReferenceSdpa::backward(
+        q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setScale(customScale));
 
     auto fwdLoss = [&]() -> double {
-        CpuFpReferenceSdpa::forward(q, k, v, o, customScale);
+        CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setScale(customScale));
         return computeDotProductLoss(dO, o);
     };
 
@@ -1795,15 +1772,16 @@ TEST(TestCpuFpReferenceSdpaGradCheck, AdditiveMask)
     mask.setHostValue(-1e4f, 0, 2); // Block sq=0 attending to skv=2
     mask.setHostValue(-1e4f, 1, 0); // Block sq=1 attending to skv=0
 
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, false);
+    CpuFpReferenceSdpa::backward(
+        q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(&mask));
 
     auto fwdLoss = [&]() -> double {
-        CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask);
+        CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask));
         return computeDotProductLoss(dO, o);
     };
 
@@ -1850,17 +1828,32 @@ TEST_P(TestCpuFpReferenceSdpaGradCheckDBias, MatchesFiniteDifferences)
     mask.fillWithRandomValues(-0.5f, 0.5f, 9004);
 
     // Bottom-right causal: rightBound = 0, topLeftAlignment = false.
-    CpuFpReferenceSdpa::forward(q, k, v, o, SCALE, &mask, -1, 0, false);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setScale(SCALE).setMask(&mask).setBand(-1, 0, false));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
     Tensor<float> dBias(maskDims);
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQ, dK, dV, SCALE, nullptr, &mask, -1, 0, false, &dBias);
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setScale(SCALE).setMask(&mask).setDBias(&dBias).setBand(
+            -1, 0, false));
 
     auto fwdLoss = [&]() -> double {
-        CpuFpReferenceSdpa::forward(q, k, v, o, SCALE, &mask, -1, 0, false);
+        CpuFpReferenceSdpa::forward(
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setScale(SCALE).setMask(&mask).setBand(-1, 0, false));
         return computeDotProductLoss(dO, o);
     };
 
@@ -1892,14 +1885,23 @@ TEST(TestCpuFpReferenceSdpaBwd, DBiasZeroOnBandMaskedPositions)
     v.fillWithRandomValues(-1.0f, 1.0f, 9102);
     dO.fillWithRandomValues(-1.0f, 1.0f, 9103);
     mask.fillWithValue(0.0f);
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask, -1, 0, true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask).setBand(-1, 0, true));
 
     Tensor<float> dQ({1, 1, 3, 4});
     Tensor<float> dK({1, 1, 3, 4});
     Tensor<float> dV({1, 1, 3, 4});
     Tensor<float> dBias({3, 3});
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, -1, 0, true, &dBias);
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(&mask).setDBias(&dBias).setBand(-1, 0, true));
     for(int64_t i = 0; i < 3; ++i)
     {
         for(int64_t j = i + 1; j < 3; ++j)
@@ -1911,13 +1913,28 @@ TEST(TestCpuFpReferenceSdpaBwd, DBiasZeroOnBandMaskedPositions)
     Tensor<float> wrongShape({1, 3, 3});
     EXPECT_THROW(
         CpuFpReferenceSdpa::backward(
-            q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, -1, 0, true, &wrongShape),
+            q,
+            k,
+            v,
+            o,
+            dO,
+            dQ,
+            dK,
+            dV,
+            SdpaBwdOptions<float>{}.setMask(&mask).setDBias(&wrongShape).setBand(-1, 0, true)),
         std::invalid_argument);
     const TensorBase<float>* noMask = nullptr;
-    EXPECT_THROW(
-        CpuFpReferenceSdpa::backward(
-            q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, -1, 0, true, &dBias),
-        std::invalid_argument);
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(
+                     q,
+                     k,
+                     v,
+                     o,
+                     dO,
+                     dQ,
+                     dK,
+                     dV,
+                     SdpaBwdOptions<float>{}.setMask(noMask).setDBias(&dBias).setBand(-1, 0, true)),
+                 std::invalid_argument);
 }
 
 // Dropout with an explicit mask (cuDNN custom dropout): O = (P * scale * mask) V. With
@@ -1958,20 +1975,11 @@ TEST(TestCpuFpReferenceSdpaGradCheck, ExplicitMaskDropout)
                                     k,
                                     v,
                                     o,
-                                    SCALE,
-                                    &bias,
-                                    -1,
-                                    0,
-                                    false,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &keepMask,
-                                    dropoutScale);
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(SCALE)
+                                        .setMask(&bias)
+                                        .setBand(-1, 0, false)
+                                        .setDropout(&keepMask, dropoutScale));
     };
     fwd();
 
@@ -1987,18 +1995,12 @@ TEST(TestCpuFpReferenceSdpaGradCheck, ExplicitMaskDropout)
                                  dQ,
                                  dK,
                                  dV,
-                                 SCALE,
-                                 nullptr,
-                                 &bias,
-                                 -1,
-                                 0,
-                                 false,
-                                 &dBias,
-                                 nullptr,
-                                 nullptr,
-                                 &keepMask,
-                                 dropoutScale,
-                                 KEEP);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setMask(&bias)
+                                     .setDBias(&dBias)
+                                     .setBand(-1, 0, false)
+                                     .setDropout(&keepMask, dropoutScale, KEEP));
 
     auto fwdLoss = [&]() -> double {
         fwd();
@@ -2029,24 +2031,12 @@ TEST(TestCpuFpReferenceSdpaFp64, ExplicitMaskDropoutForwardClosedForm)
     keepMask.setHostValue(0.0f, 0, 0, 0, 1);
     keepMask.setHostValue(1.0f, 0, 0, 0, 2);
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                &lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &keepMask,
-                                2.0f);
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDropout(&keepMask, 2.0f).setLse(&lse));
     // Compute type is fp32, so the result is exact to about 1e-7 relative.
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0 * (1.0 + 100.0) / 3.0, 1e-4);
     EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(3.0), 1e-6);
@@ -2082,21 +2072,11 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Softcap)
                                     k,
                                     v,
                                     o,
-                                    SCALE,
-                                    &bias,
-                                    -1,
-                                    0,
-                                    false,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    std::nullopt,
-                                    SOFTCAP);
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(SCALE)
+                                        .setMask(&bias)
+                                        .setBand(-1, 0, false)
+                                        .setSoftcap(SOFTCAP));
     };
     fwd();
 
@@ -2112,19 +2092,12 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Softcap)
                                  dQ,
                                  dK,
                                  dV,
-                                 SCALE,
-                                 nullptr,
-                                 &bias,
-                                 -1,
-                                 0,
-                                 false,
-                                 &dBias,
-                                 nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 SOFTCAP);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setMask(&bias)
+                                     .setDBias(&dBias)
+                                     .setBand(-1, 0, false)
+                                     .setSoftcap(SOFTCAP));
 
     auto fwdLoss = [&]() -> double {
         fwd();
@@ -2154,25 +2127,8 @@ TEST(TestCpuFpReferenceSdpaFp64, SoftcapClosedFormAndLargeCapLimit)
     v.setHostValue(0.0, 0, 0, 1, 0);
     const TensorBase<float>* noMask = nullptr;
     const auto run = [&](std::optional<float> cap) {
-        CpuFpReferenceSdpa::forward(q,
-                                    k,
-                                    v,
-                                    o,
-                                    std::nullopt,
-                                    noMask,
-                                    -1,
-                                    -1,
-                                    true,
-                                    &lse,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    std::nullopt,
-                                    cap);
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setSoftcap(cap).setLse(&lse));
     };
     run(1.0f);
     const double capped = std::tanh(3.0);
@@ -2220,28 +2176,8 @@ TEST(TestCpuFpReferenceSdpaFp64, AlibiClosedForm)
         v.setHostValue(static_cast<double>(j), 0, 0, j, 0);
     }
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                0,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                std::nullopt,
-                                std::nullopt,
-                                nullptr,
-                                nullptr,
-                                true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true).setAlibi(true));
     const double m = CpuFpReferenceSdpa::alibiSlope(0, 1);
     EXPECT_DOUBLE_EQ(m, std::pow(2.0, -8.0));
     const double w0 = std::exp(-2.0 * m);
@@ -2278,24 +2214,11 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
                                     k,
                                     v,
                                     o,
-                                    SCALE,
-                                    &bias,
-                                    -1,
-                                    0,
-                                    true,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    std::nullopt,
-                                    std::nullopt,
-                                    nullptr,
-                                    nullptr,
-                                    true);
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(SCALE)
+                                        .setMask(&bias)
+                                        .setBand(-1, 0, true)
+                                        .setAlibi(true));
     };
     fwd();
 
@@ -2311,20 +2234,12 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
                                  dQ,
                                  dK,
                                  dV,
-                                 SCALE,
-                                 nullptr,
-                                 &bias,
-                                 -1,
-                                 0,
-                                 true,
-                                 &dBias,
-                                 nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 true);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setMask(&bias)
+                                     .setDBias(&dBias)
+                                     .setBand(-1, 0, true)
+                                     .setAlibi(true));
 
     auto fwdLoss = [&]() -> double {
         fwd();
@@ -2360,16 +2275,18 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
     dO.fillWithRandomValues(-0.5f, 0.5f, 6003);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(
-        q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, /*causalMask=*/true);
+        q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     auto fwdLoss = [&]() -> double {
-        CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+        CpuFpReferenceSdpa::forward(
+            q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2613,7 +2530,8 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongRank)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lseWrong),
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(
+                     q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setLse(&lseWrong)),
                  std::invalid_argument);
 }
 
@@ -2636,7 +2554,8 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    EXPECT_THROW(CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lseWrong),
+    EXPECT_THROW(CpuFpReferenceSdpa::backward(
+                     q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setLse(&lseWrong)),
                  std::invalid_argument);
 }
 
@@ -2671,7 +2590,8 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMaskExplicitBounds)
     dO.fillWithRandomValues(-1.0f, 1.0f, 8003);
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     // Bool convenience overload
     CpuFpReferenceSdpa::backward(q,
@@ -2682,10 +2602,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMaskExplicitBounds)
                                  dQBool,
                                  dKBool,
                                  dVBool,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 /*causalMask=*/true);
+                                 SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     // Explicit bounds overload (equivalent to TOP_LEFT_CAUSAL)
     CpuFpReferenceSdpa::backward(q,
@@ -2696,12 +2613,8 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMaskExplicitBounds)
                                  dQExplicit,
                                  dKExplicit,
                                  dVExplicit,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 /*leftBound=*/static_cast<int64_t>(-1),
-                                 /*rightBound=*/static_cast<int64_t>(0),
-                                 /*topLeftAlignment=*/true);
+                                 SdpaBwdOptions<float>{}.setMask(noMask).setBand(
+                                     static_cast<int64_t>(-1), static_cast<int64_t>(0), true));
 
     const float tol = 1e-6f;
     for(int sq = 0; sq < 4; ++sq)
@@ -2746,29 +2659,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
     constexpr bool TOP_LEFT = false;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2805,29 +2722,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
     constexpr bool TOP_LEFT = true;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2864,29 +2785,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
     constexpr bool TOP_LEFT = false;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2923,29 +2848,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
     constexpr bool TOP_LEFT = false;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2983,29 +2912,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
     constexpr bool TOP_LEFT = false;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -3043,29 +2976,33 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
     constexpr bool TOP_LEFT = true;
 
     CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
-            q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
         return computeDotProductLoss(dO, o);
     };
 
@@ -3103,8 +3040,14 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
     constexpr bool TOP_LEFT = true;
 
     // Forward pass with LSE and window mask
-    CpuFpReferenceSdpa::forward(
-        q, k, v, o, std::nullopt, noMask, LEFT_BOUND, RIGHT_BOUND, TOP_LEFT, &lse);
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                SdpaFwdOptions<float>{}
+                                    .setMask(noMask)
+                                    .setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT)
+                                    .setLse(&lse));
 
     // Backward WITH LSE
     CpuFpReferenceSdpa::backward(q,
@@ -3115,28 +3058,20 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
                                  dQWithLse,
                                  dKWithLse,
                                  dVWithLse,
-                                 std::nullopt,
-                                 &lse,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+                                 SdpaBwdOptions<float>{}.setLse(&lse).setMask(noMask).setBand(
+                                     LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     // Backward WITHOUT LSE (recompute from scratch)
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQNoLse,
-                                 dKNoLse,
-                                 dVNoLse,
-                                 std::nullopt,
-                                 nullptr,
-                                 noMask,
-                                 LEFT_BOUND,
-                                 RIGHT_BOUND,
-                                 TOP_LEFT);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQNoLse,
+        dKNoLse,
+        dVNoLse,
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
 
     const float tol = 1e-5f;
     for(int h = 0; h < 2; ++h)
@@ -3213,7 +3148,11 @@ TEST(TestCpuFpReferenceSdpaFp8, PerTensorDescaleMatchesDequantizedInputs)
 
     const TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
-        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
 
     // Reference: dequantize inputs to float (decode(fp8) * descale), then run the
     // plain reference with no descale.
@@ -3285,7 +3224,11 @@ TEST(TestCpuFpReferenceSdpaFp8, PerKvHeadDescaleMatchesDequantizedInputs)
 
     const TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
-        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
 
     Tensor<float> qF({batch, numHeads, seqQ, headDim});
     Tensor<float> kF({batch, numHeads, seqKv, headDim});
@@ -3378,7 +3321,11 @@ TEST(TestCpuFpReferenceSdpaFp8, GqaPerKvHeadDescaleMatchesDequantizedInputs)
 
     const TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
-        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, &descaleQ, &descaleK, &descaleV);
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
 
     // Reference: dequantize with descale indexed by KV head, then run descale-free.
     Tensor<float> qF({batch, numHeadsQ, seqQ, headDim});
@@ -3470,31 +3417,19 @@ TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
 
     const TensorBase<float>* noMask = nullptr;
     // Bool convenience overload (causalMask=false), with descale forwarded.
-    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
-                                                                               k,
-                                                                               v,
-                                                                               oViaBool,
-                                                                               std::nullopt,
-                                                                               noMask,
-                                                                               /*causalMask=*/false,
-                                                                               /*lse=*/nullptr,
-                                                                               &descaleQ,
-                                                                               &descaleK,
-                                                                               &descaleV);
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+        q,
+        k,
+        v,
+        oViaBool,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
     // Equivalent primary (bounds) overload.
-    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
-                                                                               k,
-                                                                               v,
-                                                                               oViaBounds,
-                                                                               std::nullopt,
-                                                                               noMask,
-                                                                               -1,
-                                                                               -1,
-                                                                               true,
-                                                                               nullptr,
-                                                                               &descaleQ,
-                                                                               &descaleK,
-                                                                               &descaleV);
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+        q,
+        k,
+        v,
+        oViaBounds,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
 
     for(int64_t s = 0; s < seqQ; ++s)
     {
@@ -3530,7 +3465,11 @@ TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank4DescaleShape)
     const TensorBase<float>* noMask = nullptr;
     auto runWith = [&](const TensorBase<float>* descaleQ) {
         CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
-            q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, descaleQ, nullptr, nullptr);
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setDescales(descaleQ, nullptr, nullptr));
     };
 
     // Rank-4 but shape [2, 3, 1, 1] != [batch=1, numHeadsKv=2, 1, 1].
@@ -3566,18 +3505,11 @@ TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
 
     const TensorBase<float>* noMask = nullptr;
     EXPECT_THROW(
-        (CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(q,
-                                                                                    k,
-                                                                                    v,
-                                                                                    o,
-                                                                                    std::nullopt,
-                                                                                    noMask,
-                                                                                    -1,
-                                                                                    -1,
-                                                                                    true,
-                                                                                    nullptr,
-                                                                                    &descaleBad,
-                                                                                    nullptr,
-                                                                                    nullptr)),
+        (CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+            q,
+            k,
+            v,
+            o,
+            SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleBad, nullptr, nullptr))),
         std::invalid_argument);
 }

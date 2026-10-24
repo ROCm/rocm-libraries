@@ -267,24 +267,18 @@ public:
                 kForRef,
                 vForRef,
                 *shallowOTensor,
-                effectiveScale,
-                shallowAttnMaskTensor.get(),
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                shallowLseTensor.get(),
-                shallowDescaleQ.get(),
-                shallowDescaleK.get(),
-                shallowDescaleV.get(),
-                shallowSeqLenQ.get(),
-                shallowSeqLenKv.get(),
-                shallowSink.get(),
-                shallowDropoutMask.get(),
-                dropoutScale,
-                std::nullopt,
-                shallowMaxTensor.get(),
-                shallowSumExpTensor.get(),
-                _params.alibi);
+                utilities::SdpaFwdOptions<Mask>{}
+                    .setScale(effectiveScale)
+                    .setMask(shallowAttnMaskTensor.get())
+                    .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                    .setSeqLens(shallowSeqLenQ.get(), shallowSeqLenKv.get())
+                    .setSink(shallowSink.get())
+                    .setDropout(shallowDropoutMask.get(), dropoutScale)
+                    .setAlibi(_params.alibi)
+                    .setLse(shallowLseTensor.get())
+                    .setRowStats(shallowMaxTensor.get(), shallowSumExpTensor.get())
+                    .setDescales(
+                        shallowDescaleQ.get(), shallowDescaleK.get(), shallowDescaleV.get()));
     }
 
 private:

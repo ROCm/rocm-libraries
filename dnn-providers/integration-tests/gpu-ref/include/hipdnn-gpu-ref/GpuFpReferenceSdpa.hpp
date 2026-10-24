@@ -66,6 +66,185 @@ struct SdpaPagedSide
     int64_t blockSize = 0;
 };
 
+/// Named options for GpuFpReferenceSdpa::fprop, mirroring the CPU reference's SdpaFwdOptions (same
+/// fields and setters) plus the GPU-only probability mode and paged K/V. Every field defaults to
+/// "feature off". Pointers are non-const because uploading a tensor needs deviceData().
+template <class MaskDataType = float>
+struct GpuSdpaFwdOptions
+{
+    std::optional<float> attnScale;
+    hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* attnMask = nullptr;
+    int64_t leftBound = -1;
+    int64_t rightBound = -1;
+    bool topLeftAlignment = true;
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr;
+    /// Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
+    /// INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Needs padding.
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr;
+    int64_t pagedMaxSeqKv = 0;
+    hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr;
+    std::optional<float> dropoutScale;
+    std::optional<float> softcap;
+    bool alibi = false;
+    /// Outputs, FP32 rank 3 [B, H, Sq].
+    hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr;
+    /// Provider-attuned emulation of P storage (opt-in; FLOAT is the oracle, SEM-012).
+    SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT;
+
+    GpuSdpaFwdOptions& setScale(std::optional<float> value)
+    {
+        attnScale = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setMask(hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* value)
+    {
+        attnMask = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setBand(int64_t left, int64_t right, bool topLeft)
+    {
+        leftBound = left;
+        rightBound = right;
+        topLeftAlignment = topLeft;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setSeqLens(hipdnn_data_sdk::utilities::TensorBase<int32_t>* q,
+                                  hipdnn_data_sdk::utilities::TensorBase<int32_t>* kv)
+    {
+        seqLenQ = q;
+        seqLenKv = kv;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setPaged(hipdnn_data_sdk::utilities::TensorBase<int32_t>* tableK,
+                                hipdnn_data_sdk::utilities::TensorBase<int32_t>* tableV,
+                                int64_t maxSeqKv)
+    {
+        pageTableK = tableK;
+        pageTableV = tableV;
+        pagedMaxSeqKv = maxSeqKv;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setSink(hipdnn_data_sdk::utilities::TensorBase<float>* value)
+    {
+        sinkToken = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setDropout(hipdnn_data_sdk::utilities::TensorBase<float>* mask,
+                                  std::optional<float> scale)
+    {
+        dropoutMask = mask;
+        dropoutScale = scale;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setSoftcap(std::optional<float> value)
+    {
+        softcap = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setAlibi(bool value)
+    {
+        alibi = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setLse(hipdnn_data_sdk::utilities::TensorBase<float>* value)
+    {
+        lse = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setRowStats(hipdnn_data_sdk::utilities::TensorBase<float>* max,
+                                   hipdnn_data_sdk::utilities::TensorBase<float>* sumExp)
+    {
+        rowMax = max;
+        rowSumExp = sumExp;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setProbabilityMode(SdpaSoftmaxProbabilityMode value)
+    {
+        probabilityMode = value;
+        return *this;
+    }
+};
+
+/// Named options for GpuFpReferenceSdpa::bprop, mirroring the CPU reference's SdpaBwdOptions.
+template <class MaskDataType = float>
+struct GpuSdpaBwdOptions
+{
+    std::optional<float> attnScale;
+    /// Forward LSE, rank 3 [B, H, Sq] or rank 4 [B, H, Sq, 1]; null recomputes the softmax.
+    hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* attnMask = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* dBias = nullptr;
+    int64_t leftBound = -1;
+    int64_t rightBound = -1;
+    bool topLeftAlignment = true;
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr;
+    std::optional<float> dropoutScale;
+    std::optional<float> dropoutScaleInv;
+    std::optional<float> softcap;
+    bool alibi = false;
+
+    GpuSdpaBwdOptions& setScale(std::optional<float> value)
+    {
+        attnScale = value;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setLse(hipdnn_data_sdk::utilities::TensorBase<float>* value)
+    {
+        lse = value;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setMask(hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* value)
+    {
+        attnMask = value;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setDBias(hipdnn_data_sdk::utilities::TensorBase<MaskDataType>* value)
+    {
+        dBias = value;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setBand(int64_t left, int64_t right, bool topLeft)
+    {
+        leftBound = left;
+        rightBound = right;
+        topLeftAlignment = topLeft;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setSeqLens(hipdnn_data_sdk::utilities::TensorBase<int32_t>* q,
+                                  hipdnn_data_sdk::utilities::TensorBase<int32_t>* kv)
+    {
+        seqLenQ = q;
+        seqLenKv = kv;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setDropout(hipdnn_data_sdk::utilities::TensorBase<float>* mask,
+                                  std::optional<float> scale,
+                                  std::optional<float> scaleInv)
+    {
+        dropoutMask = mask;
+        dropoutScale = scale;
+        dropoutScaleInv = scaleInv;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setSoftcap(std::optional<float> value)
+    {
+        softcap = value;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setAlibi(bool value)
+    {
+        alibi = value;
+        return *this;
+    }
+};
+
 class GpuFpReferenceSdpa
 {
 public:
@@ -90,33 +269,31 @@ public:
               class ODataType = QDataType,
               class ComputeDataType = float,
               class MaskDataType = ComputeDataType>
-    static void fprop(
-        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-        hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-        hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-        std::optional<float> attnScaleValue = std::nullopt,
-        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
-            attnMask
-        = nullptr,
-        int64_t leftBound = -1,
-        int64_t rightBound = -1,
-        bool topLeftAlignment = true,
-        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr,
-        int64_t pagedMaxSeqKv = 0,
-        hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
-        std::optional<float> dropoutScale = std::nullopt,
-        std::optional<float> softcap = std::nullopt,
-        hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr,
-        bool alibi = false)
+    static void fprop(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                      hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                      hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                      hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                      const GpuSdpaFwdOptions<MaskDataType>& options = {})
     {
+        const auto attnScaleValue = options.attnScale;
+        auto* attnMask = options.attnMask;
+        const auto leftBound = options.leftBound;
+        const auto rightBound = options.rightBound;
+        const auto topLeftAlignment = options.topLeftAlignment;
+        auto* lse = options.lse;
+        const auto probabilityMode = options.probabilityMode;
+        auto* seqLenQ = options.seqLenQ;
+        auto* seqLenKv = options.seqLenKv;
+        auto* pageTableK = options.pageTableK;
+        auto* pageTableV = options.pageTableV;
+        const auto pagedMaxSeqKv = options.pagedMaxSeqKv;
+        auto* sinkToken = options.sinkToken;
+        auto* dropoutMask = options.dropoutMask;
+        const auto dropoutScale = options.dropoutScale;
+        const auto softcap = options.softcap;
+        auto* rowMax = options.rowMax;
+        auto* rowSumExp = options.rowSumExp;
+        const auto alibi = options.alibi;
         validateSoftcap(softcap);
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
         // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
@@ -297,7 +474,7 @@ public:
 
     // --- Backward SDPA (bprop): dQ, dK, dV and optional dBias ---
     //
-    // Same parameters, order and semantics as CpuFpReferenceSdpa::backward: fp32 accumulation,
+    // Same options and semantics as CpuFpReferenceSdpa::backward: fp32 accumulation,
     // D = sum(dO * O) from the given O, LSE (rank 3 [B, H, Sq] or rank 4 [B, H, Sq, 1]) or
     // softmax recompute when lse is null, additive bias with broadcast and dBias (unscaled dS
     // summed into the bias shape), diagonal band, GQA/MQA with independent K and V heads,
@@ -312,34 +489,30 @@ public:
               class DVDataType = VDataType,
               class ComputeDataType = float,
               class MaskDataType = ComputeDataType>
-    static void bprop(
-        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-        hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-        hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-        hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
-        hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
-        hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
-        hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
-        std::optional<float> attnScaleValue = std::nullopt,
-        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
-            attnMask
-        = nullptr,
-        int64_t leftBound = -1,
-        int64_t rightBound = -1,
-        bool topLeftAlignment = true,
-        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
-            dBias
-        = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
-        std::optional<float> dropoutScale = std::nullopt,
-        std::optional<float> dropoutScaleInv = std::nullopt,
-        std::optional<float> softcap = std::nullopt,
-        bool alibi = false)
+    static void bprop(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                      hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                      hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                      hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                      hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+                      hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+                      hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+                      hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+                      const GpuSdpaBwdOptions<MaskDataType>& options = {})
     {
+        const auto attnScaleValue = options.attnScale;
+        auto* lse = options.lse;
+        auto* attnMask = options.attnMask;
+        const auto leftBound = options.leftBound;
+        const auto rightBound = options.rightBound;
+        const auto topLeftAlignment = options.topLeftAlignment;
+        auto* dBias = options.dBias;
+        auto* seqLenQ = options.seqLenQ;
+        auto* seqLenKv = options.seqLenKv;
+        auto* dropoutMask = options.dropoutMask;
+        const auto dropoutScale = options.dropoutScale;
+        const auto dropoutScaleInv = options.dropoutScaleInv;
+        const auto softcap = options.softcap;
+        const auto alibi = options.alibi;
         validateSoftcap(softcap);
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
         const auto batch = q.dims()[0];

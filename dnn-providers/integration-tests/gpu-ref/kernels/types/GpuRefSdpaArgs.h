@@ -18,6 +18,32 @@ struct SdpaStrides
 };
 // NOLINTEND(modernize-avoid-c-arrays)
 
+// --- Score pipeline parameters shared by the forward and backward kernels ---
+// GpuRefSdpaCommon.hpp applies them: (q . k) * scale, softcap, + bias, + ALiBi, then the band.
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
+struct SdpaScoreParams
+{
+    // Optional additive bias (MASK_TYPE), right-aligned onto [B, H, Sq, Skv]; nullptr disables it.
+    const void* mask;
+    SdpaStrides maskStr;
+    int maskRank;
+    long long maskDims[4];
+    float scale;
+    // > 0 enables the logit softcap c * tanh(s / c) (reference-only extension, SEM-020).
+    float softcap;
+    // Nonzero enables cuDNN ALiBi: + (skv - sq) * slope(h) after the bias (SEM-021).
+    int alibi;
+    // cuDNN diagonal band (SEM-001); -1 is unbounded. Bottom-right measures the diagonal from the
+    // batch's valid lengths.
+    long long leftBound, rightBound;
+    int topLeftAlignment;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)
+
 // --- SDPA forward argument struct ---
 // Shared between device kernels and host launch code for ABI compatibility.
 
@@ -29,7 +55,6 @@ struct SdpaFwdArgs
     const void* q;
     const void* k;
     const void* v;
-    const void* mask;
     void* o;
     // Optional log-sum-exp output [B, H, Sq], always float. nullptr disables it.
     void* lse;
@@ -37,15 +62,10 @@ struct SdpaFwdArgs
     SdpaStrides kStr;
     SdpaStrides vStr;
     SdpaStrides oStr;
-    SdpaStrides maskStr;
     SdpaStrides lseStr;
     long long batch, numHeads, numHeadsK, numHeadsV;
     long long seqQ, seqKv, headDim, headDimV;
-    int maskRank;
-    long long maskDims[4];
-    float scale;
-    long long leftBound, rightBound;
-    int topLeftAlignment;
+    SdpaScoreParams score;
     // Optional padding (cuDNN seq_len_q / seq_len_kv): one INT32 per batch, read at
     // b * stride. nullptr means every batch uses the full seqQ / seqKv.
     const int* seqLenQ;
@@ -66,16 +86,11 @@ struct SdpaFwdArgs
     const float* dropoutMask;
     SdpaStrides dropoutMaskStr;
     float dropoutScale;
-    // Optional logit softcap c (> 0 enables): scores become c * tanh(s / c) after the attention
-    // scale and before bias and masks. Reference-only extension (SEM-020).
-    float softcap;
     // Optional cuDNN Max / Sum_exp row statistics, float [B, H, Sq]; nullptr disables each.
     void* rowMax;
     void* rowSumExp;
     SdpaStrides rowMaxStr;
     SdpaStrides rowSumExpStr;
-    // cuDNN ALiBi: nonzero adds (skv - sq) * slope(h) after the bias (SEM-021).
-    int alibi;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -95,7 +110,6 @@ struct SdpaBwdArgs
     const void* v;
     const void* o;
     const void* dO;
-    const void* mask;
     const float* lse;
     void* dQ;
     void* dK;
@@ -104,14 +118,10 @@ struct SdpaBwdArgs
     float* rowD;
     float* rowM;
     float* rowL;
-    SdpaStrides qStr, kStr, vStr, oStr, dOStr, dQStr, dKStr, dVStr, maskStr, dBiasStr, lseStr;
+    SdpaStrides qStr, kStr, vStr, oStr, dOStr, dQStr, dKStr, dVStr, dBiasStr, lseStr;
     long long batch, numHeads, numHeadsK, numHeadsV;
     long long seqQ, seqKv, headDim, headDimV;
-    int maskRank;
-    long long maskDims[4];
-    float scale;
-    long long leftBound, rightBound;
-    int topLeftAlignment;
+    SdpaScoreParams score;
     const int* seqLenQ;
     const int* seqLenKv;
     long long seqLenQStride, seqLenKvStride;
@@ -121,8 +131,6 @@ struct SdpaBwdArgs
     SdpaStrides dropoutMaskStr;
     float dropoutScale;
     float dropoutScaleInv;
-    float softcap; // > 0 enables the logit softcap, as in SdpaFwdArgs
-    int alibi; // nonzero enables cuDNN ALiBi, as in SdpaFwdArgs
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
