@@ -2,6 +2,14 @@
   "flavors": {
     "llvm20": {
       "cases": {
+        "attention/gfx942/2d_bf16_d128_b16_decode_i64": {
+          "arch": "gfx942",
+          "bytes": 452637,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t64_h32kv8_bf16_wpe2_regpv",
+          "sha256": "2ca52b461a729bfaad2594dc8e6e5ad609c562aa11898f3de0a889d400fa0d7b",
+          "status": "ok"
+        },
         "attention/gfx942/2d_bf16_d128_b64": {
           "arch": "gfx942",
           "bytes": 393929,
@@ -2141,12 +2149,12 @@
           "gfx1201": 8,
           "gfx1250": 12,
           "gfx90a": 5,
-          "gfx942": 50,
+          "gfx942": 51,
           "gfx950": 177
         },
         "expected_failures": 4,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -2169,11 +2177,19 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 264
+        "ok_cases": 265
       }
     },
     "llvm22": {
       "cases": {
+        "attention/gfx942/2d_bf16_d128_b16_decode_i64": {
+          "arch": "gfx942",
+          "bytes": 453249,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t64_h32kv8_bf16_wpe2_regpv",
+          "sha256": "5a6d4b54fb70d62786ec4c7fa3c6ce0da2db3f907aa20103244378dd5a413318",
+          "status": "ok"
+        },
         "attention/gfx942/2d_bf16_d128_b64": {
           "arch": "gfx942",
           "bytes": 394025,
@@ -4313,12 +4329,12 @@
           "gfx1201": 8,
           "gfx1250": 12,
           "gfx90a": 5,
-          "gfx942": 50,
+          "gfx942": 51,
           "gfx950": 177
         },
         "expected_failures": 4,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -4341,11 +4357,19 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 264
+        "ok_cases": 265
       }
     },
     "llvm23": {
       "cases": {
+        "attention/gfx942/2d_bf16_d128_b16_decode_i64": {
+          "arch": "gfx942",
+          "bytes": 453313,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t64_h32kv8_bf16_wpe2_regpv",
+          "sha256": "253477c2582804478fbe3995ebaf936f68515fcab3427271f3bcf2aabefcd76f",
+          "status": "ok"
+        },
         "attention/gfx942/2d_bf16_d128_b64": {
           "arch": "gfx942",
           "bytes": 394089,
@@ -6500,12 +6524,12 @@
           "gfx1201": 8,
           "gfx1250": 16,
           "gfx90a": 5,
-          "gfx942": 50,
+          "gfx942": 51,
           "gfx950": 177
         },
         "expected_failures": 0,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -6528,7 +6552,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 268
+        "ok_cases": 269
       }
     }
   },

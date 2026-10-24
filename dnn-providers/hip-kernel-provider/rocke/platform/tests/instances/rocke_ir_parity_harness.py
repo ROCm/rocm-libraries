@@ -3253,6 +3253,27 @@ def cases():
             dtype="bf16",
         ),
     )
+    # bf16 D128 decode on a paged cache past the i32 buffer range: i64 K/V
+    # addressing with four pages per tile and per-page buffer resources.
+    add(
+        "attention",
+        "attention/gfx942/2d_bf16_d128_b16_decode_i64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_bf16_decode_i64",
+            "gfx942",
+            head_size=128,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            num_seqs=256,
+            waves_per_eu=2,
+            use_register_pv=True,
+            tile_size=64,
+            use_i64_kv_addr=True,
+        ),
+    )
     add(
         "attention",
         "attention/gfx942/3d_fp16_d128_b64",
