@@ -29,7 +29,6 @@ from rocke.core.ir import (
     Value,
 )
 from rocke.helpers.compile import compile_kernel
-from rocke.runtime import Runtime
 from rocke.runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
@@ -41,6 +40,7 @@ from rocke.runtime.launcher import (
     no_fence,
     release_retained_for_stream,
     retain_until_drain,
+    synchronize_and_release,
     wait_stream_and_release,
 )
 
@@ -4293,11 +4293,13 @@ def clear_attention_3d_graph_cache() -> None:
 
 
 def clear_attention_3d_eager_cache() -> None:
-    """Drain resident eager streams, then release their scratch and bindings.
+    """Drain this thread's eager streams, then release scratch and bindings.
 
     Stop submission and call on the submitting host thread, outside capture.
-    Failed drains keep the affected owners for retry. Graphs and prepared
-    executions have separate ownership. See docs/strided-kv-decode.md.
+    Exited-thread owners are reclaimed after a device drain; live foreign
+    owners remain resident. Failed drains keep affected owners for retry.
+    Graphs and prepared executions have separate ownership.
+    See docs/strided-kv-decode.md.
     """
     import torch
 
@@ -4305,9 +4307,12 @@ def clear_attention_3d_eager_cache() -> None:
         if _torch_stream_capturing():
             raise RuntimeError("cannot clear the eager cache during capture")
         groups = {}
+        exited = {}
         for key, owner in _3D_EAGER_WORKSPACES.items():
             if key[-1] is not current_thread():
-                raise RuntimeError("cannot clear eager owners from another host thread")
+                if not key[-1].is_alive():
+                    exited.setdefault(str(owner.device), []).append(key)
+                continue
             if owner.lock.locked():
                 raise RuntimeError("cannot clear the eager cache during submission")
             groups.setdefault((str(owner.device), owner.stream), []).append(key)
@@ -4324,8 +4329,21 @@ def clear_attention_3d_eager_cache() -> None:
                     raise RuntimeError("cannot clear the eager cache during capture")
         for keys in groups.values():
             owner = _3D_EAGER_WORKSPACES[keys[0]]
-            with torch.cuda.device(owner.device):
+            with (
+                torch.cuda.device(owner.device),
+                torch.cuda.stream(
+                    torch.cuda.ExternalStream(owner.stream, device=owner.device)
+                ),
+            ):
                 wait_stream_and_release(owner.stream)
+            for key in keys:
+                del _3D_EAGER_WORKSPACES[key]
+        # A PTDS sentinel cannot select an exited thread's stream. Complete its
+        # device before dropping scratch, without disturbing live foreign owners.
+        for keys in exited.values():
+            owner = _3D_EAGER_WORKSPACES[keys[0]]
+            with torch.cuda.device(owner.device):
+                synchronize_and_release()
             for key in keys:
                 del _3D_EAGER_WORKSPACES[key]
 
@@ -4911,11 +4929,10 @@ def _run_3d_graph(
         graphs.move_to_end(graph_key)
     # The boundary established the caller's effective Torch stream.
     fence = _resolved_fence(True)
-    with Runtime.submission():
-        # Replay must survive older FIFO completion events and enqueue failures.
-        # Retain before enqueue, even when a successful call will fence below.
-        retain_until_drain(int(stream), entry)
-        entry.graph.replay()
+    # Replay must survive older FIFO completion events and enqueue failures.
+    # Retain before enqueue, even when a successful call will fence below.
+    retain_until_drain(int(stream), entry)
+    entry.graph.replay()
     if fence:
         wait_stream_and_release(int(stream))
     return LaunchSummary(launches=2)
@@ -4971,9 +4988,8 @@ def _submit_eager_3d_pair(operation, stream, prepared, tensors):
         # per bound operation between completion drains.
         return tuple(t.detach() if hasattr(t, "detach") else t for t in tensors)
 
-    with Runtime.submission():
-        retain_until_drain(stream, operation, resources=resources)
-        operation()
+    retain_until_drain(stream, operation, resources=resources)
+    operation()
     if _resolved_fence(prepared.red_config.fence):
         wait_stream_and_release(stream)
     return LaunchSummary(launches=2)
@@ -4982,18 +4998,17 @@ def _submit_eager_3d_pair(operation, stream, prepared, tensors):
 def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
     """Launch segment+reduce, without a stream fence while capturing."""
     if capturing:
-        with Runtime.submission(), no_fence():
+        with no_fence():
             return prepared.pipeline(
                 (seg_vals, red_vals),
                 (prepared.seg_config, prepared.red_config),
                 stream=int(stream),
             )
-    with Runtime.submission():
-        result = prepared.pipeline(
-            (seg_vals, red_vals),
-            (prepared.seg_config, prepared.red_config),
-            stream=int(stream),
-        )
+    result = prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
+    )
     if _resolved_fence(prepared.red_config.fence):
         # The reducer's fence also completes the segment. Release its retained
         # arguments so repeated synchronous calls do not accumulate scratch.
@@ -5991,10 +6006,9 @@ def run_unified_attention_torch(
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
     initialization and both launches use that stream. On gfx942/gfx950, eager
-    calls reuse bounded stream-owned scratch under a whole-pair submission lock;
-    a shared runtime guard coordinates retention and enqueue with completion
-    drains. Reentrant drains raise before releasing resources. Submit shared 3D attention
-    calls and perform completion cleanup on one host thread. Stop submitting
+    calls reuse bounded stream-owned scratch under a whole-pair submission lock.
+    Submit shared 3D attention calls and perform completion cleanup on one host
+    thread. Stop submitting
     before each drain; concurrent or reentrant host calls and cross-thread
     cleanup are unsupported, including calls through different bindings or
     execution owners. Sequential submissions to multiple explicit streams and

@@ -20,10 +20,8 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from threading import RLock, Thread, current_thread
+from threading import Thread, current_thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
@@ -43,30 +41,6 @@ _HIP_STREAM_DEFAULT = 0
 _HIP_STREAM_LEGACY = 1
 _HIP_STREAM_PER_THREAD = 2
 _HIP_DEFAULT_STREAMS = (_HIP_STREAM_DEFAULT, _HIP_STREAM_LEGACY, _HIP_STREAM_PER_THREAD)
-
-
-class _SubmissionCoordinator:
-    """Keep snapshots and whole submissions indivisible with completion cleanup."""
-
-    def __init__(self) -> None:
-        self._lock = RLock()
-        self._submissions = 0
-
-    @contextmanager
-    def submission(self) -> Iterator[None]:
-        with self._lock:
-            self._submissions += 1
-            try:
-                yield
-            finally:
-                self._submissions -= 1
-
-    @contextmanager
-    def drain(self) -> Iterator[None]:
-        with self._lock:
-            if self._submissions:
-                raise RuntimeError("cannot drain during an active submission")
-            yield
 
 
 class HipError(RuntimeError):
@@ -523,17 +497,6 @@ class Runtime:
     _pending_bound_args: dict[
         tuple[int, int] | tuple[int, int, Thread], dict[int, Any]
     ] = {}
-    _coordination = _SubmissionCoordinator()
-
-    @staticmethod
-    def submission() -> AbstractContextManager[None]:
-        """Guard retention and a complete enqueue sequence against runtime drains.
-
-        Nested submissions on this host thread share the guard. Other threads
-        wait; a reentrant drain raises before synchronizing or releasing refs.
-        This coordinates host work and inserts no GPU wait or completion event.
-        """
-        return Runtime._coordination.submission()
 
     def load_module(self, blob: bytes) -> Module:
         _ensure_hip_init()
@@ -624,10 +587,9 @@ class Runtime:
         time the stream-sync returns, and we destroy them as we drop
         the bucket.
         """
-        with self._coordination.drain():
-            s = int(stream)
-            self.stream_sync(s)
-            self._release_for_stream(s)
+        s = int(stream)
+        self.stream_sync(s)
+        self._release_for_stream(s)
 
     def sync(self) -> None:
         """Drain the current device and release its retained resources.
@@ -638,18 +600,17 @@ class Runtime:
         between independent lanes (e.g. Triton 2D -> CK 2D -> Triton 3D
         -> CK 3D in the parity harness).
         """
-        with self._coordination.drain():
-            _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
-            device = current_device()
-            for stream_id in list(self._pending_args):
-                if stream_id[0] != device:
-                    continue
-                for _refs, evt in self._pending_args.pop(stream_id):
-                    if evt is not None:
-                        evt.destroy()
-            for key in list(self._pending_bound_args):
-                if key[0] == device:
-                    self._pending_bound_args.pop(key, None)
+        _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
+        device = current_device()
+        for stream_id in list(self._pending_args):
+            if stream_id[0] != device:
+                continue
+            for _refs, evt in self._pending_args.pop(stream_id):
+                if evt is not None:
+                    evt.destroy()
+        for key in list(self._pending_bound_args):
+            if key[0] == device:
+                self._pending_bound_args.pop(key, None)
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -661,8 +622,7 @@ class Runtime:
         callers that did their own sync via a different mechanism and
         only need the bookkeeping cleanup.
         """
-        with self._coordination.drain():
-            self._release_for_stream(int(stream))
+        self._release_for_stream(int(stream))
 
     def _release_for_stream(self, stream: int) -> None:
         if stream in _HIP_DEFAULT_STREAMS:
@@ -698,10 +658,9 @@ class Runtime:
         release it: its latest submission may be later than those events.
         Call before enqueue so partial submission failures retain their buffers.
         """
-        with self._coordination.submission():
-            bucket = self._pending_bound_args.setdefault(self._stream_key(stream), {})
-            if id(owner) not in bucket:
-                bucket[id(owner)] = owner if resources is None else (owner, resources())
+        bucket = self._pending_bound_args.setdefault(self._stream_key(stream), {})
+        if id(owner) not in bucket:
+            bucket[id(owner)] = owner if resources is None else (owner, resources())
 
     def retain_for_stream(self, stream: int, *objects: Any) -> None:
         """Keep ``objects`` alive until the most-recent launch on
@@ -717,19 +676,18 @@ class Runtime:
         caching allocator: launcher code should call this for every
         tensor argument and workspace tensor it passes into a kernel.
         """
-        with self._coordination.submission():
-            keep = tuple(
-                obj for obj in objects if obj is not None and not isinstance(obj, int)
-            )
-            if not keep:
-                return
-            s = int(stream)
-            bucket = self._pending_args.setdefault(self._stream_key(s), [])
-            if bucket:
-                refs, evt = bucket[-1]
-                bucket[-1] = (refs + keep, evt)
-            else:
-                bucket.append((keep, None))
+        keep = tuple(
+            obj for obj in objects if obj is not None and not isinstance(obj, int)
+        )
+        if not keep:
+            return
+        s = int(stream)
+        bucket = self._pending_args.setdefault(self._stream_key(s), [])
+        if bucket:
+            refs, evt = bucket[-1]
+            bucket[-1] = (refs + keep, evt)
+        else:
+            bucket.append((keep, None))
 
     def event(self) -> Event:
         h = _HipEventHandle()

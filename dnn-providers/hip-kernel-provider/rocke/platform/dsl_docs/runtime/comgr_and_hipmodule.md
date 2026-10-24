@@ -252,12 +252,12 @@ same resolver as its cleanup helpers. Resolve and save the handle at a binding
 or batch boundary, then pass that handle through retention, enqueue and cleanup.
 The low-level `Runtime` methods continue to accept raw HIP handles.
 
-`Runtime.submission()` shares a coordinator with `wait_stream`, `sync` and
-`release_pending_for_stream`. Put storage retention and the complete enqueue
-sequence inside this guard. Other threads' runtime drains wait for it to exit;
-a reentrant drain raises before synchronizing or dropping references. The guard
-adds no GPU wait or event. Drain after leaving it, including on failed enqueue.
-External synchronization followed by release still requires stopped submission.
+Retention bookkeeping does not serialize submission with completion drains.
+Submit shared attention work and perform its cleanup on one host thread, with
+submission stopped before a drain or caller-owned synchronization followed by
+release. Retain before enqueue and drain after submission, including failed
+enqueue. PTDS identity separates owners; it does not make overlapping host
+submission, tensor updates or cleanup safe.
 
 Both registries use the same device/stream ownership key. Explicit stream cleanup
 uses the device recorded at retention and works after the launch wrapper restores
