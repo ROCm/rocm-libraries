@@ -444,7 +444,10 @@ static jval_t* jp_value(jparser_t* jp)
         return jp_object(jp);
     if(c == '[')
         return jp_array(jp);
-    if(c == '-' || (c >= '0' && c <= '9'))
+    /* Python's json.dumps spells IEEE non-finite doubles as NaN and
+     * Infinity. Float attrs are doubles and must preserve those values, so
+     * accept the producer's spellings through strtod as well as JSON numbers. */
+    if(c == '-' || c == 'N' || c == 'I' || (c >= '0' && c <= '9'))
         return jp_number(jp);
     if(jp_lit(jp, "true"))
     {
