@@ -136,6 +136,8 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "v_row_pad": lambda s: s.resolved_use_cfvst(),
             "causal_diag_split": lambda s: bool(s.causal)
             and int(s.sliding_window) == 0,
+            "window_wave_skip": lambda s: bool(s.causal)
+            and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,

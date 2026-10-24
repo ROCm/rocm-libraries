@@ -47,19 +47,20 @@ _NARROW_WINDOW = 256
 
 
 def _narrow_window_geometry(head_size, dtype):
-    """``(block_m, block_n)`` for a narrow sliding-window band.
+    """``(block_m, block_n, window_wave_skip)`` for a narrow sliding-window band.
 
     128-row query blocks on the one-CTA-per-block grid. D128 halves the KV tile to
-    32 keys, which halves its K/V LDS footprint so two CTAs fit per CU; bf16 D64
-    goes to 64-row blocks (its waves-per-eu 4 build is small enough to keep several
-    CTAs resident per CU). Depends only on compile-time fields, so one binary
-    still serves every runtime shape.
+    32 keys, which halves its K/V LDS footprint so two CTAs fit per CU, and skips
+    the (wave, tile) pairs the band fully masks, whose SIMD slot the co-resident
+    CTA then fills; bf16 D64 goes to 64-row blocks (its waves-per-eu 4 build is
+    small enough to keep several CTAs resident per CU). Depends only on
+    compile-time fields, so one binary still serves every runtime shape.
     """
     if head_size == 128:
-        return 128, 32
+        return 128, 32, True
     if dtype == "bf16":
-        return 64, _DENSE_BLOCK_N
-    return 128, _DENSE_BLOCK_N
+        return 64, _DENSE_BLOCK_N, False
+    return 128, _DENSE_BLOCK_N, False
 
 
 def _base_spec(req: AttentionRequest):
@@ -93,15 +94,22 @@ def _base_spec(req: AttentionRequest):
         persistent=head_size == 128,
     )
     if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
-        bm, bn = _narrow_window_geometry(head_size, req.dtype.lower())
-        narrow = _make_spec(req, bm, bn, persistent=False)
+        bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
+        narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
         # Keep the default geometry for any request the narrow one cannot serve.
         if _supports(narrow, arch="gfx942")[0]:
             spec = narrow
     return spec
 
 
-def _make_spec(req: AttentionRequest, bm: int, bn: int, *, persistent: bool):
+def _make_spec(
+    req: AttentionRequest,
+    bm: int,
+    bn: int,
+    *,
+    persistent: bool,
+    window_wave_skip: bool = False,
+):
     """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry."""
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
@@ -135,6 +143,7 @@ def _make_spec(req: AttentionRequest, bm: int, bn: int, *, persistent: bool):
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        window_wave_skip=window_wave_skip,
     )
 
 
@@ -175,7 +184,9 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # D64/D128 coverage is ``supports_attention_dense``'s call.
         features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
         # _base_spec picks these from the dtype, head size and window.
-        recorded=frozenset({"persistent", "waves_per_eu", "block_m", "block_n"}),
+        recorded=frozenset(
+            {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
+        ),
     )
 
 

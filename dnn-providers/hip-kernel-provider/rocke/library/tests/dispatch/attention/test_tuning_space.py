@@ -1032,6 +1032,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                # A wide sliding window keeps the default geometry, so the
+                # window-only knobs are swept from their defaults.
+                _gfx942_request(sliding_window=512),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
