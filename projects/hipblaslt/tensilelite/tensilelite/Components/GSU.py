@@ -226,14 +226,21 @@ class GSUOff(GSU):
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
-        m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # A pre-swizzled A/B interleaves MI_M/MI_N rows per K block, so one
+        # DepthU step spans DepthU*MI elements (GSUOn.graIncrements does the same).
+        mi_dim = 1
+        if tc == "A" and kernel["ProblemType"]["SwizzleTensorA"]:
+            mi_dim = kernel["MatrixInstM"]
+        elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
+            mi_dim = kernel["MatrixInstN"]
+        m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"]) * mi_dim
         if isMirrorIdx:
           m = -m
 
         if writer.states.globalReadIncsUseVgpr:
             with writer.allocTmpSgpr(2, tag="GSUOff_graIncrements_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
-                module.add(SMovB32(dst=sgpr(tmpSgpr+0), src="DepthU*%d"%(tP["bpeGR"]), comment="DepthU*Bpe"))
+                module.add(SMovB32(dst=sgpr(tmpSgpr+0), src="DepthU*%d"%(tP["bpeGR"] * mi_dim), comment="DepthU*Bpe*MI_dim(%d)"%mi_dim))
                 module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=stride, \
                     comment="incr%s%s = %s*DepthU*bpeGR (unrollIdx)"%(tc, loopChar, stride) ))
                 # TODO - this should be mul-H??
