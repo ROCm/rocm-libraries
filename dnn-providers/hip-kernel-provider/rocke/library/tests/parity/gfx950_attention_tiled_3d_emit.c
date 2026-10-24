@@ -275,6 +275,21 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_kv_lds_swizzle = true;
         s->use_wave_page_id_load = true;
         break;
+    /* head_size=192 MHA decode selector spec */
+    case 16:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_segments = 16;
+        s->num_seqs = 1;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
     default:
         return -1;
     }

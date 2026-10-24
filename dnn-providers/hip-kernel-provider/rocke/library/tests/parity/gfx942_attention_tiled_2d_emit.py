@@ -125,6 +125,22 @@ _CONFIGS = {
         tile_size=64,
         use_i64_kv_addr=True,
     ),
+    # --- idx8: head_size=192 MHA prefill selector spec
+    8: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=32,
+    ),
 }
 
 

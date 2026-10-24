@@ -250,12 +250,13 @@ bool rocke_gfx950_attention_tiled_2d_supports(
         rocke_g950_reason(reason, reason_cap, buf);
         return false;
     }
-    /* head_size in {64,128,256} (Py627). */
-    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 256))
+    /* head_size in {64,128,192,256} (Py627). */
+    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 192
+         || args->head_size == 256))
     {
         snprintf(buf,
                  sizeof(buf),
-                 "tiled 2D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 2D kernel only supports head_size in {64,128,192,256} (got %d)",
                  args->head_size);
         rocke_g950_reason(reason, reason_cap, buf);
         return false;

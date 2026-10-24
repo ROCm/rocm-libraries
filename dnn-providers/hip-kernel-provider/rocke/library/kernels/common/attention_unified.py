@@ -472,7 +472,7 @@ def _tiled_3d_impl(arch: str):
 # rejects a problem the kernel would in fact have run, so new coverage added
 # here would simply never become reachable. Exporting the sets makes that
 # impossible by construction.
-UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 256)
+UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 192, 256)
 """Head sizes the scalar 2D backend covers.
 
 The kernel loops over head_size with ``b.unroll(p.head_size)``, so any head
