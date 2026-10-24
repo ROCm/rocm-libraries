@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -138,9 +139,8 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &beta, sizeof(T), hipMemcpyHostToDevice));
 
-    hipsparseDnMatDescr_t A, B;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
+    hipsparseLocalDnMat A(A_m, A_n, lda, dA, typeT, orderA);
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
 
     // Query SDDMM buffer
     size_t bufferSize;
@@ -207,8 +207,6 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     unit_check_near(1, nnz, 1, hval_gold.data(), hval_2.data());
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -281,11 +279,8 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
                     T* dA = (T*)dA_managed.get();
                     T* dB = (T*)dB_managed.get();
 
-                    hipsparseDnMatDescr_t A, B;
-                    CHECK_HIPSPARSE_ERROR(
-                        hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-                    CHECK_HIPSPARSE_ERROR(
-                        hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
+                    hipsparseLocalDnMat A(A_m, A_n, lda, dA, typeT, orderA);
+                    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
 
                     size_t bufferSize;
                     CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_bufferSize(handle,
@@ -300,9 +295,6 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
                                                                     alg,
                                                                     &bufferSize));
                     buffer_size_max = std::max(buffer_size_max, bufferSize);
-
-                    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-                    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
                 }
             }
         }
@@ -362,11 +354,8 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
                         CHECK_HIP_ERROR(
                             hipMemcpy(dB, hB.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
 
-                        hipsparseDnMatDescr_t A, B;
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
+                        hipsparseLocalDnMat A(A_m, A_n, lda, dA, typeT, orderA);
+                        hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
 
                         // Reset the sparse matrix values before each call.
                         CHECK_HIP_ERROR(hipMemcpy(
@@ -415,9 +404,6 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
                                        idx_base);
 
                         unit_check_near(1, nnz, 1, hval_gold.data(), hval_out.data());
-
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
                     }
                 }
             }

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -249,8 +250,7 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
     // Create dense matrix descriptor.
-    hipsparseDnMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     const int64_t bell_col_ind_size = mb * ellCols / ellBlockSize;
     const int64_t bell_val_size     = int64_t(m) * ellCols;
@@ -306,7 +306,6 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
