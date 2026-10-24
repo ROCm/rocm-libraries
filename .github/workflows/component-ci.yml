@@ -25,6 +25,8 @@ jobs:
       geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
+      tensilelite-unit: ${{ steps.configure.outputs.tensilelite_unit }}
+      tensilelite-gtest: ${{ steps.configure.outputs.tensilelite_gtest }}
       library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
@@ -89,6 +91,24 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  tensilelite-unit:
+    name: "TensileLite unit"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-unit == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-unit.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
+  tensilelite-gtest:
+    name: "TensileLite gtest"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-gtest == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-gtest.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   library-uniqueness:
     name: "hipBLASLt library UID uniqueness"
     needs: changes
@@ -104,6 +124,8 @@ jobs:
       - geko
       - miopen
       - tensilelite-coverage
+      - tensilelite-unit
+      - tensilelite-gtest
       - library-uniqueness
     runs-on: ubuntu-24.04
     steps:
