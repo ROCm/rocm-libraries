@@ -27,8 +27,7 @@ This module re-uses every MFMA / async DMA / softmax helper from the
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_additive_bias import (
@@ -40,6 +39,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._lse_store import lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -60,6 +60,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     mfma_16x16x32_for_dtype as _mfma_16x16x32,
@@ -299,9 +300,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -1371,8 +1370,18 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
+    #   still differs from before LSE existed: the masked-segment merge fix below
+    #   applies with LSE on or off.)
+    emit_lse: bool = field(default=False, kw_only=True)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1383,13 +1392,15 @@ class UnifiedAttentionReduceTiledSpec:
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            "rocke_uattn_reduce_tiled",
+        parts = [
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
-        )
+        ]
+        if self.emit_lse:
+            parts.append("lse")
+        return kernel_name_join("rocke_uattn_reduce_tiled", *parts)
 
 
 def build_unified_attention_reduce_tiled(
@@ -1407,7 +1418,8 @@ def build_unified_attention_reduce_tiled(
     Grid: ``(total_q, num_query_heads, 1)``.  Each CTA reduces over the
     ``NUM_SEGMENTS`` segments for one (token, head):
 
-      1. overall_max = max(segm_max)
+      1. overall_max = max(segm_max) over segments with segm_expsum > 0 (a
+         segment masked for the row stores max=0, sum=0 and is treated as -inf)
       2. overall_expsum = sum(segm_expsum * exp2(segm_max - overall_max))
       3. acc[d] = sum_s segm_output[s,d] * exp2(segm_max[s] - overall_max)
       4. output[d] = acc[d] / overall_expsum  (with 0/0 -> 0)
@@ -1435,6 +1447,17 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     q_token = b.block_id_x()
     q_head = b.block_id_y()
@@ -1508,6 +1531,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)
@@ -1570,6 +1598,22 @@ def build_unified_attention_reduce_tiled(
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
         out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
+
+    if spec.emit_lse:
+        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
+        # lane writes. overall_max is in log2 units (segm_max carries
+        # scale*log2e); lse_store converts to natural log and writes -inf for a
+        # row with no mass (every segment empty), whose O is already 0.
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_store(
+                b,
+                lse,
+                lse_index,
+                overall_max,
+                overall_expsum,
+                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+            )
 
     return b.kernel
 

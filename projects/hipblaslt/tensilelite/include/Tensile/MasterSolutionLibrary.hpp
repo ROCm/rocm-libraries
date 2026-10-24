@@ -39,6 +39,10 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+#include <Tensile/LocalKernelIndex.hpp>
+#include <Tensile/LocalKernelLibrary.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -169,6 +173,15 @@ namespace TensileLite
         mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
             solutionSources;
 
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+        // Consulted by the master the caller queries, for GEMM queries only:
+        // the grouped GEMM ones go to the shipped library alone. Shard masters
+        // hold the same pointer but are never queried: placeholders call their
+        // inner library directly.
+        std::shared_ptr<LocalKernelLibrary<MyProblem, MySolution>> localLibrary
+            = globalLocalKernelLibrary<MyProblem, MySolution>();
+#endif
+
         MasterSolutionLibrary() = default;
 
         bool initLibraryMapping(const std::string& tensileLibPath)
@@ -293,6 +306,13 @@ namespace TensileLite
         /// file's blob cache or to a loaded shard's cache.
         std::shared_ptr<MySolution> resolveSolutionByIndex(const int index) const
         {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // Local kernels have no shard; loadLibrary would load an unrelated
+            // one.
+            if(isLocalKernelIndex(index))
+                return localLibrary ? localLibrary->lookupIndex(index)
+                                    : std::shared_ptr<MySolution>();
+#endif
             // Idempotent, and a no-op unless this is a lazy-loading master.
             loadLibrary(index);
 
@@ -514,7 +534,17 @@ namespace TensileLite
                 }
             }
             else
-                rv = library->findBestSolution(problem, hardware, fitness);
+            {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+                if(localLibrary && (rv = localLibrary->findExact(problem, hardware)))
+                {
+                    if(fitness)
+                        *fitness = 0.0;
+                }
+                else
+#endif
+                    rv = library->findBestSolution(problem, hardware, fitness);
+            }
 
             if(Debug::Instance().printLibraryLogicIndex())
             {
@@ -532,7 +562,17 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            auto rv = library->findAllSolutions(problem, hardware, searchType);
+            if(localLibrary)
+            {
+                auto local = localLibrary->findAll(problem, hardware, searchType);
+                rv.insert(local.begin(), local.end());
+            }
+            return rv;
+#else
             return library->findAllSolutions(problem, hardware, searchType);
+#endif
         }
 
         virtual SolutionSet<MySolution>
@@ -551,21 +591,47 @@ namespace TensileLite
             if(Debug::Instance().printSolutionSelectionTime())
             {
                 auto   start  = std::chrono::steady_clock::now();
-                auto   result = library->findTopSolutions(problem, hardware, numSolutions);
+                auto   result = findTopSolutions_runner(problem, hardware, numSolutions);
                 auto   end    = std::chrono::steady_clock::now();
                 double time   = std::chrono::duration<double, std::micro>(end - start).count();
                 std::cout << "Solution selection time: " << time << " us" << std::endl;
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
 
                 return result;
             }
             else
             {
-                const auto& result = library->findTopSolutions(problem, hardware, numSolutions);
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
-
-                return result;
+                return findTopSolutions_runner(problem, hardware, numSolutions);
             }
+        }
+
+        SolutionVector<MySolution> findTopSolutions_runner(MyProblem const& problem,
+                                                           Hardware const&  hardware,
+                                                           int              numSolutions) const
+        {
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // The mapped kernel goes first and the shipped library fills the
+            // rest. It cannot appear twice: the shipped library never holds a
+            // local kernel.
+            std::shared_ptr<MySolution> local;
+            if(localLibrary && numSolutions > 0)
+                local = localLibrary->findExact(problem, hardware);
+            if(local)
+            {
+                SolutionVector<MySolution> rv{local};
+                if(numSolutions == 1)
+                {
+                    lastFindTopRetAll = false;
+                    return rv;
+                }
+                auto rest         = library->findTopSolutions(problem, hardware, numSolutions - 1);
+                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
+                rv.insert(rv.end(), rest.begin(), rest.end());
+                return rv;
+            }
+#endif
+            auto result       = library->findTopSolutions(problem, hardware, numSolutions);
+            lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
+            return result;
         }
 
         virtual bool lastFindTopAlreadyRetAll() const override
