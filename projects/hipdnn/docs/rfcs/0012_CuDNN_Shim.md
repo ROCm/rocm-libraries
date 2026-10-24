@@ -54,6 +54,7 @@ signature itself names a v0.x symbol: the shim provides just enough to keep
 v9 TUs compiling — chiefly the small C-API stub `cudnn.h`
 (`cudnnHandle_t`, `cudnnStatus_t`, etc.; see §4.7). A v0.x stub layer is a
 candidate follow-up RFC (§9).
+Superseded for v0.x by [RFC 0021](./0021_CuDNN_V8_Shim.md).
 
 Also out of scope: **ABI** compatibility (consumers must recompile) and
 **Python bindings** — this is a C++-only shim, and the motivating consumer
@@ -616,6 +617,9 @@ v0.x/v8 backend-descriptor headers, and exposes the v0.x class names
 includes the upstream umbrella gets these names whether they use them
 or not.
 
+Superseded for v0.x by [RFC 0021](./0021_CuDNN_V8_Shim.md), which adds the v0.x headers to this
+umbrella.
+
 **Decision (per §1)**: the shim's `cudnn_frontend.h` is a hand-curated
 **v9-only umbrella**. It does not mirror upstream's include pattern, does
 not pull in any v0.x descriptor header, and does not declare the v0.x
@@ -690,6 +694,12 @@ That implies:
 - Within a major version of `hipdnn_frontend`, the shim's surface area may
   **only** grow (new node wrappers, new enum values mapped) — never shrink
   or change signatures.
+  Waived once, for the cuDNN v8 proof of concept:
+  [RFC 0021 §9](./0021_CuDNN_V8_Shim.md#9-amendment-builders-over-hipdnn)
+  removed (R4) the backend descriptor C API functions and three whole enums that
+  no remaining shim code names, and changed the parameter types of the
+  errata helper `check_shape`. A non-POC release with these changes needs a
+  `hipdnn_frontend` major version bump.
 - The shim's public symbols will additionally expose the upstream-style
   version macros (`CUDNN_FRONTEND_MAJOR_VERSION=1`,
   `CUDNN_FRONTEND_MINOR_VERSION=24`, `CUDNN_FRONTEND_PATCH_VERSION=0`,
@@ -1186,3 +1196,4 @@ PyTorch in, or (c) the test is run on-demand by the shim's named owners
   §4.7 and
   [Supporting Reference §6](./0012_CuDNN_Shim_Reference.md#6-the-cudnnh--v0x-umbrella-header-problem)
   for the underlying constraint and the options considered.
+  The follow-up is [RFC 0021: cuDNN v8 shim](./0021_CuDNN_V8_Shim.md).

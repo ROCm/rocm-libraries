@@ -43,6 +43,7 @@ test_categories:
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"
       - "hipdnn_frontend_tests"
+      - "hipdnn_frontend_cudnn_v8_noexcept_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
       - "hipdnn_bench_tests"

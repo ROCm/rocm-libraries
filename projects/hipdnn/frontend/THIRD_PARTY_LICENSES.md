@@ -9,12 +9,22 @@ hipDNN contains source code derived from the following third-party project.
 - **Version:** v1.24.0 (commit c4a97621eca52fa0c3a1862a411a16be580b25c6)
 - **License:** MIT
 - **Project:** https://github.com/NVIDIA/cudnn-frontend
-- **Use:** Portions of the cuDNN-compatibility shim (`include/hipdnn_compatibility/`)
-  and of `hipdnn_frontend/Types.hpp` and `hipdnn_frontend/Error.hpp` are derived
-  from cuDNN frontend. The cuDNN-shim samples (`samples/cudnn_shim/ConvFprop.cpp`,
-  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror
-  upstream samples. Each such file carries a "Portions derived from NVIDIA cuDNN
-  frontend" header naming its upstream sources.
+- **Use:** Paths are relative to `projects/hipdnn/`. Portions of the
+  cuDNN-compatibility shim (`frontend/include/hipdnn_compatibility/`) and of
+  `frontend/include/hipdnn_frontend/Types.hpp` and
+  `frontend/include/hipdnn_frontend/Error.hpp` are derived from cuDNN frontend.
+  The cuDNN-shim samples `samples/cudnn_shim/ConvFprop.cpp`,
+  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp` and `Pointwise.cpp` mirror upstream samples, and
+  `tests/cudnn_samples/legacy/overlay/cudnn.h` (legacy-corpus harness only,
+  installed with the harness under `share/hipdnn/cudnn_samples`, never under
+  `include/`) stubs the raw backend C functions that upstream
+  `include/cudnn_frontend_shim.h` wraps, with the attribute names and types
+  one legacy sample passes to them.
+  Each such file carries a "Portions derived from NVIDIA cuDNN frontend" header
+  naming its upstream sources.
+  `tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are
+  substituted copies of upstream `samples/legacy_samples/utils/` and keep
+  upstream's license header.
 
 ```
 Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
@@ -46,5 +56,6 @@ same MIT terms as above.
 Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 ```
