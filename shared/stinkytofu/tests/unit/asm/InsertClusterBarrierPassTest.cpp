@@ -300,6 +300,13 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    StinkyInstruction* createWaitDsCnt(int count) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch));
+        inst->addSrcReg(StinkyRegister(count));
+        return inst;
+    }
+
     StinkyInstruction* createWMMA(int destStart, int src0Start, int src1Start) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch);
@@ -1641,6 +1648,55 @@ TEST_F(InsertClusterBarrierPassTest, Rule3ShorterSignalLeadStaysBeforeLiveSccRan
     EXPECT_EQ(lastWriter, sccDef) << "the reader must still see the carry-out "
                                      "s_sub_u32 s90, s90, 1 computed:"
                                   << blockListing(*bb);
+}
+
+// The wait-cnt pass parks an `s_wait_dscnt` in front of the WMMA pair that
+// reads each ds_load. The 100-cycle Rule 3 lead lands on such a WMMA, right
+// behind its drain.
+class InsertClusterBarrierSignalAheadOfDsCntTest : public InsertClusterBarrierPassTest {
+   protected:
+    /// Runs the pass on that loop and returns the Rule 3 handshake's `s_cmp`.
+    StinkyInstruction* runOnDsCntDrainedLoop() {
+        appendGsu1Preheader();
+        openLoop();
+        for (int i = 0; i < 12; ++i) {
+            createDsRead(/*destReg=*/200 + 4 * i, /*addrReg=*/300);
+            createWaitDsCnt(63);
+            createWMMA(8 + (2 * i % 8) * 8, (2 * i % 8) * 8, ((2 * i + 1) % 8) * 8);
+            createWMMA(8 + ((2 * i + 1) % 8) * 8, ((2 * i + 1) % 8) * 8, ((2 * i + 2) % 8) * 8);
+        }
+        appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+        closeLoop();
+
+        runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+                /*streamKMulticast=*/false, /*pgrValue=*/1,
+                /*reduceClusterBarrierPerLoop=*/false);
+
+        StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+        if (loopHead == nullptr) return nullptr;
+        return findClusterWaveCmpAfter(indexOf(loopHead));
+    }
+};
+
+// The signal goes in front of the drain, which stays next to the WMMA it was
+// parked for:
+//
+//     ds_load / s_cmp sgprWaveIdx / s_cbranch / s_barrier_signal -3 / label
+//     s_wait_dscnt / v_wmma / v_wmma
+TEST_F(InsertClusterBarrierSignalAheadOfDsCntTest, TheSignalGoesAheadOfTheDrain) {
+    StinkyInstruction* handshakeCmp = runOnDsCntDrainedLoop();
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    StinkyInstruction* before = realInstBefore(handshakeCmp);
+    ASSERT_NE(before, nullptr);
+    EXPECT_NE(before->getUnifiedOpcode(), GFX::s_wait_dscnt)
+        << "the signal must not sit behind an s_wait_dscnt:" << blockListing(*bb);
+    const size_t cmpIdx = indexOf(handshakeCmp);
+    StinkyInstruction* signal = findClusterSignalBetween(cmpIdx, cmpIdx + 4);
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* after = firstRealInstAfter(signal);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(after->getUnifiedOpcode(), GFX::s_wait_dscnt)
+        << "the drain must stay right in front of its WMMA:" << blockListing(*bb);
 }
 
 // The one shape the downward correction has no answer for: the live range runs
