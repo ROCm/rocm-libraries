@@ -2348,7 +2348,9 @@ std::vector<float> fp8EncodeProbes()
             xs.push_back(std::nextafter(mid, -1e9f));
         }
     }
-    for(const float x : {1000.0f, -1000.0f, 1e-30f, -1e-30f, 0.0f, -0.0f})
+    // No -0.0: P @ V accumulates from +0, so a -0 value reaches the encoder as +0 (-1e-30 still
+    // probes the negative-zero encoding).
+    for(const float x : {1000.0f, -1000.0f, 1e-30f, -1e-30f, 0.0f})
     {
         xs.push_back(x);
     }
