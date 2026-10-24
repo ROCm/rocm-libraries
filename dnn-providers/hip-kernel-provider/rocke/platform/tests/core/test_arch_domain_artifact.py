@@ -456,6 +456,51 @@ class ClassifyTest(unittest.TestCase):
                 self.assertEqual(evidence, expected)
 
 
+class AssemblerCheckTest(unittest.TestCase):
+    """A probe that links is assembled for its target before it counts as ok.
+
+    The backend can select an intrinsic for a target that lacks the instruction
+    and write the encoding into the object without complaint; only the target's
+    text assembler checks every instruction against the target.
+    """
+
+    def test_the_rejection_names_the_instruction_not_the_scratch_file(self):
+        # llvm-mc's diagnostic carries the scratch path; the evidence must not,
+        # or the committed column would change from host to host.
+        diag = (
+            "/tmp/probe-x1y2/k.s:14:2: error: instruction not supported on this GPU\n"
+            "\tv_cvt_scalef32_pk_f32_fp8 v[2:3], v1, v0\n"
+            "\t^\n"
+        )
+        self.assertEqual(
+            G._assembler_rejection(diag),
+            "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        )
+
+    def test_an_instruction_the_target_lacks_is_arch_absent_though_it_links(self):
+        # The fused scale-and-convert links for gfx942 once its flag operand is
+        # a constant, and the object then holds a gfx950-only instruction.
+        from check_ir_validity import _llvm_tool
+
+        clang = _llvm_tool("clang")
+        if clang is None or not G._llvm_mc_beside(clang).is_file():
+            self.skipTest("no clang with an llvm-mc beside it on this host")
+        decl = G._decl_table(_resolve_llvm_flavor())["amdgcn.cvt.scalef32.pk.f32.fp8"]
+        module, why = G._probe_module(decl, "", literal_ints=G._LITERAL_PROBE_VALUES[0])
+        self.assertFalse(why)
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "probe.ll"
+            path.write_text(module)
+            results = {
+                arch: G._probe(clang, path, arch, Path(scratch) / f"{arch}.o")
+                for arch in ("gfx942", "gfx950")
+            }
+        self.assertEqual(results["gfx950"], (G.STATUS_OK, ""))
+        status, evidence = results["gfx942"]
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT, evidence)
+        self.assertTrue(evidence.startswith("assembler: "), evidence)
+
+
 class DeclareParseTest(unittest.TestCase):
     """Every probe is built from a declare, so the parse is the whole table.
 
@@ -874,6 +919,50 @@ class ValidityGateTest(unittest.TestCase):
         self.assertIn("-O0", argv)
         self.assertNotIn("-O3", argv)
 
+    def test_a_bundled_comgr_does_not_send_the_lookup_to_path(self):
+        """A comgr bundled with another package (the ROCm torch wheel) has no LLVM
+        beside it. The lookup must then find the installed ROCm toolchain, not the
+        first clang on PATH, which is typically a distro clang that cannot link
+        AMDGPU code objects."""
+        from unittest import mock
+
+        import check_ir_validity as V
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        # Only installs that ship a compiler can answer: a runtime-only ROCm has
+        # no <root>/llvm/bin/clang, and the lookup then rightly finds none.
+        installs = [
+            d
+            for d in _rocm_root_libdirs()
+            if any(
+                (root / "llvm" / "bin" / "clang").is_file()
+                for root in list(Path(d).resolve().parents)[:3]
+            )
+        ]
+        if not installs:
+            self.skipTest("no ROCm install with an LLVM toolchain on this host")
+        with tempfile.TemporaryDirectory() as bundled:
+            fake_comgr = Path(bundled) / "lib" / "libamd_comgr.so"
+            fake_comgr.parent.mkdir()
+            fake_comgr.touch()
+            env = {k: v for k, v in os.environ.items() if k != "ROCKE_LLVM_BIN"}
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch(
+                    "rocke.runtime.comgr.resolved_lib_path",
+                    return_value=str(fake_comgr),
+                ),
+            ):
+                found = V._llvm_tool("clang")
+        self.assertIsNotNone(found)
+        self.assertTrue(
+            any(
+                Path(found).resolve().is_relative_to(Path(d).resolve().parents[1])
+                for d in installs
+            ),
+            f"{found} is not inside a ROCm install {installs}",
+        )
+
     def test_a_target_this_clang_cannot_build_is_not_an_emission_failure(self):
         """rocke wires arches ahead of the toolchains that can build for them.
 
@@ -920,9 +1009,16 @@ class ValidityGateTest(unittest.TestCase):
                 )
             )
         )
+        # The llvm23-gated target ops (TDM tensor moves, ...) word it this way.
+        self.assertTrue(
+            V._requires_newer_flavor(
+                ValueError("tensor_load_to_lds requires LLVM flavor llvm23, got llvm22")
+            )
+        )
         for exc in (
             NotImplementedError("no handler for op 'tile.frobnicate'"),
             NotImplementedError("unsupported dtype combination"),
+            ValueError("tensor_load_to_lds requires a target with tdm, got gfx950"),
         ):
             with self.subTest(exc=str(exc)):
                 self.assertFalse(V._requires_newer_flavor(exc))

@@ -109,10 +109,12 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # top-level CMakeLists.txt). These CK-impl plugins device-compile the same way the main
     # MIOpen library does, so without this their device objects fail to link with undefined
     # __ubsan_handle_*_abort symbols. -Xarch_device scopes -fno-sanitize=undefined to the device
-    # sub-compile only, so host code keeps UBSan.
+    # sub-compile only, so host code keeps UBSan. The link option keeps clang from linking the
+    # host-side ubsan_offload runtime into the plugin (see src/CMakeLists.txt).
     if(MIOPEN_DISABLE_DEVICE_UBSAN)
         target_compile_options(${lib_name} PRIVATE
             "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+        target_link_options(${lib_name} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
     endif()
 
     # Mark as building the DLL for dllexport on Windows
