@@ -122,15 +122,44 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     /// MIIR compiler, which is very slow.
     ///
     /// The loop below does all the above at once.
+    ///
+    /// The workspace size in a find-db record can be smaller than today's requirement. Non-tunable
+    /// solvers use the direct GetWorkspaceSize result. Immediate resolves one configuration for a
+    /// tunable solver from the perf-db or its default heuristic, so use that solution's workspace
+    /// size instead of a solver-wide workspace query. This avoids walking every CK instance and
+    /// split-K value.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied = 0;
-    for(const auto& s : interim)
+    auto n_copied                        = 0;
+    auto workspace_ctx                   = ctx;
+    workspace_ctx.do_search              = false;
+    workspace_ctx.disable_search_enforce = true;
+    auto db                              = MakeConvDbGetter(workspace_ctx);
+    for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
-        if(!solver_id.GetSolver().IsApplicable(ctx, problem))
+        const auto solver    = solver_id.GetSolver();
+        if(!solver.IsApplicable(ctx, problem))
             continue;
+        if(solver.MayNeedWorkspace())
+        {
+            const auto required = [&] {
+                if(solver.IsTunable())
+                {
+                    const auto live_solution = solver.FindSolution(workspace_ctx, problem, db, {});
+                    if(live_solution.Succeeded())
+                        return live_solution.workspace_sz;
+                }
+                return solver.GetWorkspaceSize(ctx, problem);
+            }();
+            if(required > s.workspace_size)
+            {
+                MIOPEN_LOG_I2(solver_id.ToString() << ": find-db workspace " << s.workspace_size
+                                                   << " is less than required " << required);
+                s.workspace_size = required;
+            }
+        }
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
