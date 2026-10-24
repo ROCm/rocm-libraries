@@ -623,6 +623,9 @@ The installed-artifact lane used to skip the snapshot tests, because it had no s
 `conftest.py` still detects a missing plugin and skips those tests cleanly rather than erroring the
 whole run, so if a lane ever drops syrupy again, its log will show skips rather than failures.
 
+Partial TheRock categories pass `--snapshot-warn-unused`, so every selected snapshot is asserted
+while snapshots outside that category are reported as warnings instead of failures.
+
 Three adjacent lanes run none of these tests, despite their names:
 `Component CI: rocISA` only tests a `pip install` of the rocisa package; Math CI's `codecov` job is
 C++ hipBLASLt coverage and is one character away from `tensilelite-unit-codecov`; and `precheckin` is
