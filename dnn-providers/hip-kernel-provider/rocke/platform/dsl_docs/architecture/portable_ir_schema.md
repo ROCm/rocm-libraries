@@ -93,8 +93,10 @@ objects:
 `f` (double), `b` (bool), `s` (string), `l` (list of nested attr maps), mirroring
 `rocke_attr_kind_t`. The importer never infers a type from JSON syntax — an
 untagged `1` is ambiguous between an int and a bool, and that ambiguity is
-exactly the kind of drift this path exists to prevent. Attr keys are sorted for
-diff-stable artifacts.
+exactly the kind of drift this path exists to prevent. Double attrs preserve
+IEEE non-finite values using Python `json.dumps` spellings (`NaN`, `Infinity`,
+and `-Infinity`), which both native JSON decoders accept. Attr keys are sorted
+for diff-stable artifacts.
 
 **Ops and regions.** An op carries `opcode`, `operands`, `results`, `attrs`, and
 nested `regions`; a region carries a `label` and its `ops`.
