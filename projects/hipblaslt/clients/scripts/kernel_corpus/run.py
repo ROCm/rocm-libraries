@@ -15,8 +15,11 @@ stopped.
     run.py --rocm-dir build/dist/rocm --out corpus-gfx90a
 
 Sharding follows TheRock's test jobs: SHARD_INDEX (1-based) and TOTAL_SHARDS select a
-contiguous slice of the corpus. The exit code is 1 when any case failed, crashed or timed out
-(or hipblaslt-test could not run it), 3 when the GPU stopped responding, and 0 otherwise.
+contiguous slice of the corpus. Failures that match the known-bugs list (known_bugs.py) are
+reported as known_fail. The exit code is 1 when a case failed, crashed or timed out outside that
+list, when the list needs attention (an entry's cases all passed, or its review date has
+passed), or when hipblaslt-test could not run a case; 2 for a usage error or a malformed list;
+3 when the GPU stopped responding; and 0 otherwise.
 """
 
 from __future__ import annotations
@@ -589,6 +592,7 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         help="Device PCI chip ID, e.g. 0x75a0 (default: from rocminfo)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Plan and report; run nothing")
+    report.add_known_bugs_argument(parser)
     args = parser.parse_args(argv)
     if not args.rocm_dir:
         parser.error("--rocm-dir is required when THEROCK_BIN_DIR and ROCM_PATH are unset")
@@ -599,6 +603,11 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
+    try:
+        known = report.load_known_bugs(args)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_USAGE
     try:
         tool = Tool(args.rocm_dir.resolve())
     except FileNotFoundError as e:
@@ -637,13 +646,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         "device": device["device"],
         "host": socket.gethostname(),
         "hipblaslt_git_version": device["hipblaslt_git_version"],
+        "profile": args.profile,
     }
     meta = {
         **shard.base,
         "rocm_dir": str(tool.rocm_dir),
         "cu_count": cu_count,
         "pci_chip_id": chip_id,
-        "profile": args.profile,
         "shard_index": args.shard_index,
         "total_shards": args.total_shards,
         "solutions_in_corpus": len(records),
@@ -696,8 +705,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     code = 0
     if not args.dry_run and cases:
         code = shard.run_cases(cases)
-    summary = report.write_reports(out)
-    if code == 0 and (summary["failing_cases"] or summary["case_status"].get("harness_error")):
+    summary = report.write_reports(out, known=known)
+    if code == 0 and (report.run_failed(summary) or summary["case_status"].get("harness_error")):
         code = EXIT_FAILURES
     meta["finished"] = utc_now()
     meta["exit_code"] = code
