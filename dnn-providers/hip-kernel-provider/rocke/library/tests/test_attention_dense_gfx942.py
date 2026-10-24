@@ -334,6 +334,7 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
 }
 
@@ -352,6 +353,8 @@ _INJECTIVITY_BASES = {
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
+    # The sliding-window base is what makes window_wave_skip reachable.
+    "d128_fp16_swa": dict(head_size=128, dtype="fp16", sliding_window=128),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
@@ -1169,6 +1172,8 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    dict(sliding_window=128, window_wave_skip=True),  # accepted
+    dict(window_wave_skip=True),  # REJECTED: needs a sliding window
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
