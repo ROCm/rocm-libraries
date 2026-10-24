@@ -19,8 +19,10 @@ from __future__ import annotations
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
-    "sdpa_rdna": ("attention_rdna",),
-    "sdpa_rdna_decode": ("attention_rdna",),
+    # The RDNA kernels import the aiw directory's Philox (kernel modification 27, decision
+    # Q7: one source for the dropout stream), so it is an input of theirs too.
+    "sdpa_rdna": ("attention_rdna", "attention_rdna4/philox.py"),
+    "sdpa_rdna_decode": ("attention_rdna", "attention_rdna4/philox.py"),
     "sdpa_cdna": ("attention_cdna",),
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),

@@ -119,8 +119,9 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 #
 # Per op: `N` is RMSNorm's row width; `head_dim`, `head_dim_v` and `causal` are what
 # an SDPA graph asks for, and on CDNA so is the kernel family, which the target arch
-# fixes. `has_bias`, `has_sink` and the bias forms (`bias_f32`, `bias_q`,
-# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
+# fixes. `has_bias`, `has_sink`, `has_dropout` and the bias forms (`bias_f32`, `bias_q`,
+# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink, or drops
+# attention probabilities. The
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
 # `kv_align`) say which graphs an object can serve: the matcher gates on them, and
 # autotune compares the objects they distinguish as separate catalog entries.
@@ -143,7 +144,9 @@ GRAPH_DETERMINED_FIELDS = {
     "bias_q",
     "bias_kstrided",
     "has_sink",
+    "has_dropout",
     "merge_symbol",
+    "fill_symbol",
     "kernel",
 }
 
