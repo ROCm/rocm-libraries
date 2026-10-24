@@ -226,6 +226,29 @@ you can call the run API to launch the kernel directly.
         gemm.run(stream);
     }
 
+Uniform summation order
+^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, hipBLASLt uses a uniform summation order. If every row of matrix A is the same vector, every row of the output matrix D is bitwise identical. This guarantee applies across the M dimension within a single run. It is not run-to-run determinism.
+
+The mode restricts kernel selection and launch configuration. As a result, it might slightly reduce performance for some problem sizes. If your application doesn't need identical output rows, you can turn the mode off.
+
+You can control the mode at three levels:
+
+* **Handle:** Call ``hipblasLtSetUniformSummationOrder``. Use ``1`` for on (the default) or ``0`` for off.
+* **Matrix multiplication descriptor:** Set the ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`` attribute. Use ``-1`` to inherit the handle setting (the default), ``0`` for off, or ``1`` for on.
+* **GEMM preference:** Call ``hipblaslt_ext::GemmPreference::setUniformSummationOrder``. It takes an ``int32_t`` with the same values: ``-1`` (default, inherit from the handle), ``0`` (off), or ``1`` (on). Any other value throws ``std::invalid_argument``.
+
+To read the current preference value, call ``hipblaslt_ext::GemmPreference::getUniformSummationOrder``. It returns an ``int32_t``.
+
+.. code-block:: c++
+
+    hipblaslt_ext::GemmPreference pref;
+    // Turn off uniform summation order for this GEMM to favor performance
+    pref.setUniformSummationOrder(0);
+
+When uniform summation order is on and no compatible configuration exists, the call returns ``HIPBLAS_STATUS_INVALID_VALUE``. hipBLASLt doesn't silently produce a non-uniform result.
+
 .. _grouped-gemm:
 
 Grouped GEMM
