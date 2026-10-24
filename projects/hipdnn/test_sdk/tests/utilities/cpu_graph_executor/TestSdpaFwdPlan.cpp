@@ -783,31 +783,35 @@ TEST_P(TestSdpaFwdPlanPagedApplicability, MatchesContract)
 INSTANTIATE_TEST_SUITE_P(
     ,
     TestSdpaFwdPlanPagedApplicability,
-    Values(PagedApplicabilityCase{"PagedKv", {}, true},
-           PagedApplicabilityCase{
-               "PagedKOnly", {true, false, true, DataType::INT32, std::nullopt}, true},
-           PagedApplicabilityCase{
-               "MaxSeqLenWithinCapacity", {true, true, true, DataType::INT32, 5}, true},
-           // cuDNN: paging needs padding.
-           PagedApplicabilityCase{
-               "WithoutSeqLens", {true, true, false, DataType::INT32, std::nullopt}, false},
-           PagedApplicabilityCase{
-               "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7}, false},
-           // cuDNN infers the extent from the dense V when only K is paged (6), so the table
-           // (3 blocks of 2) fits; see PagedKOnly above.
-           // cuDNN: the table has exactly ceil(max_seq_len_kv / block size) entries (2, not 3).
-           PagedApplicabilityCase{
-               "TableWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 4}, false},
-           // cuDNN infers an unset extent from the bias when both sides are paged.
-           PagedApplicabilityCase{
-               "ExtentFromBias", {true, true, true, DataType::INT32, std::nullopt, 6}, true},
-           PagedApplicabilityCase{
-               "ExtentFromShortBias", {true, true, true, DataType::INT32, std::nullopt, 4}, false},
-           PagedApplicabilityCase{
-               "FloatPageTable", {true, true, true, DataType::FLOAT, std::nullopt}, false},
-           // cuDNN: max_seq_len_kv without paging is rejected.
-           PagedApplicabilityCase{
-               "MaxSeqLenWithoutPaging", {false, false, true, DataType::INT32, 6}, false}),
+    Values(
+        PagedApplicabilityCase{"PagedKv", {}, true},
+        PagedApplicabilityCase{
+            "PagedKOnly", {true, false, true, DataType::INT32, std::nullopt, std::nullopt}, true},
+        PagedApplicabilityCase{
+            "MaxSeqLenWithinCapacity", {true, true, true, DataType::INT32, 5, std::nullopt}, true},
+        // cuDNN: paging needs padding.
+        PagedApplicabilityCase{"WithoutSeqLens",
+                               {true, true, false, DataType::INT32, std::nullopt, std::nullopt},
+                               false},
+        PagedApplicabilityCase{
+            "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7, std::nullopt}, false},
+        // cuDNN infers the extent from the dense V when only K is paged (6), so the table
+        // (3 blocks of 2) fits; see PagedKOnly above.
+        // cuDNN: the table has exactly ceil(max_seq_len_kv / block size) entries (2, not 3).
+        PagedApplicabilityCase{
+            "TableWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 4, std::nullopt}, false},
+        // cuDNN infers an unset extent from the bias when both sides are paged.
+        PagedApplicabilityCase{
+            "ExtentFromBias", {true, true, true, DataType::INT32, std::nullopt, 6}, true},
+        PagedApplicabilityCase{
+            "ExtentFromShortBias", {true, true, true, DataType::INT32, std::nullopt, 4}, false},
+        PagedApplicabilityCase{"FloatPageTable",
+                               {true, true, true, DataType::FLOAT, std::nullopt, std::nullopt},
+                               false},
+        // cuDNN: max_seq_len_kv without paging is rejected.
+        PagedApplicabilityCase{"MaxSeqLenWithoutPaging",
+                               {false, false, true, DataType::INT32, 6, std::nullopt},
+                               false}),
     [](const TestParamInfo<PagedApplicabilityCase>& info) { return std::string(info.param.name); });
 
 // A paged graph runs through the executor and equals gathering the cache and running the dense
