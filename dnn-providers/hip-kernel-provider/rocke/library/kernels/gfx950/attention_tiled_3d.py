@@ -270,6 +270,20 @@ class UnifiedAttention3DTiledSpec:
                     f"tile_size_override={t} x head_size={self.head_size} needs "
                     "more async calls per tile than s_waitcnt can count"
                 )
+        # An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a
+        # whole number of rows (head_size 192), each lane derives its own row,
+        # which holds only while a tile is one page and its LDS rows are not
+        # permuted.
+        if (
+            self.kv_layout == "paged"
+            and self.kv_storage_dtype is None
+            and KV_HALVES_PER_CALL % self.head_size != 0
+            and (self.tile_size != self.block_size or self.use_kv_lds_swizzle)
+        ):
+            raise ValueError(
+                f"head_size={self.head_size} K/V copies span partial rows: needs "
+                "page-sized tiles and no use_kv_lds_swizzle"
+            )
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -905,7 +919,16 @@ def build_unified_attention_3d_tiled(
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
             ph = (call * tokens_per_call) % KV_CHUNKS_PER_ROW if KV_SWZ else 0
-            voff = b.add(lane_within_b[ph], b.const_i32(tok0 * kv_stride_tok_b))
+            if KV_HALVES_PER_CALL % HD:
+                # The call covers a partial row (head_size 192), so each lane
+                # takes its own (row, dim); the tile is one page (spec check).
+                lin = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
+                tok_b = b.mul(b.div(lin, b.const_i32(HD)), b.const_i32(kv_stride_tok_b))
+                head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+                dim_b = b.mul(b.mod(lin, b.const_i32(HD)), b.const_i32(KV_BYTES))
+                voff = b.add(b.add(tok_b, head_b), dim_b)
+            else:
+                voff = b.add(lane_within_b[ph], b.const_i32(tok0 * kv_stride_tok_b))
             if I64_KV_ADDR:
                 base_i64 = b.mul(
                     b.zext(page_ids[blk], I64), b.const_i64(kv_stride_blk_b)

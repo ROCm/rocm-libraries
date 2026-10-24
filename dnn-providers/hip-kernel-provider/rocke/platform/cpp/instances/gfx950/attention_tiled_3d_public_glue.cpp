@@ -1015,6 +1015,22 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
             return NULL;
         }
+        /* An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a
+         * whole number of rows (head_size 192), each lane derives its own row,
+         * which holds only while a tile is one page and its LDS rows are not
+         * permuted. */
+        if(!strided_kv && spec->kv_storage_dtype == NULL && spec->head_size > 0
+           && ROCKE_ATTN3D950_KV_HALVES_PER_CALL % spec->head_size != 0
+           && ((spec->has_tile_size_override && spec->tile_size_override != spec->block_size)
+               || spec->use_kv_lds_swizzle))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "head_size=%d K/V copies span partial rows: needs page-sized tiles "
+                            "and no use_kv_lds_swizzle",
+                            spec->head_size);
+            return NULL;
+        }
 
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
