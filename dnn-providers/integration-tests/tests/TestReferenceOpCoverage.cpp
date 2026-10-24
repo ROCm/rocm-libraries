@@ -172,10 +172,11 @@ TEST(TestReferenceOpCoverage, Fp8BundlesAreNotListedAsGaps)
     }
 }
 
-// Both references run the ragged bundles (CPU SdpaRaggedFwdPlan, GPU GpuSdpaRaggedFwdPlan), so
+// Both references run every BSHD forward bundle: ragged (native ragged plans), paged and ragged Q
+// over paged K/V (the dense plan and the ragged-as-dense rewrite), with or without sinks. So
 // neither may list them: a gap entry would stop validating them against golden data. The ids
 // come from discovering the bundles the build copies next to the test binary, so the expected
-// list must name exactly the registered ragged bundles.
+// list must name exactly the registered BSHD bundles.
 TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
 {
     const auto dataDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
@@ -198,6 +199,13 @@ TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
         "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
         "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
         "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_paged_Decode.Decode",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_paged_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_bf16_hd64_causal_paged_sinks_Decode.Decode",
+        "quick_SdpaFwd_bshd_bf16_hd64_window_ragged_paged_sinks_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_SpecDecode.SpecDecode",
+        "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_sinks_Decode.Decode",
+        "quick_SdpaFwd_bshd_fp16_hd64_window_ragged_paged_Mixed.Mixed",
     };
     EXPECT_EQ(discovered, expected);
 
