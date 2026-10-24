@@ -12,7 +12,7 @@ Two environments import this module, and they resolve `dualwave` differently:
 
 * **Build.** `flydsl` is installed and `kernels.*` resolves, so `dualwave` is the real
   `kernels.attention_cdna.flash_attn_utils`.
-* **Generator.** No flydsl, no kernel root -- by design, so that `.ci/build-shim.sh` stays cheap. `dualwave`
+* **Generator.** No flydsl, no kernel root -- by design, so that the generator imports without FlyDSL installed. `dualwave`
   falls back to `flyc_polyfill`, which carries a verbatim copy of the one name the generate-time path needs
   (`DualwaveSwpTraits`, the base class of `fmha_traits_gfx950.ParityDualwaveTraits`).
 

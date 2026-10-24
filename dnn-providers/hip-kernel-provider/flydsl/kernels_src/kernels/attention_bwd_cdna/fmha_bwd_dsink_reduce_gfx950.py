@@ -33,7 +33,7 @@ _COMPILE_HINTS = {}
 
 
 def dsink_reduce_arg_values(vals, sinkterm, dsink):
-    """Launch values keyed by kernel argument name. `vals` is `h/gate2.arg_values(...)`'s dict (it holds batch_size, the varlen
+    """Launch values keyed by kernel argument name. `vals` is the dict of launch values keyed by kernel argument name (it holds batch_size, the varlen
     descriptors, max_seqlen_q, num_head_q); `sinkterm` / `dsink` are device addresses.
     """
     keys = (

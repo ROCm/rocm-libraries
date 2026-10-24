@@ -1239,7 +1239,7 @@ def _record(
 
 
 def _stop_reasons(records: list[dict]) -> list[str]:
-    """Why a ship-pins run ships nothing: any ``error`` row, a row carrying the reduce kernel that did not build ``ok``, or such a row with a red per-kernel gate."""
+    """Why a ship-pins run ships nothing: any ``error`` row, a row carrying the reduce kernel that did not build ``ok``, or such a row with a red per-kernel gate or a red R-MIR verdict."""
     reasons = []
     for record in records:
         combined = bool(record["knobs"].get("reduce_symbol"))
@@ -1249,6 +1249,8 @@ def _stop_reasons(records: list[dict]) -> list[str]:
         elif combined and record["gates"]["pin_gate"]["verdict"] != "ok":
             problems = "; ".join(record["gates"]["pin_gate"]["problems"])
             reasons.append(f"{record['name']}: per-kernel gate red: {problems}")
+        elif combined and record["gates"]["rmir"]["verdict"] == "red":
+            reasons.append(f"{record['name']}: R-MIR spill finding")
     return reasons
 
 

@@ -30,8 +30,9 @@ listed but not compared.
 A manifest that ships pins (``sdpa_bwd_merged``, ``ship`` on its records) is compared by what was
 rebuilt: for a ``pin`` row the shipped object must be the pin (else red) and ``rebuilt_sha256`` /
 ``rebuilt_resources`` stand in for the object's sha and resource row; a ``combined`` row is not the
-pin by construction, so its per-kernel gate verdict (``gates.pin_gate``) is reported instead and a red
-one is red here too. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
+pin by construction, so it is judged by its per-kernel gate: the object must hash to the manifest's
+sha256 and its merged function must equal the pin's, and the recorded verdict (``gates.pin_gate``)
+must be ``ok``; any of these failing is red. A missing object of such a manifest is red. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
 
 Exit status 0 when there are differences only. Nonzero (red) on: a spill finding of the
 R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` that is
@@ -51,6 +52,8 @@ from pathlib import Path
 
 FLYDSL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(FLYDSL))
+sys.path.insert(0, str(FLYDSL / "tools"))
+import analyze  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 
 RESOURCE_COLUMNS = (
@@ -69,6 +72,19 @@ TARGET = "gfx950"
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _merged_function_problem(obj: Path, symbol: str, pin: Path) -> str:
+    """Why the merged kernel `symbol` of the combined object @p obj is not the pin's function, or ``""``."""
+    try:
+        (pin_symbol,) = analyze.kernels(analyze.amdgpu_metadata(pin.read_bytes()))
+        shipped = analyze.function_bytes(obj.read_bytes(), symbol)
+        pinned = analyze.function_bytes(pin.read_bytes(), pin_symbol)
+    except Exception as error:  # a damaged object is a finding, not a crash
+        return f"the object cannot be read: {error!r}"
+    if shipped != pinned:
+        return "merged function bytes differ from the pin"
+    return ""
 
 
 def _read_manifests(
@@ -173,7 +189,13 @@ def compare(
             continue
         obj = op_dir / record["file"]
         if not obj.is_file():
-            report("missing", row, spec, f"{record['file']} is not in {op_dir}")
+            report(
+                "missing",
+                row,
+                spec,
+                f"{record['file']} is not in {op_dir}",
+                record.get("ship") is not None,
+            )
             continue
         if record["gates"]["rmir"]["verdict"] == "red":
             report(
@@ -186,6 +208,19 @@ def compare(
         ship = record.get("ship")
         if ship == "combined":
             combined += 1
+            if _sha(obj) != record["sha256"]:
+                report(
+                    "shipped",
+                    row,
+                    spec,
+                    "the object is not the manifest's sha256",
+                    True,
+                )
+                continue
+            problem = _merged_function_problem(obj, record["symbol"], reference_object)
+            if problem:
+                report("per-kernel gate", row, spec, problem, True)
+                continue
             pin_gate = record["gates"]["pin_gate"]
             if pin_gate["verdict"] == "ok":
                 combined_ok += 1

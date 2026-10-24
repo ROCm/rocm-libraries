@@ -1540,7 +1540,7 @@ SDPA_BWD_KNOBS = {
 }
 
 # BEGIN GENERATED sdpa_bwd tables
-# Source: sweep snapshot, sweep commit e196d0d (tools/sdpa_bwd_tables_from_sweep.py).
+# Source: the sweep's pinned objects (tools/sdpa_bwd_tables_from_sweep.py).
 # fmt: off
 SDPA_BWD_TABLES = {
     "prep": (  # 68 rows

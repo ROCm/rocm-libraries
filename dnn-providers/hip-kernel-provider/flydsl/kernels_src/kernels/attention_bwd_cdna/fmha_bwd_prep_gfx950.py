@@ -22,7 +22,7 @@ in-register `reduce(ADD)`, then `shuffle_xor` across the lanes of a row group. A
 `hdim_vo <= tile` columns element by element with the tail masked to zero, for any hdim_vo (not only multiples of 8).
 O and dO are `(batch, head, row, col)` with unit column stride.
 
-ABI (the argument names are those of `h/gate2.arg_values`, plus `O`, `LSE_ws`, `stride_o_*`):
+ABI (the kernel argument names; `vals` below is keyed by them):
     O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1, varlen_bits, num_seqlens,
     max_seqlen_q, num_head_q, hdim_vo, stride_o_{batch,head,seq}, stride_do_{batch,head,seq}
 """
@@ -52,8 +52,8 @@ def prep_threads_per_row(tile):
 
 
 def prep_arg_values(vals, O, LSE_ws, delta=None):
-    """gate2-style `vals` for the prep launcher: `vals` is `h/gate2.arg_values(...)`'s dict (it already holds DO, LSE,
-    Delta, varlen descriptors, strides). Adds `O`, `LSE_ws` and `stride_o_*` (O shares dO's layout).
+    """`vals` for the prep launcher: the dict of launch values keyed by kernel argument name (it already holds DO,
+    LSE, Delta, varlen descriptors, strides). Adds `O`, `LSE_ws` and `stride_o_*` (O shares dO's layout).
     """
     out = dict(vals)
     out["O"], out["LSE_ws"] = O, LSE_ws

@@ -255,6 +255,16 @@ def test_a_pin_ships_when_its_rebuild_is_a_dual_object(rig) -> None:
         ),
         (
             "bias",
+            build.Outcome(
+                "ok",
+                COMBINED,
+                gate=_gate(COMBINED, verdict="red", pin_gate="ok"),
+                geometry=GEOMETRY,
+            ),
+            "R-MIR spill finding",
+        ),
+        (
+            "bias",
             build.Outcome("dual_object", detail="dual", geometry=GEOMETRY),
             "dual_object: dual",
         ),
@@ -269,7 +279,7 @@ def test_a_pin_ships_when_its_rebuild_is_a_dual_object(rig) -> None:
             "error: boom",
         ),
     ],
-    ids=["red-gate", "combined-dual-object", "combined-error", "pin-error"],
+    ids=["red-gate", "red-rmir", "combined-dual-object", "combined-error", "pin-error"],
 )
 def test_a_red_gate_or_a_row_that_does_not_build_ships_nothing(
     rig, row, outcome, reason
