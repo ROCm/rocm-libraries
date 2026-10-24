@@ -270,6 +270,7 @@ constexpr gen gen_from_target_arch(target_arch i)
     }
 }
 
+// When updating this, make sure to keep `TARGET_GPU_NAMES` in base_tuner.py in sync.
 constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
     std::make_tuple<std::string_view, gpu>("MI455X", gpu::mi455x),
     std::make_tuple<std::string_view, gpu>("MI355X", gpu::mi355x),
