@@ -11,7 +11,7 @@ rank in WorkGroup0/1/2; the reread would overwrite it, so the enableCluster
 guard skips it.
 
 Uses StreamK/StaticGrid with ClusterDim=[2, 1] and tree reduction. The same
-geometry uses independent tensor loads with the spatial cluster schedule.
+geometry uses B multicast with the spatial cluster schedule.
 """
 
 import os

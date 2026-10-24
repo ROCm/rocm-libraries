@@ -97,12 +97,12 @@ def _assert_multicast_completion(src):
 @pytest.mark.parametrize("feature,cluster,pgr,tree", [
     ("dense", [2, 1], 1, 0),
     ("dense", [2, 2], 1, 1),
-    ("dense", [2, 2], 2, 0),
+    ("dense", [4, 1], 2, 0),
     ("single_wave", [2, 2], 2, 1),
     ("subtile", [2, 2], 1, 1),
     ("sparse_a", [2, 2], 1, 0),
     ("sparse_b", [2, 2], 1, 1),
-    ("store_remap", [2, 2], 1, 1),
+    ("store_remap", [2, 1], 1, 1),
 ])
 def test_streamk_cluster_completion_assembles(tmp_path, feature, cluster, pgr, tree):
     fixture = {
@@ -133,11 +133,10 @@ def test_streamk_cluster_completion_assembles(tmp_path, feature, cluster, pgr, t
         assert_assembles(source, base)
         _assert_phantom_completion(source)
         assert ("Tree reduction" in source) == bool(tree)
-        if cluster[1] > 1:
-            _assert_multicast_completion(source)
-        else:
-            assert "s_barrier_signal -3" not in source
-            assert "s_barrier_wait -3" not in source
+        _assert_multicast_completion(source)
+        assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in source
+        a_mask = "s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]"
+        assert (a_mask in source) == (cluster[1] > 1)
         if not tree:
             code = _assembly_code(source)
             fixup = code[code.index("\nlabel_SK_Fixup:\n"):]

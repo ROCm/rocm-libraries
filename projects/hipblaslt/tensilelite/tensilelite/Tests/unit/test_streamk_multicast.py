@@ -141,9 +141,8 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
-    @pytest.mark.parametrize("shape,multicast", [
-        ([2, 1], False), ([2, 2], True)])
-    def test_streamk_one_axis_cluster_avoids_multicast_overhead(self, tmp_path, shape, multicast):
+    @pytest.mark.parametrize("shape", [[2, 1], [2, 2]])
+    def test_streamk_spatial_clusters_enable_multicast(self, tmp_path, shape):
         cfg = _write_variant(tmp_path, "streamk.yaml", fork_overrides={
             "TileProcessingStrategy": ["StreamK"], "ClusterDim": [shape],
             "StreamKFixupTreeReduction": [1]})
@@ -154,8 +153,8 @@ class TestValidation:
             assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
             assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
             assert state["InternalSupportParams"]["SupportStreamKClusterParallel"] is True
-            assert state["Multicast"] is multicast
-            assert state["ClusterBarrier"] is multicast
+            assert state["Multicast"] is True
+            assert state["ClusterBarrier"] is True
 
     @pytest.mark.parametrize("overrides", [
         {"ClusterDim": [4, 8]}, {"PrefetchAcrossPersistent": 1},
