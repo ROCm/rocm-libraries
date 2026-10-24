@@ -6594,6 +6594,9 @@ class Solution(collections.abc.Mapping):
       # Should be able to support as long as NO scheduleLocalWrite
       if (not state["_ScheduleIterAlg"] == 2) and (not state["_ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
+      # SIA1 without SLW miscompares once a second global-read prefetch shares the single LDS buffer.
+      if state["_ScheduleIterAlg"] == 1 and state["PrefetchGlobalRead"] >= 2:
+        reject(state, printRejectionReason, "1LDSBuffer with SIA1 requires PrefetchGlobalRead=1")
       state["LdsOffsetA"] = 0
       state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMXSA"] + state["LdsNumElementsAlignedMXSA"]
