@@ -366,6 +366,44 @@ define amdgpu_kernel void @k() {
         self.assertEqual(res.sgpr_count, 48)
         self.assertEqual(res.lds_bytes, 32768)
 
+    def test_parse_isa_rdna_gfx12(self):
+        # Verbatim llvm-objdump lines from gfx1201/gfx1151 WMMA FMHA builds. RDNA
+        # spells LDS ops ds_load/ds_store, uses global_* memory ops, and gfx12
+        # splits barriers and memory waits into separate instructions.
+        asm = """
+\tv_wmma_f32_16x16x16_f16 v[32:39], v[40:43], v[91:94], 0    // 000000001D90: CC404020 1A02B728
+\tglobal_load_b128 v[40:43], v[0:1], off                     // 000000001C50: EE05C07C 00000028 00000000
+\tglobal_store_b16 v[46:47], v50, off                        // 000000002CE4: EE06407C 19000000 0000002E
+\tscratch_load_b128 v[154:157], off, off                     // 000000001F5C: DC5D0000 9A7C0000
+\tscratch_store_b128 off, v[2:5], off                        // 000000001DE0: DC750000 007C0200
+\tds_load_b128 v[84:87], v82                                 // 00000000297C: DBFC0000 54000052
+\tds_store_b128 v80, v[91:94] offset:512                     // 000000002864: DB7C0200 00005B50
+\ts_wait_loadcnt 0x0                                         // 000000001D8C: BFC00000
+\ts_wait_dscnt 0x0                                           // 000000001E6C: BFC60000
+\ts_wait_kmcnt 0x0                                           // 000000001A58: BFC70000
+\ts_wait_alu 0xfffe                                          // 000000001BBC: BF88FFFE
+\ts_barrier_signal -1                                        // 000000002974: BE804EC1
+\ts_barrier_wait 0xffff                                      // 000000002978: BF94FFFF
+\ts_mov_b32 s13, 0                                           // 000000001A90: BE8D0080
+"""
+        isa = parse_isa(asm)
+        self.assertEqual(isa.wmma, 1)
+        self.assertEqual(isa.mfma, 0)
+        self.assertEqual(isa.global_load, 1)
+        self.assertEqual(isa.global_store, 1)
+        self.assertEqual(isa.scratch_load, 1)
+        self.assertEqual(isa.scratch_store, 1)
+        self.assertEqual(isa.ds_read, 1)
+        self.assertEqual(isa.ds_write, 1)
+        # Three split memory waits; s_wait_alu is an ALU dependency hint.
+        self.assertEqual(isa.s_waitcnt, 3)
+        self.assertEqual(isa.s_wait_alu, 1)
+        # One split barrier (signal + wait) is one barrier.
+        self.assertEqual(isa.s_barrier, 1)
+        # WMMA is not VALU; waits/barriers are not SALU.
+        self.assertEqual(isa.valu, 0)
+        self.assertEqual(isa.salu, 1)
+
     def test_benchmark_summary_discards_first_and_reports_spread(self):
         s = summarize_runs(
             ms=[1.0, 0.5, 0.25],
@@ -403,6 +441,60 @@ define amdgpu_kernel void @k() {
         rows = compare_variant_reports([report])
         self.assertEqual(rows[0]["median_tflops"], 123.0)
         self.assertEqual(rows[0]["llvm_mfma"], 1)
+
+    def test_resources_and_report_expose_compiled_workgroup_bound(self):
+        # Verbatim llvm-readelf --notes lines from a one-wave (32-thread) gfx1201
+        # kernel whose flat-work-group-size range was invalid, so LLVM budgeted
+        # registers for its 1024-thread default.
+        notes = """
+    .max_flat_workgroup_size: 1024
+    .private_segment_fixed_size: 216
+    .vgpr_count:     192
+    .wavefront_size: 32
+"""
+        res = parse_resources(notes)
+        self.assertEqual(res.max_flat_workgroup_size, 1024)
+        self.assertEqual(res.as_dict()["max_flat_workgroup_size"], 1024)
+
+        b = IRBuilder("one_wave")
+        b.kernel.attrs["max_workgroup_size"] = 32
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="one_wave", spec={}, artifact=artifact, resources=res
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 32)
+        self.assertEqual(row["wg_compiled"], 1024)
+        # The kernel records only a bound; without a launch size the row
+        # does not invent one.
+        self.assertIsNone(row["wg_launch"])
+
+    def test_report_compares_compiled_bound_with_actual_launch(self):
+        # A kernel left at the 256 default bound but launched with 64 threads:
+        # the compiler budgets for 256, four times the launch.
+        b = IRBuilder("default_bound")
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="default_bound",
+            spec={},
+            artifact=artifact,
+            resources=parse_resources("    .max_flat_workgroup_size: 256\n"),
+            launch_block_size=64,
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 256)
+        self.assertEqual(row["wg_launch"], 64)
+        self.assertEqual(row["wg_compiled"], 256)
+        self.assertEqual(report.as_dict()["launch_block_size"], 64)
+        # from_artifact forwards the launch size the caller supplies.
+        forwarded = VariantReport.from_artifact(
+            name="default_bound", spec={}, artifact=artifact, launch_block_size=64
+        )
+        self.assertEqual(forwarded.launch_block_size, 64)
 
 
 # ---------------------------------------------------------------------
