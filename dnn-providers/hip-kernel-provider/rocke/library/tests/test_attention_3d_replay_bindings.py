@@ -64,7 +64,7 @@ def replay(runtime, monkeypatch):
         au, "wait_stream_and_release", lambda s: operations.append(("wait", s))
     )
     monkeypatch.setattr(
-        au, "retain_for_stream", lambda s, e: operations.append(("retain", e))
+        au, "retain_until_drain", lambda s, e: operations.append(("retain", e))
     )
     arguments = _arguments()
     arguments["out"] = Tensor(256)
@@ -87,7 +87,7 @@ def test_warm_replay_and_storage_rebinding(replay, runtime, owned):
         assert resident[key] is entry
         assert next(iter(resident)) is key
         assert len(runtime.allocations) == allocations
-        assert operations == [("replay", entry.graph), ("retain", entry)]
+        assert operations == [("retain", entry), ("replay", entry.graph)]
 
         # Same tensor identity and geometry, different captured storage.
         arguments["out"].pointer += 256
@@ -97,8 +97,8 @@ def test_warm_replay_and_storage_rebinding(replay, runtime, owned):
         assert replacement is not entry and len(resident) == 1
         assert operations[0] == ("wait", entry.stream)
         assert operations[-2:] == [
-            ("replay", replacement.graph),
             ("retain", replacement),
+            ("replay", replacement.graph),
         ]
         assert len(runtime.allocations) > allocations
     if owned:
@@ -257,7 +257,7 @@ def test_additive_bias_storage_replacement_refreshes_graph(replay, owned):
         arguments["additive_bias"].contents += 1
         au._run_3d_tiled(**arguments, execution=owner)
         assert resident[key] is entry
-        assert operations == [("replay", entry.graph), ("retain", entry)]
+        assert operations == [("retain", entry), ("replay", entry.graph)]
         arguments["additive_bias"].pointer += 1024
         operations.clear()
         au._run_3d_tiled(**arguments, execution=owner)
@@ -274,3 +274,75 @@ def test_prepared_execution_rejects_changed_additive_bias_strides(replay):
     au._run_3d_tiled(**arguments, execution=owner)
     with pytest.raises(ValueError, match="prepare again"):
         au._run_3d_tiled(**arguments, execution=owner, additive_bias_head_stride=64)
+
+
+@pytest.mark.parametrize("earlier_complete", [False, True])
+@pytest.mark.parametrize("fenced", [False, True])
+@pytest.mark.parametrize("enqueue_fails", [False, True])
+def test_prepared_graph_resources_survive_earlier_events_and_enqueue_failure(
+    replay, monkeypatch, earlier_complete, fenced, enqueue_fails
+):
+    import gc
+    import weakref
+    from contextlib import nullcontext
+
+    from rocke.runtime import hip_module
+    from rocke.runtime.hip_module import Runtime
+
+    arguments, _graphs, operations = replay
+    owner = au.Attention3DExecution()
+    au._run_3d_tiled(**arguments, execution=owner)
+    entry = next(iter(owner._graphs.values()))
+    ref, entry_id = weakref.ref(entry), id(entry)
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
+    monkeypatch.setattr(rt, "stream_sync", lambda s: None)
+    monkeypatch.setattr(au, "retain_until_drain", rt.retain_until_drain)
+    monkeypatch.setattr(au, "wait_stream_and_release", rt.wait_stream)
+
+    class EarlierEvent:
+        def query(self):
+            return earlier_complete
+
+        def destroy(self):
+            pass
+
+    rt._pending_args[(0, 17)] = [((object(),), EarlierEvent())]
+
+    def submit():
+        assert entry_id in rt._pending_bound_args[(0, 17)]
+        if enqueue_fails:
+            raise RuntimeError("replay enqueue failed")
+
+    monkeypatch.setattr(entry.graph, "replay", submit)
+    with nullcontext() if fenced else au.no_fence():
+        if enqueue_fails:
+            with pytest.raises(RuntimeError, match="replay enqueue failed"):
+                au._run_3d_tiled(**arguments, execution=owner)
+        else:
+            for _ in range(3):
+                au._run_3d_tiled(**arguments, execution=owner)
+            if not fenced:
+                assert len(rt._pending_bound_args[(0, 17)]) == 1
+    del owner, entry
+    operations.clear()
+    gc.collect()
+    rt._reap_completed(17)
+    gc.collect()
+    pending = enqueue_fails or not fenced
+    assert (ref() is not None) == pending
+    if pending:
+
+        def fail_drain(s):
+            raise RuntimeError("replay drain failed")
+
+        monkeypatch.setattr(rt, "stream_sync", fail_drain)
+        with pytest.raises(RuntimeError, match="replay drain failed"):
+            rt.wait_stream(17)
+        assert ref() is not None
+        monkeypatch.setattr(rt, "stream_sync", lambda s: None)
+        rt.wait_stream(17)
+    gc.collect()
+    assert ref() is None
+    assert not rt._pending_args and not rt._pending_bound_args

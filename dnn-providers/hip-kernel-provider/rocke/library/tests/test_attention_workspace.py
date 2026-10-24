@@ -293,7 +293,7 @@ def test_graph_churn_bounds_resources_and_waits_before_eviction(
     monkeypatch.setattr(au, "wait_stream_and_release", wait)
     retained = []
     monkeypatch.setattr(
-        au, "retain_for_stream", lambda stream, entry: retained.append(entry)
+        au, "retain_until_drain", lambda stream, entry: retained.append(entry)
     )
     owner = au.Attention3DExecution() if owned else None
     resident = owner._graphs if owned else graphs

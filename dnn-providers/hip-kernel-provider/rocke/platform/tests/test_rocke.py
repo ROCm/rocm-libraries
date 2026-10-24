@@ -7139,7 +7139,7 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
             e1 = FakeEvent(fired=True)
             e2 = FakeEvent(fired=False)  # this one is still in flight
             e3 = FakeEvent(fired=True)
-            Runtime._pending_args[42] = [
+            Runtime._pending_args[rt._stream_key(42)] = [
                 (("ref0",), e0),
                 (("ref1",), e1),
                 (("ref2",), e2),
@@ -7149,7 +7149,7 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
             # The first two should be popped (FIFO from the head);
             # e2 halts the walk so e3 is NOT touched even though it
             # has fired.
-            self.assertEqual(len(Runtime._pending_args[42]), 2)
+            self.assertEqual(len(Runtime._pending_args[rt._stream_key(42)]), 2)
             self.assertTrue(e0.destroyed and e1.destroyed)
             self.assertFalse(e2.destroyed)
             self.assertFalse(e3.destroyed)
@@ -7168,9 +7168,9 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
         rt = Runtime()
         prior = self._isolate_pending()
         try:
-            Runtime._pending_args[7] = [(("legacy_ref",), None)]
+            Runtime._pending_args[rt._stream_key(7)] = [(("legacy_ref",), None)]
             rt._reap_completed(7)
-            self.assertEqual(len(Runtime._pending_args[7]), 1)
+            self.assertEqual(len(Runtime._pending_args[rt._stream_key(7)]), 1)
         finally:
             self._restore_pending(prior)
 
@@ -7193,9 +7193,9 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
         prior = self._isolate_pending()
         try:
             e = FakeEvent()
-            Runtime._pending_args[9] = [(("args_buf",), e)]
+            Runtime._pending_args[rt._stream_key(9)] = [(("args_buf",), e)]
             rt.retain_for_stream(9, "tensor_A", "tensor_B", 1234)
-            entries = Runtime._pending_args[9]
+            entries = Runtime._pending_args[rt._stream_key(9)]
             self.assertEqual(len(entries), 1)
             refs, evt = entries[0]
             # ints are filtered out; tensors are merged into the same
@@ -7250,7 +7250,7 @@ class TestRuntimeLaunchKeepAlive(unittest.TestCase):
                     stream=7,
                     record_event=False,
                 )
-            bucket = Runtime._pending_args.get(7)
+            bucket = Runtime._pending_args.get(rt._stream_key(7))
             self.assertIsNotNone(bucket)
             self.assertEqual(len(bucket), 1)
             refs, evt = bucket[-1]
@@ -7291,7 +7291,7 @@ class TestRuntimeLaunchKeepAlive(unittest.TestCase):
                 )
             # The sync IS the barrier + args-buffer drain, so no bucket
             # bookkeeping is needed for a blocking launch.
-            self.assertNotIn(3, Runtime._pending_args)
+            self.assertNotIn(rt._stream_key(3), Runtime._pending_args)
             self.assertEqual(sync_stub.call_count, 1)
         finally:
             self._restore_pending(prior)

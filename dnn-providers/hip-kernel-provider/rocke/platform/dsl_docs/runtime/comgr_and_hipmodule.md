@@ -241,6 +241,12 @@ released by completion-event polling. `wait_stream` or `sync` releases it only
 after successful completion; a failed drain preserves owners for retry.
 `release_pending_for_stream` requires caller-confirmed external completion.
 
+Graph replay also retains its immutable resource entry here before enqueue,
+including for a fenced call whose enqueue or completion can fail. An earlier
+FIFO event does not cover a later replay. Dropping the Python execution owner
+does not release queued graph resources; successful replay-stream completion
+releases them. FIFO event polling and bound-owner deduplication remain distinct.
+
 The launcher-level `retain_until_drain` resolves the effective stream with the
 same resolver as its cleanup helpers. Resolve and save the handle at a binding
 or batch boundary, then pass that handle through retention, enqueue and cleanup.
@@ -253,11 +259,12 @@ a reentrant drain raises before synchronizing or dropping references. The guard
 adds no GPU wait or event. Drain after leaving it, including on failed enqueue.
 External synchronization followed by release still requires stopped submission.
 
-Explicit stream cleanup works after the launch wrapper restores the caller's
-device. Default stream handles remain device-scoped, and the per-thread default
+Both registries use the same device/stream ownership key. Explicit stream cleanup
+uses the device recorded at retention and works after the launch wrapper restores
+the caller's device. Default stream handles remain device-scoped, and the per-thread default
 stream additionally uses stable host-thread identity in both retention registries.
 A stream drain releases only that thread's PTDS owners. A device drain releases
-bound owners on the synchronized device, including PTDS owners across threads.
+both FIFO and bound owners on the synchronized device, including PTDS owners across threads.
 
 ### Launch Mechanism
 

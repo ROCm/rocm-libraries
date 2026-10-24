@@ -340,7 +340,7 @@ def test_default_stream_cleanup_stays_device_scoped(monkeypatch, stream, cleanup
     monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
     monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
     first, second = object(), object()
-    first_key = rt._bound_stream_key(stream)
+    first_key = rt._stream_key(stream)
     rt.retain_until_drain(stream, first)
     device[0] = 1
     rt.retain_until_drain(stream, second)
@@ -387,6 +387,118 @@ def test_device_drain_keeps_other_device_explicit_streams(monkeypatch):
     rt.retain_until_drain(29, second)
     rt.sync()
     assert rt._pending_bound_args == {(0, 17): {id(first): first}}
+
+
+@pytest.mark.parametrize("stream", [0, 1, 2, 29])
+@pytest.mark.parametrize("launch_kind", ["extra", "kernelparams"])
+def test_device_drain_keeps_other_device_fifo_and_bound_storage(
+    monkeypatch, stream, launch_kind
+):
+    import ctypes
+    import gc
+    import weakref
+
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    device = [0]
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", lambda: 0)
+    monkeypatch.setattr(rt, "_enqueue", lambda *a: ())
+    refs = []
+    for index in (0, 1):
+        device[0] = index
+        selected = stream if stream in (0, 1, 2) or index == 1 else 37
+        fifo, bound = Tensor(8192), Tensor(16384)
+        refs.append((weakref.ref(fifo), weakref.ref(bound)))
+        if launch_kind == "extra":
+            rt.launch(object(), (1, 1, 1), (64, 1, 1), b"args", stream=selected)
+        else:
+            rt.launch_kernelparams(
+                object(),
+                (1, 1, 1),
+                (64, 1, 1),
+                [ctypes.c_uint64(1)],
+                stream=selected,
+                record_event=False,
+            )
+        rt.retain_for_stream(selected, fifo)
+        rt.retain_until_drain(selected, object(), resources=lambda: (bound,))
+        del fifo, bound
+    device[0] = 0
+    rt.sync()
+    gc.collect()
+    assert all(ref() is None for ref in refs[0])
+    assert all(ref() is not None for ref in refs[1])
+    assert all(key[0] == 1 for key in rt._pending_args)
+    assert all(key[0] == 1 for key in rt._pending_bound_args)
+    device[0] = 1
+    rt.sync()
+    gc.collect()
+    assert all(ref() is None for ref in refs[1])
+    assert not rt._pending_args and not rt._pending_bound_args
+
+
+@pytest.mark.parametrize("cleanup", ["wait_stream", "release_pending_for_stream"])
+def test_explicit_stream_cleanup_releases_both_registries_after_device_restore(
+    monkeypatch, cleanup
+):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    device, destroyed, drains = [1], [], []
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    monkeypatch.setattr(rt, "stream_sync", drains.append)
+
+    class Completion:
+        def destroy(self):
+            destroyed.append(True)
+
+    rt._pending_args[(1, 17)] = [((object(),), Completion())]
+    rt.retain_until_drain(17, object())
+    rt.retain_for_stream(29, object())
+    rt.retain_until_drain(29, object())
+    device[0] = 0
+    getattr(rt, cleanup)(17)
+    assert destroyed == [True]
+    assert drains == ([17] if cleanup == "wait_stream" else [])
+    assert set(rt._pending_args) == set(rt._pending_bound_args) == {(1, 29)}
+    assert device[0] == 0
+
+
+@pytest.mark.parametrize("device_wide", [False, True])
+def test_failed_drain_preserves_both_registries_for_retry(monkeypatch, device_wide):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 1)
+    destroyed = []
+
+    def fail(*args):
+        raise RuntimeError("completion failed")
+
+    rt._pending_args[(1, 17)] = [
+        ((object(),), SimpleNamespace(destroy=lambda: destroyed.append(True)))
+    ]
+    rt.retain_until_drain(17, object())
+    if device_wide:
+        monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", fail)
+        drain = rt.sync
+    else:
+        monkeypatch.setattr(rt, "stream_sync", fail)
+        drain = lambda: rt.wait_stream(17)
+    with pytest.raises(RuntimeError, match="completion failed"):
+        drain()
+    assert set(rt._pending_args) == set(rt._pending_bound_args) == {(1, 17)}
+    assert not destroyed
+    monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", lambda: 0)
+    monkeypatch.setattr(rt, "stream_sync", lambda s: None)
+    drain()
+    assert destroyed == [True]
+    assert not rt._pending_args and not rt._pending_bound_args
 
 
 def test_maximum_length_within_same_selector_bucket_reuses_pair(eager, runtime):

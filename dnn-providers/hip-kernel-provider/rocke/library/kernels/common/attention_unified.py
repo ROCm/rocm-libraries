@@ -40,7 +40,6 @@ from rocke.runtime.launcher import (
     _resolved_fence,
     no_fence,
     release_retained_for_stream,
-    retain_for_stream,
     retain_until_drain,
     wait_stream_and_release,
 )
@@ -4913,9 +4912,10 @@ def _run_3d_graph(
     # The boundary established the caller's effective Torch stream.
     fence = _resolved_fence(True)
     with Runtime.submission():
+        # Replay must survive older FIFO completion events and enqueue failures.
+        # Retain before enqueue, even when a successful call will fence below.
+        retain_until_drain(int(stream), entry)
         entry.graph.replay()
-        if not fence:
-            retain_for_stream(int(stream), entry)
     if fence:
         wait_stream_and_release(int(stream))
     return LaunchSummary(launches=2)
