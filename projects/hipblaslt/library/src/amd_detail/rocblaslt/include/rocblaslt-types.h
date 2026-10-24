@@ -208,7 +208,9 @@ typedef enum rocblaslt_pointer_mode_
     rocblaslt_pointer_mode_host   = 0, /**< scalar pointers are in host memory. */
     rocblaslt_pointer_mode_device = 1, /**< scalar pointers are in device memory. */
     rocblaslt_pointer_mode_alpha_device_vector_beta_host
-    = 4 /** alpha pointer targets a device memory vector of length equal to the number of rows of matrix D, and beta is a single value in host memory. */
+    = 4, /** alpha pointer targets a device memory vector of length equal to the number of rows of matrix D, and beta is a single value in host memory. */
+    rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext
+    = 1000 /** alpha pointer targets a single value in device memory, and beta is a single value in host memory. */
 } rocblaslt_pointer_mode;
 
 /*! \ingroup types_module
@@ -590,6 +592,9 @@ struct RocblasltContractionProblem
     const void*   scaleD;
     const void*   scaleE;
     const void*   scaleAlphaVec;
+    // scaleAlphaVec aliases alpha for both device pointer modes. This flag
+    // distinguishes a single per-tensor scalar from the existing row vector.
+    bool          deviceScalarAlpha = false;
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
@@ -798,5 +803,7 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
         void* amaxD         = nullptr;
+        // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
+        bool deviceScalarAlpha = false;
     };
 } // End of namespace rocblaslt

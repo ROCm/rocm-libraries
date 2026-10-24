@@ -253,6 +253,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags  = streamKFlags;
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
@@ -467,6 +468,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue = matmul_descr->fused_epilogue;
@@ -480,8 +482,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
         return rocblaslt_status_invalid_value;
     }
 #endif
-
-
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -531,6 +531,16 @@ rocblaslt_status
     std::vector<std::array<int8_t, 16>> alpha_1(matmul_descr.size());
 
     std::vector<bool> gradient_vec;
+
+    const bool deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr[0]->pointermode);
+    for(const auto& descriptor : matmul_descr)
+    {
+        auto alphaTypeStatus = validateDeviceScalarAlphaType(descriptor);
+        if(alphaTypeStatus != rocblaslt_status_continue)
+            return alphaTypeStatus;
+        if(isDeviceScalarAlphaPointerMode(descriptor->pointermode) != deviceScalarAlpha)
+            return rocblaslt_status_invalid_value;
+    }
 
     for(int i = 0; i < matmul_descr.size(); i++)
     {
@@ -606,7 +616,9 @@ rocblaslt_status
         int64_t            lde, batch_stride_e;
         bool               gradient;
         rocblaslt_epilogue epilogue    = matmul_descr[i]->epilogue;
-        const void*        alphaVecPtr = matmul_descr[i]->pointermode ? alpha[i] : nullptr;
+        const void* alphaVecPtr = isScaleAlphaVecPointerMode(matmul_descr[i]->pointermode)
+                                      ? alpha[i]
+                                      : nullptr;
         if(validArgs == rocblaslt_status_continue)
             validArgs = rocblaslt_epilogue_valid_args(epilogue, // add alpha
                                                       num_rows_d,
@@ -798,6 +810,7 @@ rocblaslt_status
                                         effective_sm_count_target(handle, matmul_descr[i], nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr[i])});
         problems.back().int4EncodingA = matmul_descr[i]->int4_encoding_a_ext;
+        problems.back().deviceScalarAlpha = deviceScalarAlpha;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -890,7 +903,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         hipDataType alpha_type = matA->type;
         hipDataType beta_type  = matD->type;
         
-        // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
+        // alpha is a device pointer when a ScaleAlphaVec pointer mode is set;
         // avoid CPU dereference which causes an access violation on Windows.
         auto alpha_scalar = (!matmul_descr->pointermode && alpha)
                             ? get_alpha_beta_scalar(alpha_type, alpha)
@@ -923,7 +936,9 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
             workspace,
             "workSpaceSizeInBytes",
             workspaceSizeInBytes,
-            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            isDeviceScalarAlphaPointerMode(matmul_descr->pointermode)
+                ? "alphaDeviceScalar"
+                : (matmul_descr->pointermode ? "alphaVector" : "alpha"),
             alpha_scalar, 
             "beta",
             beta_scalar,
@@ -1003,10 +1018,21 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     bool swizzleB
         = problemtype.order_b != HIPBLASLT_ORDER_COL && problemtype.order_b != HIPBLASLT_ORDER_ROW;
 
+    alignas(double) int8_t alpha_1[16] = {0};
+    if(inputs.deviceScalarAlpha)
+    {
+        if(!inputs.scaleAlphaVec)
+            return rocblaslt_status_invalid_pointer;
+        if(compute_type == rocblaslt_compute_f64 || compute_type == rocblaslt_compute_i32)
+            return rocblaslt_status_not_implemented;
+        // Validation must not read the ignored host alpha or use its zero shortcut.
+        setTo1(compute_type, alpha_1, (const void**)&alpha);
+    }
+
     auto status = validateMatmulArgs(m,
                                      n,
                                      k,
-                                     inputs.alpha,
+                                     alpha,
                                      inputs.a,
                                      inputs.b,
                                      inputs.beta,
@@ -1062,7 +1088,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                                rocEpilogue.aux_stride,
                                                inputs.bias,
                                                inputs.scaleAlphaVec,
-                                               inputs.alpha,
+                                               alpha,
                                                rocEpilogue.scaling_a_type,
                                                rocEpilogue.scaling_b_type,
                                                E,
@@ -1077,7 +1103,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     if(status != rocblaslt_status_continue)
         return status;
 
-    int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
     {
         setTo1(compute_type, (void*)alpha_1, (const void**)&alpha);
@@ -1165,6 +1190,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
+    problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1274,6 +1300,12 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                                          std::shared_ptr<void>&    gemmData,
                                                          size_t&                   gemmCount)
 {
+    // internalArg0[11] is launch-wide; each record still owns its scalar pointer.
+    const bool deviceScalarAlpha = inputs[0].deviceScalarAlpha;
+    for(const auto& input : inputs)
+        if(input.deviceScalarAlpha != deviceScalarAlpha)
+            return rocblaslt_status_invalid_value;
+
     hipblasOperation_t     opA          = problemtype[0].op_a;
     hipblasOperation_t     opB          = problemtype[0].op_b;
     rocblaslt_compute_type compute_type = problemtype[0].type_compute;
@@ -1305,10 +1337,19 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
 
     for(int i = 0; i < m.size(); i++)
     {
+        const void* effectiveAlpha = inputs[i].alpha;
+        if(deviceScalarAlpha)
+        {
+            if(!inputs[i].scaleAlphaVec)
+                return rocblaslt_status_invalid_pointer;
+            if(compute_type == rocblaslt_compute_f64 || compute_type == rocblaslt_compute_i32)
+                return rocblaslt_status_not_implemented;
+            setTo1(compute_type, alpha_1[i].data(), &effectiveAlpha);
+        }
         auto validArgs = validateMatmulArgs(m[i],
                                             n[i],
                                             k[i],
-                                            inputs[i].alpha,
+                                            effectiveAlpha,
                                             inputs[i].a,
                                             inputs[i].b,
                                             inputs[i].beta,
@@ -1512,6 +1553,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         effective_sm_count_target(handle, nullptr, nullptr),
                                         effective_uniform_summation_order(handle, nullptr)});
         problems.back().int4EncodingA = int4EncA;
+        problems.back().deviceScalarAlpha = deviceScalarAlpha;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
