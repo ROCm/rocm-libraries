@@ -12,6 +12,28 @@ namespace origami {
 namespace attention {
 
 /**
+ * @brief Total number of active (Q-tile, KV-tile) work pairs under causal masking.
+ *
+ * Triangular sum of ::causal_active_kv_tiles_for_qtile over all Q-tiles. For a
+ * square, tile-aligned problem this is ~grid_m*grid_n/2. Result is bounded to
+ * [grid_m, grid_m*grid_n].
+ *
+ * @param grid_m Number of Q-tiles (ceil(M/MT_M)).
+ * @param grid_n Number of KV-tiles (ceil(N/MT_N)).
+ * @param mt_m Macro-tile M.
+ * @param mt_n Macro-tile N.
+ * @param M Query sequence length.
+ * @param N Key/value sequence length.
+ * @return size_t Total active (Q-tile, KV-tile) pairs.
+ */
+ORIGAMI_EXPORT size_t causal_active_tile_pairs(size_t grid_m,
+                                               size_t grid_n,
+                                               size_t mt_m,
+                                               size_t mt_n,
+                                               size_t M,
+                                               size_t N);
+
+/**
  * @brief calculate the work utilization which is the ratio of the useful problem volume to the total scheduled volume.
  *
  * @param problem Problem description (M, N, K, etc.)
