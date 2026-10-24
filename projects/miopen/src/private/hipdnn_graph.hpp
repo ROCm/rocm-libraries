@@ -4,9 +4,10 @@
 // The part of the hipDNN forwarding that does not depend on the operation. The
 // first half is what the rest of the wrapper calls: probing the backend,
 // releasing a handle's hipDNN state and prefixing forwarded error messages. The
-// second half is what each operation's file (hipdnn_conv.cpp) uses: it
-// describes its problem as a PlanKey and supplies the function that builds the
-// graph for it, and RunCachedGraph does the rest.
+// second half is what each operation's file (hipdnn_conv.cpp,
+// hipdnn_batchnorm.cpp) uses: it describes its problem as a PlanKey and
+// supplies the function that builds the graph for it, and RunCachedGraph does
+// the rest.
 //
 // Compiled only into the public wrapper library; never installed.
 #pragma once
@@ -72,6 +73,11 @@ enum class GraphKind : int64_t
     ConvDgrad,
     ConvWgrad,
     ConvBiasActivation,
+    BnFwdTraining,
+    BnFwdInference,
+    BnFwdInferenceInvVar,
+    BnBackward,
+    BnBackwardActivation,
 };
 
 // Identifies one cached graph. `problem` is everything that tells two problems

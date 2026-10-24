@@ -79,6 +79,7 @@ endif()
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
         hipdnn_lru_cache.cpp
+        hipdnn_shim_batchnorm.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp
         hipdnn_shim_conv_translation.cpp
@@ -309,9 +310,9 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   endif()
 
-  # Among discrete binaries only the hipdnn_shim_conv*.cpp files have shim tests; any other
+  # Among discrete binaries only the hipdnn_shim_*.cpp files have shim tests; any other
   # would replay nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_conv"))
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_"))
     miopen_forwarding_parity_entries(BUILD ${TEST_NAME})
   endif()
 
