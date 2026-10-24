@@ -252,35 +252,24 @@ std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
 
 const std::vector<KnownReferenceGap>& knownReferenceGaps()
 {
-    // Every entry here is a promise to delete it. The GPU Sdpa reference
-    // dispatches through a dtype-keyed plan registry (GpuSdpaFwdSignatureKey.hpp)
-    // with no FP8 tuple (GpuSdpaFwdPlan.hpp, GpuSdpaRaggedFwdPlan.hpp). These are being
-    // implemented; until they are, these bundles must fail applicability rather
-    // than vanish, and the run must not be red for a gap we have already
-    // written down.
-    //
-    // Note the CPU reference already handles fp8 (CPU SdpaFwdPlan registers
-    // FP8_E4M3 -> BFLOAT16), variable sequence lengths and ragged tensors, so it
-    // has no entries. Both references run the ragged bundles (SdpaRaggedFwdPlan.hpp,
-    // GpuSdpaRaggedFwdPlan.hpp).
-    static const std::vector<KnownReferenceGap> s_gaps = {
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
-         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
-         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small",
-         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-    };
+    // Every entry here is a promise to delete it: a listed bundle must fail
+    // applicability rather than vanish, and the run must not be red for a gap we
+    // have already written down. Both references run every bundle today (the GPU fp8
+    // forward dequantizes first, as the CPU one does), so the list is empty.
+    static const std::vector<KnownReferenceGap> s_gaps = {};
     return s_gaps;
 }
 
 const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
                                                std::string_view bundleId)
 {
-    const auto& gaps = knownReferenceGaps();
+    return findKnownReferenceGap(knownReferenceGaps(), type, bundleId);
+}
+
+const KnownReferenceGap* findKnownReferenceGap(const std::vector<KnownReferenceGap>& gaps,
+                                               ReferenceExecutorType type,
+                                               std::string_view bundleId)
+{
     const auto it = std::find_if(gaps.begin(), gaps.end(), [&](const KnownReferenceGap& gap) {
         return gap.reference == type && gap.bundleId == bundleId;
     });

@@ -135,7 +135,7 @@ dimension must be reduced.
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same | Same |
 | Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Not supported | Supported |
 | Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Not supported | Not supported (the backward node has no `rng_dump`) |
-| ALiBi | Not supported | Not supported | Not supported |
+| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Not supported | Supported (same rules) |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported | Not supported |
 | Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |

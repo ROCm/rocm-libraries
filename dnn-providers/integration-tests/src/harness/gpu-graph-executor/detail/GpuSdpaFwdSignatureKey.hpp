@@ -140,6 +140,15 @@ struct GpuSdpaFwdSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // fp8 E4M3 inputs (OCP and the gfx942 FNUZ encoding) with BF16 output, as on the CPU.
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }

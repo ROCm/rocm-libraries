@@ -79,12 +79,24 @@ flatbuffers::DetachedBuffer buildMatmulGraph()
         .Release();
 }
 
+// The live gap table may be empty, so the gap path runs against this one: a GPU gap the
+// fixture bundles hit, and a CPU gap on a shape the CPU lane finds too costly.
+const std::vector<KnownReferenceGap>& fixtureGaps()
+{
+    static const std::vector<KnownReferenceGap> s_gaps = {
+        {ReferenceExecutorType::GPU, "quick_SdpaFwd_gpu_gap_Small.Small", "fixture GPU gap"},
+        {ReferenceExecutorType::CPU, "quick_SdpaFwd_costly_cpu_gap.Small", "fixture CPU gap"},
+    };
+    return s_gaps;
+}
+
 GoldenDataSession session(bool cpu, bool gpu, bool gpuHasDevice)
 {
     GoldenDataSession s;
     s.cpuSelected = cpu;
     s.gpuSelected = gpu;
     s.gpuHasDevice = gpuHasDevice;
+    s.gaps = &fixtureGaps();
     return s;
 }
 
@@ -105,8 +117,8 @@ protected:
     // One bundle for each way a lane can judge a bundle:
     //   0 batchnorm            CPU validates; outside the GPU set
     //   1 costly Sdpa          too costly for CPU; GPU validates
-    //   2 ragged Sdpa          both validate (the CPU reference has no known gaps left)
-    //   3 fp8 batch Sdpa       CPU validates; a known gap for GPU
+    //   2 ragged Sdpa          both validate (no gap entry)
+    //   3 GPU-gap Sdpa         CPU validates; a known gap for GPU (fixtureGaps())
     //   4 no golden outputs    nothing to validate
     //   5 matmul               outside both sets
     std::vector<detail::LoadedBundle> _bundles;
@@ -117,8 +129,7 @@ protected:
         _bundles.push_back(loaded("quick_SdpaFwd_x", "Large", buildSdpaGraph(8192)));
         _bundles.push_back(loaded(
             "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small", "Small", buildSdpaGraph(256)));
-        _bundles.push_back(loaded(
-            "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small", "Small", buildSdpaGraph(256)));
+        _bundles.push_back(loaded("quick_SdpaFwd_gpu_gap_Small", "Small", buildSdpaGraph(256)));
         _bundles.push_back(loaded("quick_SdpaFwd_y", "Small", buildSdpaGraph(256), false));
         _bundles.push_back(loaded("quick_Matmul_x", "Small", buildMatmulGraph()));
     }
@@ -127,7 +138,7 @@ protected:
 } // namespace
 
 // The common CI shape. The costly bundle is left to the GPU lane, which runs, so
-// the CPU lane registers nothing for it. Both lanes validate the ragged bundle; the fp8
+// the CPU lane registers nothing for it. Both lanes validate the ragged bundle; the GPU-gap
 // bundle is a known gap for the GPU lane, which asserts the decline. Only the matmul,
 // which no lane covers, fails.
 TEST_F(TestGoldenDataPlan, BothLanesWithADeviceCoverEachBundleOnceOrFailIt)
@@ -139,14 +150,12 @@ TEST_F(TestGoldenDataPlan, BothLanesWithADeviceCoverEachBundleOnceOrFailIt)
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
-        {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
+        {PlannedKind::VALIDATE, "quick_SdpaFwd_gpu_gap_Small_CpuRef", "Small"},
         {PlannedKind::VALIDATE, "quick_SdpaFwd_x_GpuRef", "Large"},
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_GpuRef",
          "Small"},
-        {PlannedKind::EXPECT_DECLINE,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_GpuRef",
-         "Small"},
+        {PlannedKind::EXPECT_DECLINE, "quick_SdpaFwd_gpu_gap_Small_GpuRef", "Small"},
         {PlannedKind::FAIL, "quick_Matmul_x_Unvalidated", "Small"},
     };
     EXPECT_EQ(kindsAndNames(plan), expected);
@@ -165,14 +174,12 @@ TEST_F(TestGoldenDataPlan, NoDeviceTurnsTheCostExclusionIntoASkipNamingTheGap)
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
-        {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
+        {PlannedKind::VALIDATE, "quick_SdpaFwd_gpu_gap_Small_CpuRef", "Small"},
         {PlannedKind::VALIDATE, "quick_SdpaFwd_x_GpuRef", "Large"},
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_GpuRef",
          "Small"},
-        {PlannedKind::EXPECT_DECLINE,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_GpuRef",
-         "Small"},
+        {PlannedKind::EXPECT_DECLINE, "quick_SdpaFwd_gpu_gap_Small_GpuRef", "Small"},
         {PlannedKind::FAIL, "quick_Matmul_x_Unvalidated", "Small"},
     };
     EXPECT_EQ(kindsAndNames(plan), expected);
@@ -188,7 +195,7 @@ TEST_F(TestGoldenDataPlan, ASingleLaneChecksNothingAcrossLanes)
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
-        {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
+        {PlannedKind::VALIDATE, "quick_SdpaFwd_gpu_gap_Small_CpuRef", "Small"},
     };
     EXPECT_EQ(kindsAndNames(planGoldenDataValidation(_bundles, session(true, false, true))),
               cpuOnly);
@@ -198,9 +205,7 @@ TEST_F(TestGoldenDataPlan, ASingleLaneChecksNothingAcrossLanes)
         {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_GpuRef",
          "Small"},
-        {PlannedKind::EXPECT_DECLINE,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_GpuRef",
-         "Small"},
+        {PlannedKind::EXPECT_DECLINE, "quick_SdpaFwd_gpu_gap_Small_GpuRef", "Small"},
     };
     EXPECT_EQ(kindsAndNames(planGoldenDataValidation(_bundles, session(false, true, true))),
               gpuOnly);
@@ -279,21 +284,19 @@ TEST(TestGoldenDataPlanJudgeLane, EachBundleGetsTheVerdictItsLaneEarns)
          "quick_SdpaFwd_x.Small",
          ReferenceExecutorType::CPU,
          LaneVerdict::TOO_COSTLY},
-        // No CPU gap entry is left, so this row only shows the cost verdict; it keeps a
-        // future CPU gap entry from outranking the cost gate.
         {"cost is checked before a gap entry",
          graphBundle(buildSdpaGraph(8192), true),
-         "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
+         "quick_SdpaFwd_costly_cpu_gap.Small",
          ReferenceExecutorType::CPU,
          LaneVerdict::TOO_COSTLY},
         {"a gap entry for this reference",
          graphBundle(buildSdpaGraph(256), true),
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+         "quick_SdpaFwd_gpu_gap_Small.Small",
          ReferenceExecutorType::GPU,
          LaneVerdict::KNOWN_GAP},
         {"a gap entry for the other reference only",
          graphBundle(buildSdpaGraph(256), true),
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+         "quick_SdpaFwd_gpu_gap_Small.Small",
          ReferenceExecutorType::CPU,
          LaneVerdict::VALIDATE},
         {"the cost gate is CPU-only",
@@ -306,7 +309,7 @@ TEST(TestGoldenDataPlanJudgeLane, EachBundleGetsTheVerdictItsLaneEarns)
     for(const auto& row : rows)
     {
         SCOPED_TRACE(row.label);
-        EXPECT_EQ(judgeLane(*row.bundle, row.bundleId, row.reference), row.expected);
+        EXPECT_EQ(judgeLane(*row.bundle, row.bundleId, row.reference, fixtureGaps()), row.expected);
     }
 }
 

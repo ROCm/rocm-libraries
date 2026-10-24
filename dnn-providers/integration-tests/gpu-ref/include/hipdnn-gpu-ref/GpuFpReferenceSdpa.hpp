@@ -95,6 +95,11 @@ struct GpuSdpaFwdOptions
     hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr;
     /// Provider-attuned emulation of P storage (opt-in; FLOAT is the oracle, SEM-012).
     SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT;
+    /// fp8 (AITER contract): FLOAT scalar or [B, H_kv, 1, 1] Q/K/V descales. Q/K/V are
+    /// dequantized first, then the float pipeline runs.
+    hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr;
 
     GpuSdpaFwdOptions& setScale(std::optional<float> value)
     {
@@ -166,6 +171,15 @@ struct GpuSdpaFwdOptions
     GpuSdpaFwdOptions& setProbabilityMode(SdpaSoftmaxProbabilityMode value)
     {
         probabilityMode = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setDescales(hipdnn_data_sdk::utilities::TensorBase<float>* q,
+                                   hipdnn_data_sdk::utilities::TensorBase<float>* k,
+                                   hipdnn_data_sdk::utilities::TensorBase<float>* v)
+    {
+        descaleQ = q;
+        descaleK = k;
+        descaleV = v;
         return *this;
     }
 };
@@ -288,6 +302,25 @@ public:
         }
         validateInput(
             q.dims(), k.dims(), v.dims(), o.dims(), pagedK, pagedV, options.pagedMaxSeqKv);
+
+        // fp8 (AITER contract): dequantize Q/K/V on the device, then run the float pipeline
+        // (CpuFpReferenceSdpa::forward does the same on the host).
+        if(options.descaleQ != nullptr || options.descaleK != nullptr
+           || options.descaleV != nullptr)
+        {
+            const auto batch = q.dims()[0];
+            const auto headsPerK = q.dims()[1] / k.dims()[1];
+            auto qd = dequantize(q, options.descaleQ, batch, k.dims()[1], headsPerK, false, "Q");
+            auto kd = dequantize(k, options.descaleK, batch, k.dims()[1], 1, pagedK, "K");
+            auto vd = dequantize(v, options.descaleV, batch, v.dims()[1], 1, pagedV, "V");
+            auto plain = options;
+            plain.descaleQ = nullptr;
+            plain.descaleK = nullptr;
+            plain.descaleV = nullptr;
+            fprop<float, float, float, ODataType, ComputeDataType, MaskDataType>(
+                qd, kd, vd, o, plain);
+            return;
+        }
 
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -654,6 +687,63 @@ private:
     };
 
     static void launchSdpaBwd(const SdpaBwdLaunch& launch, const std::vector<std::string>& defines);
+
+    static void launchSdpaDequant(const void* in,
+                                  const std::vector<int64_t>& dims,
+                                  const std::vector<int64_t>& strides,
+                                  float* out,
+                                  const float* descale,
+                                  int64_t descaleBatchStride,
+                                  int64_t descaleHeadStride,
+                                  int64_t headsPerKv,
+                                  const char* inType);
+
+    // fp8 dequantization on the device: a packed float copy of x * descale, with a FLOAT scalar
+    // or [B, H_kv, 1, 1] descale; head h of x uses KV head h / headsPerKv. A per-head descale is
+    // undefined on a paged container (its blocks are not batches), so paging needs a scalar.
+    template <class T>
+    static hipdnn_data_sdk::utilities::Tensor<float>
+        dequantize(hipdnn_data_sdk::utilities::TensorBase<T>& x,
+                   hipdnn_data_sdk::utilities::TensorBase<float>* descale,
+                   int64_t batch,
+                   int64_t numHeadsKv,
+                   int64_t headsPerKv,
+                   bool paged,
+                   const char* name)
+    {
+        const float* descalePtr = nullptr;
+        int64_t batchStride = 0;
+        int64_t headStride = 0;
+        if(descale != nullptr)
+        {
+            descalePtr = static_cast<const float*>(descale->memory().deviceData());
+            if(descale->elementCount() != 1)
+            {
+                const auto& d = descale->dims();
+                if(paged || d.size() != 4 || d[0] != batch || d[1] != numHeadsKv || d[2] != 1
+                   || d[3] != 1)
+                {
+                    throw std::invalid_argument(
+                        std::string("GpuFpReferenceSdpa: descale") + name
+                        + " must be a scalar or [B, H_kv, 1, 1] (a scalar when paged)");
+                }
+                batchStride = descale->strides()[0];
+                headStride = descale->strides()[1];
+            }
+        }
+        hipdnn_data_sdk::utilities::Tensor<float> out(x.dims());
+        launchSdpaDequant(x.memory().deviceData(),
+                          x.dims(),
+                          x.strides(),
+                          static_cast<float*>(out.memory().deviceData()),
+                          descalePtr,
+                          batchStride,
+                          headStride,
+                          headsPerKv,
+                          detail::HipRtcTypeName<T>::VALUE);
+        out.memory().markDeviceModified();
+        return out;
+    }
 
     // --- Validation ---
     // No SDPA param validator exists; perform minimal shape checks only.

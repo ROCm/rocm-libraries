@@ -47,7 +47,9 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
                              hipdnn_frontend::DataType inputDataType,
                              hipdnn_frontend::DataType outputDataType,
                              bool withDescale,
-                             bool withDescaleS = false)
+                             bool withDescaleS = false,
+                             hipdnn_frontend::DataType descaleDataType
+                             = hipdnn_frontend::DataType::FLOAT)
 {
     using hipdnn_data_sdk::utilities::generateStrides;
     using hipdnn_frontend::DataType;
@@ -83,9 +85,9 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
     if(withDescale)
     {
         const std::vector<int64_t> scalarDims = {1, 1, 1, 1};
-        sdpaAttrs.set_descale_q(makeAttr("DESCALE_Q", DataType::FLOAT, scalarDims, 5));
-        sdpaAttrs.set_descale_k(makeAttr("DESCALE_K", DataType::FLOAT, scalarDims, 6));
-        sdpaAttrs.set_descale_v(makeAttr("DESCALE_V", DataType::FLOAT, scalarDims, 7));
+        sdpaAttrs.set_descale_q(makeAttr("DESCALE_Q", descaleDataType, scalarDims, 5));
+        sdpaAttrs.set_descale_k(makeAttr("DESCALE_K", descaleDataType, scalarDims, 6));
+        sdpaAttrs.set_descale_v(makeAttr("DESCALE_V", descaleDataType, scalarDims, 7));
         if(withDescaleS)
         {
             // Softmax descale is part of the fp8 contract but unsupported by the v3
@@ -1647,6 +1649,29 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsDescaleForNonFp8)
         floatBuilder;
     EXPECT_FALSE(floatBuilder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
         << "Non-FP8 inputs carrying descales must be rejected";
+}
+
+// The plan reads descales as float, so another dtype is declined rather than misread.
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsNonFloatDescale)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    auto graph = buildDescaleSdpaFwdGraph(dims,
+                                          dims,
+                                          dims,
+                                          hipdnn_frontend::DataType::FP8_E4M3,
+                                          hipdnn_frontend::DataType::BFLOAT16,
+                                          /*withDescale=*/true,
+                                          /*withDescaleS=*/false,
+                                          hipdnn_frontend::DataType::HALF);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::BFLOAT16>
+        fp8Builder;
+    EXPECT_FALSE(fp8Builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()));
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
