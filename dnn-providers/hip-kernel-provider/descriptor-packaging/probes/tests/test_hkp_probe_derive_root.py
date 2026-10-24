@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from probe_support import MAIN_FIXTURE, PROBE_DERIVE, run_derive
+from probe_support import GENERIC_TARGETS_JSON, MAIN_FIXTURE, PROBE_DERIVE, run_derive
 
 
 def _derive(src: Path, arch: str, out: Path, ukds=()):
@@ -76,13 +76,30 @@ def _embedded(name, ukd_id=None):
     return _ukd(name, ks, ukd_id=ukd_id)
 
 
+# The packer requires these three to be UUIDs: the UED's id, the KMD it names as its
+# metadata, and the UHD its role map binds.
+_UED_ID = "00000000-0000-4000-8000-0000000000e1"
+_KMD_ID = "00000000-0000-4000-8000-0000000000e2"
+_UHD_ID = "00000000-0000-4000-8000-0000000000e3"
+
 # The generic descriptors every KDP of _write_root references.
 _GENERICS = {
     "x.umd.json": {"name": "m", "scope": "kernel", "match_symbol": "m"},
-    "x.ued.json": {"name": "t:e", "heuristic": "uhd", "metadata": "kmd"},
+    "x.ued.json": {
+        "id": _UED_ID,
+        "name": "t:e",
+        "sort_kernel_catalog": {"default": _UHD_ID},
+        "metadata": _KMD_ID,
+    },
     "x.udd.json": {"name": "d", "dispatch_symbol": "d"},
-    "x.uhd.json": {"name": "h", "kind": "native", "payload": "h"},
-    "x.kmd.json": {"name": "k", "fields": []},
+    "x.uhd.json": {
+        "id": _UHD_ID,
+        "name": "h",
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": "h"},
+    },
+    "x.kmd.json": {"id": _KMD_ID, "name": "k", "fields": []},
 }
 
 
@@ -94,7 +111,7 @@ def _write_root(root: Path, ukds, kdp_arch=("gfx950",), kdp_file="x.kdp.json"):
         "name": "x",
         "arch": list(kdp_arch) if kdp_arch is not None else [],
         "matchers": ["umd"],
-        "engine": "ued",
+        "engine": _UED_ID,
         "dispatch": "udd",
         "kernelDescriptors": list(ukds),
     }
@@ -105,8 +122,8 @@ def _write_root(root: Path, ukds, kdp_arch=("gfx950",), kdp_file="x.kdp.json"):
         (root / file).write_text(json.dumps(doc) + "\n")
 
 
-def _write_standalone(root: Path, ukd_id="ukd-standalone-id", arch=None):
-    ukd = _rocke("standalone", builder="b9", arch=arch, ukd_id=ukd_id)
+def _write_standalone(root: Path, ukd_id="ukd-standalone-id", arch=("gfx950",)):
+    ukd = _rocke("standalone", builder="b9", arch=list(arch), ukd_id=ukd_id)
     (root / "s.ukd.json").write_text(json.dumps(ukd) + "\n")
 
 
@@ -179,8 +196,8 @@ def test_passthrough_kind_expect_carries_authored_kernel_source(tmp_path):
     # One passthrough UKD per KDP (nothing compiles); it records its authored block.
     assert set(by_name) == {"e", "r"}
     assert by_name["e"]["kernel_source"] == emb["kernel_source"]
-    # kpack-output entries keep the three-field schema.
-    assert set(by_name["r"]) == {"kdp", "name", "kind"}
+    # kpack-output entries carry no authored block.
+    assert set(by_name["r"]) == {"kdp", "name", "kind", "arch"}
 
 
 def test_non_varying_group_keeps_first_by_name(tmp_path):
@@ -301,7 +318,9 @@ def test_wildcard_kdp_ships_everywhere(tmp_path):
 def test_expect_records_kdp_relative_path(tmp_path):
     _write_root(tmp_path / "src", [_rocke("a")], kdp_file="sub/dir/x.kdp.json")
     expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
-    assert expect == [{"kdp": "sub/dir/x.kdp.json", "name": "a", "kind": "rocke"}]
+    assert expect == [
+        {"kdp": "sub/dir/x.kdp.json", "name": "a", "kind": "rocke", "arch": "gfx950"}
+    ]
 
 
 def test_dot_prefixed_kdp_is_copied_but_not_expected(tmp_path):
@@ -350,7 +369,7 @@ def test_standalone_reference_in_other_arch_kdp_is_ignored(tmp_path):
     _write_root(
         tmp_path / "src", [_rocke("a"), "ukd-standalone-id"], kdp_arch=("gfx942",)
     )
-    _write_standalone(tmp_path / "src")
+    _write_standalone(tmp_path / "src", arch=("gfx942",))
     assert _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root") == []
 
 
@@ -553,7 +572,9 @@ def test_rederive_follows_source_changes(tmp_path):
     (out / "stale_dir").mkdir()
     (out / "stale_dir" / "f.json").write_text("{}")
     _write_root(src, [_rocke("b"), _rocke("0first")])
-    kmd = '{"version": "1.0", "id": "kmd", "name": "k2", "fields": []}\n'
+    kmd = (
+        json.dumps({"version": "1.0", "id": _KMD_ID, "name": "k2", "fields": []}) + "\n"
+    )
     (src / "x.kmd.json").write_text(kmd)
     expect = _derive(src, "gfx950", out)
     assert [e["name"] for e in expect] == ["0first"]
@@ -563,16 +584,25 @@ def test_rederive_follows_source_changes(tmp_path):
 
 
 # --- --list-arches ----------------------------------------------------------
-def _list_arches(src: Path, *filters: str):
+def _list_cmd(src: Path, *filters: str, exclude=()):
+    cmd = [
+        sys.executable,
+        str(PROBE_DERIVE),
+        "--list-arches",
+        "--from",
+        str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        *filters,
+    ]
+    for arch in exclude:
+        cmd += ["--exclude", arch]
+    return cmd
+
+
+def _list_arches(src: Path, *filters: str, exclude=()):
     r = subprocess.run(
-        [
-            sys.executable,
-            str(PROBE_DERIVE),
-            "--list-arches",
-            "--from",
-            str(src),
-            *filters,
-        ],
+        _list_cmd(src, *filters, exclude=exclude),
         capture_output=True,
         text=True,
         check=False,
@@ -588,7 +618,7 @@ def test_list_arches_unions_explicit_kdp_and_ukd_arches(tmp_path):
     # and standalone.
     wild = [_rocke("b", arch=["gfx1201"]), _rocke("c"), "ukd-standalone-id"]
     _write_root(src, wild, kdp_arch=None, kdp_file="wild.kdp.json")
-    _write_standalone(src, arch=["gfx90a"])
+    _write_standalone(src, arch=("gfx90a",))
     assert _list_arches(src) == ["gfx1201", "gfx90a", "gfx942", "gfx950"]
 
 
@@ -601,15 +631,125 @@ def test_list_arches_excludes_wildcards(tmp_path):
 def test_list_arches_packer_rejection_exits_2(tmp_path):
     src = tmp_path / "src"
     _write_root(src, [_rocke("a", arch=["gfx942"])])
-    r = subprocess.run(
-        [sys.executable, str(PROBE_DERIVE), "--list-arches", "--from", str(src)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    r = subprocess.run(_list_cmd(src), capture_output=True, text=True, check=False)
     assert r.returncode == 2
     assert r.stderr.startswith("hkp_probe_derive:")
     assert "is not a subset of KDP" in r.stderr
+
+
+# --- generic targets ---------------------------------------------------------
+# gpu_generic_targets.json lists gfx1100 first for gfx11-generic, and gfx1151 among its
+# members.
+_GENERIC = "gfx11-generic"
+_FIRST_MEMBER = "gfx1100"
+
+
+def _generic_hsaco(name):
+    ks = {"kind": "hsaco", "file": f"{name}.hsaco", "symbol": name}
+    return _ukd(name, ks, [_GENERIC])
+
+
+def test_list_arches_maps_generic_to_its_first_member(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_generic_hsaco("g")], kdp_arch=(_GENERIC,))
+    assert _list_arches(src) == [f"{_FIRST_MEMBER} {_GENERIC}"]
+
+
+def test_list_arches_drops_a_generic_when_a_member_is_a_build_target(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_generic_hsaco("g")], kdp_arch=(_GENERIC,))
+    _write_root(
+        src, [_hsaco("o", ("gfx942",))], kdp_arch=("gfx942",), kdp_file="o.kdp.json"
+    )
+    # gfx1151 is a member that is not the first one; any member covers the generic.
+    assert _list_arches(src, exclude=["gfx1151"]) == ["gfx942"]
+    # A build target that is no member leaves the generic probed.
+    assert _list_arches(src, exclude=["gfx942"]) == [
+        f"{_FIRST_MEMBER} {_GENERIC}",
+        "gfx942",
+    ]
+
+
+def test_list_arches_gives_one_probe_to_a_member_that_is_also_explicit(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_generic_hsaco("g")], kdp_arch=(_GENERIC,))
+    _write_root(
+        src,
+        [_hsaco("m", (_FIRST_MEMBER,))],
+        kdp_arch=(_FIRST_MEMBER,),
+        kdp_file="m.kdp.json",
+    )
+    assert _list_arches(src) == [f"{_FIRST_MEMBER} {_GENERIC}"]
+
+
+def test_list_arches_probes_each_generic_through_its_own_first_member(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_generic_hsaco("g")], kdp_arch=(_GENERIC,))
+    twelve = _ukd(
+        "h",
+        {"kind": "hsaco", "file": "h.hsaco", "symbol": "h"},
+        ["gfx12-generic"],
+    )
+    _write_root(src, [twelve], kdp_arch=("gfx12-generic",), kdp_file="h.kdp.json")
+    assert _list_arches(src) == [
+        f"gfx1100 {_GENERIC}",
+        "gfx1200 gfx12-generic",
+    ]
+
+
+def test_list_arches_keeps_family_names_and_rejects_unknown_generics(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_hsaco("f", ("gfx110x-all",))], kdp_arch=("gfx110x-all",))
+    # A family name is not in the table: it prints as itself for the caller to skip.
+    assert _list_arches(src) == ["gfx110x-all"]
+
+    unknown = tmp_path / "unknown"
+    _write_root(unknown, [_hsaco("u", ("gfx99-generic",))], kdp_arch=("gfx99-generic",))
+    r = subprocess.run(_list_cmd(unknown), capture_output=True, text=True, check=False)
+    # The packer's loader refuses a generic absent from the table.
+    assert r.returncode == 2
+    assert "gfx99-generic" in r.stderr
+    assert r.stdout == ""
+
+
+def test_derive_trims_a_generic_only_kdp_for_a_member_arch(tmp_path):
+    src = tmp_path / "src"
+    _write_root(
+        src,
+        [_generic_hsaco(n) for n in ("g_b", "g_a", "g_c")],
+        kdp_arch=(_GENERIC,),
+        kdp_file="generic.kdp.json",
+    )
+    _write_root(src, [_hsaco("m", (_FIRST_MEMBER,))], kdp_arch=(_FIRST_MEMBER,))
+    twelve = [
+        _ukd(n, {"kind": "hsaco", "file": f"{n}.hsaco", "symbol": n}, ["gfx12-generic"])
+        for n in ("o1", "o2")
+    ]
+    _write_root(src, twelve, kdp_arch=("gfx12-generic",), kdp_file="twelve.kdp.json")
+
+    out = tmp_path / "w" / "root"
+    expect = _derive(src, _FIRST_MEMBER, out)
+
+    # One UKD per compile group under each pass; the packed archive of the generic
+    # pass is the generic's, so its entry names the generic.
+    assert expect == [
+        {"kdp": "generic.kdp.json", "name": "g_a", "kind": "hsaco", "arch": _GENERIC},
+        {"kdp": "x.kdp.json", "name": "m", "kind": "hsaco", "arch": _FIRST_MEMBER},
+    ]
+    assert _kept(out, "generic.kdp.json") == ["g_a"]
+    # A generic of another family does not ship for this member: copied unchanged.
+    assert (out / "twelve.kdp.json").read_bytes() == (
+        src / "twelve.kdp.json"
+    ).read_bytes()
+
+
+def test_derive_for_a_member_outside_the_generic_ignores_its_kdps(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_generic_hsaco("g")], kdp_arch=(_GENERIC,))
+    out = tmp_path / "w" / "root"
+    # gfx1200 is no member of gfx11-generic: no pass for it, nothing to expect.
+    assert _derive(src, "gfx1200", out) == []
+    assert (out / "x.kdp.json").read_bytes() == (src / "x.kdp.json").read_bytes()
 
 
 # --- disabled kinds and excluded folders -------------------------------------
@@ -623,6 +763,8 @@ def test_disabled_kind_is_neither_kept_nor_expected(tmp_path):
             str(PROBE_DERIVE),
             "--from",
             str(src),
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
             "--arch",
             "gfx950",
             "--out",
@@ -655,7 +797,16 @@ def test_list_arches_ignores_content_of_disabled_kind_and_excluded_folder(tmp_pa
 
 
 def _derive_filtered(src, out, ukds, *filters):
-    cmd = [sys.executable, str(PROBE_DERIVE), "--from", str(src), "--arch", "gfx950"]
+    cmd = [
+        sys.executable,
+        str(PROBE_DERIVE),
+        "--from",
+        str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        "--arch",
+        "gfx950",
+    ]
     cmd += ["--out", str(out), *filters]
     for name in ukds:
         cmd += ["--ukd", name]
@@ -701,7 +852,16 @@ def test_arch_only_a_disabled_kind_ships_for_is_not_listed_or_derived_as_empty(
     # empty probe for configure to reject.
     r = _derive_filtered(src, tmp_path / "w" / "root", [], "--disable-kind", "rocke")
     assert r.returncode == 0  # gfx950 keeps h
-    cmd = [sys.executable, str(PROBE_DERIVE), "--from", str(src), "--arch", "gfx1201"]
+    cmd = [
+        sys.executable,
+        str(PROBE_DERIVE),
+        "--from",
+        str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        "--arch",
+        "gfx1201",
+    ]
     cmd += ["--out", str(tmp_path / "w2" / "root"), "--disable-kind", "rocke"]
     r = subprocess.run(cmd, capture_output=True, text=True, check=False)
     assert r.returncode == 3, r.stderr
@@ -759,3 +919,73 @@ def test_every_registered_output_type_has_checks():
     assert {k.output for k in kinds.values()} <= set(outputs)
     # ... and no check set is dead.
     assert set(outputs) <= {k.output for k in kinds.values()}
+
+
+# --- multi-launch UKDs (`sources`) ---------------------------------------------
+def _rocke_sources(name, launches, spec=None, arch=None):
+    """A multi-launch rocke UKD. `launches` maps each launch name to (builder, role)."""
+    sources = {}
+    for launch, (builder, role) in launches.items():
+        entry = {
+            "kind": "rocke",
+            "source": "s.py",
+            "builder": builder,
+            "spec": dict(spec) if spec is not None else {"block": 64},
+        }
+        if role is not None:
+            entry["role"] = role
+        sources[launch] = entry
+    ukd = _ukd(name, {}, arch)
+    del ukd["kernel_source"]
+    ukd["version"] = "1.1"
+    ukd["sources"] = sources
+    return ukd
+
+
+_DECODE_MERGE = {"decode": ("b1", None), "merge": ("b1", "merge")}
+
+
+def test_expect_lists_each_launch_with_its_authored_role(tmp_path):
+    _write_root(
+        tmp_path / "src", [_rocke_sources("m", _DECODE_MERGE), _rocke("s", "b9")]
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    by_name = {e["name"]: e for e in expect}
+    assert by_name["m"] == {
+        "kdp": "x.kdp.json",
+        "name": "m",
+        "kind": "rocke",
+        "arch": "gfx950",
+        "launches": {"decode": None, "merge": "merge"},
+    }
+    # A single-launch UKD keeps the entry shape every existing root records.
+    assert set(by_name["s"]) == {"kdp", "name", "kind", "arch"}
+
+
+def test_launches_are_part_of_the_compile_group_key(tmp_path):
+    ukds = [
+        _rocke_sources("m_a", _DECODE_MERGE),
+        _rocke_sources("m_b", _DECODE_MERGE),
+        # Same builder for `decode`, another one for the second launch: a different path.
+        _rocke_sources("m_other", {"decode": ("b1", None), "reduce": ("b2", None)}),
+        # The builder `m_a` uses, but one launch: not the same compile group either.
+        _rocke("single", "b1"),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_a", "m_other", "single"]
+
+
+def test_sweep_covers_the_values_of_every_launch(tmp_path):
+    # `decode` carries one spec in both UKDs; only `merge` varies, so the value of the
+    # second launch is what decides that both are packed.
+    def ukd(name, merge_block):
+        built = _rocke_sources(name, _DECODE_MERGE)
+        built["sources"]["merge"]["spec"] = {"block": merge_block}
+        return built
+
+    _write_root(
+        tmp_path / "src", [ukd("m_64", 64), ukd("m_128", 128), ukd("m_64b", 64)]
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]

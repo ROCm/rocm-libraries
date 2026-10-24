@@ -43,7 +43,7 @@ if _CODEGEN_DIR not in sys.path:
 # Module under test
 # ---------------------------------------------------------------------------
 import importlib
-M = importlib.import_module("Tensile.BenchmarkProblems")
+M = importlib.import_module("tensilelite.BenchmarkProblems")
 
 # ---------------------------------------------------------------------------
 # PRONG A helpers — build valid inputs for _generate_single_solution in-process
@@ -56,13 +56,13 @@ def _make_toolchain(arch="gfx942"):
 
 
 def _make_debug_config():
-    from Tensile.Common.Types import makeDebugConfig
+    from tensilelite.Common.Types import makeDebugConfig
     return makeDebugConfig({})
 
 
 def _make_problem_type(arch="gfx942"):
     """Build a ProblemType (BBS NT shape, Batched=True) valid for MFMA on gfx942."""
-    from Tensile.SolutionStructs.Problem import ProblemType
+    from tensilelite.SolutionStructs.Problem import ProblemType
     from config_harness import _toolchain_for, _isolated_globals_with_isa
 
     _, iim = _toolchain_for(arch)
@@ -230,7 +230,7 @@ class TestGenerateCustomKernelSolutions:
         stub = _StubSol()
         if mismatch_transpose:
             # Build a ProblemType with a different TransposeA so comparison fails.
-            from Tensile.SolutionStructs.Problem import ProblemType as PT_cls
+            from tensilelite.SolutionStructs.Problem import ProblemType as PT_cls
             from config_harness import _isolated_globals_with_isa, _toolchain_for
             _, iim = _toolchain_for("gfx942")
             pt_config = {
@@ -442,6 +442,32 @@ class TestGenerateForkedSolutions:
 
         # Dedup should yield <=1 unique solution.
         assert len(sols) <= 1, f"Expected dedup to <=1, got {len(sols)}"
+
+    def test_register_allocation_configs_with_one_mode_keep_the_first(
+            self, toolchain, problem_type, debug_config, capsys):
+        """Configs with one mode name one solution: the first stays and the
+        last is reported. "apply" spells the first, so it is not reported."""
+        from config_harness import _isolated_globals_with_isa
+
+        assembler, iim = toolchain
+        const = _make_constant_params()
+        perms = [
+            {"StinkyTofuRegisterAllocation": "2,classes=vs"},
+            {"StinkyTofuRegisterAllocation": "apply"},
+            {"StinkyTofuRegisterAllocation": "2,classes=s"},
+        ]
+
+        with _isolated_globals_with_isa(iim):
+            sols = M._generateForkedSolutions(
+                problem_type, const, perms, assembler, debug_config, iim
+            )
+
+        assert [sol["StinkyTofuRegisterAllocation"] for sol in sols] == [2]
+        warnings = [line for line in capsys.readouterr().out.splitlines()
+                    if "StinkyTofuRegisterAllocation" in line]
+        assert len(warnings) == 1
+        assert "'2,classes=s' is not built for 1 kernel(s)" in warnings[0]
+        assert "Benchmark it in a separate run." in warnings[0]
 
 
 # ---------------------------------------------------------------------------

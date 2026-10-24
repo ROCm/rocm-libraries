@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,8 +61,8 @@ void testing_gebsr2gebsr_bad_arg(const Arguments& argus)
     std::unique_ptr<descr_struct>  unique_ptr_descr_C(new descr_struct);
     hipsparseMatDescr_t            descr_C = unique_ptr_descr_C->descr;
 
-    hipsparseSetMatIndexBase(descr_A, idx_base_A);
-    hipsparseSetMatIndexBase(descr_C, idx_base_C);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr_A, idx_base_A));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr_C, idx_base_C));
 
     auto bsr_row_ptr_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (safe_size + 1)), device_free};
@@ -916,8 +916,8 @@ void testing_gebsr2gebsr(Arguments argus)
     std::unique_ptr<descr_struct>  unique_ptr_descr_C(new descr_struct);
     hipsparseMatDescr_t            descr_C = unique_ptr_descr_C->descr;
 
-    hipsparseSetMatIndexBase(descr_A, idx_base_A);
-    hipsparseSetMatIndexBase(descr_C, idx_base_C);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr_A, idx_base_A));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr_C, idx_base_C));
 
     srand(12345ULL);
 

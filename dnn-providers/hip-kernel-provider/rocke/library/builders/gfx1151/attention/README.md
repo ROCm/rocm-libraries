@@ -1,4 +1,27 @@
-# gfx1151 WMMA FMHA-forward: an optimization case study
+# RDNA (gfx11 / gfx12) WMMA SDPA forward
+
+The rocKE SDPA forward for RDNA3/3.5 (gfx11) and RDNA4 (gfx12) is two
+runtime-shaped kernels, each compiled once per RDNA generation for its LLVM
+generic processor:
+
+- **Prefill**: `kernels/gfx1151/wmma_fmha_fwd_v2.py` (`WmmaFmhaFwdV2Spec`,
+  body in `rocke/helpers/rdna_attention.py`).
+- **Decode**: `kernels/gfx1151/wmma_fmha_decode.py` (`WmmaFmhaDecodeSpec`), a
+  split-KV, GQA-packed kernel for small query lengths, plus its split-merge
+  kernel.
+
+Both have byte-identical C mirrors (`instance_gfx1151_wmma_fmha_fwd_v2.h`,
+`instance_gfx1151_wmma_fmha_decode.h`) gated by the parity pairs
+`gfx1151_wmma_fmha_fwd_v2_emit` and `gfx1151_wmma_fmha_decode_emit`. rocKE
+dispatch now routes every RDNA request to them instead of the earlier
+single-wave `wmma_fmha_fwd` kernel and its gfx11-only transposed-QK body
+(`wmma_swapqk`).
+
+The single-wave kernel (`kernels/gfx1151/wmma_fmha_fwd.py`, its C mirror
+`instance_gfx1151_wmma_fmha_fwd.h` and its parity pairs) remains in the tree,
+unselected by dispatch, because the shipped hipDNN catalog
+(`hipkernel:Gfx1151WmmaAttention`) still builds from it. It is retired once the
+catalog packaging moves to the two kernels above.
 
 ## Inference coverage benchmark
 
@@ -25,323 +48,73 @@ absorbed-attention or backward benchmark.
 - Every run prints a per-case record, a grouped table, provenance, and
   `METRIC` lines; `coverage_passed` is the primary metric.
 
-Run on a gfx1151 device with the platform Python package and library on
-`PYTHONPATH`:
+Run on any gfx11 (RDNA3/3.5) or gfx12 (RDNA4) device with the platform Python
+package and library on `PYTHONPATH`. The benchmark compiles for the device's
+generic target by default; `--arch gfx1151` builds processor-specific objects
+on a gfx1151 device:
 
 ```bash
-python -m benchmarks.gfx1151.attention.benchmark_sdpa
+python -m benchmarks.gfx1151.attention.benchmark_sdpa [--arch gfx1151]
 ```
 
-### Dense forward dtype support
+## Prefill kernel (`wmma_fmha_fwd_v2`)
 
-`WmmaFmhaFwdSpec` accepts `fp16` (including the `f16` spelling) and `bf16`.
-The selected WMMA atom and all Q/K/V/output pointer types follow that dtype.
-FP16 kernel-cache names remain unchanged; BF16 has distinct names, preventing
-cross-dtype cache collisions. Both causal and noncausal paths and the optional
-V-LDS staging path support the dtype selection. Aligned query/KV tiles remain
-the default specialization; the independent tail flags below handle partial
-tiles. Packed and paged inputs use the explicit layout selection below.
+- **CTA.** A multi-wave workgroup owns `block_m` query rows (128, or 64 when a
+  wave pair splits the head) of one (batch, query head). The key loop walks
+  32-key tiles (`block_n`); K and V tiles are loaded once into padded LDS
+  (`k_pad` / `v_pad`) and shared by every wave.
+- **Transposed scores.** The waves compute `S^T = K Q^T`, keeping a query row's
+  softmax state within a lane, and `O^T = V^T P`.
+- **Lazy rescale.** The O/l rescale is skipped while no lane's running maximum
+  grows by more than 8 (log2 domain).
+- **Masked work.** The key loop runs only over the tiles a query tile can see
+  (causal diagonal and window bounds); fully visible tiles skip the mask.
+  Causal launches use longest-processing-time CTA order; the default order
+  (`cta_order="hqb"`) is heads, then query tile, then batch.
+- **Head widths.** Q/K buckets 64, 96, 128, 192 and 256 with V/O buckets 64, 96,
+  128 and 256; the actual widths are multiples of 8 inside the bucket. Buckets
+  above 128 split the head across a wave pair; gfx12 keeps an unsplit Q up to
+  256 while V is at most 128 (MLA).
+- **Runtime arguments.** Batch, Sq, Sk, Hq, Hkv, Hv, head widths, every
+  batch/token/head stride (BSHD or BHSD; token strides multiples of 8),
+  top-left or bottom-right causal alignment, two-sided window bounds, LSE
+  selection and the bias broadcast strides.
+- **Baked variants.** dtype (FP16/BF16), bucket, mask class (`none`, or
+  `causal`, whose runtime bounds also express no mask and windows), additive
+  bias (none, FP32, Q dtype), and the optional score features softcap, sinks,
+  ALiBi, QQ-bias, ragged/paged layouts and OCP E4M3 K/V storage.
 
-The C `rocke_wmma_fmha_fwd_spec_t` now includes `dtype`, initialized to `"fp16"`
-by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
-the updated header and archive; the pybind spec adapter also carries the field.
-The parity emitters cover both dtypes, head sizes, masks, GQA, and V staging.
+## Decode kernel (`wmma_fmha_decode`)
 
-### Aligned FP16/BF16 transposed-QK specialization
+- **GQA packing.** The query heads that share a K/V head and their query
+  positions are packed into 16-row WMMA tiles, so each K/V head is read once per
+  row tile rather than once per query head.
+- **Split-KV.** A runtime `num_splits` (chosen on the host from the shape and
+  the CU count) cuts the visible key range; splits are interleaved so all splits
+  of a head sweep the keys as one DRAM stream. Partial O and LSE go to a
+  workspace and are merged by the last split to finish (fused merge, up to 4
+  splits, with a self-re-arming arrival counter) or by the separate merge kernel.
+  `build_wmma_fmha_decode_module` ships both kernels in one code object.
+- **Per-family codegen.** gfx12 runs the waves of a workgroup in lockstep (one
+  barrier per key iteration, which keeps cold-cache reads in one stream); gfx11
+  does not. D256 splits the O columns over 2 (gfx11) or 4 (gfx12) workgroups.
+- **Buckets.** 64, 128 and 256, with the same runtime shapes, masks, bias kinds
+  and score features as the prefill.
 
-Public dispatch selects `transposed_qk=True` for dense FP16 or BF16 D64/D128
-attention with no mask or either causal alignment, query lengths divisible by
-16, and KV lengths divisible by 32. Score features, sequence tails,
-packed/paged layouts, explicit windows, and D96/D256 retain the shared WMMA
-path. The FP16 and BF16 variants use their dtype-matched WMMA atoms; neither
-dtype is routed through the former slower shared path for eligible shapes.
+## Selection
 
-The specialized helper computes `K @ Q.T`, reduces softmax over lane-local
-accumulator slots and a cross-half exchange, then computes `V @ P`. The
-probability transpose stays in registers; V remains ordinary row-major
-`[B,S,Hkv,D]`. No host/device transpose or preprocessing is required.
-The implementation specializes the transposed-QK design from
-[PR #9710](https://github.com/ROCm/rocm-libraries/pull/9710), not its optional
-pre-transposed-V or experimental scheduling variants.
-
-`block_n` accepts 32 or 64; `num_waves` accepts 1 or 2. Each wave writes
-16 query rows. Dispatch uses `(block_n=64, num_waves=2)` when the query length
-is at least 512 and divisible by 32 and the KV length is divisible by 64;
-otherwise it uses `(32,1)`. Direct spec callers must satisfy the selected
-query-group and KV-tile alignment. The grid helper and tensor binding reject
-partial groups/tiles rather than silently dropping them.
-
-Bottom-right alignment shifts the visible-key bound by `Sk-Sq`. Empty query
-groups skip the KV loop. True negative-infinity initialization and safe
-empty-row exponential shifts preserve exact-zero fully masked prefixes;
-the legacy top-left specialization is unchanged.
-
-The specialization retains a distinct cache name while using the common
-runtime-shaped dense ABI. Its native spec fields and pybind mapping mirror
-Python; native consumers must rebuild against the updated header. Numeric
-regressions cover both dtypes, tile sizes, wave counts, masks, GQA, independent
-batch/head/column coordinates, and output guards.
-
-### Runtime-shaped dense ABI and AOT catalog
-
-Dense WMMA kernels specialize only code-shaping choices: dtype, Q/K and V/O
-head dimensions, mask algorithm, optional score features, and tuning knobs.
-Query/KV lengths, query/KV head counts, bottom-right alignment, two-sided
-window bounds, the optional LSE write gate, and every tensor stride are kernel
-arguments. A compiled kernel can therefore serve multiple batches, sequence
-lengths, MHA/GQA/MQA ratios, window widths, and dense layouts.
-
-The dense binding accepts logical BSHD and BHSD tensors. The innermost head
-dimension must remain contiguous, but batch, token, and head strides may be any
-positive non-overlapping element strides; compact storage is not required.
-`emit_lse=True` adds a caller-owned FP32 output. hipDNN uses logical shape
-`[B,S,H,1]` for BSHD or `[B,H,S,1]` for BHSD; direct dispatch also accepts
-compact rank-3 forms. Each element is the natural-log log-sum-exp of that row.
-
-`hipkernel:Gfx1151WmmaAttention` is the packaged hipDNN engine for this dense
-surface. Its authored catalog contains 40 reusable variants: generic kernels
-for FP16/BF16, D64/D96/D128/D256, and no-mask/causal/window modes, plus aligned
-transposed-QK kernels for FP16/BF16 D64/D128. `hkp_packaging_product` lowers
-them to the per-architecture `.kpack`; runtime shapes, bounds, strides, and LSE
-selection are not descriptor dimensions. The packaged catalog intentionally
-excludes ragged/paged layouts, FP8 KV, and auxiliary score features, which
-remain available through direct rocKE dispatch.
-
-### Output-column tiling
-
-`value_tile_size=0` preserves the full-head WMMA path. A nonzero value must
-be a proper multiple-of-16 divisor of `head_size`; it selects that many
-PV/output columns per workgroup without truncating QK's head dimension.
-`value_tiles` reports the number of output partitions, and the grid's Z axis
-is `batch * value_tiles`. The kernel decodes the logical batch and column
-offset; callers still pass full-sized Q/K/V/O tensors and their ordinary strides.
-
-Each partition computes the same complete attention normalization and writes
-disjoint output columns. This trades repeated QK work for fewer live output
-accumulators and more workgroups. V-LDS staging, when enabled, stages only the
-selected columns. Dense, packed and paged addressing and FP8 KV storage retain
-their existing meanings. The knob is independent of sequence tails but cannot
-be combined with `transposed_qk`.
-
-Public dispatch uses this profile for dense D256 requests with Q-matched KV
-storage, no extra score features or window, at least 128 KV tokens, and at most
-128 query workgroups before output tiling. Noncausal prefill uses 32-column tiles with
-V-LDS staging; causal prefill uses 64-column tiles with direct V gathers.
-Queries of at most 16 rows use 64-column tiles with V-LDS staging. Other
-requests retain their existing policy. The tile width is part of the cache
-identity; native consumers must rebuild against the extended spec header.
-
-Numeric regressions place all QK signal in the final head dimension, so an
-incorrectly shortened QK reduction fails even in the first output partition.
-They cover every output column, query/KV tails, both dtypes, packed/paged FP8,
-and exact-zero empty sequences.
-
-
-
-### Bottom-right causal alignment
-
-The runtime `bottom_right` argument selects the diagonal
-`key_index <= query_index + seqlen_k - seqlen_q`; zero selects the top-left
-diagonal. This supports chunked dense prefill and packed batches whose
-per-sequence Q/K lengths differ. When `seqlen_q > seqlen_k`, the fully masked
-query prefix is written as zero.
-
-Bottom-right alignment is not a cache-key or spec field. The kernel derives
-the offset from its runtime lengths, including device-loaded ragged/paged
-lengths. True negative-infinity initialization and safe empty-row exponential
-shifts preserve exact-zero fully masked prefixes. BF16 also uses this
-normalization for ordinary attention: large finite negative logits must not
-underflow solely because of a finite initial maximum.
-`test_wmma_fmha_fwd_numeric.py` covers constant-value preservation under those
-logits and exact-zero masked prefixes.
-
-### Sequence tails and dense decode
-
-Set `query_tail=True` when the query length is not divisible by 16, and
-`kv_tail=True` when the KV length is not divisible by 16. Query tiling then
-rounds up; invalid Q lanes load zero and do not store output. The KV-tail
-variant includes the final partial tile, substitutes zero for invalid K/V
-loads, and excludes those keys from softmax. The two flags are independent,
-so a one-token query with an aligned cache does not pay for KV-tail masking.
-
-No input/output padding is required. The shared WMMA helper clamps a row before
-using its address callback, and both direct V gathers and V-LDS staging
-zero-fill invalid values. Numeric tests use NaN-poisoned input padding and
-output canaries to detect leaked padding values or out-of-range stores.
-The benchmark adapter selects these flags from each case's true lengths.
-Aligned configurations retain their previous code and cache names.
-
-### Dense score features
-
-`sliding_window=W` supplies a legacy causal left width. Explicit
-`window_left`/`window_right` bounds support an arbitrary two-sided diagonal
-band; `-1` means unbounded. The builder bounds the KV tile loop to the union
-needed by each query tile rather than scanning fully masked cache blocks.
-`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, and `use_attn_bias`
-are independent compile-time feature switches; they compose with both dtypes,
-runtime alignments, and tail specializations.
-
-The score order is scaled QK, softcap, ALiBi, QQ-bias, additive attention
-bias, then masking. Softcap uses the stable AMDGPU-lowerable `tanh` operation.
-ALiBi uses `slope[head] * (key_position - context)`, including in
-combinations with sinks. QQ-bias is FP32 and uses query-local rows and
-context-relative key columns; out-of-bounds bias entries contribute zero. A
-sink is an always-visible softmax logit with no value-vector contribution, so
-it adds denominator mass without being multiplied into the output.
-
-Enabled features append arguments to the base ABI in declaration order. Use
-`wmma_fmha_fwd_signature`, the actual `KernelDef.params`, or the native
-signature API with the standard kernarg packer. Native signatures own their
-names/types in the caller arena.
-
-### Packed variable lengths and paged KV
-
-`layout="ragged"` reads packed Q/O `[total_q,Hq,D]` and K/V
-`[total_k,Hkv,D]`, with I32 `cu_seqlens_q` and `cu_seqlens_k` prefix sums.
-`layout="paged"` keeps packed Q/O and reads K/V caches
-`[num_pages,page_block_size,Hkv,D]` through an I32 `block_table`; per-sequence
-KV lengths come from I32 `seqused_k`. Page size is a positive power of two.
-The block table need not be identity, contiguous, or sequence-ordered.
-
-Pass the maximum query length to `wmma_fmha_fwd_grid` and the sequence count
-as `batch`. Each workgroup loads its sequence's real lengths on the device;
-query tiles beyond that sequence return before touching Q/K/V. Both packed
-layouts always enable query and KV tail bounds, independently of the dense
-specialization flags. Empty-KV sequences produce zero output. Bottom-right
-alignment, windows, and score features use per-sequence logical positions,
-not packed offsets or physical page numbers.
-
-Layout metadata follows the enabled score arguments in the ABI. Ragged adds
-`cu_seqlens_q`, `cu_seqlens_k`. Paged adds `cu_seqlens_q`, `seqused_k`,
-`block_table`, `block_table_stride`, `stride_k_block`, `stride_v_block`.
-All strides are in their pointer's element units; page strides are separate
-from the token/head strides. K/V head elements remain contiguous. No host
-densification or input/output padding is required.
-
-### Additive attention bias
-
-`use_attn_bias=True` adds a general bias tensor `[B|1, H|1, Sq|1, Sk]` to the
-scaled scores. `bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype, FP16 or
-BF16); the key dimension must be unit-stride. Batch, head, and query strides are
-runtime I32 arguments (`bias_stride_b`, `bias_stride_h`, `bias_stride_q`) after
-the `attn_bias_ptr` argument, which follows the LSE arguments. A stride of 0
-broadcasts, and an extent-1 dimension maps to stride 0, so the common
-broadcast, expanded, permuted, and row-padded views need no copy. Entries are
-multiplied by log2(e) to match the log2-domain scores and are applied after
-QQ-bias, before masking. Loads are guarded by `query_pos < seqlen_q` and
-`key_pos < seqlen_k`; out-of-range entries contribute zero.
-
-Ragged and paged layouts take `Sq`/`Sk` as the request maxima, and each sequence
-reads the bias at its own within-sequence positions. The transposed-QK fast path
-does not support a bias and its spec rejects the combination. The kernel name
-gains an `abias_<dtype>` part. Runtime batch strides address each bias slice
-without host-side relaunches.
-
-### Softmax statistics (LSE)
-
-`emit_lse=True` supplies the runtime `write_lse` gate and a caller-owned FP32
-buffer. The kernel writes the natural-log log-sum-exp of each scaled, masked,
-biased row; sink mass is included in the denominator and an empty row stores
-`-inf`. LSE is not a spec or cache dimension.
-
-Direct dense bindings accept `[B,H,Sq]` and the layout-shaped rank-4 form;
-packed bindings accept `[H,total_q]`, `[total_q,H]`, or `[total_q,H,1]`.
-The fixed ABI always carries the LSE pointer plus batch/token/head strides.
-The hipDNN graph contract uses rank-4 stats. Launch returns the output tensor;
-LSE is a caller-owned side effect.
-
-### Compiler policy and launch bounds
-
-LLVM launch bounds use the target's wave size as the minimum, capped by the
-kernel's declared maximum. A single-wave gfx1151 kernel therefore declares
-`32,32`, not an inverted `64,32` range. LLVM
-[discards invalid ranges](https://llvm.org/docs/doxygen/AMDGPUSubtarget_8cpp_source.html#l00157)
-and substitutes its defaults, which loses the intended register-allocation
-constraint. Both engines emit the corrected bounds. The GPU regression queries
-the compiled function's maximum block size through HIP rather than checking
-source text.
-
-`WmmaFmhaFwdSpec.scheduler_strategy` selects the existing typed LLVM scheduler
-policy: `max-ilp`, `max-memory-clause`, `iterative-ilp`, `iterative-minreg`, or
-`iterative-maxocc`. `None` preserves the backend default and legacy cache names.
-An explicit policy is part of the kernel name, complete spec cache key, and
-serialized kernel attributes in both engines. Unsupported values are rejected.
-The HIPCC alternative does not support this LLVM scheduler option. Native
-callers must rebuild against the extended spec header and keep its policy
-string alive while using the spec.
-
-### FP8 KV storage
-
-Set `kv_dtype="fp8e4m3"` for OCP E4M3FN byte storage with FP16/BF16 Q and O.
-The WMMA path decodes bytes with integer/IEEE operations, multiplies by ordinary
-FP32 `k_scale` and `v_scale`, then casts each operand to the Q dtype before
-the existing 16-bit WMMA. It does not require native FP8 conversion or FP8 WMMA
-instructions. Both scales are runtime scalars appended after layout metadata;
-FNUZ and E5M2 storage are not accepted.
-
-The decoder preserves all finite OCP values, signed zeros, subnormals, and the
-two NaN encodings. Numeric regressions enumerate all 256 bytes and check
-non-power-of-two scale rounding. FP8 storage composes with packed/paged layouts,
-tail bounds, both V-staging choices, and the score features above.
-
-### Head dimensions, causal tile skipping, windows, dense strides
-
-- **Head dimensions.** The Q/K width (`head_size`) and the V/O width
-  (`v_head_size`, zero meaning equal) are independent multiples of 16 up to
-  256. The transposed-QK specialization stays restricted to equal D64/D128;
-  every other width pair uses the standard path. Output-column tiling applies
-  to the V/O width.
-- **Causal tile skipping.** `causal_tile_skip` bounds the K loop at the causal
-  diagonal of the standard path (either runtime alignment), so fully masked
-  key tiles are never loaded. It is a default-off spec flag; dispatch sets it
-  for causal masks without an explicit window.
-- **Windows.** `window_left` and `window_right` are runtime I32 bounds around
-  `q + context`; `-1` means unbounded. Legacy `sliding_window=W` maps to
-  `window_left=W-1`. The mask class, not either bound value, is part of the
-  compiled identity.
-- **Dense strides.** Batch, token, and head strides for Q/K/V/O and LSE are
-  runtime arguments. One launch handles compact, padded, or gapped BSHD/BHSD
-  batches without host-side slicing.
-- **Offset overflow.** The kernel computes element offsets in I32 and scales
-  them to I32 byte offsets against at most 2 GiB buffer descriptors. The
-  binding (like the hipDNN pack) rejects any tensor whose addressed byte
-  extent would not fit, rather than launching and silently wrapping or
-  reading zeros past the descriptor.
-- **FP8 KV alignment.** FP8 K rows are read as 16-byte vectors and LDS-staged
-  FP8 V rows as 8-byte vectors. The binding rejects FP8 K (and staged V) whose
-  data pointer or any outer stride is not a multiple of that width.
-- **Sweep.** `sweep_space` offers distinct valid variants, baseline first,
-  gated on the device compute-unit count (`num_cus`; zero uses the reference
-  part) instead of a fixed query-group limit.
-
-The composed native struct ABI is `rocke-attention-gfx1151/v5`. Rebuild native
-callers and initialize the struct with `rocke_wmma_fmha_fwd_spec_default()`.
-
-### Public library selection and launch
-
-`dispatch.attention.AttentionRequest(arch="gfx1151", ...)` auto-selects
-`attention_gfx1151_wmma` for supported requests. Set `layout` explicitly to
-`dense`, `ragged`, or `paged`; `auto` resolves to dense on this candidate and
-preserves legacy conventions on other architectures. `use_fp8`,
-`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, and `use_attn_bias` describe required
-features before selection, not features inferred silently at bind time.
-
-For FP16 D64 ragged causal requests and dense query/KV-tail requests without
-additional score features or an explicit window, dispatch uses V-LDS staging
-and `max-ilp`. Causal profiles use an effective window spanning both advertised
-maximum sequence lengths, preserving every causally-visible key for either
-alignment, including top-left `Sq > Sk`. Unmasked profiles keep the window
-disabled. Those maxima must bound the device-resident sequence lengths.
-The profile admits maxima up to `2**30` to keep context/window arithmetic
-within I32; other requests retain their existing policy. No sequence metadata
-is copied to the host to choose the profile.
+Routes, priorities, the decode/prefill rule (`rdna_attention_use_decode`),
+head-width buckets and the bindings are documented in the dispatcher's
+[RDNA WMMA inference](../../../dispatch/attention/README.md#rdna-wmma-inference-gfx11-and-gfx12)
+section.
 
 `dispatch_attention(request).bind_torch(tensors, **scalars)` accepts caller-owned
 `q`, `k`, `v`, `out` and the selected metadata/auxiliary tensors. Despite the
 historical method name, any real device-tensor owner implementing shape, dtype,
 element strides, device, and `data_ptr()` can bind. The adapter validates rank,
-shape agreement, vector alignment, metadata contiguity, and the dense
-batch stride (folded or per-batch launch) without reading GPU sequence contents.
+shape agreement, vector alignment, metadata contiguity, and non-overlapping
+outer strides without reading GPU sequence contents; the batch and every stride
+are kernel arguments, so one launch covers the whole batch.
 
 The compiled launcher is cached by target and complete spec. Repeated
 `binding.launch(stream=...)` calls reuse it. The default fence synchronizes only
@@ -351,21 +124,53 @@ After external stream synchronization, call
 tensor owners. Captured launch owners must remain alive until their graphs
 are destroyed. The benchmark drains them at that boundary, outside timing.
 
+## RDNA generic targets
+
+One kernel set serves each RDNA generation; no per-processor kernels are
+authored or shipped:
+
+| Generation | Generic target | Devices | WMMA atom |
+|---|---|---|---|
+| RDNA3/3.5 | `gfx11-generic` | gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1154 | `wmma_f32_16x16x16_{f16,bf16}` (operands duplicated across lane halves) |
+| RDNA4 | `gfx12-generic` | gfx1200, gfx1201 | `wmma_gfx12_f32_16x16x16_{f16,bf16}` (K split across lane halves) |
+
+rocKE IR names no processor: the LLVM module carries only the
+`amdgcn-amd-amdhsa` triple, and the comgr ISA name chooses the processor.
+`rocke.core.arch.generic_arch_from_target_id()` maps a device name to its
+generic target; tests, the benchmark and hip-kernel-provider packaging use it.
+The dispatcher's CU count is twice HIP's `multiProcessorCount` (HIP reports
+WGPs on RDNA) of the live device when it can run the object, else 40.
+
+Toolchain and runtime requirements:
+
+- Compile: an LLVM 20 or newer comgr, the oldest flavor rocKE supports.
+  Generic processors need code object v6, which the validated LLVM 22 and 23
+  comgrs emit (generic version 1).
+- Load: the HIP runtime must accept generic code objects. ROCm 7.0.2, 7.2.0 and
+  the 7.13 and 10.0 core builds load them; ROCm 6.4.0 on a gfx1151 rejected
+  them (`hipErrorNoBinaryForGpu`). Treat ROCm 7.0 as the minimum.
+- Hardware coverage: the GPU tests have run on gfx1100, gfx1101, gfx1150 and
+  gfx1201. gfx1151 and gfx1200 load the same generic objects but have not been
+  run.
+
+## Historical gfx1151 optimization campaign
+
 The sections below are a historical campaign, not results for this benchmark.
 
 The sections below record the design lessons of an earlier optimization campaign
 on gfx1151 (RDNA3.5, wave32, a single 16x16x16 WMMA atom). They are qualitative.
-They are not results for the comparator above, and this document deliberately
-carries no absolute performance figures: re-measure with the harnesses listed
-under "Files" before acting on any ordering below.
+They are not results for the kernels above, and this document deliberately
+carries no absolute performance figures. Part 1 ran on the single-wave kernel
+(`kernels/gfx1151/wmma_fmha_fwd.py`); re-measure with the vehicles listed under
+"Files" before acting on any ordering below.
 [`ALGORITHM.md`](ALGORITHM.md) derives the kernel from the math and is the place
 to start if flash attention is new to you.
 
 The study applies the
 [optimization runbook](../../../../platform/dsl_docs/optimization/optimization_runbook.md)
-to the native gfx1151 WMMA flash-attention forward kernel
-(`kernels.gfx1151.wmma_fmha_fwd`). Every variant was correctness-gated against a
-reference before it was timed.
+to the single-wave gfx1151 WMMA flash-attention forward kernel
+(`kernels.gfx1151.wmma_fmha_fwd`) that preceded the current kernels. Every
+variant was correctness-gated against a reference before it was timed.
 
 - **Part 1** applies the runbook loop to one lever (V-LDS staging). The
   "optimization" regressed and was reverted.
@@ -377,7 +182,7 @@ reference before it was timed.
 
 ## The kernel under test
 
-One wave32 owns 16 Q rows for a `(q_tile, head, batch)`. Per K-tile it runs
+In the campaign's kernel, one wave32 owns 16 Q rows for a `(q_tile, head, batch)`. Per K-tile it runs
 `QK^T` (WMMA), an online softmax, then `PV` (WMMA), carrying the running max
 `m`, the running sum `l`, and the `<8 x f32>` PV accumulator as `scf.for`
 iter-args. `BLOCK_M = BLOCK_K = 16`.
@@ -409,9 +214,9 @@ memory with one scalar load per `(d, k)`. Staging each K-tile's V rows into LDS
 once with wide loads, then reading the B operand from LDS, should cut global
 traffic and speed the kernel up.
 
-**One lever.** `WmmaFmhaFwdSpec.v_lds_stage`: `False` is the per-element global
-gather; `True` vector-loads each k-row into an LDS tile, shares the existing
-P-staging barrier, and reads the B operand from LDS.
+**One lever.** `WmmaFmhaFwdSpec.v_lds_stage`: `False` is
+the per-element global gather; `True` vector-loads each k-row into an LDS tile,
+shares the existing P-staging barrier, and reads the B operand from LDS.
 
 **Result.** The variants were bit-identical to each other and within tolerance of
 the reference. The staged variant was consistently slower across the shapes and
@@ -426,9 +231,9 @@ hypothesis about global loads (far fewer) and refuted everything else:
 3. The baseline loads are cache-resident: across the wave each k-row is read
    once, so the gather's global traffic was already close to optimal.
 
-**Decision.** Revert the default. `v_lds_stage` defaults to `False` and the
-toggle remains. Dispatch re-enables it only for profiles where a fresh
-measurement favors it (for example D64 tails and tiled D256 values).
+**Decision.** Reverted: the knob stayed off by default and was enabled only
+for profiles where a fresh measurement favored it. The knob remains on the
+single-wave kernel, and `bench_v_staging.py` replays the A/B.
 
 Lessons:
 
@@ -487,8 +292,9 @@ A survey of the kept winners across a matrix of shapes showed uniformly
 issue-bound behavior. It also surfaced the campaign's largest win: tuning on one
 shape had hidden that causal masking ran at roughly half the efficiency of
 non-causal. Clamping the K loop to skip fully masked tiles recovered that, and it
-was algorithmic rather than microarchitectural. The production kernel applies the
-same idea through `_window_tiles` (see "Dense score features" above).
+was algorithmic rather than microarchitectural. The current prefill and decode
+kernels apply the same idea: their key loops visit only the tiles a query tile
+can see.
 
 ## Iteration ledger
 
@@ -592,10 +398,14 @@ repacks that silently regress an issue-bound kernel.
 
 ## Files
 
-- `ALGORITHM.md`: a from-the-math-up guide to the kernel for readers new to flash
-  attention.
-- `bench_v_staging.py`: Part 1 A/B harness for V staging on the production spec;
-  gates each variant on a numpy reference, times with HIP events, and
+The campaign's research vehicles are self-contained FP16 gfx1151 kernels with
+their own drivers; nothing in production imports them. Their drivers replay the
+Part 2 and Part 3 experiments on a gfx11 device.
+
+- `ALGORITHM.md`: a from-the-math-up guide to the campaign's single-wave kernel
+  for readers new to flash attention.
+- `bench_v_staging.py`: Part 1 A/B harness for V staging on the single-wave
+  kernel; gates each variant on a numpy reference, times with HIP events, and
   disassembles for the memory-instruction mix.
 - `fmha_singlewave.py` / `tune.py`: the Part 2 vehicle (`SingleWaveCfg`:
   `bm_tiles`, `p_mode`, `v_mode`, `prefetch_k`, `q_preload`, `fuse_k`) and its
@@ -612,5 +422,9 @@ repacks that silently regress an issue-bound kernel.
 - `survey.py`: the shape survey, which runs the best single-wave kernels per
   shape and compares against PyTorch SDPA.
 - `wmma_fmha_fwd_bench.py`, `wmma_fmha_fwd_sweep_profile.py`: benchmark and
-  sweep-profile drivers for the production kernel. Its numeric checks live in
+  sweep-profile drivers for the single-wave kernel. Its numeric checks live in
   `library/tests/test_wmma_fmha_fwd_numeric.py`.
+
+The production kernels' tests are `library/tests/test_wmma_fmha_fwd_v2_*.py` and
+`library/tests/test_wmma_fmha_decode_*.py`; their inference benchmark is
+[`benchmarks/gfx1151/attention`](../../../benchmarks/gfx1151/attention/).
