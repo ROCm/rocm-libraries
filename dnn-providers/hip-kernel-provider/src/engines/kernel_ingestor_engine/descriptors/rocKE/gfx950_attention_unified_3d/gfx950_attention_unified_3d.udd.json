@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a18bfb64-e493-49f6-9f8b-602c421dfc95",
+  "name": "Gfx950AttentionUnified3D dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_attention_unified_3d.dispatch"
+}

@@ -1706,8 +1706,8 @@ class TestPlaceholderGateOnUnreadableFiles:
         target = "packs/ScaleAddNative.cpp"
 
         class GeneratorThatLosesAFileAfterWriting(generate.IngestorGenerator):
-            def render(self, config, output_dir):
-                written = super().render(config, output_dir)
+            def render(self, config, output_dir, **kwargs):
+                written = super().render(config, output_dir, **kwargs)
                 (output_dir / target).write_bytes(b"// \xff\xfe not utf-8\n")
                 return written
 
