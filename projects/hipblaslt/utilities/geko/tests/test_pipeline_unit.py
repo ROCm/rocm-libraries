@@ -230,7 +230,7 @@ def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.Monkey
         "summarize",
         lambda *_args, **kwargs: (pd.DataFrame(), pd.DataFrame([{"M": 16}])),
     )
-    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gt = GemmType.from_tensilelite("T", "N", "F8", "S", "S")
     gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
     monkeypatch.setattr(pipeline, "gemm_configs_from_gemm_dataframe", lambda _df: [gc])
 
