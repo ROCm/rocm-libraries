@@ -9,6 +9,12 @@
 # test hardware exists for that family yet (see amdgpu_family_matrix.py in
 # TheRock, family key "gfx125x": test-runs-on is empty everywhere).
 #
+# Testing is scoped to the subtrees listed in .github/repos-config.json rather
+# than to all of ROCm. A schedule run has no diff to narrow against, so TheRock
+# would otherwise test every component it builds, including system components
+# (hip-tests, rocrtst, rocgdb, rocprofiler-*, amdsmi, rccl, ...) that this
+# repository cannot affect.
+#
 # For manual triggering with custom GPU families, use therock-multi-arch-ci.yml.
 
 name: TheRock Multi-Arch Nightly CI
@@ -33,6 +39,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  configure:
+    name: Configure Test Scope
+    runs-on: ubuntu-24.04
+    outputs:
+      test_projects: ${{ steps.scope.outputs.test_projects }}
+    steps:
+      - name: Checkout repository config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/repos-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Collect rocm-libraries subtrees
+        id: scope
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+
+          with open(".github/repos-config.json", encoding="utf-8") as f:
+              config = json.load(f)
+          subtrees = sorted(
+              f"{entry['category']}/{entry['name']}"
+              for entry in config["repositories"]
+          )
+          print("test_projects=" + ",".join(subtrees))
+          PY
+
+      - name: Surface test scope
+        env:
+          TEST_PROJECTS: ${{ steps.scope.outputs.test_projects }}
+        run: |
+          {
+            echo "### Nightly test scope"
+            echo ""
+            echo "Testing rocm-libraries subtrees and their direct consumers only:"
+            echo ""
+            echo '```'
+            echo "${TEST_PROJECTS}" | tr ',' '\n'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     with:
@@ -85,7 +133,7 @@ jobs:
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [setup]
+    needs: [configure, setup]
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
@@ -101,8 +149,12 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string triggers full test run in downstream workflow
-      changed_projects: ''
+      # Scope testing to the subtrees this repository owns (plus the consumers
+      # TheRock's dependency graph pulls in). An empty string would mean "test
+      # everything", which on a schedule run spends GPU runner time on ROCm
+      # system components (hip-tests, rocrtst, rocgdb, rocprofiler-*, amdsmi,
+      # ...) that no rocm-libraries change can affect.
+      changed_projects: ${{ needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
@@ -111,7 +163,7 @@ jobs:
 
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [setup]
+    needs: [configure, setup]
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
@@ -125,8 +177,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string triggers full test run in downstream workflow
-      changed_projects: ''
+      # See the Linux job above: scope testing to rocm-libraries-owned subtrees.
+      changed_projects: ${{ needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
@@ -137,6 +189,7 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
