@@ -489,5 +489,19 @@ def getRegisteredArchKeys():
     return stinkytofu.getRegisteredArchKeys()
 
 
+def parseRegisterAllocationConfig(value: int | str) -> Tuple[str, int]:
+    """Parse a StinkyTofuRegisterAllocation value.
+
+    The parser lives on the standalone ``stinkytofu`` binding. Native rocisa
+    exposes the same function from ``_rocisa.so``; this backend replaces that
+    module, so TensileLite's ``rocisa.parseRegisterAllocationConfig`` lands here.
+    ``value`` is a mode 0..3 or a comma-separated string such as
+    ``'apply,classes=vs'``. Returns ``(canonical, mode)``.
+    """
+    import stinkytofu
+
+    return stinkytofu.parseRegisterAllocationConfig(value)
+
+
 # Path-1 interop: ``toStinkyTofuModule`` / ``StinkyAsmModule`` (see
 # ``stinky_interop.py`` and ``code.Module.to_stinky_asm``).

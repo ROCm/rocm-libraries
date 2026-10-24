@@ -49,6 +49,7 @@
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
@@ -1077,6 +1078,31 @@ NB_MODULE(_stinkytofu, m) {
         "Return True if StinkyTofu has a hardware instruction definition for *mnemonic* on "
         "[major, minor, stepping]. Lets a generator ask before emitting, instead of finding "
         "out when the mnemonic fails to lower.");
+
+    // TensileLite asks rocisa.parseRegisterAllocationConfig before codegen. On the
+    // stinkytofu backend that name is the adaptor, which forwards here. The
+    // _rocisa.so binding in ToStinkyTofuUtils.cpp calls this same parser.
+    m.def(
+        "parseRegisterAllocationConfig",
+        [](const nb::object& value) -> std::pair<std::string, int> {
+            std::string text;
+            if (nb::isinstance<nb::str>(value))
+                text = nb::cast<std::string>(value);
+            else if (nb::isinstance<nb::int_>(value))
+                text = std::to_string(nb::cast<long long>(value));
+            else
+                throw nb::type_error(
+                    "a register allocation config is a mode 0..3 or a comma-separated string");
+            Expected<RegisterAllocationConfig> config =
+                parseRegisterAllocationConfig(text, RegisterAllocationDialect::Kernel);
+            if (config.hasError()) throw nb::value_error(config.getError().c_str());
+            return {canonicalRegisterAllocationConfig(*config), static_cast<int>(config->mode)};
+        },
+        nb::arg("value"),
+        "Parse a StinkyTofuRegisterAllocation value: a mode 0..3, or a comma-separated "
+        "string such as 'apply,classes=vs'. Returns (canonical, mode), where canonical is the "
+        "shortest spelling of the same configuration -- the mode alone for a mode-only "
+        "config, '0' for mode off. Raises ValueError naming what does not parse.");
 
     // ========================================================================
     // Hardware capability dictionaries (replaces rocisa getAsmCaps/etc.)
