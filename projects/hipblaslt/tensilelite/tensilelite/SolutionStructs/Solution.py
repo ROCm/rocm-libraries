@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
+from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup, usesStreamKDynamicParallel
 
 import collections
 import copy
@@ -301,6 +301,21 @@ def _supportStreamKArrivalFixup(state, hasSAtomic):
               and not isCustomKernelConfig(state)
               and usesStreamKArrivalFixup(state.get("DebugStreamK", 0), hasSAtomic,
                                           bool(state.get("PrefetchAcrossPersistent", 0))))
+
+
+def _supportStreamKDynamicParallel(state):
+  """Whether this solution's asm reduces split dynamic tiles in parallel.
+
+  Only generated StreamK Hybrid kernels whose dynamic sub-mode can store its
+  parts through the parallel-reduction path (no StreamKAtomic, DebugStreamK 0,
+  no PrefetchAcrossPersistent) claim it; the host sets bit 29 of SKTiles only
+  for these.
+  """
+  return bool(isStreamK(state) and hasHybridAssignment(state)
+              and not isCustomKernelConfig(state)
+              and usesStreamKDynamicParallel(state.get("DebugStreamK", 0),
+                                             state.get("StreamKAtomic", 0),
+                                             bool(state.get("PrefetchAcrossPersistent", 0))))
 
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
@@ -7247,6 +7262,10 @@ class Solution(collections.abc.Mapping):
     # generator knows which fixup protocol it emits (StreamKHybrid.usesArrivalFixup).
     state["InternalSupportParams"]["SupportStreamKArrivalFixup"] = \
         _supportStreamKArrivalFixup(state, isaInfoMap[isa].asmCaps["HasSAtomic"])
+    # Same for the dynamic sub-mode's parallel reduction
+    # (StreamKHybrid.usesDynamicParallel).
+    state["InternalSupportParams"]["SupportStreamKDynamicParallel"] = \
+        _supportStreamKDynamicParallel(state)
     state["AssignedDerivedParameters"] = True
 
     # Set E

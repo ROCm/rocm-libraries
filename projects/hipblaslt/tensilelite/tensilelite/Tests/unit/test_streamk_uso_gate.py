@@ -138,8 +138,14 @@ def _reg_name(reg):
 
 
 def _is_uso_test(inst):
-    """True for the single instruction the USO predicate emits."""
-    return isinstance(inst, SBitcmp1B32) and list(inst.getParams())[1] == _SK_USO_BIT
+    """True for the single instruction the USO predicate emits.
+
+    The Hybrid dynamic sub-mode tests the same bit through the SKTiles alias,
+    where it selects the parallel reduction; that is not a USO test.
+    """
+    if not (isinstance(inst, SBitcmp1B32) and list(inst.getParams())[1] == _SK_USO_BIT):
+        return False
+    return _reg_name(list(inst.getParams())[0]) != "sgprSKTiles"
 
 
 # --- 1. The gate: one bit test, in place, plus its branch ------------------
@@ -237,10 +243,17 @@ def test_both_mapping_arms_are_emitted(site, inVgprs, variant):
 
 
 def test_only_the_helper_can_emit_the_predicate():
-    """No caller may hand-roll the bit test; all go through the one helper."""
-    assert len(re.findall(r"SBitcmp1B32\(", inspect.getsource(skmod))) == 1, (
-        "the bit-29 test must exist only in emitUsoBranchToGlobal"
+    """No caller may hand-roll the bit test; all go through the one helper.
+
+    The only other bit test in the module is the dynamic sub-mode's
+    parallel-reduction bit (extractDynamicParallelMode).
+    """
+    assert len(re.findall(r"SBitcmp1B32\(", inspect.getsource(skmod))) == 2
+    assert len(re.findall(r"SBitcmp1B32\(", inspect.getsource(StreamK.emitUsoBranchToGlobal))) == 1, (
+        "the USO bit-29 test must exist only in emitUsoBranchToGlobal"
     )
+    dynamic = inspect.getsource(StreamKHybrid.extractDynamicParallelMode)
+    assert len(re.findall(r"SBitcmp1B32\(", dynamic)) == 1
 
 
 def test_helper_emits_the_branch_itself():
@@ -309,9 +322,15 @@ def test_initialization_does_not_extract_the_uso_bit(assignment, processing):
 
     writer.allocTmpSgpr = alloc_tmp
     writer.longBranchScc0 = lambda label, **kw: SCBranchSCC0(labelName=label.getLabelName())
+    writer.isPrefetchAcrossPersistentEnabled = lambda k: False
     module = assignment().initialize(writer, kernel, processing())
     insts = list(module.flatitems())
     assert sum(_is_uso_test(inst) for inst in insts) == 1
+    # Hybrid: the dynamic preLoop reads bit 29 through the SKTiles alias, where
+    # it selects the parallel reduction.
+    dynamicTests = [inst for inst in insts if isinstance(inst, SBitcmp1B32)
+                    and _reg_name(list(inst.getParams())[0]) == "sgprSKTiles"]
+    assert len(dynamicTests) == (1 if processing is StreamKHybrid else 0)
     for inst in insts:
         if isinstance(inst, (SAndB32, SLShiftRightB32)):
             params = list(inst.getParams())

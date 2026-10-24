@@ -599,7 +599,9 @@ namespace TensileLite
      * and Hybrid in its dynamic sub-mode): the first tiles - skTiles work items are whole
      * tiles, the remaining skTiles tiles are each cut into skSplit parts of
      * skItersPerWI iterations, for totalItems work items in all. grid is the
-     * workgroup count the dynamic grid policy launches for it.
+     * workgroup count the dynamic grid policy launches for it. parallel (only
+     * with every tile split) sums the parts in the PostGSU kernel with
+     * gsu = skSplit instead of in the last part to arrive.
      */
     struct StreamKDynamicSplit
     {
@@ -608,6 +610,7 @@ namespace TensileLite
         uint32_t skItersPerWI = 0;
         uint32_t totalItems   = 0;
         size_t   grid         = 0;
+        bool     parallel     = false;
 
         // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
         // flags) the kernel indexes: one per part of every split tile.
@@ -627,13 +630,17 @@ namespace TensileLite
         size_t maxGrid = 0;
         // CUs the split is sized for: origami's cu_count for the static grid.
         size_t splitCUs = 0;
-        // False keeps every tile whole unless the debug overrides ask otherwise.
+        // The kernel can fix split tiles up by last arrival. With neither this
+        // nor allowParallel every tile stays whole unless the debug overrides
+        // ask otherwise.
         bool allowSplit = true;
         // Flag-region entries left after the per-XCD queue counters.
         size_t flagSlots = 0;
         // Workspace the launch is given, and the bytes of one partial tile.
         size_t workspaceBytes   = 0;
         size_t partialTileBytes = 0;
+        // The kernel can reduce split tiles in parallel (PostGSU kernel).
+        bool allowParallel = false;
         // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
         int overrideTiles = -1;
         int overrideSplit = -1;
@@ -648,16 +655,28 @@ namespace TensileLite
     // than CUs and the reduction is tree (origami grid_k_split_aware).
     inline constexpr size_t StreamKDynamicSplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
 
+    // The static path reduces in parallel when there are at most CUs / 4 tiles
+    // with at least 64 iterations each (origami select_reduction:
+    // MaxTilesForParallel, MinItersForParallel).
+    constexpr size_t StreamKDynamicParallelCUsPerTile = 4;
+    constexpr size_t StreamKDynamicParallelMinIters   = 64;
+
     /**
      * Choose the dynamic StreamK work decomposition. Single source of truth for
      * the packed SKTiles/SKSplit/SKItersPerWI/TotalItems, the dynamic grid, the
-     * partials workspace and the launch summary.
+     * reduction of split tiles, the partials workspace and the launch summary.
      *
-     * Fewer tiles than splitCUs are each cut into the largest of
-     * StreamKDynamicSplitFactors parts with tiles*skSplit <= splitCUs, at least
-     * StreamKDynamicMinItersPerWI iterations per part and partials that fit
-     * flagSlots and the workspace; otherwise every tile is whole. The debug
-     * overrides replace this rule, within the same workspace and flag limits.
+     * Fewer tiles than splitCUs are split. With allowParallel, at most
+     * splitCUs / StreamKDynamicParallelCUsPerTile tiles and at least
+     * StreamKDynamicParallelMinIters iterations per tile, every tile is cut
+     * into min(splitCUs / tiles, itersPerTile / StreamKDynamicMinItersPerWI)
+     * parts that fit the workspace and summed by the PostGSU kernel
+     * (parallel). Otherwise each tile is cut into the
+     * largest of StreamKDynamicSplitFactors parts with tiles*skSplit <=
+     * splitCUs, at least StreamKDynamicMinItersPerWI iterations per part and
+     * partials that fit flagSlots and the workspace; otherwise every tile is
+     * whole. The debug overrides replace this rule, within the same workspace
+     * and flag limits (parallel only when they split every tile).
      */
     TENSILELITEHOST_EXPORT StreamKDynamicSplit
         streamKDynamicSplit(StreamKDynamicSplitInputs const& in);
@@ -1343,6 +1362,7 @@ namespace TensileLite
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
+                                      Hardware const&          hardware,
                                       PersistentLaunchSettings const&   launch,
                                       uint32_t                 autoGsuVal,
                                       size_t                   resolvedGlobalAccumulation,
@@ -1360,6 +1380,7 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
+                                                      Hardware const&          hardware,
                                                       PersistentLaunchSettings const&   launch,
                                                       uint32_t                 autoGsuVal,
                                                       size_t resolvedGlobalAccumulation) const;
@@ -1409,6 +1430,11 @@ namespace TensileLite
             // of per-part ready flags; streamKDynamicDecomposition() splits
             // tiles only for these. Older/custom kernels leave this false.
             bool arrivalFixup       = false;
+            // StreamK Hybrid kernel reduces split tiles of its dynamic
+            // sub-mode in parallel (PostGSU kernel) when bit 29 of SKTiles is
+            // set; streamKDynamicDecomposition() picks it only for these.
+            // Older/custom kernels leave this false and never receive the bit.
+            bool dynamicParallel    = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
