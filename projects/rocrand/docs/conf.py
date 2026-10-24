@@ -5,7 +5,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import pathlib
-import shutil
 import sys
 import re
 
@@ -23,7 +22,6 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 left_nav_title = f"rocRAND {version_number} Documentation"
-shutil.copy2("../library/src/fortran/README.md", "./fortran-api-reference.md")
 
 # for PDF output on Read the Docs
 project = "rocRAND Documentation"
