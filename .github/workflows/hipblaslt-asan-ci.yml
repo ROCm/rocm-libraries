@@ -8,7 +8,9 @@ on:
       - reopened
     paths:
       - "projects/hipblaslt/**"
+      - "projects/hipsparselt/**"
       - "test/therock/test_hipblaslt.py"
+      - "test/therock/test_hipsparselt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
   workflow_dispatch:
@@ -26,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
-      # this focused gfx90a lane exercises its actual math-libs build system.
+      # these jobs exercise its actual math-libs build system.
       therock_ref: ${{ steps.therock-ref.outputs.ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
@@ -51,13 +53,25 @@ jobs:
       - name: Compute arch matrix
         id: matrix
         run: |
-          build='[{"family":"gfx90a"}]'
-          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
+          build='[
+            {"family":"gfx90a","components":["hipBLASLt"]},
+            {"family":"gfx942","components":["hipBLASLt","hipSPARSELt"]},
+            {"family":"gfx950","components":["hipBLASLt","hipSPARSELt"]}
+          ]'
+          test='[
+            {"family":"gfx90a","component":"hipblaslt","test_type":"quick","command_timeout":"20m","step_timeout_minutes":30,"job_timeout_minutes":90,"runs_on":"linux-gfx90a-gpu-rocm"},
+            {"family":"gfx942","component":"hipblaslt","test_type":"standard","command_timeout":"60m","step_timeout_minutes":70,"job_timeout_minutes":120,"runs_on":"linux-gfx942-1gpu-ccs-csp-ossci-rocm"},
+            {"family":"gfx942","component":"hipsparselt","test_type":"standard","command_timeout":"60m","step_timeout_minutes":70,"job_timeout_minutes":120,"runs_on":"linux-gfx942-1gpu-ccs-csp-ossci-rocm"},
+            {"family":"gfx950","component":"hipblaslt","test_type":"standard","command_timeout":"60m","step_timeout_minutes":70,"job_timeout_minutes":120,"runs_on":"linux-gfx950-1gpu-ccs-ossci-rocm"},
+            {"family":"gfx950","component":"hipsparselt","test_type":"standard","command_timeout":"60m","step_timeout_minutes":70,"job_timeout_minutes":120,"runs_on":"linux-gfx950-1gpu-ccs-ossci-rocm"}
+          ]'
+          build=$(echo "$build" | jq -c .)
+          test=$(echo "$test" | jq -c .)
           echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: "Build (hipBLASLt | ${{ matrix.family }} | ASAN)"
+    name: "Build (hipBLASLt / hipSPARSELt | ${{ matrix.family }} | HOST_ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
@@ -91,14 +105,25 @@ jobs:
 
       - name: Adjust git config
         run: |
-          git config --global --add safe.directory $PWD
+          git config --global --add safe.directory "$PWD"
           git config fetch.parallel 10
+
+      - name: Install ccache with host sanitizer flag support
+        # TODO: Remove this pin once the shared CI image has ccache >= 4.12.1.
+        # Older versions drop -Xarch_host options (https://github.com/ccache/ccache/issues/1632).
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/ccache/ccache/releases/download/v4.12.1/ccache-4.12.1-linux-x86_64.tar.xz \
+            --output "$RUNNER_TEMP/ccache.tar.xz"
+          echo "742e6a6e17c0a060046874eece2949b221c228e1119698a4c6e0b096cbc87152  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.12.1-linux-x86_64" >> "$GITHUB_PATH"
 
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
             --config-preset "github-oss-dev" \
-            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --dir "$(dirname "$CCACHE_CONFIGPATH")" \
             --local-path "$CACHE_DIR/ccache"
 
       - name: Runner health status
@@ -119,7 +144,7 @@ jobs:
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --progress --no-include-rocm-libraries --no-include-ml-frameworks
 
-      - name: Configure gfx90a TheRock host-ASAN math-libs
+      - name: Configure TheRock host-ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
@@ -127,7 +152,7 @@ jobs:
           # this workflow's focused single-family build.
           extra_cmake_options: >-
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
-            -DTHEROCK_DIST_AMDGPU_FAMILIES=gfx90a
+            -DTHEROCK_DIST_AMDGPU_FAMILIES=${{ matrix.family }}
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
@@ -165,23 +190,30 @@ jobs:
           echo "-------------"
           ccache -s -v || true
 
-      - name: Package hipBLASLt trees
+      - name: Package ASAN trees
         if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          COMPONENTS: ${{ join(matrix.components, ' ') }}
         run: |
           set -uo pipefail
-          mkdir -p upload/hipblaslt
-          found=0
-          for kind in stage dist; do
-            d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null | head -1)
-            if [ -n "$d" ] && [ -d "$d" ]; then
-              echo "Packaging hipBLASLt/${kind}: $d"
-              if tar -C "$d" -czf "upload/hipblaslt/hipblaslt-${kind}.tar.gz" . ; then found=1; fi
-            else
-              echo "::warning::no hipBLASLt/${kind} tree found"
-            fi
+          read -r -a components <<< "$COMPONENTS"
+          for component in "${components[@]}"; do
+            name="${component,,}"
+            mkdir -p "upload/${name}"
+            found=0
+            for kind in stage dist; do
+              d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/${component}/${kind}" 2>/dev/null | head -1)
+              if [ -n "$d" ] && [ -d "$d" ]; then
+                echo "Packaging ${component}/${kind}: $d"
+                if tar -C "$d" -czf "upload/${name}/${name}-${kind}.tar.gz" . ; then found=1; fi
+              else
+                echo "::warning::no ${component}/${kind} tree found"
+              fi
+            done
+            [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for ${component}"
+            ls -lh "upload/${name}" || true
           done
-          [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for hipBLASLt"
-          ls -lh upload/hipblaslt || true
 
       - name: Upload hipBLASLt trees
         if: ${{ !cancelled() }}
@@ -192,13 +224,23 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Upload hipSPARSELt trees
+        if: ${{ !cancelled() && contains(matrix.components, 'hipSPARSELt') }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-hipsparselt-${{ matrix.family }}
+          path: upload/hipsparselt/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
-    name: "Test hipBLASLt ASAN | ${{ matrix.family }} (quick)"
+    name: "Test ${{ matrix.component }} HOST_ASAN | ${{ matrix.family }} (${{ matrix.test_type }})"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.job_timeout_minutes }}
     container:
-      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      # The image is public. Use HTTPS port 443 to avoid the runner's automatic GHCR token login.
+      image: ghcr.io:443/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
         --group-add video
         --device /dev/kfd
@@ -222,7 +264,7 @@ jobs:
       AMDGPU_FAMILIES: ${{ matrix.family }}
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
       HSA_XNACK: "0"
-      TEST_COMPONENT: hipblaslt
+      TEST_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -240,22 +282,22 @@ jobs:
             test/therock
           sparse-checkout-cone-mode: true
 
-      - name: Download hipBLASLt ASAN trees
+      - name: Download ASAN trees
         timeout-minutes: 30
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: asan-trees-hipblaslt-${{ matrix.family }}
+          name: asan-trees-${{ matrix.component }}-${{ matrix.family }}
           path: asan-trees
 
       - name: Assemble runnable tree from dist (+ stage overlay)
         run: |
           set -euo pipefail
           mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
-          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/hipblaslt-dist.tar.gz"
-          if [ -f "asan-trees/hipblaslt-stage.tar.gz" ]; then
-            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/hipblaslt-stage.tar.gz"
+          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-dist.tar.gz"
+          if [ -f "asan-trees/${TEST_COMPONENT}-stage.tar.gz" ]; then
+            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-stage.tar.gz"
           fi
-          test -x "${THEROCK_BIN_DIR}/hipblaslt-test"
+          test -x "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
           echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
 
       - name: Driver / GPU sanity check
@@ -282,25 +324,36 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
-      - name: Test hipBLASLt (quick)
+      - name: Test ${{ matrix.component }} (${{ matrix.test_type }})
         # A passing smoke run takes 2-3 minutes; hangs used to run to the
-        # 180-minute step limit. Cap the test well below that and name the
-        # runner, since hangs have clustered on specific hosts.
-        timeout-minutes: 30
+        # 180-minute step limit. Cap tests using the matrix's command timeout
+        # and name the runner, since hangs have clustered on specific hosts.
+        # The step timeout leaves time to record logs after killing the test.
+        timeout-minutes: ${{ matrix.step_timeout_minutes }}
         env:
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
-          TEST_TYPE: quick
+          TEST_TYPE: ${{ matrix.test_type }}
+          TEST_COMMAND_TIMEOUT: ${{ matrix.command_timeout }}
           RUNNER_NAME: ${{ runner.name }}
         run: |
           mkdir -p ./test_logs
           status=0
-          timeout -k 60 20m python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 \
-            | tee ./test_logs/hipblaslt-test_output.log || status=$?
+          timeout -k 60 "${TEST_COMMAND_TIMEOUT}" python3 "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py" 2>&1 \
+            | tee "./test_logs/${TEST_COMPONENT}-test_output.log" || status=$?
           if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
-            echo "::error::hipBLASLt ASAN test hung and was killed after 20 minutes on runner ${RUNNER_NAME}"
+            echo "::error::${TEST_COMPONENT} HOST_ASAN test timed out after ${TEST_COMMAND_TIMEOUT} on runner ${RUNNER_NAME}"
           fi
           exit "${status}"
+
+      - name: Upload failed test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-logs-${{ matrix.component }}-${{ matrix.family }}
+          path: test_logs
+          if-no-files-found: ignore
+          retention-days: 7
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
@@ -318,8 +371,8 @@ jobs:
           BUILD: ${{ needs.build.result }}
           TEST: ${{ needs.test.result }}
         run: |
-          echo "Build (hipBLASLt ASAN, gfx90a-gating): ${BUILD}"
-          echo "Test  (hipBLASLt ASAN, gfx90a-gating): ${TEST}"
+          echo "Build (hipBLASLt / hipSPARSELt HOST_ASAN): ${BUILD}"
+          echo "Test  (hipBLASLt / hipSPARSELt HOST_ASAN): ${TEST}"
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
             echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
             exit 1
