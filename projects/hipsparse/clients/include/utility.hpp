@@ -938,7 +938,7 @@ void gen_matrix_coo(I                    m,
                 }
 
                 // Repeat if running out of bounds
-                if(rng < 0 || rng > n - 1)
+                if(rng < 0 || rng > n - 1 || rng >= nnz)
                 {
                     continue;
                 }
@@ -959,7 +959,11 @@ void gen_matrix_coo(I                    m,
             }
 
             // Partially sort column indices
-            std::sort(&col_ind[begin], &col_ind[i]);
+            if (i <= static_cast<I>(col_ind.size())) {
+                std::sort(col_ind.begin() + begin, col_ind.begin() + i);
+            } else {
+                std::sort(col_ind.begin() + begin, col_ind.end());
+            }
         }
     }
 
