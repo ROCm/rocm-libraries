@@ -44,7 +44,8 @@ namespace rocsparse
                                    rocsparse_int*       zero_pivot,
                                    rocsparse_index_base idx_base,
                                    rocsparse_diag_type  diag_type,
-                                   rocsparse_direction  dir)
+                                   rocsparse_direction  dir,
+                                   int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -53,8 +54,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -176,7 +179,8 @@ namespace rocsparse
                                    rocsparse_int*       zero_pivot,
                                    rocsparse_index_base idx_base,
                                    rocsparse_diag_type  diag_type,
-                                   rocsparse_direction  dir)
+                                   rocsparse_direction  dir,
+                                   int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -185,8 +189,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -309,7 +315,8 @@ namespace rocsparse
                                   rocsparse_int*       zero_pivot,
                                   rocsparse_index_base idx_base,
                                   rocsparse_diag_type  diag_type,
-                                  rocsparse_direction  dir)
+                                  rocsparse_direction  dir,
+                                  int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -319,8 +326,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -480,7 +489,8 @@ namespace rocsparse
                                   rocsparse_int*       zero_pivot,
                                   rocsparse_index_base idx_base,
                                   rocsparse_diag_type  diag_type,
-                                  rocsparse_direction  dir)
+                                  rocsparse_direction  dir,
+                                  int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -490,8 +500,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)

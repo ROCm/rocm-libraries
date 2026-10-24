@@ -276,6 +276,62 @@ Tests:
   batch_count: [2, 4]
   batch_count_A: [0, 1]
 
+# Regression test for the batched transposed CSR triangular solve when the
+# batch count exceeds the grid-y limit. The transposed path first gathers the
+# transposed values through gthr_strided_batched (AISPARSE-649) and then runs
+# csrsv_kernel with the batch on grid.y (AISPARSE-655). Before the fixes the
+# batch axis was placed directly on grid.y with no stride; because grid.y is
+# capped at maxGridSize[1] (65535, and the driver rejects anything above 65536),
+# the launch failed with "invalid configuration argument" once the batch count
+# passed that cap. batch_count is chosen well above the cap while the matrix is
+# kept tiny so the whole batch stays under 1 GB.
+- name: sptrsv_batched_large_grid
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_only_precisions
+  M: 16
+  N: 16
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_force]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
+  batch_count: [131072]
+  device_memory_gb: 2
+  host_memory_gb: 1
+
+# Same regression, conjugate-transposed with a complex type. In addition to the
+# transposed value gather (AISPARSE-649) and the batched solve (AISPARSE-655),
+# this path conjugates the gathered values through conjugate_strided_batched,
+# which also placed the batch on grid.y with no stride (AISPARSE-655). A complex
+# precision is used so the conjugation is exercised, not a no-op.
+- name: sptrsv_batched_large_grid
+  category: nightly
+  function: sptrsv
+  indextype: *i64i32
+  precision: *single_only_precisions_complex
+  M: 16
+  N: 16
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_force]
+  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
+  batch_count: [131072]
+  device_memory_gb: 2
+  host_memory_gb: 1
+
 - name: sptrsv_file
   category: nightly
   function: sptrsv
