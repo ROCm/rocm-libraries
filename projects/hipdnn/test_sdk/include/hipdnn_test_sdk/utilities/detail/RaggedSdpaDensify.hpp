@@ -84,6 +84,9 @@ struct Role
     int64_t uid;
     bool queryPacking;
     bool output;
+    // Row statistics (LSE, Max, Sum_exp) may be dense beside a ragged Q; the other primaries of a
+    // packing group are all ragged or all dense.
+    bool stats = false;
 };
 
 template <typename AttrsT>
@@ -93,16 +96,16 @@ template <>
 inline std::vector<Role>
     sdpaRoles(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT& attrs)
 {
-    std::vector<Role> roles = {{attrs.q_tensor_uid, true, false},
-                               {attrs.k_tensor_uid, false, false},
-                               {attrs.v_tensor_uid, false, false},
-                               {attrs.o_tensor_uid, true, true}};
+    std::vector<Role> roles = {{attrs.q_tensor_uid, true, false, false},
+                               {attrs.k_tensor_uid, false, false, false},
+                               {attrs.v_tensor_uid, false, false, false},
+                               {attrs.o_tensor_uid, true, true, false}};
     for(const auto& stats :
         {attrs.stats_tensor_uid, attrs.max_tensor_uid, attrs.sum_exp_tensor_uid})
     {
         if(stats.has_value())
         {
-            roles.push_back({stats.value(), true, true});
+            roles.push_back({stats.value(), true, true, true});
         }
     }
     return roles;
@@ -112,15 +115,15 @@ template <>
 inline std::vector<Role>
     sdpaRoles(const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT& attrs)
 {
-    return {{attrs.q_tensor_uid, true, false},
-            {attrs.k_tensor_uid, false, false},
-            {attrs.v_tensor_uid, false, false},
-            {attrs.o_tensor_uid, true, false},
-            {attrs.do_tensor_uid, true, false},
-            {attrs.stats_tensor_uid, true, false},
-            {attrs.dq_tensor_uid, true, true},
-            {attrs.dk_tensor_uid, false, true},
-            {attrs.dv_tensor_uid, false, true}};
+    return {{attrs.q_tensor_uid, true, false, false},
+            {attrs.k_tensor_uid, false, false, false},
+            {attrs.v_tensor_uid, false, false, false},
+            {attrs.o_tensor_uid, true, false, false},
+            {attrs.do_tensor_uid, true, false, false},
+            {attrs.stats_tensor_uid, true, false, true},
+            {attrs.dq_tensor_uid, true, true, false},
+            {attrs.dk_tensor_uid, false, true, false},
+            {attrs.dv_tensor_uid, false, true, false}};
 }
 
 template <typename AttrsT>
@@ -151,6 +154,24 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
     for(const auto& [uid, tensor] : tensors)
     {
         if(tensor->ragged_offset_tensor_uid.has_value() && roleOf.count(uid) == 0)
+        {
+            return std::nullopt;
+        }
+    }
+    // A partly ragged packing group (e.g. ragged Q/K/V with a dense O) is not a layout either
+    // reference defines, so it is declined rather than guessed at (RFC-0014).
+    for(const bool queryGroup : {true, false})
+    {
+        int ragged = 0;
+        int dense = 0;
+        for(const auto& role : roles)
+        {
+            if(role.queryPacking == queryGroup && !role.stats)
+            {
+                (tensors.at(role.uid)->ragged_offset_tensor_uid.has_value() ? ragged : dense) += 1;
+            }
+        }
+        if(ragged > 0 && dense > 0)
         {
             return std::nullopt;
         }

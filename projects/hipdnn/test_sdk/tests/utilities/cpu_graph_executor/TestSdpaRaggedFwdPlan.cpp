@@ -675,14 +675,15 @@ TEST(TestSdpaRaggedFwdPlan, ExecutorDeclinesPartlyRaggedGraph)
                  CpuReferenceNotApplicableError);
 }
 
-// The ragged plan registers bf16 and fp8 only, matching the GPU ragged plan.
-TEST(TestSdpaRaggedFwdPlan, ExecutorDeclinesUnregisteredRaggedDtype)
+// The native ragged plan registers bf16 and fp8 only, matching the GPU ragged plan; other dtypes
+// run through the dense rewrite (RaggedSdpaDensify.hpp), which the dense plans cover.
+TEST(TestSdpaRaggedFwdPlan, ExecutorRunsUnregisteredRaggedDtypeThroughDenseRewrite)
 {
     auto graph = makeGraph(GATE_SHAPE, DataType::FLOAT);
     ASSERT_TRUE(accepts<Fp32Builder>(graph));
 
     CpuReferenceGraphExecutor executor;
-    EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsApplicableForBf16RaggedGraph)
