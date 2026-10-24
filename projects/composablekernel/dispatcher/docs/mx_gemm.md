@@ -43,8 +43,9 @@ Eight-wave async requires `4 × 2 × 1` warps and M/N block tiles divisible by
 requires block N divisible by 512. The host reshuffles B for weight preshuffle,
 so callers supply the same packed RCR input buffers for every pipeline.
 On gfx1250, weight preshuffle requires problem N divisible by 16; the host
-rejects other N sizes before reshuffling. Async and TDM require `2 × 2 × 1`
-warps on gfx1250.
+rejects other N sizes before reshuffling. Async requires `2 × 2 × 1` warps on
+gfx1250. TDM v2 requires exactly 4 waves (`warp_m * warp_n * warp_k == 4`);
+TDM v1 does not restrict the warp arrangement.
 The generator and Python configuration validation apply the same architecture,
 tile-distribution, and LDS limits.
 
@@ -210,7 +211,7 @@ bridge generator:
 | --- | --- | --- |
 | `comp_async` | gfx950, gfx1250 | `2 × 2 × 1` warps on gfx1250 |
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
-| `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
+| `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512. gfx950 FP8 drops a tile when the B and scale `s_waitcnt` would exceed 63 (tile K 512 with tile N 512) |
 | `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
