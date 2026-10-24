@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/stringutils.hpp>
 #include <algorithm>
@@ -46,6 +47,8 @@
 #include <mutex>
 #include <stdexcept>
 #include <cmath>
+#include <cstring>
+#include <numeric>
 #include <sstream>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -1480,10 +1483,173 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
     return encoded_candidates;
 }
 
+// ---- Per-process RAM cache for CandidateSelectionResult --------------
+//
+// Mirrors the TunaNet RAM cache (GetCachedPrediction / StorePredictionCache in
+// ai_heuristics.cpp). A cache hit at this level bypasses all fdeep inference.
+namespace {
+
+struct CandidateSelectionCache
+{
+    std::unordered_map<std::string, CandidateSelectionResult> map;
+    std::mutex mtx;
+
+    static CandidateSelectionCache& Get(const std::string& arch)
+    {
+        static std::mutex instances_mtx;
+        static std::unordered_map<std::string, std::unique_ptr<CandidateSelectionCache>> instances;
+        std::lock_guard<std::mutex> lk(instances_mtx);
+        auto& ptr = instances[arch];
+        if(!ptr)
+            ptr = std::make_unique<CandidateSelectionCache>();
+        return *ptr;
+    }
+};
+
+std::string MakeCandidateSelectionKey(const std::string& solver,
+                                      const conv::ProblemDescription& problem,
+                                      bool use_split_k)
+{
+    std::ostringstream ss;
+    ss << solver << "|split_k=" << use_split_k << "|";
+    problem.Serialize(ss);
+    return ss.str();
+}
+
+std::optional<CandidateSelectionResult>
+GetCachedCandidateSelection(const std::string& arch,
+                            const std::string& solver,
+                            const conv::ProblemDescription& problem,
+                            bool use_split_k)
+{
+    auto& cache = CandidateSelectionCache::Get(arch);
+    std::lock_guard<std::mutex> lk(cache.mtx);
+    const auto it = cache.map.find(MakeCandidateSelectionKey(solver, problem, use_split_k));
+    if(it == cache.map.end())
+        return std::nullopt;
+    MIOPEN_LOG_I2("CandidateSelection RAM cache hit for solver: " << solver);
+    return it->second;
+}
+
+void StoreCandidateSelectionCache(const std::string& arch,
+                                  const std::string& solver,
+                                  const conv::ProblemDescription& problem,
+                                  bool use_split_k,
+                                  const CandidateSelectionResult& result)
+{
+    if(result.IsEmpty())
+        return;
+    auto& cache = CandidateSelectionCache::Get(arch);
+    std::lock_guard<std::mutex> lk(cache.mtx);
+    cache.map.emplace(MakeCandidateSelectionKey(solver, problem, use_split_k), result);
+}
+
+// ---- Kernel-config embedding cache ------------------------------------------
+//
+// The config encoder processes each kernel independently, so its output for
+// kernel K is the same regardless of what other kernels are in the batch.
+// Cache at individual kernel-row granularity so embeddings are reused across
+// different shapes that share a subset of valid kernels.
+struct KernelEmbeddingCache
+{
+    std::unordered_map<std::string, std::vector<float>> map; // one entry per kernel row
+    std::mutex mtx;
+
+    static KernelEmbeddingCache& Get()
+    {
+        static KernelEmbeddingCache instance;
+        return instance;
+    }
+};
+
+std::string
+KernelRowKey(const std::string& arch, const std::string& solver, const std::vector<float>& row)
+{
+    // Use the exact bit pattern of each float so the key is collision-free.
+    // Encoded candidate rows contain small integer values from EncodeKernelParams;
+    // a hash-only approach risks structured collisions for such inputs.
+    std::ostringstream ss;
+    ss << arch << '|' << solver << '|' << row.size();
+    for(float v : row)
+    {
+        uint32_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        ss << '|' << std::hex << bits;
+    }
+    return ss.str();
+}
+
+std::vector<std::vector<float>>
+GetOrComputeKernelEmbeddings(const std::string& arch,
+                             const std::string& solver,
+                             const std::vector<std::vector<float>>& encoded_candidates,
+                             const CandidateSelectionModel& model)
+{
+    auto& cache = KernelEmbeddingCache::Get();
+
+    std::vector<std::vector<float>> result(encoded_candidates.size());
+    std::vector<size_t> miss_indices;
+    std::vector<std::string> miss_keys;
+
+    // Phase 1: look up each kernel row individually.
+    {
+        std::lock_guard<std::mutex> lk(cache.mtx);
+        for(size_t i = 0; i < encoded_candidates.size(); ++i)
+        {
+            auto key = KernelRowKey(arch, solver, encoded_candidates[i]);
+            auto it  = cache.map.find(key);
+            if(it != cache.map.end())
+            {
+                result[i] = it->second;
+            }
+            else
+            {
+                miss_indices.push_back(i);
+                miss_keys.push_back(std::move(key));
+            }
+        }
+    }
+
+    if(miss_indices.empty())
+    {
+        MIOPEN_LOG_I2("Kernel-config embedding cache: all "
+                      << encoded_candidates.size() << " kernels hit for solver: " << solver);
+        return result;
+    }
+
+    MIOPEN_LOG_I2("Kernel-config embedding cache: "
+                  << (encoded_candidates.size() - miss_indices.size()) << "/"
+                  << encoded_candidates.size() << " kernels hit, encoding " << miss_indices.size()
+                  << " new kernels for solver: " << solver);
+
+    // Phase 2: batch-encode only the cache misses.
+    std::vector<std::vector<float>> miss_candidates;
+    miss_candidates.reserve(miss_indices.size());
+    for(size_t idx : miss_indices)
+        miss_candidates.push_back(encoded_candidates[idx]);
+
+    auto miss_embeddings = model.EncodeKernelConfigs(miss_candidates);
+
+    // Phase 3: store new embeddings and assemble the full result.
+    {
+        std::lock_guard<std::mutex> lk(cache.mtx);
+        for(size_t i = 0; i < miss_indices.size(); ++i)
+        {
+            result[miss_indices[i]] = miss_embeddings[i];
+            cache.map.emplace(miss_keys[i], miss_embeddings[i]);
+        }
+    }
+
+    return result;
+}
+
+} // anonymous namespace
+
 MIOPEN_INTERNALS_EXPORT
 CandidateSelectionResult
 ModelSelectBestCandidate(const std::string& arch,
                          const std::string& solver,
+                         const conv::ProblemDescription& problem,
                          const std::map<std::string, float>& features,
                          const std::vector<std::vector<std::string>>& valid_kernel_params,
                          const bool use_split_k,
@@ -1495,10 +1661,17 @@ ModelSelectBestCandidate(const std::string& arch,
                       << solver << " on " << arch);
         return CandidateSelectionResult{{}, {}};
     }
+
+    // RAM cache: bypass all model inference on repeated calls for the same problem
+    {
+        auto cached = GetCachedCandidateSelection(arch, solver, problem, use_split_k);
+        if(cached)
+            return *cached;
+    }
+
     try
     {
         const auto& model = GetCandidateSelectionModel(arch, solver);
-        // debug: show that we successfully retrieved the model
         MIOPEN_LOG_I2("Retrieved CandidateSelectionModel for arch: " << arch
                                                                      << ", solver: " << solver);
         std::vector<std::vector<std::string>> expanded_params = valid_kernel_params;
@@ -1558,8 +1731,9 @@ ModelSelectBestCandidate(const std::string& arch,
         for(const auto& candidate : expanded_params)
             candidate_kernel_names.push_back(candidate.empty() ? std::string{} : candidate.front());
 
-        const auto& encoded_configs =
-            model.EncodeKernelConfigs(encoded_candidates, &candidate_kernel_names);
+        // Reuse kernel-config embeddings if the kernel set hasn't changed
+        const auto encoded_configs =
+            GetOrComputeKernelEmbeddings(arch, solver, encoded_candidates, model);
         {
             std::ostringstream encoded_configs_log;
             encoded_configs_log << "Encoded configs: [";
@@ -1605,6 +1779,7 @@ ModelSelectBestCandidate(const std::string& arch,
             }
         }
 
+        StoreCandidateSelectionCache(arch, solver, problem, use_split_k, result);
         return result;
     }
     catch(const miopen::Exception& ex)
