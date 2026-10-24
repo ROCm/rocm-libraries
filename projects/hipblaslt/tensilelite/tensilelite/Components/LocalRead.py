@@ -31,6 +31,7 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             VCmpClassF32, VCndMaskB32, \
                             ECvtPkFP8toF32, ECvtF32toF16
 
+from ..Common import log2
 from ..Component import LocalRead
 
 from math import ceil
@@ -1828,6 +1829,19 @@ class LocalReadMFMA(LocalRead):
                             srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                             tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536
+
+                            # LdsXorSwizzle: read 16 B chunk c (immediate bits 4..) through its
+                            # swizzled base LocalReadAddr+c; the rest of the immediate (tile rows,
+                            # buffer swap) must leave the key bits unchanged.
+                            if kernel["LdsXorSwizzle"]:
+                                assert numOffsets == 1, "LdsXorSwizzle expects numOffsets==1"
+                                assert addrIdx == 0, "LdsXorSwizzle: read immediate > 64KB (addrIdx>0) unsupported"
+                                nChunk, keyShift = writer.ldsXorSwzGeometry(kernel)
+                                c = (paramList[0] >> 4) & (nChunk - 1)
+                                paramList[0] -= (c << 4)
+                                assert paramList[0] % (1 << (keyShift + log2(nChunk))) == 0, \
+                                    "LdsXorSwizzle: read offset %u changes the swizzle key" % paramList[0]
+                                srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, c))
 
                             if numOffsets == 1:
                                 ds = DSModifiers(na=1, offset=paramList[0])

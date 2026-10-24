@@ -181,6 +181,7 @@
       'LdsPadMXSA',
       'LdsPadMXSB',
       'LdsPadMetadata',
+      'LdsXorSwizzle',
       'LocalReadVectorWidth',
       'LocalReadVectorWidthA',
       'LocalReadVectorWidthB',
