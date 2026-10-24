@@ -5515,4 +5515,101 @@ Tests:
   beta: 1.0
   unit_check: 1
 
+# Grouped GEMM tests for gfx950 — FP8 (all orientations)
+- name: matmul_groupedgemm_f8f8s_gfx950
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_f8
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 1
+  beta: 0.0
+  activation_type: none
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Grouped GEMM tests for gfx950 — BF16 (all orientations, varied alpha/beta)
+- name: matmul_groupedgemm_bbs_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 2
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '950'
+
+# Grouped GEMM tests for gfx950 — BF16 to FP32 (all orientations, varied alpha/beta)
+- name: matmul_groupedgemm_bss_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_bf16_fp32dst_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 2
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '950'
+
+# Grouped GEMM tests for gfx950 — FP16 HHS (all orientations)
+- name: matmul_groupedgemm_hhs_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 2
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '950'
+
+# Grouped GEMM tests for gfx950 — FP16 to FP32 HSS (all orientations)
+- name: matmul_groupedgemm_hss_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_fp32dst_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 2
+  beta: 1.0
+  unit_check: 1
+  gpu_arch: '950'
+
 ...
