@@ -1455,6 +1455,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestElapse = INT_MIN;
     int bestWait = 0;
     int bestAff = 0;
+    bool bestWaitsAlu = false;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
         if (heldBackForLead(n) || needsWaitAlu(n) || prefetchHeldForLead(n)) continue;
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
@@ -1473,9 +1474,14 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         // (larger aff), then largest elapse.
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
+        // One that InsertWaitAlu would put an s_wait_alu before goes last: another filler
+        // takes the slot and this one a later one.
+        const bool nWaitsAlu = waitAlu_ && waitAlu_->query(*n->inst).any();
         bool better;
         if (best == nullptr)
             better = true;
+        else if (nWaitsAlu != bestWaitsAlu)
+            better = !nWaitsAlu;
         else
             better = (!nHazard && curHazard) ||
                      (nHazard == curHazard &&
@@ -1485,6 +1491,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
             bestElapse = elapse;
             bestWait = wait;
             bestAff = aff;
+            bestWaitsAlu = nWaitsAlu;
         }
     }
     if (best && outWait) *outWait = bestWait;
