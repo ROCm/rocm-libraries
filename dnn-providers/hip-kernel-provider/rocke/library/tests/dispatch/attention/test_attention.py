@@ -27,6 +27,7 @@ _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
     "full_attention",
+    "layout_dense",
     "lse",
     "sinks",
     "sliding_window",
@@ -62,6 +63,7 @@ EXPECTED_FEATURES = {
     "attention_gfx942_dense": {
         "causal",
         "causal_bottom_right",
+        "layout_dense",
         "lse",
         "sinks",
         "sliding_window",

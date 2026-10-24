@@ -379,7 +379,9 @@ class TestRdnaAttentionSelection(unittest.TestCase):
 
     def test_explicit_layout_and_score_requirements_are_not_ignored_elsewhere(self):
         for changes in (
-            {"layout": "dense"},
+            # gfx950 serves contiguous prefill with its dense kernel; a single
+            # query row has no contiguous-layout kernel there.
+            {"layout": "dense", "seqlen_q": 1},
             {"layout": "ragged"},
             {"layout": "paged"},
             {"use_softcap": True},

@@ -98,7 +98,13 @@ for result in dispatch_attention_all(request):
 
 Each executable candidate expands into many concrete specs through its
 `sweep_space` / `sample_space`; how that space is built is the next section.
-Production `algorithm="auto"` selection never sees the opt-in candidates.
+Production `algorithm="auto"` selection never sees the opt-in candidates, with
+one exception: on gfx942 and gfx950 an unpinned request that declares
+contiguous tensors (`layout="dense"`) and has more than one query row is
+pinned to the arch's dense kernel at its default spec (the gfx950 body --
+grid, persistent, or persistent with wide DMA -- comes from
+`gfx950_dense.dense_auto_order`). Paged or unspecified layouts and single-row
+requests keep the unified route.
 
 ## Tuning knob space
 
