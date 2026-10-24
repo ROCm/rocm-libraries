@@ -57,6 +57,7 @@ struct GpuSdpaBwdParams
     std::optional<Attrs> dropoutMaskTensor;
     std::optional<Attrs> dropoutScaleTensor;
     std::optional<Attrs> dropoutScaleInvTensor;
+    bool alibi = false;
     int64_t leftBound = -1;
     int64_t rightBound = -1;
     bool topLeftAlignment = true;
@@ -164,7 +165,9 @@ public:
             seqLenKv.has_value() ? &seqLenKv.value() : nullptr,
             dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
             dropoutScale,
-            dropoutScaleInv);
+            dropoutScaleInv,
+            std::nullopt,
+            _params.alibi);
     }
 
 private:
@@ -237,7 +240,7 @@ public:
             CHECK_TENSOR_TYPE(tensorMap, attrs->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
         }
 
-        if(attrs->alibi_mask() || !isSupportedSdpaPadding(*attrs, tensorMap))
+        if(!isSupportedSdpaAlibi(*attrs) || !isSupportedSdpaPadding(*attrs, tensorMap))
         {
             return false;
         }
@@ -349,6 +352,7 @@ public:
         params.rightBound = band.rightBound;
         params.topLeftAlignment = band.topLeftAlignment;
 
+        params.alibi = attrs->alibi_mask();
         return std::make_unique<GpuSdpaBwdPlan<IoDataType, MaskDataType>>(std::move(params));
     }
 };

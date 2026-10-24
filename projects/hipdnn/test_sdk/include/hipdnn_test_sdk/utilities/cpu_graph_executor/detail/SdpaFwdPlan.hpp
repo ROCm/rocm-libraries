@@ -115,6 +115,7 @@ struct SdpaFwdParams
     // cuDNN Max / Sum_exp row statistics outputs, FLOAT [B, H, Sq, 1].
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
+    bool alibi = false;
 };
 
 template <typename QDataType,
@@ -282,7 +283,8 @@ public:
                 dropoutScale,
                 std::nullopt,
                 shallowMaxTensor.get(),
-                shallowSumExpTensor.get());
+                shallowSumExpTensor.get(),
+                _params.alibi);
     }
 
 private:
@@ -346,8 +348,7 @@ public:
                 tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
         }
 
-        // Unsupported mask modes
-        if(nodeAttributes->alibi_mask())
+        if(!isSupportedSdpaAlibi(*nodeAttributes))
         {
             return false;
         }
@@ -515,6 +516,7 @@ public:
                              nodeAttributes->sink_token_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                                  : nullptr);
+        params.alibi = nodeAttributes->alibi_mask();
         if(nodeAttributes->max_tensor_uid().has_value())
         {
             params.maxTensor
