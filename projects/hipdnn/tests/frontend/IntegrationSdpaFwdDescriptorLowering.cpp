@@ -521,7 +521,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     sdpaAttrs.set_generate_stats(true);
     sdpaAttrs.causal_mask = true;
     sdpaAttrs.set_attn_scale(0.125f);
-    sdpaAttrs.set_diagonal_band_left_bound(0);
+    sdpaAttrs.set_diagonal_band_left_bound(2); // cuDNN rejects 0 (keeps no key)
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
     sdpaAttrs.set_implementation(AttentionImplementation::UNIFIED);
@@ -591,7 +591,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 
     // Integer scalars
     ASSERT_TRUE(sdpa->left_bound.has_value());
-    EXPECT_EQ(sdpa->left_bound.value(), 0);
+    EXPECT_EQ(sdpa->left_bound.value(), 2);
 
     ASSERT_TRUE(sdpa->right_bound.has_value());
     EXPECT_EQ(sdpa->right_bound.value(), 128);
@@ -603,7 +603,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 
 // Exercises packer code paths for FP8 descale/scale tensors, amax output
 // tensors, the optional int32 max_seq_len_kv scalar (with the page tables and
-// seq_len_kv it requires), and the conditional mma_core_mode enum branch.
+// both seq_len tensors it requires, as in cuDNN), and the conditional mma_core_mode enum branch.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
 {
     auto descaleQ = std::make_shared<TensorAttributes>();
@@ -654,6 +654,12 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     amaxO->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     amaxO->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
+    auto seqLenQ = std::make_shared<TensorAttributes>();
+    seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID).set_name("SEQ_LEN_Q");
+    seqLenQ->set_data_type(DataType::INT32);
+    seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
+    seqLenQ->set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
+
     auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID).set_name("SEQ_LEN_KV");
     seqLenKv->set_data_type(DataType::INT32);
@@ -682,6 +688,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     sdpaAttrs.set_scale_o(scaleO);
     sdpaAttrs.set_amax_s(amaxS);
     sdpaAttrs.set_amax_o(amaxO);
+    sdpaAttrs.set_seq_len_q(seqLenQ);
     sdpaAttrs.set_seq_len_kv(seqLenKv);
     sdpaAttrs.set_paged_attention_k_table(pageTableK);
     sdpaAttrs.set_paged_attention_v_table(pageTableV);
@@ -694,8 +701,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
         return;
     }
 
-    // Q + K + V + O + 6 descale/scale + 2 amax + seq_len_kv + 2 page tables = 15
-    EXPECT_EQ(graphT.tensors.size(), 15u);
+    // Q + K + V + O + 6 descale/scale + 2 amax + 2 seq_len + 2 page tables = 16
+    EXPECT_EQ(graphT.tensors.size(), 16u);
 
     std::unordered_set<int64_t> uids;
     for(const auto& t : graphT.tensors)
@@ -714,6 +721,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     EXPECT_NE(uids.count(K_SDPA_TENSOR_SCALE_O_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_AMAX_S_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_AMAX_O_UID), 0u);
+    EXPECT_NE(uids.count(K_SDPA_TENSOR_SEQ_LEN_Q_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_SEQ_LEN_KV_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_PAGE_TABLE_K_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_PAGE_TABLE_V_UID), 0u);
@@ -749,6 +757,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     EXPECT_EQ(sdpa->amax_o_tensor_uid.value(), K_SDPA_TENSOR_AMAX_O_UID);
 
     // Paged K/V tensor UIDs
+    ASSERT_TRUE(sdpa->seq_len_q_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->seq_len_q_tensor_uid.value(), K_SDPA_TENSOR_SEQ_LEN_Q_UID);
     ASSERT_TRUE(sdpa->seq_len_kv_tensor_uid.has_value());
     EXPECT_EQ(sdpa->seq_len_kv_tensor_uid.value(), K_SDPA_TENSOR_SEQ_LEN_KV_UID);
 
