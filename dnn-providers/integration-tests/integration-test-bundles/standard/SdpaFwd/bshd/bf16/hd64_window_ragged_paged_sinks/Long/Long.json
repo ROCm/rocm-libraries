@@ -1,0 +1,266 @@
+{
+    "nodes": [
+        {
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "name": "",
+            "inputs": {
+                "q_tensor_uid": 0,
+                "k_tensor_uid": 1,
+                "v_tensor_uid": 2,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": 5,
+                "seq_len_kv_tensor_uid": 6,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": 12,
+                "page_table_v_tensor_uid": 13,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": 14,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 3,
+                "stats_tensor_uid": 4,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": true,
+                "alibi_mask": false,
+                "padding_mask": true,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.125,
+                "left_bound": 128,
+                "right_bound": 0,
+                "max_seq_len_kv": 2048,
+                "diagonal_alignment": "BOTTOM_RIGHT",
+                "mma_core_mode": "unset",
+                "implementation": "AUTO"
+            }
+        }
+    ],
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "Q",
+            "dims": [
+                3,
+                16,
+                300,
+                64
+            ],
+            "strides": [
+                307200,
+                64,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 10,
+            "ragged_offset_multiplier": 1024
+        },
+        {
+            "uid": 1,
+            "name": "K",
+            "dims": [
+                90,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "V",
+            "dims": [
+                90,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "O",
+            "dims": [
+                3,
+                16,
+                300,
+                64
+            ],
+            "strides": [
+                307200,
+                64,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 10,
+            "ragged_offset_multiplier": 1024
+        },
+        {
+            "uid": 4,
+            "name": "LSE",
+            "dims": [
+                3,
+                16,
+                300,
+                1
+            ],
+            "strides": [
+                4800,
+                1,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 10,
+            "ragged_offset_multiplier": 16
+        },
+        {
+            "uid": 5,
+            "name": "SeqLenQ",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "SeqLenKv",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 10,
+            "name": "RaggedOffsetQ",
+            "dims": [
+                4,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 12,
+            "name": "PageTableK",
+            "dims": [
+                3,
+                1,
+                64,
+                1
+            ],
+            "strides": [
+                64,
+                64,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 13,
+            "name": "PageTableV",
+            "dims": [
+                3,
+                1,
+                64,
+                1
+            ],
+            "strides": [
+                64,
+                64,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 14,
+            "name": "SinkToken",
+            "dims": [
+                1,
+                16,
+                1,
+                1
+            ],
+            "strides": [
+                16,
+                1,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "io_data_type": "bfloat16",
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "name": ""
+}

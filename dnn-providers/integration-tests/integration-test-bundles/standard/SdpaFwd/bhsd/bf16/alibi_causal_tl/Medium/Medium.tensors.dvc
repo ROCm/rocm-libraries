@@ -1,0 +1,26 @@
+outs:
+- path: Medium.tensor0.bin
+  remote: golden-data
+  md5: 5afc0b20964d76ce95df88c02a8a99fe
+  size: 1572864
+  hash: md5
+- path: Medium.tensor1.bin
+  remote: golden-data
+  md5: a1d0578f82fed1134b70d93483b53c67
+  size: 524288
+  hash: md5
+- path: Medium.tensor2.bin
+  remote: golden-data
+  md5: e477232ef6d9f74342fdb4568a00eeaf
+  size: 524288
+  hash: md5
+- path: Medium.tensor3.bin
+  remote: golden-data
+  md5: 9cfb030f0480cb7fedf3521724bee797
+  size: 1572864
+  hash: md5
+- path: Medium.tensor4.bin
+  remote: golden-data
+  md5: b1da77a075778c3796c8de7a5b011e93
+  size: 49152
+  hash: md5
