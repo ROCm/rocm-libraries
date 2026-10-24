@@ -875,6 +875,31 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deprecatedCausalMaskCases()),
                          deprecatedCausalMaskCaseName);
 
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the band the kernels take is FlashAttention's window_size_left, L - 1.
+TEST(TestSdpaFwdResolveDiagonalBand, ConvertsCudnnLeftBoundToWindowLeft)
+{
+    for(const int64_t leftBound : {int64_t{-1}, int64_t{1}, int64_t{2}, int64_t{64}})
+    {
+        auto builder = createSdpaFwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            leftBound,
+            /*rightBound=*/0,
+            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+
+        const auto band = plan_utils::resolveDiagonalBand(attrs);
+        EXPECT_EQ(band.leftBound, leftBound > 0 ? leftBound - 1 : -1) << "left_bound=" << leftBound;
+        EXPECT_EQ(band.rightBound, 0);
+    }
+}
+
 // =============================================================================
 // plan_utils::makeCoveringBoundsUnbound
 // =============================================================================

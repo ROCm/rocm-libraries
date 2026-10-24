@@ -186,13 +186,27 @@ def physical_seqlens(valid_lens, s_max):
     return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
 
 
+def left_bound_from_window_left(window_left):
+    """Map a FlashAttention-style window_size_left to hipDNN's left_bound.
+
+    hipDNN follows cuDNN: left_bound = L keeps the L keys ending at the diagonal,
+    diagonal included. FlashAttention's window_size_left = W keeps W + 1 keys, so
+    the same window is left_bound = W + 1.
+    """
+    return window_left + 1
+
+
 def build_mask(s_q, s_kv, causal, window_left, window_right):
     """Construct a boolean keep-mask [S_q, S_kv] for the given causal/window config.
 
     Returns None when no masking applies (the dense attention case), so callers
     can take the fast PyTorch path. The mask is True where attention is allowed.
-    The bound math matches the CPU reference executor's leftBound/rightBound +
-    topLeftAlignment semantics so golden output is reproducible on the CPU side.
+
+    window_left / window_right follow FlashAttention's window_size_left/right:
+    window_left = W keeps the W keys before the diagonal plus the diagonal itself
+    (W + 1 keys). The graph's cuDNN-semantics left_bound for that window is W + 1
+    (see left_bound_from_window_left), so the CPU reference executor reproduces
+    this mask.
 
     causal:
       - "none":          no causal constraint
@@ -402,7 +416,7 @@ def build_graph_json(
         left_bound = -1
         right_bound = 0
     if window_left >= 0:
-        left_bound = window_left
+        left_bound = left_bound_from_window_left(window_left)
     if window_right >= 0:
         right_bound = window_right
 
@@ -1080,7 +1094,9 @@ def main():
         "--window-left",
         type=int,
         default=-1,
-        help="Sliding window left bound, -1 = unbounded (default: -1)",
+        help="Sliding window left size in FlashAttention's window_size_left convention "
+        "(W keeps W + 1 keys, diagonal included; written to the graph as left_bound = W + 1), "
+        "-1 = unbounded (default: -1)",
     )
     parser.add_argument(
         "--window-right",

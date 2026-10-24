@@ -57,6 +57,12 @@ enum class MaskType : int
 
 // The diagonal band an SDPA (forward or backward) attribute set requests, with
 // the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
+//
+// The bounds are in the kernels' FlashAttention convention (window_size_left /
+// window_size_right), not the graph's: leftBound is the number of keys kept
+// before the diagonal, so it is the graph's cuDNN-semantics left_bound minus 1
+// (see resolveDiagonalBand()). rightBound means the same in both conventions.
+// -1 is unbounded.
 struct DiagonalBand
 {
     int64_t leftBound;
@@ -100,7 +106,12 @@ inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ
 // alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
 // TOP_LEFT is the schema default and indistinguishable from an unset alignment.
 //
-// Setting both booleans, or a bound below -1, throws
+// The graph's left_bound follows cuDNN: left_bound = L keeps the L keys ending at
+// the diagonal, diagonal included. The returned band holds the FlashAttention
+// window_size_left the kernels take, L - 1 (see DiagonalBand).
+//
+// Setting both booleans, a bound below -1, or left_bound = 0 (which would keep no
+// key at or before the diagonal; cuDNN rejects it) throws
 // HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
@@ -128,13 +139,22 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
             "SDPA: left_bound and right_bound must be >= -1 (got left_bound=" + std::to_string(left)
                 + ", right_bound=" + std::to_string(right) + ")");
     }
+    if(left == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound must be -1 (unbounded) or >= 1; left_bound = L keeps the L keys "
+            "ending at the diagonal, so 0 keeps none");
+    }
+
+    const int64_t windowLeft = left > 0 ? left - 1 : -1;
 
     if(!causalDeprecated && !bottomRightDeprecated)
     {
-        return {left, right, attrs.diagonal_alignment()};
+        return {windowLeft, right, attrs.diagonal_alignment()};
     }
 
-    return {left,
+    return {windowLeft,
             right >= 0 ? right : 0,
             bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
 }
@@ -163,8 +183,9 @@ inline MaskType getMaskType(int64_t leftBound,
 // Sliding-window mask coordinate transformation
 // =============================================================================
 //
-// Converts raw window sizes (left_bound, right_bound from the hipDNN graph)
-// into the precomputed mask coordinates (mask_y, mask_x) that the AITER ASM
+// Converts FlashAttention-convention window sizes (a DiagonalBand's bounds, not
+// the graph's cuDNN-semantics left_bound) into the precomputed mask coordinates
+// (mask_y, mask_x) that the AITER ASM
 // DQDKDV kernel expects in its argument struct.
 //
 // AITER reference: ck_tile_shim.h::compute_mask_coordinates()
