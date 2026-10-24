@@ -312,7 +312,7 @@ def test_alpha_zero_input_bias_load_variants(tmp_path, source, variant):
 
 
 @pytest.mark.parametrize("source", [None, "A", "B"])
-def test_two_peer_streamk_has_no_multicast_or_unpaired_cluster_wait(tmp_path, source):
+def test_two_peer_streamk_multicasts_b_with_input_bias(tmp_path, source):
     config = _input_bias_config("StreamK", source or "A")
     problem, group = config["BenchmarkProblems"][0]
     if source is None:
@@ -320,7 +320,7 @@ def test_two_peer_streamk_has_no_multicast_or_unpaired_cluster_wait(tmp_path, so
     for entry in group["ForkParameters"]:
         if "ClusterDim" in entry:
             entry["ClusterDim"] = [[2, 1]]
-    path = tmp_path / "independent_cluster.yaml"
+    path = tmp_path / "one_axis_multicast.yaml"
     path.write_text(yaml.safe_dump(config))
     kernels = emit_kernels_from_config(str(path), limit=1, arch="gfx1250", canonical=False)
     assert len(kernels) == 1
@@ -330,8 +330,8 @@ def test_two_peer_streamk_has_no_multicast_or_unpaired_cluster_wait(tmp_path, so
         assert "sgprStreamKClusterPeer" in assembly
         assert "sgprPersistentPhantomTile" in assembly
         assert "tensor_load_to_lds" in assembly
-        assert "MulticastMask" not in assembly
-        assert not re.search(r"s_barrier_(signal|wait) -3", assembly)
+        assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in assembly
+        assert all(f"s_barrier_{op} -3" in assembly for op in ("signal", "wait"))
         if source:
             _assert_alpha_zero_product_discarded(assembly)
             _assert_alpha_zero_tdm_inputs(assembly, source)

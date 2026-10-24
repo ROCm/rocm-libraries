@@ -773,7 +773,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabili
     solution.problemType.useBias = 1;
     EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
     solution.problemType.useGradient = true;
-    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
     solution.problemType.useBias = 0;
     EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
 }
