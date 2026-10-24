@@ -50,6 +50,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaBwdPlan.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuSdpaPagedFwdPlan.cpp
+    TestGpuRaggedSdpaDensify.cpp
     TestGpuReductionSignatureKey.cpp
     TestGpuReductionPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
