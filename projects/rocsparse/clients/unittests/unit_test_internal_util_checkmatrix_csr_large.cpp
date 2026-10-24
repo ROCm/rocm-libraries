@@ -130,7 +130,8 @@ namespace
         {
             if(mat != nullptr)
             {
-                rocsparse_destroy_spmat_descr(mat);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(mat));
             }
         }
 
@@ -403,7 +404,7 @@ namespace
         // deterministic rather than whatever the allocation held.
         device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
         EXPECT_TRUE(tmp.ptr);
-        EXPECT_EQ(hipMemset(tmp.ptr, 0, buffer_size), hipSuccess);
+        unit_test_throw_hip_error("hipMemset", hipMemset(tmp.ptr, 0, buffer_size));
 
         (void)hipGetLastError();
 
@@ -422,7 +423,12 @@ namespace
                                               &status,
                                               tmp.ptr),
                   rocsparse_status_success);
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        const hipError_t launch = hipGetLastError();
+        if(launch != hipSuccess)
+        {
+            ADD_FAILURE() << "validator launch rejected: " << hipGetErrorString(launch);
+            return rocsparse_data_status_inf;
+        }
         return status;
     }
 }
