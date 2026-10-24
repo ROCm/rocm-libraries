@@ -230,7 +230,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         rowAmax = e > rowAmax ? e : rowAmax;
         if(args.pFp8Format != 0)
         {
-            e = roundToFp8E4m3(e * args.scaleS, args.pFp8Format) * args.descaleS;
+            e = roundToFp8(e * args.scaleS, args.pFp8Format) * args.descaleS;
         }
         COMPUTE_TYPE probability = e / sumExp;
         probability = storeSoftmaxProbability(probability);

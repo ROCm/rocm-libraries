@@ -64,6 +64,8 @@ enum class SdpaFp8Format : int
     NONE = 0,
     E4M3 = 1,
     E4M3_FNUZ = 2,
+    E5M2 = 3,
+    E5M2_FNUZ = 4,
 };
 
 // cuDNN sdpa_fp8 softmax scaling for one forward launch (SdpaFwdArgs::pFp8Format and friends).
@@ -1018,6 +1020,14 @@ private:
         else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e4m3_fnuz>)
         {
             return SdpaFp8Format::E4M3_FNUZ;
+        }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e5m2>)
+        {
+            return SdpaFp8Format::E5M2;
+        }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e5m2_fnuz>)
+        {
+            return SdpaFp8Format::E5M2_FNUZ;
         }
         else
         {

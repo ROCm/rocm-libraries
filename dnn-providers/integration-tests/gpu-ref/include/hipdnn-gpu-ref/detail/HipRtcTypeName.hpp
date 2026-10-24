@@ -6,6 +6,8 @@
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3Fnuz.hpp>
+#include <hipdnn_data_sdk/types/Fp8E5M2.hpp>
+#include <hipdnn_data_sdk/types/Fp8E5M2Fnuz.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
 
 #include <cstdint>
@@ -71,6 +73,19 @@ template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3_fnuz>
 {
     static constexpr const char* VALUE = "GpuRefFp8E4M3Fnuz";
+};
+
+// fp8 E5M2 (OCP) and E5M2 FNUZ map to gpu_ref::GpuRefFp8E5M2 / GpuRefFp8E5M2Fnuz, as above.
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2>
+{
+    static constexpr const char* VALUE = "GpuRefFp8E5M2";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2_fnuz>
+{
+    static constexpr const char* VALUE = "GpuRefFp8E5M2Fnuz";
 };
 
 } // namespace hipdnn_gpu_ref::detail

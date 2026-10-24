@@ -36,6 +36,8 @@ enum class SdpaFp8Format
     NONE,
     E4M3,
     E4M3_FNUZ,
+    E5M2,
+    E5M2_FNUZ,
 };
 
 /// Named options for CpuFpReferenceSdpa::forward. Every field defaults to "feature off".
@@ -1143,6 +1145,14 @@ private:
         {
             return SdpaFp8Format::E4M3_FNUZ;
         }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e5m2>)
+        {
+            return SdpaFp8Format::E5M2;
+        }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e5m2_fnuz>)
+        {
+            return SdpaFp8Format::E5M2_FNUZ;
+        }
         else
         {
             return SdpaFp8Format::NONE;
@@ -1153,11 +1163,19 @@ private:
     template <class ComputeDataType>
     static ComputeDataType roundToFp8(ComputeDataType x, SdpaFp8Format format)
     {
+        using namespace hipdnn_data_sdk::types;
         const auto f = static_cast<float>(x);
-        return static_cast<ComputeDataType>(
-            format == SdpaFp8Format::E4M3_FNUZ
-                ? static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3_fnuz(f))
-                : static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3(f)));
+        switch(format)
+        {
+        case SdpaFp8Format::E4M3_FNUZ:
+            return static_cast<ComputeDataType>(static_cast<float>(fp8_e4m3_fnuz(f)));
+        case SdpaFp8Format::E5M2:
+            return static_cast<ComputeDataType>(static_cast<float>(fp8_e5m2(f)));
+        case SdpaFp8Format::E5M2_FNUZ:
+            return static_cast<ComputeDataType>(static_cast<float>(fp8_e5m2_fnuz(f)));
+        default:
+            return static_cast<ComputeDataType>(static_cast<float>(fp8_e4m3(f)));
+        }
     }
 
     static void requireSingleElement(const hipdnn_data_sdk::utilities::TensorBase<float>* t,
