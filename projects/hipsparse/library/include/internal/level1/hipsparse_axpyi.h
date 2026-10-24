@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,63 +28,62 @@
 extern "C" {
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level1_module
-*  \brief Scale a sparse vector and add it to a dense vector.
-*
-*  \details
-*  \p hipsparseXaxpyi multiplies the sparse vector \f$x\f$ with scalar \f$\alpha\f$ and
-*  adds the result to the dense vector \f$y\f$, such that
-*
-*  \f[
-*      y := y + \alpha \cdot x
-*  \f]
-*
-*  \code{.c}
-*      for(i = 0; i < nnz; ++i)
-*      {
-*          y[xInd[i]] = y[xInd[i]] + alpha * xVal[i];
-*      }
-*  \endcode
-*
-*  \note
-*  This function is non-blocking and executed asynchronously with respect to the host.
-*  It can return before the actual computation has finished.
-*
-*  \note
-*  If \p nnz is zero, the function returns successfully without modifying \p y.
-*  Duplicate indices in \p xInd will result in the corresponding values being added
-*  multiple times to the same location in \p y.
-*
-*  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
-*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
-*
-*  @param[in]
-*  handle      handle to the hipSPARSE library context queue.
-*  @param[in]
-*  nnz         number of non-zero entries of vector \f$x\f$. Must be non-negative.
-*  @param[in]
-*  alpha       scalar \f$\alpha\f$.
-*  @param[in]
-*  xVal        array of \p nnz elements containing the values of \f$x\f$.
-*  @param[in]
-*  xInd        array of \p nnz elements containing the indices of the non-zero
-*              values of \f$x\f$.
-*  @param[inout]
-*  y           array of values in dense format. Must be pre-allocated with sufficient
-*              size to accommodate all indices specified in \p xInd.
-*  @param[in]
-*  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
-*              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
-*
-*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative, 
-*          \p alpha, \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, 
-*          or \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
-*/
-/**@{*/
+ *  \brief Scale a sparse vector and add it to a dense vector.
+ *
+ *  \details
+ *  \p hipsparseXaxpyi multiplies the sparse vector \f$x\f$ with scalar \f$\alpha\f$ and
+ *  adds the result to the dense vector \f$y\f$, such that
+ *
+ *  \f[
+ *      y := y + \alpha \cdot x
+ *  \f]
+ *
+ *  \code{.c}
+ *      for(i = 0; i < nnz; ++i)
+ *      {
+ *          y[xInd[i]] = y[xInd[i]] + alpha * xVal[i];
+ *      }
+ *  \endcode
+ *
+ *  \note
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
+ *
+ *  \note
+ *  If \p nnz is zero, the function returns successfully without modifying \p y.
+ *  Duplicate indices in \p xInd will result in the corresponding values being added
+ *  multiple times to the same location in \p y.
+ *
+ *  \deprecated
+ *  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be
+ *  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+ *
+ *  @param[in]
+ *  handle      handle to the hipSPARSE library context queue.
+ *  @param[in]
+ *  nnz         number of non-zero entries of vector \f$x\f$. Must be non-negative.
+ *  @param[in]
+ *  alpha       scalar \f$\alpha\f$.
+ *  @param[in]
+ *  xVal        array of \p nnz elements containing the values of \f$x\f$.
+ *  @param[in]
+ *  xInd        array of \p nnz elements containing the indices of the non-zero
+ *              values of \f$x\f$.
+ *  @param[inout]
+ *  y           array of values in dense format. Must be pre-allocated with sufficient
+ *              size to accommodate all indices specified in \p xInd.
+ *  @param[in]
+ *  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+ *              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative,
+ *          \p alpha, \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero,
+ *          or \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+ */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSaxpyi(hipsparseHandle_t    handle,
@@ -94,6 +93,12 @@ hipsparseStatus_t hipsparseSaxpyi(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   float*               y,
                                   hipsparseIndexBase_t idxBase);
+
+/*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
+ *
+ *  \copydoc hipsparseSaxpyi
+ */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDaxpyi(hipsparseHandle_t    handle,
@@ -103,6 +108,12 @@ hipsparseStatus_t hipsparseDaxpyi(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   double*              y,
                                   hipsparseIndexBase_t idxBase);
+
+/*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
+ *
+ *  \copydoc hipsparseSaxpyi
+ */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCaxpyi(hipsparseHandle_t    handle,
@@ -112,6 +123,12 @@ hipsparseStatus_t hipsparseCaxpyi(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   hipComplex*          y,
                                   hipsparseIndexBase_t idxBase);
+
+/*! \ingroup level1_module
+ *  \brief Scale a sparse vector and add it to a dense vector. See hipsparseSaxpyi.
+ *
+ *  \copydoc hipsparseSaxpyi
+ */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZaxpyi(hipsparseHandle_t       handle,
@@ -121,7 +138,6 @@ hipsparseStatus_t hipsparseZaxpyi(hipsparseHandle_t       handle,
                                   const int*              xInd,
                                   hipDoubleComplex*       y,
                                   hipsparseIndexBase_t    idxBase);
-/**@}*/
 #endif
 
 #ifdef __cplusplus
