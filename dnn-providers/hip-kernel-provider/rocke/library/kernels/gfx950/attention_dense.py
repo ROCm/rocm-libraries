@@ -1751,10 +1751,27 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
     WIDE_DMA = spec.wide_lds_dma
+    # Without a sliding window the softmax scale is folded into the exp2
+    # argument, as on the grid body: the row max is taken on unscaled scores
+    # and each probability is exp2(fma(s, qk_scale, -m)), one VALU op per score
+    # instead of a multiply and a subtract. The row sum is a pairwise <2 x f32>
+    # tree. Same unbounded-score limitation as the grid body (see _MAX_SCALE).
+    # The window phases keep scaling each score before the max.
+    FOLD_SCALE = SW == 0
+    # Without a window, at D128, the next tile's K load is issued right after
+    # this tile's QK reads instead of at the end of the iteration (see
+    # emit_loop_body).
+    EARLY_K = SW == 0 and D == 128
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
+    # D128 only (measured; D64 regressed): one LDS alias scope per allocation,
+    # so a read of one allocation does not wait for an in-flight DMA into the
+    # other. V(j+1) can then stay in flight across QK(j+1) and the softmax
+    # instead of being drained at the first K read.
+    if D == 128:
+        b.kernel.attrs["lds_alias_scopes"] = True
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -1872,6 +1889,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
     b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
+    # The wide DMA's LDS line index is wave-uniform: keep it in an SGPR so each
+    # tile's LDS destination is scalar math instead of VGPR math + readfirstlane.
+    wave_s = b.to_sgpr_u32(wave) if WIDE_DMA else None
 
     # ----- persistent grid-stride loop over the flattened work-item space -----
     cta_id = b.block_id_x()
@@ -1976,7 +1996,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             n_in_wave = b.div(lane, b.const_i32(8))
             d_bucket = b.mod(lane, b.const_i32(8))
             for n_pass in range(WIDE_LINE_PASSES):
-                line_id = b.add(wave, b.const_i32(n_pass * WAVES))
+                line_id = b.add(wave_s, b.const_i32(n_pass * WAVES))
                 krow = b.add(
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
@@ -2012,7 +2032,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             n_in_wave = b.div(lane, b.const_i32(8))
             d_bucket = b.mod(lane, b.const_i32(8))
             for n_pass in range(WIDE_LINE_PASSES):
-                line_id = b.add(wave, b.const_i32(n_pass * WAVES))
+                line_id = b.add(wave_s, b.const_i32(n_pass * WAVES))
                 vrow = b.add(
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
@@ -2110,9 +2130,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                             K_lds, kbuf, krow, col, dtype=dtype, n=8
                         )
                     acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
-                s_reg.append(
-                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
-                )
+                if FOLD_SCALE:
+                    s_reg.append([b.vec_extract(acc, i) for i in range(16)])
+                else:
+                    s_reg.append(
+                        [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                    )
             return s_reg
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):
@@ -2152,12 +2175,24 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # the spec, so they cannot see a partial last KV tile.
         RAG_KBOUND = RAGGED and (Skv % BN != 0) and ((not causal) or Sq + RIGHT > Skv)
 
+        def half_reduce(x, op):
+            """op(x, x of lane ^ 32). With the folded scale this is one
+            v_permlane32_swap instead of an LDS ds_bpermute round trip."""
+            if not FOLD_SCALE:
+                return op(x, b.warp_shuffle_xor(x, 32))
+            lo, hi = b.permlane32_swap(b.bitcast(x, I32), b.bitcast(x, I32))
+            return op(b.bitcast(lo, F32), b.bitcast(hi, F32))
+
         def softmax_max(s_reg, m_i):
             local_max = neg_inf
             for nsub in range(N_SUB):
                 for i in range(16):
                     local_max = b.fmax(local_max, s_reg[nsub][i])
-            tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
+            tile_max = half_reduce(local_max, b.fmax)
+            if FOLD_SCALE:
+                # Max of the unscaled scores; scale > 0, so scaling it gives the
+                # max of the scaled scores up to one rounding.
+                tile_max = b.fmul(tile_max, qk_scale)
             if LAZY_RESCALE:
                 # Lazy max: only re-anchor when some lane's tile_max exceeds the
                 # running max by > threshold; else keep m_i (skip the rescale).
@@ -2175,17 +2210,39 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             alpha = _exp2(b.fsub(m_i, m_new))
             return m_new, alpha, skip
 
+        def exp_arg(s_val, m_new, neg_m):
+            if FOLD_SCALE:
+                return b.fma(s_val, qk_scale, neg_m)
+            return b.fsub(s_val, m_new)
+
+        def row_sum(p):
+            if not FOLD_SCALE:
+                l_local = b.const_f32(0.0)
+                for nsub in range(N_SUB):
+                    for i in range(16):
+                        l_local = b.fadd(l_local, p[nsub][i])
+                return l_local
+            # Pairwise tree over <2 x f32> lanes (v_pk_add_f32).
+            vals = [p[nsub][i] for nsub in range(N_SUB) for i in range(16)]
+            pairs = [
+                b.vec_pack([vals[2 * k], vals[2 * k + 1]], F32)
+                for k in range(len(vals) // 2)
+            ]
+            while len(pairs) > 1:
+                pairs = [
+                    b.fadd(pairs[2 * k], pairs[2 * k + 1])
+                    for k in range(len(pairs) // 2)
+                ]
+            return b.fadd(b.vec_extract(pairs[0], 0), b.vec_extract(pairs[0], 1))
+
         def softmax_stats(s_reg, m_i, l_i=None):
             m_new, alpha, _skip = softmax_max(s_reg, m_i)
+            neg_m = b.fneg(m_new) if FOLD_SCALE else None
             p = [
-                [_exp2(b.fsub(s_reg[nsub][i], m_new)) for i in range(16)]
+                [_exp2(exp_arg(s_reg[nsub][i], m_new, neg_m)) for i in range(16)]
                 for nsub in range(N_SUB)
             ]
-            l_local = b.const_f32(0.0)
-            for nsub in range(N_SUB):
-                for i in range(16):
-                    l_local = b.fadd(l_local, p[nsub][i])
-            l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
+            l_tile = half_reduce(row_sum(p), b.fadd)
             if use_sinks:
                 # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
                 # the sink's contribution from exp(sink - m_i) to exp(sink - m_new).
@@ -2272,6 +2329,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
 
         def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
+            neg_m = b.fneg(m_new) if FOLD_SCALE else None
             slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
             p_vals = [[None] * 16 for _ in range(N_SUB)]
             it = iter(slots)
@@ -2286,7 +2344,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     if slot is None:
                         break
                     nsub, i = slot
-                    p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+                    p_vals[nsub][i] = _exp2(exp_arg(s_reg[nsub][i], m_new, neg_m))
                     n_emit += 1
                 if SCHED_GROUP:
                     b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -2295,12 +2353,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     b.sched_group_barrier(TRANS, max(1, n_emit), 0)
             for slot in it:
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
-            l_local = b.const_f32(0.0)
-            for nsub in range(N_SUB):
-                for i in range(16):
-                    l_local = b.fadd(l_local, p_vals[nsub][i])
-            l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
+                p_vals[nsub][i] = _exp2(exp_arg(s_reg[nsub][i], m_new, neg_m))
+            l_tile = half_reduce(row_sum(p_vals), b.fadd)
             return out, p_vals, l_tile
 
         _rs_ctr = [0]
@@ -2326,6 +2380,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.s_waitcnt(vmcnt=LOOP_VMCNT)
             b.s_barrier_bare()
             s = do_qk(kbuf)
+            if EARLY_K:
+                next_key0 = b.mul(b.add(j, b.const_i32(1)), b.const_i32(BN))
+                # This wave's K reads for the tile are done, and every wave read
+                # the other K buffer before the loop-top barrier, so K(j+1) can
+                # load during the softmax and PV (the LDS alias scopes keep the V
+                # reads from waiting on it). V(j+1) still waits for PV(j-1).
+                async_load_k(K_lds_addr, pbuf, next_key0)
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
             if mask_kbound:
@@ -2363,7 +2424,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 o_acc = rescale_o(o_acc, alpha)
             p_packs = relayout_p(p_vals)
             b.s_barrier_bare()
-            load_tile(pbuf, b.add(j, b.const_i32(1)))
+            if EARLY_K:
+                async_load_v(V_lds_addr, pbuf, next_key0)
+            else:
+                load_tile(pbuf, b.add(j, b.const_i32(1)))
             b.scf_yield(m_new, l_new, *o_acc, *p_packs)
 
         if causal:

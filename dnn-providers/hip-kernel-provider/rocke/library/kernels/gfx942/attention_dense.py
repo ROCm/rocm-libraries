@@ -29,7 +29,7 @@ Why this is a port, not a copy (the CDNA3 deltas)
     parked "1/8 sign-flip" symptom was reproduced-or-disproven before anything was
     lifted: DISPROVEN cross-part (both the 228- and 304-CU parts, bit-identical, no
     sign mismatches), so the vehicle is proven correct rather than merely untested.
-    It is lifted here for D128 fp16 as :func:`_use_cfvst` — the barrier caveat is
+    It is lifted here for D128 (fp16 and bf16) as :func:`_use_cfvst` — the barrier caveat is
     that V publication becomes an in-loop ``ds_write``, so the tile-START rendezvous
     needs an lgkmcnt drain (``sync_lds_only``), not a bare barrier. The disproof
     procedure and its evidence are recorded in the gfx942 dense-prefill
@@ -80,7 +80,7 @@ the repo -- see the optimization plan and the protected results page.
 Implementation status (the optimization plan holds the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
-  * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
+  * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128)
   * P2  exp2_fast + fused rescale .............................. DONE (exp2_fast for
         ALL configs incl. bf16 D128; fused rescale bit-identical, and is what
         enabled bf16 D64 exp2_fast)
@@ -129,14 +129,14 @@ P5 is deliberately no-op for this kernel (a decision, not code):
 P1 conflict-free V (:func:`_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
 P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
-**D128 fp16**: D64 is VGPR-bound so the register round-trip regresses it, and D128
-bf16 spills over the waves-per-eu=2 cap (a P2/P3 register-headroom item). The lever
+**D128**: D64 is VGPR-bound so the register round-trip regresses it. bf16 D128 fits
+the waves-per-eu=2 cap once its P cast is the NaN-free pair pack. The lever
 is numerically identity-preserving (same MFMA operands; only the LDS layout and read
 width change) -- the cohort's ``max_abs`` is unchanged from the naive path. The
 conflict-free vehicle was proven correct cross-part before being lifted (see the
 optimization plan for the disproof procedure).
 
-P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
+P0 is CORRECTNESS-FIRST: the naive-V path (D64) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
 on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
@@ -354,7 +354,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     # v_row_pad: V^T row (token axis) width pad, in elements, for the P1 conflict-free-V
     #   store. V_lds is transposed to [D, block_n+pad] so the PV A-operand read is a
-    #   contiguous ds_read_b64. On the cfvst path (fp16-D128) the pad is DERIVED from
+    #   contiguous ds_read_b64. On the cfvst path (D128) the pad is DERIVED from
     #   block_n by :func:`_v_row_pad` so the row is the smallest pow2 the XOR bank-
     #   conflict swizzle needs (:func:`_v_swizzle_width`): pad 64->0, 32->32, 128->0; 8
     #   (the original unswizzled layout) elsewhere. The pad VALUE is no longer OPEN --
@@ -370,8 +370,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
     #   None (default) -> :func:`_use_cfvst`, which owns the measured verdict.
     #   Forcing it ON where the policy says OFF is REJECTED by
-    #   supports_attention_dense (D64 regresses under it -- VGPR-bound; bf16 D128
-    #   spills past the waves-per-eu cap), so this field can only turn cfvst off, or
+    #   supports_attention_dense (D64 regresses under it -- VGPR-bound), so this
+    #   field can only turn cfvst off, or
     #   pin it on where it already is.
     use_cfvst: bool | None = None
 
@@ -379,7 +379,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   the pad value -- so the pad-value sweep can vary ``v_row_pad`` without silently
     #   toggling the swizzle (an explicit non-derived pad used to turn it off by making
     #   the row non-pow2). None (default) -> :func:`_use_v_swizzle` (the cfvst path).
-    #   Only the transposed-V (fp16-D128) store has a V_lds to swizzle; forcing it ON
+    #   Only the transposed-V (D128) store has a V_lds to swizzle; forcing it ON
     #   off that path, or with a pad that leaves V_LDROW non-pow2 / < 64, is REJECTED
     #   by supports_attention_dense rather than silently mis-addressing LDS.
     use_v_swizzle: bool | None = None
@@ -834,18 +834,40 @@ def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
 def _use_cfvst(head_size: int, dtype: str) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
-    D128 **fp16** only. Measured on gfx942 (both parts):
+    D128 only (both dtypes). Measured on gfx942:
       * D64 (any dtype): cfvst REGRESSES it -- D64 is VGPR-bound, not LDS-bound
         (plan §6.1), so the register round-trip + perm temps raise pressure without
         relieving the actual bottleneck.
-      * D128 bf16: the bf16 ``.1k`` MFMA schedule keeps more registers live, so cfvst
-        pushes VGPR over the waves-per-eu=2 cap (256) and SPILLS. fp16 does not
-        (it drops slightly, 176 -> 173). The flash x8 ladder is fp16-first anyway
-        (tiled_2d keeps bf16 D128 on the narrow path); a bf16 cfvst register-pressure
-        fix is a P3 occupancy item.
-    Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
+      * D128 bf16: once the P cast is the NaN-free pair pack (:func:`_pack_p_bf16`),
+        cfvst fits the waves-per-eu=2 cap without spilling (about 220 VGPR on
+        LLVM 23), and replaces the naive path's 128 element-wise ds_read_u16 per tile
+        with 32 ds_read_b64, as on fp16.
+    Gate on rows-per-DMA == 1 (D128) so the LDS budget and the body agree.
     """
-    return _rows_per_instr(head_size) == 1 and dtype == "fp16"
+    del dtype  # both 2-byte dtypes take the same transposed-V path
+    return _rows_per_instr(head_size) == 1
+
+
+def _pack_p_bf16(b: IRBuilder, elems):
+    """Round four f32 probabilities to bf16 (nearest-even) and pack them as the PV
+    B-operand ``<4 x bf16>``.
+
+    P = exp2(s - m) is finite and in [0, 1], so the NaN-preserving select of a
+    generic f32 -> bf16 conversion is dead weight: each element is rounded with
+    ``bits + 0x7FFF + ((bits >> 16) & 1)``, and one ``perm_b32`` takes the two high
+    halves of a pair. Bit-identical to the generic conversion for every finite
+    input; gfx942 has no packed f32 -> bf16 convert instruction.
+    """
+    words = []
+    for h in range(0, len(elems), 2):
+        rounded = []
+        for e in elems[h : h + 2]:
+            bits = b.bitcast(e, I32)
+            lsb = b.land(b.lshr(bits, b.const_i32(16)), b.const_i32(1))
+            rounded.append(b.add(b.add(bits, b.const_i32(0x7FFF)), lsb))
+        # Bytes 2-3 of each operand: low half <- first element, high <- second.
+        words.append(b.perm_b32(rounded[0], rounded[1], b.const_i32(0x03020706)))
+    return b.bitcast(b.vec_pack(words, I32), VectorType(BF16, len(elems)))
 
 
 def _v_swizzle_width(block_n: int) -> int:
@@ -869,12 +891,12 @@ def _v_swizzle_width(block_n: int) -> int:
 
 def _use_v_swizzle(head_size: int, dtype: str) -> bool:
     """Policy for the V^T bank-conflict swizzle: rides the :func:`_use_cfvst` gate,
-    since only the transposed-V (fp16-D128) store has a V_lds to swizzle."""
+    since only the transposed-V (D128) store has a V_lds to swizzle."""
     return _use_cfvst(head_size, dtype)
 
 
 def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
-    """V^T row (token-axis) pad, in elements, on the cfvst path (fp16-D128); 8 (no
+    """V^T row (token-axis) pad, in elements, on the cfvst path (D128); 8 (no
     swizzle, original layout) everywhere else. On the cfvst path the row is widened to
     :func:`_v_swizzle_width` so the XOR swizzle (``col' = key ^ ((dim & (V_LDROW//4-1))
     << 2)``) stays in-bounds and engages at EVERY tile width (pad 64->0, 32->32,
@@ -1158,18 +1180,17 @@ def supports_attention_dense(
     _wpe = spec.resolved_waves_per_eu()
     if _wpe <= 0:
         return False, f"waves_per_eu must be positive, got {_wpe}"
-    # cfvst forced ON where the policy says OFF. Both cases the policy excludes are
+    # cfvst forced ON where the policy says OFF. The case the policy excludes is
     # known-bad, not merely untuned: D64 (rows-per-DMA > 1) is VGPR-bound, so the
     # register round-trip regresses it AND the transposed store no longer matches the
-    # packed async-DMA layout the naive path relies on; bf16 D128 spills past the
-    # waves-per-eu cap on the .1k schedule. Turning cfvst OFF is always legal (it is
-    # the naive path), so only the ON direction is gated. See _use_cfvst.
+    # packed async-DMA layout the naive path relies on. Turning cfvst OFF is always
+    # legal (it is the naive path), so only the ON direction is gated. See _use_cfvst.
     if spec.resolved_use_cfvst() and not _use_cfvst(spec.head_size, spec.dtype):
         return False, (
             f"use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
-            f"and regresses; bf16 D128 spills past the waves-per-eu cap), and it is "
-            f"only tile-exact on the rows-per-DMA==1 fp16 path -- see _use_cfvst"
+            f"and regresses), and it is only tile-exact on the rows-per-DMA==1 path "
+            f"-- see _use_cfvst"
         )
     # use_v_swizzle forced ON where there is no transposed-V buffer to swizzle. Only the
     # cfvst path builds V_lds[dim, token]; on the naive path the flag is a no-op, so
@@ -1178,7 +1199,7 @@ def supports_attention_dense(
         return False, (
             f"use_v_swizzle=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the XOR bank-conflict swizzle only exists on the conflict-free-V "
-            f"(fp16-D128) path -- there is no transposed V_lds to swizzle otherwise"
+            f"(D128) path -- there is no transposed V_lds to swizzle otherwise"
         )
     # Performance-only codegen knobs: ranges, plus the one scheduling conflict.
     if spec.lds_num_buffers != 1:
@@ -1371,7 +1392,7 @@ def _build_attention_dense_single_buffer(
     buffer, simple online-softmax rescale. The per-work-item compute is factored into
     ``_run_work_item(qb, hq, bt)``, shared by the default grid (one CTA per work item)
     and the P4 persistent grid-stride path (one CTA strides over many). Perf levers
-    are all on: conflict-free V/cfvst (P1, D128 fp16), exp2_fast + fused rescale (P2),
+    are all on: conflict-free V/cfvst (P1, D128), exp2_fast + fused rescale (P2),
     per-config waves-per-eu (P3), persistent grid-stride + qb/hkv-major decode (P4).
     The transposed-QK architecture (S^T=K@Q^T so P feeds PV lane-locally) is kept
     from the gfx950 sibling — only the MFMA atom and K/V fragment widths change.
@@ -1493,7 +1514,10 @@ def _build_attention_dense_single_buffer(
     # LDS-budget check in supports_attention_dense so the two cannot drift. The one
     # exception is when _k_group_pad_active(spec): D64 K_lds then takes the padded
     # [1, block_n // rows_per_instr, _k_group_stride] 2-row-group layout below.
-    USE_CFVST = spec.resolved_use_cfvst()  # P1 conflict-free V: D128 fp16 only
+    USE_CFVST = spec.resolved_use_cfvst()  # P1 conflict-free V: D128 only
+    # bf16 P is packed by _pack_p_bf16 on the transposed-V path (the configuration
+    # whose register budget it was sized for); D64 keeps the generic conversion.
+    PACK_P_BF16 = USE_CFVST and spec.dtype == "bf16"
     LDROW = _lds_row_stride(spec)
     # Hypothesis #3 (D64 K-LDS bank conflicts): K_lds with a row-group boundary pad,
     # sized by the shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
@@ -1670,8 +1694,8 @@ def _build_attention_dense_single_buffer(
         conflicts live on the STORE (8-way -> 4-way: within a wave t0 is constant and
         d0 = 2*lane, so (d0 & mask) takes only 8 values), so further conflict work
         belongs there, not on this read.
-        naive (D64 / bf16-D128): element-wise from V_lds[key, dim] (bank-heavy, but
-        those configs are VGPR-bound / spill under cfvst, not LDS-read-bound)."""
+        naive (D64): element-wise from V_lds[key, dim] (bank-heavy, but D64 is
+        VGPR-bound under cfvst, not LDS-read-bound)."""
         if USE_CFVST:
             dim_row = b.add(b.const_i32(dt * 32), lane_m)
             key0 = b.add(b.const_i32(kk * 8), d_base)
@@ -2046,8 +2070,11 @@ def _build_attention_dense_single_buffer(
                 for j2 in range(4):
                     pv = exp2(b.fsub(s[nsub][base_i + j2], m_new))
                     l_local = b.fadd(l_local, pv)
-                    elems.append(b.cast_f32_to(pv, dtype))
-                p_packs.append(b.vec_pack(elems, dtype))
+                    elems.append(pv if PACK_P_BF16 else b.cast_f32_to(pv, dtype))
+                if PACK_P_BF16:
+                    p_packs.append(_pack_p_bf16(b, elems))
+                else:
+                    p_packs.append(b.vec_pack(elems, dtype))
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
             l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
 
