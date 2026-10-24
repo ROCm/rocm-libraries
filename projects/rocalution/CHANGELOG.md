@@ -2,10 +2,17 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
-## (Unreleased) rocALUTION 4.2.0
+## (Unreleased) rocALUTION
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
+### Resolved issues
+* Fixed the HIP backend ignoring the errors returned by rocPRIM calls, such as too small temporary storage, which could lead to allocations of undefined size and to undefined scan, reduction, sort and nonzero count results.
+* Fixed the HIP backend ignoring the errors returned by HIP runtime calls for allocations, frees, memsets, copies, synchronizations and device queries, and not checking several kernel launches for errors.
+* Fixed the ILU0 factorization and the triangular solve analysis of CSR and BCSR matrices on the accelerator ignoring errors from the rocSPARSE buffer size queries.
+* Fixed `info_rocalution()` printing uninitialized memory when the rocBLAS or rocSPARSE version query fails.
+* Fixed `LocalMatrix::ReadFileRSIO()` not checking the element size query when the index or value type of the file differs from the type of the matrix, and leaking temporary buffers when a read fails.
 
 ## (Unreleased) rocALUTION 4.1.1
 
