@@ -23,6 +23,8 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/candidate_preparation_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental/contract_demo_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
