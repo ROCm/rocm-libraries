@@ -505,11 +505,11 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         ATTN3D_REASON(reason_buf);
         return false;
     }
-    if(head_size != 64 && head_size != 128 && head_size != 256)
+    if(head_size != 64 && head_size != 128 && head_size != 192 && head_size != 256)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 3D kernel only supports head_size in {64,128,192,256} (got %d)",
                  head_size);
         ATTN3D_REASON(reason_buf);
         return false;

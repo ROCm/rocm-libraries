@@ -477,7 +477,7 @@ def _tiled_3d_impl(arch: str):
 # rejects a problem the kernel would in fact have run, so new coverage added
 # here would simply never become reachable. Exporting the sets makes that
 # impossible by construction.
-UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 256)
+UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 192, 256)
 """Head sizes the scalar 2D backend covers.
 
 The kernel loops over head_size with ``b.unroll(p.head_size)``, so any head
@@ -1020,8 +1020,9 @@ def _enable_softmax_mfma_interleave(
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
     force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
     """
-    # Shape checks first, as in _enable_d128_small_tile.
-    if problem.head_size != 128 or problem.use_fp8:
+    # Shape checks first, as in _enable_d128_small_tile. d192 takes the d128
+    # interleave + nw=4 geometry.
+    if problem.head_size not in (128, 192) or problem.use_fp8:
         return False
     env = (
         __import__("os")
@@ -1311,6 +1312,11 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         # barrier (all QK reads drained) so it cannot WAR-race -- avoiding the
         # documented gfx942 naive-single-buffer hazard. Default-OFF behind the
         # same env opt-in (golden/production routing unchanged) until landed.
+        # FP8 K/V d128 and d192: T=64. The FP8 sync-dequant loader and the
+        # wider d192 rows both amortise the per-iteration cost better over a
+        # 64-token tile than over 2*block_size (measured on gfx950).
+        if problem.use_fp8 or problem.head_size == 192:
+            return 64
         if _enable_d128_small_tile(problem, arch):
             return 2 * problem.block_size
         return 2 * problem.block_size
@@ -1972,8 +1978,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         transposed routing.
       * dtype in {bf16, fp16} (the transposed softmax keeps m/l/acc in f32;
         fp16 winners were as accurate as flash).
-      * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
-        the sync-dequant loader and its own routing).
+      * FP8 K/V is admitted without sliding window: the sync-dequant loader
+        stages K/V in LDS at the working dtype, which is what the combo reads.
+        The schedule levers the FP8 loader does not wire (K single-buffer,
+        early-V, V double-buffer, Q direct-reg) stay off for it.
       * no softcap / sinks (not wired into the transposed softmax VALU opts;
         the spec validator rejects them).
       * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
@@ -1995,9 +2003,11 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.dtype not in ("bf16", "fp16"):
         return False
-    if problem.use_fp8:
-        return False
     if problem.softcap > 0 or problem.use_sinks:
+        return False
+    # FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+    # at the working dtype), with no sliding window.
+    if problem.use_fp8 and problem.sliding_window > 0:
         return False
     # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
     # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
@@ -2015,7 +2025,7 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         and problem.block_size == 16
     ):
         return False
-    if problem.head_size not in (64, 128):
+    if problem.head_size not in (64, 128, 192):
         return False
     if problem.max_seqlen_q <= 256:
         return False
@@ -2049,11 +2059,15 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool
     """
     if not _enable_single_batch_combo(problem, arch):
         return False
+    # The FP8 sync-dequant loader has no in-flight V DMA to prefetch.
+    if problem.use_fp8:
+        return False
     if _enable_early_v_schedule(problem, arch):
         return False
     # d128: vdbuf is a net drag (see docstring) -- OFF; the nw=2 / no-prefetch
-    # path is the winner. This also auto-disables sched_barrier.
-    if problem.head_size == 128:
+    # path is the winner. This also auto-disables sched_barrier. d192 follows
+    # d128.
+    if problem.head_size != 64:
         return False
     return problem.max_seqlen_q <= 1024
 
@@ -2100,6 +2114,9 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> boo
         143us) -> OFF; d128 long gets no V schedule flag.
     """
     if not _enable_single_batch_combo(problem, arch):
+        return False
+    # The FP8 sync-dequant loader has no async V issue to move earlier.
+    if problem.use_fp8:
         return False
     return problem.head_size == 64 and problem.max_seqlen_q >= 2048
 
@@ -2350,7 +2367,7 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
     """
     return (
         arch == "gfx942"
-        and problem.head_size in (64, 128)
+        and problem.head_size in (64, 128, 192)
         and problem.dtype == "bf16"
         and not problem.use_fp8
         # D128 sliding-window prefill rides the non-ring wide flash
@@ -2416,7 +2433,9 @@ def _gfx942_bf16_wide_geometry(
     cfvst is not enabled on D128 (it needs nw=4, which only fits with the
     sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
     """
-    if problem.head_size == 128:
+    # D192 takes the D128 geometry: its nw=4 double-buffered form exceeds the
+    # 64 KB LDS cap as well.
+    if problem.head_size in (128, 192):
         # gfx942 bf16 D128 small-tile double-K (synthesized from the gfx942
         # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
         # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
@@ -2566,6 +2585,10 @@ def _enable_gfx942_flash_mask_limit(
     # which is invalid once a sliding window must be applied. Disable it for SW so
     # the emitter's per-element window mask (dist < sliding_window) runs.
     if problem.sliding_window > 0:
+        return False
+    # D192 keeps the plain wide flash body: the transposed softmax VALU stack is
+    # validated at D64/D128 only.
+    if problem.head_size == 192:
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
@@ -6143,6 +6166,17 @@ def run_unified_attention_torch(
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path(_launch_arch) == "2d"
+    # FP8 K/V prefill that no tiled 2D kernel serves (gfx942 has no FP8 2D
+    # path) runs on the 3D split-KV kernel, which handles multi-token query
+    # blocks, instead of the scalar fallback. use_fp8 is checked first so other
+    # launches skip the support walk.
+    if (
+        prefer_2d
+        and problem.use_fp8
+        and tuning_spec is None
+        and not _explicit_path_supported(problem, None, "2d", _launch_arch)[0]
+    ):
+        prefer_2d = False
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch
