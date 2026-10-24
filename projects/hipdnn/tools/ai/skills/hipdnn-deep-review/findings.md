@@ -73,6 +73,14 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
    ([policy.md](policy.md) *M-rules*: `TESTQ` M1 and M3, `TESTB` M2, `AUTH` M4 and M5) puts
    one literal line per rule here: `M<n>: PASS|FAIL|WAIVED(<code>)|N/A|UNVERIFIED <evidence>`
    (with no PR, `N/A (no PR)` for M4 and M5).
+   `ROCK` and `ROCK-f1` also write literal non-finding lines here. These lines contain no `|`, and Coverage and ledger parsing
+   ignore them. `ROCK` writes:
+   - `Timing-base: <entry> <family> <exposure> max-shard <s>s limit <s>s (<run ids>)`
+   - `Flag-dep: <NAME> pin=<v> main=<v> (<FLAGS.cmake line>)`
+   - `Win-path: <entry or file> <length> (<root source>)`
+
+   `ROCK-f1` writes `Timing: <entry> <family> <exposure> base <s>s delta <s>s (<source>) bound <s>s/<N> shards limit <s>s`. The
+   formats are defined in [lanes/therock.md](lanes/therock.md).
 4. **Handoffs:** `<target lane>: <one line>` for issues outside the brief.
 5. **Approval requests:** command, architecture, test selection, expected duration and
    where it runs, for anything needing a GPU, remote compute or another approval.

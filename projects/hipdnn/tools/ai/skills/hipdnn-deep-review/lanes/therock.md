@@ -96,6 +96,32 @@ Confirm it from the `test_type` output of the `configure` job in `therock-multi-
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.
 Provider and integration YAMLs do not, so a test they categorize only as `comprehensive` never runs in PR CI.
 
+**Timeout budget (main pass).** Each tier is its own CTest entry, `<binary>_<tier>_suite`, with a `category_timeouts` value in the
+project's `*test_categories*.yaml` (hipkernelprovider: quick 300 s, standard 2700 s, comprehensive 25200 s). Check three exposures for
+each covered family: run-all PRs (`quick`, always, because any PR touching an unclassified path runs it), scoped PRs (`standard`) and
+nightly (`comprehensive`). A family's `test_type_for_family` overrides these. The baseline comes from per-job logs, because
+`gh run view --log` on a whole run can come back empty. Scan recent runs for successful jobs named `Test <job> (shard <i>/<N>) (<family>)`,
+fetch each such job's log, and read the entry's `Test #<n>: <entry> ... Passed <t> sec` line:
+
+```bash
+. ./env.sh; E="$EVIDENCE/r<N>/lanes/ROCK-evidence"; mkdir -p "$E"; JOB=<job>; ENTRY=<binary>_<tier>_suite
+for id in $(gh run list -R <owner>/<repo> --workflow therock-multi-arch-ci.yml --limit 100 --json databaseId -q '.[].databaseId'); do
+  gh run view "$id" -R <owner>/<repo> --json jobs -q ".jobs[] | select(.conclusion==\"success\" and (.name|test(\"Test $JOB \"))) |
+    \"$id\t\(.databaseId)\t\(.name)\""
+done > "$E/jobs-$JOB.tsv"
+while IFS=$'\t' read -r run job name; do
+  gh api "repos/<owner>/<repo>/actions/jobs/$job/logs" > "$E/job-$job.log" || continue
+  printf '%s\t%s\t%s\n' "$run" "$name" "$("$GREP" -oE "Test +#[0-9]+: $ENTRY[ .]+Passed +[0-9.]+ sec" "$E/job-$job.log" | "$GREP" -oE '[0-9.]+ sec')"
+done < "$E/jobs-$JOB.tsv"
+```
+
+Use the latest 3 runs that ran the entry for each (family, exposure). The baseline is the maximum over those runs of the maximum
+shard. With fewer than 3 runs, use the runs found and write their count. With none, or with logs `gh` cannot read (record the error),
+the line is `UNVERIFIED (no CI log)`. A run-all `quick` baseline can come from any run that executed the `quick` entry. Write one line
+per (entry, family, exposure) under **Checked, no finding**, with no `|`: `Timing-base: <entry> <family> <run-all|scoped|nightly>
+max-shard <s>s limit <s>s (<run ids>)`, or `Timing-base: <entry> <family> <exposure> UNVERIFIED (no CI log)`. `ROCK-f1` (section 6)
+adds the change's delta.
+
 ## 3. Is the change tested in TheRock?
 
 When the change adds or alters tests or shipped code, one of these must hold, or it is an IMPORTANT finding:
@@ -118,13 +144,14 @@ The code is covered only by workflows where it resolves ON and whose families te
 
 ## 4. Will TheRock package and run it?
 
-Only a TheRock-layout build applies TheRock's post-processing, which the RPATH and component checks need. It is an **Approval
+Only a TheRock-layout build applies TheRock's post-processing, which *Installed CTest*, *RPATH* and *Components* need. It is an **Approval
 request**: it needs `meson` (`pip install -r requirements.txt` in `$T`), fetched sources (`python3 ./build_tools/fetch_sources.py`) and
 the dist AMDGPU target selection, and builds the compiler and runtime from source (hours, tens of GB); state these, the architecture
-and the duration. Without approval, *Installed CTest*, *RPATH* and *Components* are `UNVERIFIED`: read the sources they name and say
-what was not run. This section covers hipDNN core only: when the change touches only `dnn-providers/**` or integration tests, those
-three checks are `N/A (hipDNN core not touched)`, or `UNVERIFIED` with a Handoff when the PR claims provider packaging changes; do
-not parameterize them per provider. Once approved, build in `$SCRATCH/ROCK/build` from a full scratch checkout of `$HEAD`, never
+and the duration. Without approval, those three are `UNVERIFIED`: read the sources they name and say what was not run. The approval
+gate and the hipDNN-core-only scope below apply to those three only: when the change touches only `dnn-providers/**` or integration
+tests, they are `N/A (hipDNN core not touched)`, or `UNVERIFIED` with a Handoff when the PR claims provider packaging changes; do
+not parameterize them per provider. *Arch split*, *Target-neutral outputs* and *Windows* run without the TheRock build. Once approved,
+build in `$SCRATCH/ROCK/build` from a full scratch checkout of `$HEAD`, never
 `$REPO` or `$REPO_BASE` (sparse checkouts lack sources) and never `-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR="$REPO"`:
 
 ```bash
@@ -174,7 +201,98 @@ The stage is `$SCRATCH/ROCK/build/ml-libs/hipDNN/stage`.
 - **Windows.** The test job sets only `THEROCK_BIN_DIR`. The runner adds no hipDNN directory to PATH: check `COMPONENT_OVERRIDES` in
   `test_runner.py` for the job. DLLs resolve because test executables install directly into `bin/` next to them, and plugins resolve
   through `HIPDNN_PLUGIN_ROOTDIR` (`bin` on WIN32, set in `projects/hipdnn/CMakeLists.txt`). A new test executable or loader in a
-  subdirectory of `bin/` needs its DLL lookup shown.
+  subdirectory of `bin/` needs its DLL lookup shown. It needs no TheRock build.
+
+  **Path length.** Windows tests run from `${GITHUB_WORKSPACE}\build` (`test_component.yml`). No CI step sets `LongPathsEnabled`, and
+  no hipDNN or hipkernelprovider binary declares `longPathAware`, so a file API fails on a path over 259 characters. Compute the paths
+  for every change that installs files or registers installed CTest entries; skipping the computation is not an option. Sources:
+  - CTest entries: run `ctest --test-dir <tree> --show-only=json-v1` on a configure tree to get each entry's arguments, `ENVIRONMENT`
+    and `WORKING_DIRECTORY`. The configure tree is the *Target-neutral outputs* step 4 tree, or one configure of the component's
+    preset. Cover every installed entry, including the per-arch entries installed under `test_arch_content`
+    (hipkernelprovider census shards). Keep every relative path an entry passes, `../` climbs included: a climb that reaches a
+    content directory is joined raw with each file under it.
+  - Installed files: use `RUN`'s prefix when it exists. Otherwise take the `file(INSTALL DESTINATION ...)` rules from
+    `cmake_install.cmake`. A file named at build time (packed shards, generated descriptors) takes the longest name its producing
+    rule can emit for the arches and ops the content carries; cite the rule.
+  - Map both to the Windows layout (executables and plugins under `bin/`).
+
+  Length = root + 1 + the string the file API receives. That string is the raw join (the entry's working directory plus its relative
+  path plus the file) unless the caller normalizes it first; cite the caller's line. When an entry passes a directory, the loader opens
+  files under it, so add the longest relative path of the files installed there. Take those paths from `RUN`'s prefix, or else from
+  the source content tree the install copies (for hipkernelprovider, the descriptor trees under `src/engines/*/descriptors/`). The root
+  is the `${GITHUB_WORKSPACE}\build` value from the job log when one is available, else 64 characters (an allowance;
+  `B:\actions-runner\_work\rocm-libraries\rocm-libraries\build` is 59). Write the longest path per entry as `Win-path: <entry or file>
+  <length> (<root source>)`.
+
+  A length over 259 is a finding unless the caller uses a `\\?\` path: BLOCKING when a required set (an engine's content or a
+  plugin set) provably fails to load, else IMPORTANT. Without a tree or prefix the result is `UNVERIFIED (no tree)`. Record only
+  lengths and the job id; the literal runner path goes in `ROCK-evidence/`, because a literal path in the report trips `LEAK`.
+- **Target-neutral outputs.** Applies to an artifact `BUILD_TOPOLOGY.toml` marks `target-specific` (`"$GREP" -n -A4 '^\[artifacts\.<name>\]'
+  "$T/BUILD_TOPOLOGY.toml"`); a target-neutral artifact is `N/A (target-neutral)`. TheRock builds such an artifact once per family and
+  uploads its `*_generic` part from every family job under one name without comparing the copies (`artifact_manager.py`,
+  `therock_artifacts.cmake`), so host code, headers and CTest files must not depend on `GPU_TARGETS`. Cite the rule for hipkernelprovider
+  (`dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`: host gates never read `GPU_TARGETS`); per-arch reads of
+  `GPU_TARGETS` are legitimate when they only feed the *Arch split* globs. It needs no TheRock build. Four steps follow the list.
+
+**Target-neutral outputs, step 1: flags.** List every option that guards the changed code: **Options and guards** of `CONTEXT.md`
+plus the options guarding each gate step 2 finds. Record each one's value at the pin (`FLAGS.cmake` in `$T`), on TheRock main
+(`git -C "$T" fetch -q origin main`, then `git -C "$T" show origin/main:FLAGS.cmake`) and in `extra_cmake_options` (the table in
+section 3). For each flag that is OFF at the pin and ON on main, write under **Checked, no finding**, with no `|`:
+`Flag-dep: <NAME> pin=<v> main=<v> (<FLAGS.cmake line>)`. The next pin bump builds that code. Step 4 sets every listed flag ON.
+
+**Step 2: static trace.** List every `GPU_TARGETS`, `AMDGPU_TARGETS` and `THEROCK_AMDGPU_TARGETS` read in the changed CMake files and the
+files they include, then one level of `set()`/`list()` derivations of them, then every use of the source or a derived variable that
+reaches `target_sources`, `target_compile_definitions`, `configure_file` into a host header, `install()` or `add_test`. A use whose
+destination is per-arch is clean: for hipkernelprovider the *Arch split* globs, for any other artifact only kpack-split device code
+(`THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS`). Any other use is a static hit.
+
+```bash
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T")
+mapfile -t CM < <(git -C "$CLONE" diff --name-only "$BASE" "$HEAD" | "$GREP" -E '(^|/)(CMakeLists\.txt|[^/]+\.cmake)$')
+git -C "$CLONE" grep -nE 'GPU_TARGETS|AMDGPU_TARGETS|THEROCK_AMDGPU_TARGETS' "$HEAD" -- "${CM[@]}"
+```
+
+Repeat with each included file as the pathspec and with each derived variable's name as the pattern.
+
+**Step 3: arch pair.** Two archs from distinct TheRock families (`amdgpu_family_matrix.py`): one with the gated content or feature, one
+without. With no gate found in step 2, use the first presubmit family's arch plus an arch from another family the toolchain accepts.
+
+**Step 4: configure diff.** Needs `Build host: yes`; otherwise the check is static only and a static hit is IMPORTANT. Use the
+superbuild preset that builds the component (root `CMakePresets.json`; for hipkernelprovider `hip-kernel-provider`). Configure it once
+per arch with every step 1 flag ON, `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and `-DENABLE_CLANG_TIDY=OFF`, and, when the ingestor is ON, the
+prerequisites its README names (for hipkernelprovider `KPACK_PYTHON_DIR` and a Python with `msgpack` and `zstandard`). When a gate reads
+DVC content, first run the pull the component's README names; if it fails the result is `UNVERIFIED (content not pulled)` plus the static
+finding. Record whether the pull ran. `$A1` and `$A2` are the step 3 archs:
+
+```bash
+. ./env.sh; R="$SCRATCH/ROCK"; fullclone "$R/src" "$HEAD" || exit 1
+for A in "$A1" "$A2"; do
+  nice -n 19 cmake --preset <preset> -S "$R/src" -B "$R/cfg-$A" -DGPU_TARGETS="$A" <-D<NAME>=ON for each step 1 flag> \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DENABLE_CLANG_TIDY=OFF > "$R/cfg-$A.log" 2>&1 ||
+    { tail -n 30 "$R/cfg-$A.log"; echo "STOP: configure failed for $A" >&2; exit 1; }
+done
+norm() { python3 -c '
+import json, pathlib, re, sys
+b = pathlib.Path(sys.argv[1]).resolve().as_posix()
+for e in sorted(json.loads(pathlib.Path(b, "compile_commands.json").read_text()), key=lambda e: e["file"]):
+    cmd = e.get("command") or " ".join(e["arguments"])
+    print("CC", e["file"].replace(b, "<B>"), *sorted({d.replace(b, "<B>") for d in re.findall(r"-D\S+", cmd)}))
+for p in sorted(pathlib.Path(b).rglob("cmake_install.cmake")):
+    for m in re.finditer(r"file\(INSTALL DESTINATION \"([^\"]*)\"[^\n]*? FILES \"([^\"]*)\"", p.read_text()):
+        print("INSTALL", m.group(1), m.group(2).replace(b, "<B>"))' "$1"; }
+for A in "$A1" "$A2"; do norm "$R/cfg-$A" | "$GREP" -vE 'arch_content' > "$R/norm-$A.txt"; done
+diff "$R/norm-$A1.txt" "$R/norm-$A2.txt"
+```
+
+Replace `arch_content` in the filter with the artifact's per-arch globs. The diff compares, per host target, the sorted `-D` set and source list
+of `compile_commands.json` and each `file(INSTALL DESTINATION ...)` of `cmake_install.cmake`, with the build directory replaced by `<B>`; a
+difference that survives the filter is a confirmed dependence.
+
+**Target-neutral outputs, tier** ([../policy.md](../policy.md) *Review rules*): BLOCKING for a difference the diff confirms behind a flag
+that is ON at the pin or on TheRock main (the next pin bump builds it); IMPORTANT for a static-only hit (no build host, or content not
+pulled) and for a hit behind a flag that is OFF both at the pin and on main. A gated install into a component the artifact does not request
+(hipkernelprovider `share/doc`: `ml-libs/CMakeLists.txt` requests no `doc` component) is SUGGESTION, with that reason. Record the two archs,
+the preset and whether the pull ran under **Checked, no finding**.
 
 ## 5. TheRock-side changes
 
@@ -191,3 +309,41 @@ rocm-libraries CI uses only the pinned TheRock: a companion TheRock PR has no ef
 and whether the pin contains it: `git -C "$T" merge-base --is-ancestor <companion-sha> "$ROCK_REF"`, where `<companion-sha>` is its
 merge commit. A needed TheRock change with no companion PR, or a pin that does not contain it, means the new pieces are not built,
 packaged or selected by CI.
+
+## 6. Follow-up `ROCK-f1`: timeout budget
+
+Runs after `RUN` returns, only when `ROCK` wrote a `Timing-base:` line. Read the `ROCK` and `RUN` reports, write the `ROCK-f1` lane
+report ([../findings.md](../findings.md) *Lane report*) and do no other check. It adds the change's measured time to the baselines
+`ROCK` took from CI and projects each entry per shard. It runs no test.
+
+1. **Cases.** Added, altered and removed cases are the ones the test-source diff `git -C "$CLONE" diff "$BASE" "$HEAD"` adds, edits or
+   deletes (each parametrized instance counts). Per-case times are the `[       OK ] <case> (<ms> ms)` lines in the logs that `RUN`'s suite rows cite (and in logs of
+   approved remote runs), at `$HEAD` and at `$BASE`. Count only cases within the entry's filter that execute on that family; a skipped
+   case counts 0. A case behind a flag (its guard in the source or in **Options and guards** of `CONTEXT.md`) counts when the flag is ON at
+   the pin or on TheRock main (`ROCK`'s `Flag-dep:` line gives pin and main; `RUN`'s `Flag:` lines say what ran); when it is ON only
+   on main, label the `Timing:` line `pin-bump` and tier it as below.
+2. **Delta** (seconds, over all cases that differ between `$BASE` and `$HEAD`):
+   - added case: + its head time;
+   - altered case: + (head time − base time) when both were measured; otherwise + the head time, labelled `upper bound`;
+   - removed or moved-out case: − its base time when measured, otherwise 0;
+   - a time measured on another arch: label `estimate (<arch>)`;
+   - an added or altered case with no time: `UNVERIFIED (no case times)` for that entry; write no `Timing:` line for it.
+3. **Bound.** `N` is the entry's shard count for that family and OS (`total_shards_dict` in `fetch_test_configurations.py` at `$ROCK_REF`;
+   `GTEST_ONLY_SHARDING_COMPONENTS` in `test_runner.py` lists the components that shard by gtest case). With gtest-only sharding every
+   shard runs every entry, and gtest assigns cases to shards by index, so the even share alone is not a bound:
+
+   `bound = base + delta / N + longest`
+
+   where `base` is `max-shard` from the `Timing-base:` line and `longest` is the largest single added or altered case's contribution
+   (its head time when added; its increase when altered). Without gtest-only sharding an entry runs in one shard: `N = 1`. For
+   gtest-only sharding also check that the sum over all entries in one shard (`Timing-base` lines of the same family) plus the delta
+   stays under the job's `timeout_minutes` (`fetch_test_configurations.py`).
+4. **Line.** Write one line per (entry, family, exposure) under **Checked, no finding**, with no `|`: `Timing: <entry> <family>
+   <exposure> base <s>s delta <s>s (<source>) bound <s>s/<N> shards limit <s>s`. Append any labels that apply (`pin-bump`, `upper
+   bound`, `estimate (<arch>)`). `<source>` names the `RUN` log rows.
+5. **Finding.** A `bound` above `limit` is a finding, tiered by [../policy.md](../policy.md) *Review rules*:
+   - BLOCKING for the `run-all` (`quick`) or `scoped` (`standard`) exposure on a presubmit family, `pin-bump` cases included;
+   - IMPORTANT for `nightly` (`comprehensive`) or dispatch-only exposure.
+
+   `Where` cites the entry's `category_timeouts` line and the case. A `Timing-base:` line
+   with `UNVERIFIED (no CI log)` carries through as `UNVERIFIED`, never as a pass.

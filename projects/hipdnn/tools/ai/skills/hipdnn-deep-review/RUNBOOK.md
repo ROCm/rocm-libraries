@@ -151,7 +151,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `BUILD` | [build-packaging](lanes/build-packaging.md) | CMake targets, option defaults and registration, install rules, exported config, CI files | `CMakeLists.txt`, `*.cmake`, `*.cmake.in`, any `CMakePresets.json`, `*test_categories*.yaml`, `.github/` or `version.json` changes |
 | `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt`, `.github/` or C/C++/HIP source (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`, `.hip`, `.cu`, `.cuh`) changes |
 | `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table, or non-test source under `projects/hipdnn/` or `dnn-providers/`, changes |
-| `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, Windows lookup | Non-documentation file changes |
+| `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, target-neutral outputs, Windows lookup and path length, tier timeout baselines. Its timeout projection against what `RUN` measured is the follow-up `ROCK-f1` | Non-documentation file changes |
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
@@ -215,8 +215,8 @@ writer as its own fresh agent with shell and write access; fill this template as
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
 **Queue.** Run at most `Agents:` agents at once, in this priority order: `RUN` first, then `DRIFT`, the
-longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT` and an approved
-`ROCK` build, or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
+longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT`, an approved
+`ROCK` build, `ROCK`'s configure diff (`Build host: yes`), or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
 split `Cores:` between them while they overlap, `RUN` taking the larger share.
 
 ```markdown
@@ -253,8 +253,10 @@ the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
-`RUN`'s regression-test runs ([lanes/test-quality.md](lanes/test-quality.md)). A lane's newest follow-up report wins when
-`ledger.py mlines` reads an `M<n>:` line. Re-dispatch both when `RUN` is re-dispatched with an approval.
+`RUN`'s regression-test runs ([lanes/test-quality.md](lanes/test-quality.md)). When `ROCK` wrote a `Timing-base:` line, also dispatch
+`ROCK-f1` with the `ROCK` and `RUN` report paths: it projects each entry's per-shard time from `ROCK`'s CI baselines and `RUN`'s case
+times ([lanes/therock.md](lanes/therock.md) section 6). A lane's newest follow-up report wins when
+`ledger.py mlines` reads an `M<n>:` line. Re-dispatch all three follow-ups (`AUTH-f1`, `TESTQ-f1`, `ROCK-f1`) when `RUN` is re-dispatched with an approval.
 
 An agent that fails, times out or returns a non-conforming report twice is `FAILED
 (<reason>)` in the Lanes table; split an over-large lane by area before the second attempt.
