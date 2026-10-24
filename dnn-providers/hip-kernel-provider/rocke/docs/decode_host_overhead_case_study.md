@@ -78,5 +78,46 @@ and a migration of the generic stream API are outside scope.
 
 ## Results
 
-Fresh paired measurements are required for this binding implementation. Earlier
-results from the withdrawn runtime/cache design do not establish its savings.
+The saved binding reduced host enqueue time at every measured configuration
+and in every paired trial. Each value below is
+`100 * (1 - median(final/base))` over the three paired trials. These are
+per-configuration results, not confidence intervals.
+
+| Target | B / KV | Binding mode | Host enqueue reduction | Host-paced HIP-event interval reduction |
+| --- | --- | --- | ---: | ---: |
+| gfx942 | 1 / 2048 | Stable | 57.1% | 56.8% |
+| gfx942 | 1 / 2048 | Maximum-length series | 57.5% | 57.1% |
+| gfx942 | 4 / 4096 | Stable | 57.0% | 56.1% |
+| gfx942 | 4 / 4096 | Maximum-length series | 57.6% | 57.0% |
+| gfx950 | 1 / 2048 | Stable | 53.7% | 54.0% |
+| gfx950 | 1 / 2048 | Maximum-length series | 54.1% | 53.3% |
+| gfx950 | 4 / 4096 | Stable | 54.2% | 53.9% |
+| gfx950 | 4 / 4096 | Maximum-length series | 54.3% | 54.2% |
+
+All compared segment/reducer LLVM and HSACO hashes, executable specs and
+grid/block geometry matched across arms and trials. Each target passed 48
+independent before/after checks in the measured runs, 64 existing runtime
+numerical cases and nine stream/capture/retention/completion checks. Ten
+existing LDS-admission numerical cases were explicitly deselected. No hardware
+skip or failed check is counted as a pass.
+
+The baseline was `41317132e3f7c081bb36fd228efb59145fe6368d`; the measured
+implementation was `b106aeda4da3265c35612b99c69f2a99a2c8c0de`. The explicit
+specs were `gfx942_u3d_splitkv_seg128_t1xb` and
+`gfx950_u3d_splitkv_seg128_t1xb`. The environment used Python 3.12, the Python
+engine, LLVM23, ROCm 7.14.0, Torch `2.13.0+rocm7.14.0`, HIP `7.14.60850` and
+NumPy 2.2.6. Compilation ran in Torch-free COMGR workers; launch and compilation
+used release-matched wheel HIP/COMGR libraries.
+
+The source-and-adapter archive SHA-256 was
+`df8c036a8b55370c134fe0ddeb9db3793ac81d82d8bcd6bf792e426b7c6deb31`;
+the separately hashed timing harness was
+`bdc02b9d13d80d3c370b15e0276bc331494ae6b801f92a91e03922590b3bfa3e`.
+The validation record retains per-file provenance, commands and paired trials.
+
+These results establish savings at the saved Python binding's host submission
+boundary for these configurations. HIP-event intervals include host pacing and
+do not establish a device-kernel speedup. The runs do not measure a new binding
+on every invocation, native provider performance, two-device concurrent
+submission or gfx1250 hardware. Earlier measurements of the withdrawn generic
+runtime/cache design are not used for these results.
