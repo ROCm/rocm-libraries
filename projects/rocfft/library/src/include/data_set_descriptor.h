@@ -403,6 +403,41 @@ struct data_descriptor_t
      */
     bool is_embedded() const;
 
+    /**
+     * @brief Splits a length axis into two length axes describing the same data.
+     *
+     * Length axis `dim`, of logical range [lower, upper) and in-buffer stride `s`, is
+     * replaced by an inner length axis of full range [0, factor) and stride `s` (at
+     * index `dim`) followed by an outer length axis of range [lower / factor,
+     * upper / factor) and stride `factor * s` (at index `dim + 1`); former length axes
+     * of index `> dim` are shifted by one. Logical coordinate `i` along `dim` maps to
+     * `(i % factor, i / factor)` so every element keeps its in-buffer offset. Batch
+     * axes are unchanged. If this object is embedded, the corresponding axis of the
+     * embedding data set is split alike, i.e., the returned object's embedding layout
+     * is the current embedding layout split along its corresponding axis.
+     *
+     * @param[in] dim index of the length axis to split.
+     * @param[in] factor span of the inner axis. If omitted, the divisor of the logical
+     * span `L = upper - lower` closest to `sqrt(L)` is used, ties going to the smaller
+     * one (equivalently, the largest divisor `d` of `L` such that `d * d <= L`).
+     * @return The split data descriptor.
+     *
+     * @note A partial range along `dim` is representable after the split iff `lower`
+     * and `upper` are both multiples of `factor`.
+     *
+     * @throw An `std::invalid_argument` is thrown if any of the following is detected:
+     *
+     * - `dim` is not smaller than `get_len_rank()`;
+     *
+     * - `factor` is omitted and `L` has no divisor other than 1 and `L` (`L` is 0, 1 or prime);
+     *
+     * - `factor` is 1, not smaller than `L`, or does not divide `L`;
+     *
+     * - `lower` (hence `upper`) is not a multiple of `factor`.
+     */
+    data_descriptor_t split_length_axis(size_t                dim,
+                                        std::optional<size_t> factor = std::nullopt) const;
+
     //-------------------------------------------------------------------------
     //                        DEFAULT COPIES AND MOVES
     //-------------------------------------------------------------------------
