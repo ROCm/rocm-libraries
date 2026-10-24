@@ -95,5 +95,32 @@ class TestStinkyTofuArchProbes(AdaptorTestCase):
         self.assertIn("gfx1250", rocisa.getRegisteredArchKeys())
 
 
+@unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
+class TestParseRegisterAllocationConfig(AdaptorTestCase):
+    def test_mode_only(self):
+        self.assertEqual(rocisa.parseRegisterAllocationConfig(0), ("0", 0))
+        self.assertEqual(rocisa.parseRegisterAllocationConfig(2), ("2", 2))
+        self.assertEqual(rocisa.parseRegisterAllocationConfig("apply"), ("2", 2))
+
+    def test_nondefault_classes_stay_in_the_canonical_spelling(self):
+        self.assertEqual(
+            rocisa.parseRegisterAllocationConfig("2,classes=s"),
+            ("2,classes=s", 2),
+        )
+
+    def test_matches_stinkytofu_api(self):
+        import stinkytofu
+
+        for value in (0, "apply,classes=vs", "shadow"):
+            self.assertEqual(
+                rocisa.parseRegisterAllocationConfig(value),
+                stinkytofu.parseRegisterAllocationConfig(value),
+            )
+
+    def test_bad_value_is_value_error(self):
+        with self.assertRaises(ValueError):
+            rocisa.parseRegisterAllocationConfig("bogus")
+
+
 if __name__ == "__main__":
     unittest.main()
