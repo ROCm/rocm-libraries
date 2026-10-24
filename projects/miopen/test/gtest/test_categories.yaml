@@ -64,10 +64,26 @@ positive_patterns: &positive_patterns
   - "*/GPU_Dropout*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
+  # Jenkins-parity: Smoke/ and unprefixed cases also run in standard; Full/ cases run in comprehensive/full only.
+  # Chunk: find/allocator/misc suites, Adam/AmpAdam, pure unprefixed suites.
+  - "*/GPU_Allocator_*"
+  - "*/GPU_CandidateSelection_*"
+  - "*/GPU_Find2Conv_*"
+  - "*/GPU_FindDb_*"
+  - "*/GPU_FindModeTrustVerify_*"
+  - "*/GPU_Adam_*"
+  - "*/GPU_AmpAdam_*"
   # Unprefixed: these are plain TEST/TEST_F with no INSTANTIATE_TEST_SUITE_P,
   # so they carry no "Prefix/" and the leading "*/" above would not match them.
   - "GPU_StreamTracker_FP32*"
   - "GPU_NaiveTimeout_FP32*"
+  # Jenkins-parity (find/allocator/misc suites, Adam/AmpAdam, pure unprefixed suites): single-instantiation TEST/TEST_F suites.
+  - "GPU_BN_Spatial_FP32*"
+  - "GPU_CKValidatorIntegration_FP32*"
+  - "GPU_CkImplLoader_FP16*"
+  - "GPU_ConvNDKernelTuningUtils_FP32*"
+  - "GPU_ConvStridedTensors_FP32*"
+  - "GPU_SoftmaxFind20_*"
   - "Standard/*" # include all standard tests by default
 
 
@@ -169,6 +185,11 @@ test_categories:
       - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
+      # Jenkins-parity (find/allocator/misc suites, Adam/AmpAdam, pure unprefixed suites): Smoke/unprefixed cases run here; the Full/ cross product
+      # runs in comprehensive/full only.
+      - "Full/GPU_Adam_*"
+      - "Full/GPU_AmpAdam_*"
+      - "Full/GPU_CandidateSelection_*"
 
     test_files:
       # Quick tests
