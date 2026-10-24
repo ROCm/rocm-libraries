@@ -3097,8 +3097,8 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         # rebuild and a redundant AOT instance.
         self.assertEqual(
             base.runtime_param_fields,
-            ("batch", "seqlen_q", "seqlen_kv"),
-            "test assumes the aligned dense spec declares all three shape "
+            ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads"),
+            "test assumes the aligned dense spec declares the shape and head "
             "fields as runtime params",
         )
         for wpe, spec in specs.items():
@@ -3472,55 +3472,107 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS)
-        self.assertTrue(
-            base.runtime_shape,
-            "test setup error: the base spec is not on the runtime-shape path",
-        )
+        for sliding_window in (0, 128):
+            with self.subTest(sliding_window=sliding_window):
+                base = AttentionDenseSpec(
+                    **self._BASE_KWARGS, sliding_window=sliding_window
+                )
+                self.assertTrue(
+                    base.runtime_shape,
+                    "test setup error: the base spec is not on the runtime-shape path",
+                )
 
-        keys, irs = {}, {}
-        for shape in self._SHAPES:
-            with self.subTest(shape=shape):
-                b, sq, sk = shape
-                spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
-                keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
-                irs[shape] = self._ir_sha(spec)
+                keys, irs = {}, {}
+                for shape in self._SHAPES:
+                    with self.subTest(shape=shape):
+                        b, sq, sk = shape
+                        spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+                        keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
+                        irs[shape] = self._ir_sha(spec)
+                        self.assertEqual(
+                            spec.kernel_name(),
+                            base.kernel_name(),
+                            "symbol name carries shape on the runtime path",
+                        )
 
-        # Precondition: this is the collision the key deliberately creates.
-        self.assertEqual(
-            len(set(keys.values())),
-            1,
-            f"runtime-shape specs did not share one cache key: {self._SHAPES}",
-        )
-        # The property under test: the collision is safe only if the IR agrees.
-        self.assertEqual(
-            len(set(irs.values())),
-            1,
-            "specs sharing ONE cache key lowered to DIFFERENT IR "
-            + repr({s: irs[s][:12] for s in self._SHAPES})
-            + " -- a shape field reached codegen on the runtime path, so "
-            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
-            "every other shape. Either stop baking that field, or drop it from "
-            "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
-        )
+                # Precondition: this is the collision the key deliberately creates.
+                self.assertEqual(
+                    len(set(keys.values())),
+                    1,
+                    f"runtime-shape specs did not share one cache key: {self._SHAPES}",
+                )
+                # The property under test: the collision is safe only if the IR agrees.
+                self.assertEqual(
+                    len(set(irs.values())),
+                    1,
+                    "specs sharing ONE cache key lowered to DIFFERENT IR "
+                    + repr({s: irs[s][:12] for s in self._SHAPES})
+                    + " -- a shape field reached codegen on the runtime path, so "
+                    "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+                    "every other shape. Either stop baking that field, or drop it from "
+                    "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
+                )
+
+    def test_runtime_heads_share_one_key_and_ir(self):
+        """Head configs that collapse to one cache key must emit one kernel.
+
+        The head-count twin of the shape test above: on the runtime path the GQA
+        ratio, the token strides (Hq*D / Hkv*D) and the K/V buffer-resource byte
+        extent are all computed from kernargs, so every head config shares one key,
+        IR and name. A single baked head-derived constant (a stride or the buffer
+        bound) splits the IR under one key, so _DENSE_LAUNCHER_CACHE would serve the
+        first-compiled config's strides to every other head config. Covers GQA 16,
+        non-pow2 GQA 5 and 7, and MHA.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        heads = ((128, 8), (40, 8), (28, 4), (32, 32))
+        for sliding_window in (0, 128):
+            with self.subTest(sliding_window=sliding_window):
+                base = AttentionDenseSpec(
+                    **self._BASE_KWARGS, sliding_window=sliding_window
+                )
+                self.assertTrue(base.runtime_shape)
+                keys, irs, names = set(), set(), set()
+                for hq, hkv in heads:
+                    spec = replace(base, num_query_heads=hq, num_kv_heads=hkv)
+                    keys.add(attention_dense_cache_key(spec, arch="gfx950"))
+                    irs.add(self._ir_sha(spec))
+                    names.add(spec.kernel_name())
+                self.assertEqual(len(keys), 1, f"head configs split the key: {heads}")
+                self.assertEqual(
+                    len(irs),
+                    1,
+                    "head configs sharing ONE cache key lowered to DIFFERENT IR -- a "
+                    "head-derived constant (a token stride or the K/V buffer byte "
+                    "extent) reached codegen on the runtime path",
+                )
+                self.assertEqual(len(names), 1, f"one key, several names: {names}")
+                self.assertNotRegex(names.pop(), r"_(hq|kv)\d+")
 
     def test_baked_shape_specs_split_both_key_and_ir(self):
         """Control: off the runtime path, each shape keeps its own key and IR.
 
         Without this, a builder that ignored batch/seqlen_q/seqlen_kv entirely
         -- emitting one kernel that is wrong everywhere -- would satisfy the
-        guard above. ``sliding_window`` is the cheapest way off the runtime
-        path: it is a single field (``runtime_shape`` excludes it), unlike
-        ``persistent``, which also drags in num_persistent/persist_decode.
+        guard above. The persistent body bakes shape; a single qb_major workgroup
+        is valid for every shape in the cohort.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS, sliding_window=128)
+        base = AttentionDenseSpec(
+            **self._BASE_KWARGS,
+            persistent=True,
+            num_persistent=1,
+            persist_decode="qb_major",
+        )
         self.assertFalse(
             base.runtime_shape,
-            "test setup error: sliding_window no longer leaves the runtime path",
+            "test setup error: persistent body no longer leaves the runtime path",
         )
         self.assertEqual(base.runtime_param_fields, ())
 
@@ -4253,8 +4305,8 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
     # Persistent variants, decode order pinned so ``auto`` cannot resolve
     # differently per head config. num_persistent must not exceed nqb*Hq*B for the
-    # smallest config under test. gfx950 dense is the baked-heads control
-    # (test_gfx950_baked_heads_split_key_ir_and_name).
+    # smallest config under test. The gfx950 PERSISTENT body is the baked-heads
+    # control (test_gfx950_baked_heads_split_key_ir_and_name).
     _PERSIST_VARIANTS = {
         "hkv_major": dict(
             persistent=True, num_persistent=64, persist_decode="hkv_major"
@@ -4638,28 +4690,37 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         kernel = build_attention_dense(spec, arch="gfx950")
         return _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
 
+    # gfx950 dense now reads heads at runtime on the GRID body too (same as gfx942),
+    # so the PERSISTENT body is the remaining baked-heads control -- persistent is not
+    # runtime_shape, so it bakes Hq/Hkv/gqa. num_persistent stays within nqb*Hq*B for
+    # every head config under test.
+    _GFX950_BAKED = dict(persistent=True, num_persistent=64, persist_decode="hkv_major")
+
     def _gfx950_spec(self, **kw):
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec as Gfx950AttentionDenseSpec,
             supports_attention_dense,
         )
 
-        spec = Gfx950AttentionDenseSpec(**kw)
+        spec = Gfx950AttentionDenseSpec(**{**kw, **self._GFX950_BAKED})
         ok, why = supports_attention_dense(spec, arch="gfx950")
-        self.assertTrue(ok, f"test setup error: gfx950 spec out of scope: {why}")
+        self.assertTrue(
+            ok, f"test setup error: gfx950 persistent spec out of scope: {why}"
+        )
         self.assertNotIn(
             "num_query_heads",
             spec.runtime_param_fields,
-            "test setup error: gfx950 dense took runtime heads; it can no longer "
-            "serve as the baked-heads control",
+            "test setup error: gfx950 persistent dense took runtime heads; it can no "
+            "longer serve as the baked-heads control",
         )
         return spec
 
     def test_gfx950_baked_heads_split_key_ir_and_name(self):
-        """Control: gfx950 dense bakes the heads, so each head config keeps its own
-        key, IR and ``hq``/``kv``-tagged name. Every gfx942 dense body now takes the
-        heads at runtime; without a body that bakes them, a probe or builder that
-        ignored heads everywhere would pass the guards above unnoticed."""
+        """Control: the gfx950 PERSISTENT body bakes the heads, so each head config
+        keeps its own key, IR and ``hq``/``kv``-tagged name. Every runtime body (both
+        archs' grid, and the gfx942 persistent decodes) now takes the heads at
+        runtime; without a body that bakes them, a probe or builder that ignored heads
+        everywhere would pass the guards above unnoticed."""
         import hashlib
         from kernels.common.attention_dense_spec import attention_dense_cache_key
 
@@ -4684,22 +4745,32 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         self.assertEqual(len(irs), n, "gfx950: heads did not split IR")
         self.assertEqual(len(names), n, "gfx950: heads did not split name")
 
-    def test_gfx950_and_base_names_keep_the_head_tokens(self):
-        """The ``_head_name_parts`` hook is a gfx942-only override: the shared
-        base and gfx950 still bake heads, so their symbols are unchanged."""
+    def test_head_name_tokens_track_runtime_shape(self):
+        """The ``_head_name_parts`` hook drops ``hq``/``kv`` exactly when the body
+        takes heads at runtime. The shared base never does (it is always baked) and
+        the gfx950 persistent body still bakes heads, so both keep the tokens; the
+        gfx950 grid body now reads heads at runtime (like gfx942) and drops them."""
         from kernels.common.attention_dense_spec import AttentionDenseSpec
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec as Gfx950AttentionDenseSpec,
         )
 
+        # Shared base: always baked, keeps the tokens.
         self.assertEqual(
             AttentionDenseSpec(**self._BASE_KWARGS).kernel_name(),
             "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs",
         )
-        gfx950 = Gfx950AttentionDenseSpec(**self._BASE_KWARGS)
-        self.assertIn("_hq128_kv8_", gfx950.kernel_name())
-        self.assertNotIn("num_query_heads", gfx950.runtime_param_fields)
-        self.assertNotIn("num_kv_heads", gfx950.runtime_param_fields)
+        # gfx950 grid: runtime heads, drops the tokens AND declares them as kernargs.
+        grid = Gfx950AttentionDenseSpec(**self._BASE_KWARGS)
+        self.assertTrue(grid.runtime_shape)
+        self.assertNotRegex(grid.kernel_name(), r"_(hq|kv)\d+")
+        self.assertIn("num_query_heads", grid.runtime_param_fields)
+        self.assertIn("num_kv_heads", grid.runtime_param_fields)
+        # gfx950 persistent: baked heads, keeps the tokens.
+        persist = self._gfx950_spec(**self._BASE_KWARGS)
+        self.assertFalse(persist.runtime_shape)
+        self.assertIn("_hq128_kv8_", persist.kernel_name())
+        self.assertNotIn("num_query_heads", persist.runtime_param_fields)
 
     # Hq=91, Hkv=13, D=128: gqa=7, Hq*D=11648, Hkv*D=1664, 2*Hkv*D=3328 -- values
     # that occur in the IR only if a head-derived constant is baked.
@@ -4717,8 +4788,9 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
     def test_runtime_ir_bakes_no_head_derived_constant(self):
         """Byte-level probe on every gfx942 runtime body -- the default grid and
-        each persistent decode -- with a positive control on gfx950 dense at the
-        same heads, which bakes them, so the probe is proven able to fire."""
+        each persistent decode -- with a positive control on the gfx950 PERSISTENT
+        body at the same heads, which bakes them, so the probe is proven able to
+        fire."""
         kw = {**self._BASE_KWARGS, **self._PROBE_HEADS}
         bodies = {
             "default": self._spec(**kw),

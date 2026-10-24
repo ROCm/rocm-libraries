@@ -474,13 +474,13 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         A moving bottom-right diagonal also bakes the sequence-length difference;
         equal-length bottom-right stays in the unshifted runtime-shape cohort.
         ``persistent`` is excluded for a stronger reason: it is a separate body that
-        declares no shape params at all."""
+        declares no shape params at all. Sliding-window attention uses the runtime
+        k-tile trip count while keeping the window size specialized."""
         return not (
             self.persistent
             or self.ragged
             or self.varlen
             or self.paged
-            or self.sliding_window > 0
             or (self.causal_bottom_right and self.seqlen_q != self.seqlen_kv)
         )
 
@@ -497,8 +497,15 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         narrow this (bake ``batch``, keep the seqlens runtime) -- the cache key
         follows automatically, but the symbol name would have to derive from this
         tuple first. It does not today.
+
+        The head counts ride along: one binary serves every (num_query_heads,
+        num_kv_heads) pair by reading them as kernargs and deriving the token strides
+        and GQA ratio at launch. The grid still takes num_query_heads host-side, which
+        is fine -- that never bakes into the binary.
         """
-        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+        if not self.runtime_shape:
+            return ()
+        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
 
     def _layout_name_parts(self) -> tuple[str, ...]:
         if self.head_size != 128:
@@ -514,6 +521,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _head_name_parts(self) -> tuple[str, ...]:
+        # One runtime-shape binary serves every head count, so the symbol must not
+        # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
+        return () if self.runtime_shape else super()._head_name_parts()
 
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
@@ -806,9 +818,14 @@ def build_attention_dense(
     RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
     DIAG_TILES = (DIAG_OFF + RIGHT) // BN
     # A row whose band holds no key (top-left, Sq > Skv + W - 1, with a window) must
-    # output zeros. Emitted only then (emit_lse already zeroes them via row_has_key), so
-    # every other kernel's IR is unchanged.
-    EMPTY_ROWS = W > 0 and not spec.varlen and not spec.emit_lse and Sq > Skv + W - 1
+    # output zeros. WINDOW_EMPTY is the shape-INDEPENDENT part (a windowed non-LSE
+    # kernel can face empty rows at some shape); EMPTY_ROWS adds the baked Sq/Skv test.
+    # Under runtime_shape the cache key drops Sq/Skv, so one binary serves shapes with
+    # and without empty rows -- there the empty-row handling must key off WINDOW_EMPTY
+    # (always emit, runtime predicate) and the runtime KV extent, never baked EMPTY_ROWS.
+    # emit_lse already zeroes empty rows via its own row_has_key, so both exclude it.
+    WINDOW_EMPTY = W > 0 and not spec.varlen and not spec.emit_lse
+    EMPTY_ROWS = WINDOW_EMPTY and Sq > Skv + W - 1
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
@@ -869,6 +886,32 @@ def build_attention_dense(
     batch_p = b.param("batch", I32)
     seqlen_q_p = b.param("seqlen_q", I32)
     seqlen_kv_p = b.param("seqlen_kv", I32)
+    # Heads as kernargs, runtime_shape ONLY -- unlike batch/seqlen above, which every
+    # non-persistent spec takes. One binary then serves every (num_query_heads,
+    # num_kv_heads): the token strides and GQA ratio are derived once as uniform (SGPR)
+    # values. A baked spec reads none of these and keeps its exact IR, so the helpers
+    # below return the compile-time constant for it, emitted in place at each use.
+    if spec.runtime_shape:
+        hq_p = b.param("num_query_heads", I32)
+        hkv_p = b.param("num_kv_heads", I32)
+        gqa_p = b.div(hq_p, hkv_p)
+        stride_q_p = b.mul(hq_p, b.const_i32(D))
+        stride_k_p = b.mul(hkv_p, b.const_i32(D))
+    else:
+        hq_p = hkv_p = gqa_p = stride_q_p = stride_k_p = None
+
+    def _stride_q():
+        return stride_q_p if spec.runtime_shape else b.const_i32(stride_q_tok)
+
+    def _stride_k():
+        return stride_k_p if spec.runtime_shape else b.const_i32(stride_k_tok)
+
+    def _gqa():
+        return gqa_p if spec.runtime_shape else b.const_i32(gqa)
+
+    def _hq_count():
+        return hq_p if spec.runtime_shape else b.const_i32(Hq)
+
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -929,8 +972,29 @@ def build_attention_dense(
     qb = b.block_id_x()
     hq = b.block_id_y()
     bt = b.block_id_z()
-    hkv = b.div(hq, b.const_i32(gqa))
+    hkv = b.div(hq, _gqa())
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+
+    # runtime_shape empty-row predicate, computed HERE (pre-loop) while seqlen_kv_p is
+    # the fresh kernarg value. seqlen_kv_p has no other post-loop use, so reading it in
+    # the epilogue returns a stale register; the per-row i1 carried across the loop does
+    # not. qtok is loop-invariant (q_tok0 + a lane constant), so it is valid pre-loop.
+    # Gated on WINDOW_EMPTY (not baked EMPTY_ROWS): one runtime_shape binary serves
+    # shapes with and without empty rows, and the predicate is a no-op (all rows keep
+    # has_key=True) when the runtime shape has none.
+    rt_empty_has_key = (
+        dense_row_has_key(
+            b,
+            b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
+            seqlen_kv_p,
+            causal=causal,
+            diagonal=DIAG_OFF,
+            window=W,
+            right_bound=RIGHT,
+        )
+        if (WINDOW_EMPTY and spec.runtime_shape)
+        else None
+    )
 
     if varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
@@ -943,19 +1007,15 @@ def build_attention_dense(
         seqlen_kv_b = b.sub(kv_seq1, kv_seq0)
         with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
             b.ret()
-        q_base = b.add(
-            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-        )
-        k_base = b.add(
-            b.mul(kv_seq0, b.const_i32(stride_k_tok)), b.mul(hkv, b.const_i32(D))
-        )
+        q_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
+        k_base = b.add(b.mul(kv_seq0, _stride_k()), b.mul(hkv, b.const_i32(D)))
     else:
         q_base = b.add(
-            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, seqlen_kv_p), b.const_i32(stride_k_tok)),
+            b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -999,7 +1059,7 @@ def build_attention_dense(
     q_packs = []
     for ks in range(K_STEPS):
         col = b.add(b.const_i32(ks * 16), d_base)
-        addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
+        addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
         if RAGGED:
             raw = b.buffer_load_vN(
                 q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
@@ -1057,12 +1117,21 @@ def build_attention_dense(
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        _kv_elem_bytes = Hkv * D * 2
+        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
+        # (one binary serves every head count), baked otherwise. Emitted fresh at each
+        # buffer_rsrc so the baked branch keeps its exact two-const node count.
+        def _kv_elem_bytes_ir():
+            return (
+                b.mul(_stride_k(), b.const_i32(2))
+                if spec.runtime_shape
+                else b.const_i32(Hkv * D * 2)
+            )
+
         k_rsrc = b.buffer_rsrc(
-            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
         v_rsrc = b.buffer_rsrc(
-            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
     b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
@@ -1142,9 +1211,7 @@ def build_attention_dense(
                     )
                 else:
                     kv_row = gkey
-                voff = b.add(
-                    b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))), gcol
-                )
+                voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
@@ -1164,7 +1231,7 @@ def build_attention_dense(
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
-                voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col)
+                voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
@@ -1394,13 +1461,21 @@ def build_attention_dense(
         start_tile = b.select(
             b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
         )
-        if EMPTY_ROWS:
-            # A q-block that starts at or past Skv + W has every key behind its window,
-            # so the unclamped start would point past the last KV tile and the prologue
-            # would load and score another batch's tokens (and for the last batch,
-            # whatever follows the buffer). Pin it to the last real tile: all of its
-            # keys fail the window compare, so the rows stay at the mask sentinel and
-            # the epilogue zeroes them. Blocks with any visible key keep their start.
+        # A q-block that starts at or past Skv + W has every key behind its window,
+        # so the unclamped start would point past the last KV tile and the prologue
+        # would load and score another batch's tokens (and for the last batch,
+        # whatever follows the buffer). Pin it to the last real tile: all of its
+        # keys fail the window compare, so the rows stay at the mask sentinel and
+        # the epilogue zeroes them. Blocks with any visible key keep their start.
+        # Under runtime_shape the last real tile is the runtime n_ktiles_val-1 (baked
+        # EMPTY_ROWS/n_ktiles belong to the compiling shape, not the run shape), and
+        # the clamp must always be emitted since any windowed run shape can be empty.
+        if spec.runtime_shape:
+            _last_tile = b.sub(n_ktiles_val, b.const_i32(1))
+            start_tile = b.select(
+                b.cmp_lt(start_tile, _last_tile), start_tile, _last_tile
+            )
+        elif EMPTY_ROWS:
             start_tile = b.select(
                 b.cmp_lt(start_tile, b.const_i32(n_ktiles - 1)),
                 start_tile,
@@ -1622,28 +1697,32 @@ def build_attention_dense(
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:
         rcp_l = b.rcp(l_i)
-    if EMPTY_ROWS:
+    if EMPTY_ROWS and not spec.runtime_shape:
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
         # (see _MAX_SCALE), so a max at the threshold means "no visible key": store zeros.
+        # Under runtime_shape the runtime band can bump an empty row's max, so this
+        # heuristic is unreliable there -- those rows are zeroed in the O store instead
+        # via rt_empty_has_key (computed pre-loop), by the integer bit-mask the LSE path uses.
         rcp_l = b.select(
             b.fcmp("ogt", m_i, b.const_f32(_EMPTY_ROW_MAX_GRID)),
             rcp_l,
             b.const_f32(0.0),
         )
     if varlen:
-        o_base = b.add(
-            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-        )
+        o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
     else:
         o_base = b.add(
-            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
-    q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
+    q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
     d_half = b.mul(lane_h, b.const_i32(4))
+    # Under runtime_shape, zero keyless rows in the O store via the exact per-row
+    # predicate (against the runtime seqlen), the same integer bit-mask the LSE path
+    # uses. ``runtime_shape`` implies not varlen, so seqlen_kv_p is the right length.
     if spec.emit_lse:
         row_has_key = dense_row_has_key(
             b,
@@ -1655,11 +1734,11 @@ def build_attention_dense(
             right_bound=RIGHT,
         )
         if varlen:
-            lse_index = b.add(b.mul(b.add(q_seq0, qtok), b.const_i32(Hq)), hq)
+            lse_index = b.add(b.mul(b.add(q_seq0, qtok), _hq_count()), hq)
             row_exists = b.cmp_lt(qtok, seqlen_q_b)
         else:
             lse_index = b.add(
-                b.mul(b.add(b.mul(bt, b.const_i32(Hq)), hq), seqlen_q_p),
+                b.mul(b.add(b.mul(bt, _hq_count()), hq), seqlen_q_p),
                 qtok,
             )
             row_exists = b.cmp_lt(qtok, seqlen_q_p)
@@ -1696,7 +1775,7 @@ def build_attention_dense(
             dtype,
             D_TILES,
             spec.o_store_width,
-            row_has_key=row_has_key if spec.emit_lse else None,
+            row_has_key=row_has_key if spec.emit_lse else rt_empty_has_key,
         )
     b.ret()
     return b.kernel
@@ -2784,7 +2863,7 @@ def _has_shape_params(spec: AttentionDenseSpec) -> bool:
 
     This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
     question (does the body bake the shape *anywhere*), and the two differ for
-    paged / ragged / varlen / sliding-window / moving bottom-right causal.
+    paged / ragged / varlen / moving bottom-right causal.
     """
     return not spec.persistent
 
@@ -2811,6 +2890,11 @@ def attention_dense_signature(spec: AttentionDenseSpec):
             .scalar("seqlen_q", "i32")
             .scalar("seqlen_kv", "i32")
         )
+        # Heads ride along ONLY under runtime_shape (the body declares them there and
+        # nowhere else), after the seqlens and before any pointer. Baked specs omit
+        # them, so their ABI is unchanged.
+        if spec.runtime_shape:
+            sig = sig.scalar("num_query_heads", "i32").scalar("num_kv_heads", "i32")
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -3047,6 +3131,9 @@ def run_attention_dense_torch(
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
+        if spec.runtime_shape:
+            vals["num_query_heads"] = int(spec.num_query_heads)
+            vals["num_kv_heads"] = int(spec.num_kv_heads)
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
