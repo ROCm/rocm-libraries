@@ -95,7 +95,7 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
     const auto kvOff = ragged ? std::optional<int64_t>(KV_OFFSETS) : std::nullopt;
     const auto qs = ragged ? packedStrides(SQ) : denseStrides(SQ);
     const auto ks = ragged ? packedStrides(SKV) : denseStrides(SKV);
-    inline const std::vector<int64_t> lseStrides
+    const std::vector<int64_t> lseStrides
         = ragged ? std::vector<int64_t>{SQ * H, 1, H, 1} : std::vector<int64_t>{H * SQ, SQ, 1, 1};
     auto& t = graph.tensors;
     t.push_back(tensor(Q, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
@@ -190,22 +190,23 @@ inline std::vector<float> packedValues(int64_t tokens, int64_t width, unsigned s
 }
 
 // Packed [token, H, D] -> dense contiguous [B, H, S, D] with zeros past each batch's length.
-inline std::vector<float> unpack(inline const std::vector<float>& packed,
-                                 inline const std::vector<int32_t>& tokens,
+inline std::vector<float> unpack(const std::vector<float>& packed,
+                                 const std::vector<int32_t>& tokens,
                                  int64_t s,
                                  int64_t width)
 {
     std::vector<float> dense(static_cast<size_t>(B * H * s * width), 0.0F);
     for(int64_t b = 0; b < B; ++b)
     {
-        for(int64_t tok = 0; tok < tokens[b + 1] - tokens[b]; ++tok)
+        const auto first = tokens[static_cast<size_t>(b)];
+        for(int64_t tok = 0; tok < tokens[static_cast<size_t>(b + 1)] - first; ++tok)
         {
             for(int64_t h = 0; h < H; ++h)
             {
                 for(int64_t d = 0; d < width; ++d)
                 {
                     dense[static_cast<size_t>(((b * H + h) * s + tok) * width + d)]
-                        = packed[static_cast<size_t>(((tokens[b] + tok) * H + h) * width + d)];
+                        = packed[static_cast<size_t>(((first + tok) * H + h) * width + d)];
                 }
             }
         }

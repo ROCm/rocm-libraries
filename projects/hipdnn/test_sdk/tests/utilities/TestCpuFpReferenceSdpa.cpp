@@ -2138,7 +2138,8 @@ TEST(TestCpuFpReferenceSdpaFp64, AlibiSlopesMatchCudnn)
 {
     for(int64_t h = 0; h < 8; ++h)
     {
-        EXPECT_DOUBLE_EQ(CpuFpReferenceSdpa::alibiSlope(h, 8), std::pow(2.0, -(h + 1.0)));
+        EXPECT_DOUBLE_EQ(CpuFpReferenceSdpa::alibiSlope(h, 8),
+                         std::pow(2.0, -(static_cast<double>(h) + 1.0)));
     }
     const std::vector<double> six = {0.25, 0.0625, 0.015625, 0.00390625, 0.5, 0.125};
     for(int64_t h = 0; h < 6; ++h)
