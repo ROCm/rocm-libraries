@@ -10,11 +10,44 @@ Documentation for hipBLAS is available at
 ### Added
 
 * gfx1170 and gfx1171 support to clients.
+* Generated Fortran bindings, as a single `hipblas` module: `use hipblas`, link
+  `roc::hipblas_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows
+  and on the CUDA backend), `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES`
+  (`assumed-shape` by default; `none` or `assumed-rank`). Found with
+  `find_package(hipblas-fortran)`; the archive and `.mod` files install per compiler under
+  `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+  The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
+  you call.
 
 ### Changed
 
 * The minimum required CMake version is now 3.17, for the library and the clients. `FindCUDAToolkit`, used by the CUDA backend, was added in that release.
 * `hipblasSetWorkspace` chooses whether the rocBLAS backend may grow its device workspace. A non-null workspace with a nonzero size is a fixed limit and is never resized, which caps device memory for the handle. A later call that needs more, such as `trsmBatched` or `trsmStridedBatched` with a large `batchCount`, returns `HIPBLAS_STATUS_ALLOC_FAILED` even when free device memory remains. Passing `nullptr` or a size of 0 returns the handle to rocBLAS-managed memory, which starts from a default size and grows as needed. `HIPBLAS_WORKSPACE_CONFIG=:0:0` selects that same managed mode for callers that configure the workspace through the environment, such as PyTorch. With the rocBLAS backend, set `ROCBLAS_VERBOSE_ERROR=1` to print the required and available sizes when a fixed workspace is too small for `trsm`.
+* `hipblas_enums` is merged into `hipblas`: the generated binding defines only `hipblas`, with
+  the enum constants folded in. `use hipblas` is unchanged; `use hipblas_enums` becomes
+  `use hipblas`.
+* The `hipDataType` enumerators (`HIP_R_32F` and the rest) are no longer re-exported: they
+  belong to HIP, not to hipBLAS. Code that names them when calling `hipblasGemmEx` and the
+  other `_ex` routines must now get them from HIP.
+* The binding ships as a compiled archive and `.mod` set, not a `.f90` to compile yourself:
+  link `roc::hipblas_fortran` instead of adding the source to your build.
+* Output arguments are now typed variables passed by reference, as in the C API, instead of
+  `type(c_ptr), value`: `hipblasCreate` and `hipblasGetStream` (`type(c_ptr)`),
+  `hipblasGetPointerMode` and `hipblasGetAtomicsMode` (the enum kind) and
+  `hipblasGetBatchAlphaStride` and `hipblasGetBatchBetaStride` (`integer(c_int64_t)`). Pass the
+  variable itself: code passing `c_loc(x)` must pass `x`. The newly bound `hipblasGetMathMode`
+  (the enum kind), `hipblasGetProperty` and `hipblasGetVersion` (`integer(c_int)`) follow the
+  same convention.
+* On the CUDA backend the Fortran gtests, benchmark and samples are no longer built by default,
+  since the bindings are OFF there: pass `-DBUILD_FORTRAN_BINDINGS=ON` to keep them.
+* The default Fortran compiler is now ROCm's `amdflang` when the Fortran bindings are built and the
+  test and benchmark clients are not. It stays `gfortran` when those clients are built, since they
+  link the host LAPACK; the client packages depend on `libgfortran` only when `gfortran` built them.
+
+### Removed
+
+* The hand-written `library/src/hipblas_module.f90`, no longer installed into
+  `include/hipblas`.
 
 ## hipBLAS 3.7.0
 
