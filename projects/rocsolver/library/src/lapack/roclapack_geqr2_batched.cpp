@@ -34,23 +34,29 @@ template <typename T, typename I, typename U>
 rocblas_status rocsolver_geqr2_batched_impl(rocblas_handle handle,
                                             const I m,
                                             const I n,
-                                            U A,
+                                            U A_arg,
                                             const I lda,
-                                            T* ipiv,
+                                            T* ipiv_arg,
                                             const rocblas_stride stridep,
-                                            const I batch_count)
+                                            const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("geqr2_batched", "-m", m, "-n", n, "--lda", lda, "--strideP", stridep,
-                        "--batch_count", batch_count);
+                        "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const ipiv = ipiv_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_geqr2_geqrf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st = rocsolver_geqr2_geqrf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
     rocblas_stride shiftA = 0;
@@ -67,8 +73,17 @@ try
     size_t size_Abyx_norms;
     // size of temporary array to store diagonal elements
     size_t size_diag;
-    rocsolver_geqr2_getMemorySize<true, T>(m, n, batch_count, &size_scalars, &size_work_workArr,
-                                           &size_Abyx_norms, &size_diag);
+
+    I const max_batch_count = 64 * 1024 - 1;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+
+        rocsolver_geqr2_getMemorySize<true, T>(m, n, batch_count, &size_scalars, &size_work_workArr,
+                                               &size_Abyx_norms, &size_diag);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work_workArr,
@@ -88,10 +103,25 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_geqr2_template<T>(handle, m, n, A, shiftA, lda, strideA, ipiv, stridep,
-                                       batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
-                                       (T*)diag);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const ipiv = (ipiv_arg == nullptr) ? nullptr : ipiv_arg + bid * stridep;
+
+        // execution
+        auto const istat = rocsolver_geqr2_template<T>(handle, m, n, A, shiftA, lda, strideA, ipiv,
+                                                       stridep, batch_count, (T*)scalars,
+                                                       work_workArr, (T*)Abyx_norms, (T*)diag);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {

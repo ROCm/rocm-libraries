@@ -30,30 +30,36 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_gelqf_batched_impl(rocblas_handle handle,
-                                            const rocblas_int m,
-                                            const rocblas_int n,
-                                            U A,
-                                            const rocblas_int lda,
-                                            T* ipiv,
-                                            const rocblas_stride stridep,
-                                            const rocblas_int batch_count)
+                                            const I m,
+                                            const I n,
+                                            U A_arg,
+                                            const I lda,
+                                            T* ipiv_arg,
+                                            const rocblas_stride strideP,
+                                            const I batch_count_arg)
 try
 {
-    ROCSOLVER_ENTER_TOP("gelqf_batched", "-m", m, "-n", n, "--lda", lda, "--strideP", stridep,
-                        "--batch_count", batch_count);
+    ROCSOLVER_ENTER_TOP("gelqf_batched", "-m", m, "-n", n, "--lda", lda, "--strideP", strideP,
+                        "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const ipiv = ipiv_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_gelq2_gelqf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st = rocsolver_gelq2_gelqf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -67,8 +73,18 @@ try
     size_t size_Abyx_norms_trfact;
     // extra requirements for calling GELQ2 and LARFB
     size_t size_diag_tmptr;
-    rocsolver_gelqf_getMemorySize<true, T>(m, n, batch_count, &size_scalars, &size_work_workArr,
-                                           &size_Abyx_norms_trfact, &size_diag_tmptr, &size_workArr);
+
+    I const max_batch_count = 64 * 1024 - 1;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+
+        rocsolver_gelqf_getMemorySize<true, T>(m, n, batch_count, &size_scalars, &size_work_workArr,
+                                               &size_Abyx_norms_trfact, &size_diag_tmptr,
+                                               &size_workArr);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work_workArr,
@@ -91,10 +107,25 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_gelqf_template<true, false, T>(
-        handle, m, n, A, shiftA, lda, strideA, ipiv, stridep, batch_count, (T*)scalars,
-        work_workArr, (T*)Abyx_norms_trfact, (T*)diag_tmptr, (T**)workArr);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const ipiv = (ipiv_arg == nullptr) ? nullptr : ipiv_arg + bid * strideP;
+
+        // execution
+        auto const istat = rocsolver_gelqf_template<true, false, T>(
+            handle, m, n, A, shiftA, lda, strideA, ipiv, strideP, batch_count, (T*)scalars,
+            work_workArr, (T*)Abyx_norms_trfact, (T*)diag_tmptr, (T**)workArr);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {
@@ -117,10 +148,10 @@ rocblas_status rocsolver_sgelqf_batched(rocblas_handle handle,
                                         float* const A[],
                                         const rocblas_int lda,
                                         float* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gelqf_batched_impl<float>(handle, m, n, A, lda, ipiv, stridep,
+    return rocsolver::rocsolver_gelqf_batched_impl<float>(handle, m, n, A, lda, ipiv, strideP,
                                                           batch_count);
 }
 
@@ -130,10 +161,10 @@ rocblas_status rocsolver_dgelqf_batched(rocblas_handle handle,
                                         double* const A[],
                                         const rocblas_int lda,
                                         double* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gelqf_batched_impl<double>(handle, m, n, A, lda, ipiv, stridep,
+    return rocsolver::rocsolver_gelqf_batched_impl<double>(handle, m, n, A, lda, ipiv, strideP,
                                                            batch_count);
 }
 
@@ -143,11 +174,11 @@ rocblas_status rocsolver_cgelqf_batched(rocblas_handle handle,
                                         rocblas_float_complex* const A[],
                                         const rocblas_int lda,
                                         rocblas_float_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_gelqf_batched_impl<rocblas_float_complex>(handle, m, n, A, lda, ipiv,
-                                                                          stridep, batch_count);
+                                                                          strideP, batch_count);
 }
 
 rocblas_status rocsolver_zgelqf_batched(rocblas_handle handle,
@@ -156,11 +187,11 @@ rocblas_status rocsolver_zgelqf_batched(rocblas_handle handle,
                                         rocblas_double_complex* const A[],
                                         const rocblas_int lda,
                                         rocblas_double_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
     return rocsolver::rocsolver_gelqf_batched_impl<rocblas_double_complex>(
-        handle, m, n, A, lda, ipiv, stridep, batch_count);
+        handle, m, n, A, lda, ipiv, strideP, batch_count);
 }
 
 } // extern C
