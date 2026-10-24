@@ -236,6 +236,12 @@ class SchedulerConfig:
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    # Number of LDS buffers the GR writes cycle through.  This is the period at
+    # which a GR overwrites the buffer an earlier LR reads: GR(n + ldsBuffers)
+    # collides with LR(n).  2 = the usual double buffer; 1 = kernel["1LDSBuffer"],
+    # where a GR collides with the LR of the *immediately* preceding iteration
+    # and therefore needs a wait_lr_sync the double-buffered schedule never does.
+    ldsBuffers: int = 2
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -727,6 +733,47 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
+    # Register sets per tensor in the deterministic allocator (_tile_set_idx).
+    _TILE_BUFFER_DEPTH = 2
+
+    def _tensor_needs_partition_reload(self, tensor: str) -> bool:
+        """True when `tensor` cannot stay resident across the partition sweep.
+
+        The deterministic allocator double-buffers each tensor into
+        _TILE_BUFFER_DEPTH register sets, so a tensor with more k-groups than
+        that recycles its registers within a single partition. Cross-partition
+        reuse (the `placed` dedup and the `load` wrap gate) is only sound while
+        the tile survives the whole sweep; otherwise later partitions would
+        MFMA against stale data and the LRs must be re-issued per partition.
+        """
+        cfg = self.config
+        if cfg.numPartitions <= 1:
+            return False
+        # The free-list allocator sizes tiles from real last-read positions
+        # rather than a fixed double buffer, so its tiles stay live as long as
+        # they are needed and cross-partition reuse remains sound.
+        if self._use_free_list_vgpr_allocation():
+            return False
+        grans = {'A': cfg.lrA, 'B': cfg.lrB}
+        if cfg.hasScale:
+            grans['SA'] = cfg.lrSA
+            grans['SB'] = cfg.lrSB
+        gran = grans.get(tensor)
+        if gran is None:
+            return False
+        return (cfg.numSubIterK // gran.k) > self._TILE_BUFFER_DEPTH
+
+    def _wraps_this_partition(self, tensor: str, load: dict) -> bool:
+        """Whether `tensor`'s wrapping (k-group 0) LR is placed this partition.
+
+        Normally driven by the `load` gate, which tracks tile ranges only. A
+        tensor that cannot stay resident (see _tensor_needs_partition_reload)
+        must also re-read k-group 0 even when its tile range is unchanged,
+        because its registers were recycled within this partition.
+        """
+        side_key = 'A' if tensor in ('A', 'SA') else 'B'
+        return load[side_key] or self._tensor_needs_partition_reload(tensor)
+
     @pipeline_pass(Pass.LR)
     def place_LRs(self) -> LogicalSchedule:
         """Place MFMAs and LRs based on read granularities.
@@ -767,7 +814,7 @@ class LogicalScheduler:
             for side in ('A', 'B'):
                 load[side] = is_last or nxt[side] not in loaded_ranges[side]
 
-            slots = self._place_LRs_for_partition(cur, nxt, is_last, load, placed)
+            slots = self._place_LRs_for_partition(cur, nxt, is_last, load, placed, pi)
             for slot in slots:
                 for lr in slot.lrs:
                     lr.partition = pi
@@ -835,7 +882,8 @@ class LogicalScheduler:
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
                                   load: dict,
-                                  placed: set) -> List[SubIterKSlot]:
+                                  placed: set,
+                                  pi: int = 0) -> List[SubIterKSlot]:
         """Place MFMAs and LRs for one partition."""
         cfg = self.config
         numK = cfg.numSubIterK
@@ -866,7 +914,7 @@ class LogicalScheduler:
                 # the loop) to keep slot indices stable for their k_gran group.
                 if is_wrap and multi_part:
                     group = [(t, g) for t, g in group_all
-                             if t in ('A', 'B') or load['A' if t in ('A', 'SA') else 'B']]
+                             if t in ('A', 'B') or self._wraps_this_partition(t, load)]
                 else:
                     group = group_all
 
@@ -892,10 +940,15 @@ class LogicalScheduler:
 
                         # Wrapping: use load dict. Non-wrapping: use placed set.
                         if is_wrap and multi_part:
-                            if not load[side_key]:
+                            if not self._wraps_this_partition(tensor, load):
                                 continue
                         else:
-                            lr_key = (tensor, lr_k_start, lr_k_end, ts, te)
+                            # Key non-resident tensors on the partition so the
+                            # cross-partition dedup does not drop the re-read.
+                            reload_pi = (pi if self._tensor_needs_partition_reload(tensor)
+                                         else None)
+                            lr_key = (tensor, lr_k_start, lr_k_end, ts, te,
+                                      reload_pi)
                             if lr_key in placed:
                                 continue
                             placed.add(lr_key)
@@ -1283,7 +1336,7 @@ class LogicalScheduler:
         """Build lower and upper slot bounds for GR placement.
 
         lower: tensor -> [(flat, t_start, t_end, k_start, k_end)] for LR(mt=0).
-               GR(mt=2) writes the same LDS buffer as MT n, so it can't be
+               GR(mt=ldsBuffers) writes the same LDS buffer as MT n, so it can't be
                placed at/before a flat slot where a later LR(mt=0) in *any*
                partition reads an overlapping tile/k-range (LDS conflict).
                Collisions span partitions: an LR(n) read for tensor B may sit
@@ -1311,16 +1364,17 @@ class LogicalScheduler:
                         upper[key] = flat
         return lower, upper
 
-    @staticmethod
-    def _has_lr_conflict(lr_lower, tensor, mt_val, flat,
+    def _has_lr_conflict(self, lr_lower, tensor, mt_val, flat,
                          gr_t_start, gr_t_end, gr_k_start, gr_k_end):
         """Return True if placing GR(mt_val) at flat slot conflicts.
 
-        GR(MT n+2) writes the same LDS buffer as MT n, so it conflicts if a
-        later LR(MT n) — in flat execution order across all partitions —
-        still reads an overlapping tile/subIterK range from that buffer.
+        GR(MT n+p) writes the same LDS buffer as MT n, for p = ldsBuffers, so it
+        conflicts if a later LR(MT n) — in flat execution order across all
+        partitions — still reads an overlapping tile/subIterK range from that
+        buffer.  Under 1LDSBuffer p is 1, which is what makes the *immediately*
+        preceding iteration's reads a hazard.
         """
-        if mt_val != 2:
+        if mt_val != self.config.ldsBuffers:
             return False
         for lr_flat, lr_ts, lr_te, lr_ks, lr_ke in lr_lower.get(tensor, []):
             if (lr_flat > flat and
@@ -1599,7 +1653,18 @@ class LogicalScheduler:
         def _mt_offset(consumer_partition, consumer_slot, consumer_type, producer, consumer=None):
             # MFMA→LR: MFMA always consumes mt=0 (current).
             if consumer_type == 'MFMA' and isinstance(producer, LRPlacement):
-                return -producer.mtIteration
+                offset = -producer.mtIteration
+                # A same-MT producer that executes after this MFMA is feeding a
+                # later consumer; the instance this MFMA sees is the previous
+                # MT's. Without this, _dedup_deps can rank such a producer above
+                # the true last writer and point the dep forward in program
+                # order. Only reachable when a tensor is re-read per partition.
+                # Same-slot producers (PGR0 places the LR in its consumer's
+                # slot) are emitted ahead of the MFMA and stay at 0.
+                if offset == 0 and ((producer.partition, producer.subIterK_slot)
+                                    > (consumer_partition, consumer_slot)):
+                    offset = -1
+                return offset
             # LR→GR: mt difference determines how many iterations back.
             if consumer_type == 'LR' and isinstance(producer, GRPlacement) and consumer:
                 return consumer.mtIteration - producer.mtIteration
@@ -1658,10 +1723,11 @@ class LogicalScheduler:
                         lr.deps.append(Dep(
                             ref=gr, mt_offset=_mt_offset(pi, k, 'LR', gr, consumer=lr)))
 
-            # GR: depends on collision LR (LDS double-buffer)
-            # GR(n+x) collides with LR(n+x-2) — same buffer, period 2.
+            # GR: depends on collision LR (LDS buffer reuse)
+            # GR(n+x) collides with LR(n+x-p) — same buffer, period p =
+            # cfg.ldsBuffers (2 = double buffer, 1 = 1LDSBuffer).
             for gr in slot.grs:
-                target_data = gr.mtIteration - 2
+                target_data = gr.mtIteration - cfg.ldsBuffers
                 for lr in lr_by_tensor.get(gr.tensor, []):
                     if _range_overlaps(lr.tiles, gr.tiles):
                         mt_off = target_data - lr.mtIteration
