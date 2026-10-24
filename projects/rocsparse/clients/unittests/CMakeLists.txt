@@ -312,6 +312,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_grid_clamp.cpp
 )
 
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
+endif()
+
 # Host building-block library translation units under test by the
 # unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
 # because their include chain (rocsparse_control.hpp -> rocsparse_common.hpp)
