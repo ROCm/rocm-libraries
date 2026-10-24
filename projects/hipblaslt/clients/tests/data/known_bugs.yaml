@@ -36,12 +36,6 @@ Known bugs:
   # ROCM-32343. Review by 2026-11-01.
   - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
-  # ROCM-32153: on MI350P (Device 75a8) two custom-schedule MT256x160x64 f16 kernels
-  # in gfx950_id75a8/Equality still write wrong values in the TN cases at
-  # 4099 x 2053 x 129. The custom schedule is tracked in ROCM-32343. REMOVE these
-  # entries in the PR that removes or fixes those kernels. Review by 2026-11-01.
-  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
-  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
   # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
   # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
   - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
