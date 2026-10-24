@@ -848,6 +848,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
+    // Whether `node` (directly, or through up to `depth` ALU ops) feeds an op a higher level
+    // places: a ds, VMEM, prefetch or tensor_load. Fillers and WMMAs do not count.
+    bool feedsPlacedOp(const DAGNode* node, int depth) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return false;
+        for (unsigned succ : regionDag_->graph[node->id]) {
+            const DAGNode& s = regionDag_->nodes[succ];
+            const StinkyInstruction& inst = *s.inst;
+            const bool alu = isVectorALU(inst) || isScalarALU(inst) || isTranscendental(inst);
+            if (!alu && !isMatrixInstruction(inst) && !isBarrier(inst)) return true;
+            if (depth > 0 && alu && feedsPlacedOp(&s, depth - 1)) return true;
+        }
+        return false;
+    }
     // InsertWaitAlu's own scoreboard over this BB's final order
     // (dagFeatures.waitAluHoldStrictCount). A filler it would put an s_wait_alu before is held, so
     // the DAG and the pass agree.
@@ -879,11 +892,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     // Whether placing `node` later can drop the s_wait_alu it needs now. A wait no count of
     // WMMAs or FIFO ops hides, such as an EXEC writer's drain, stays wherever it goes. The
-    // producer of a fixed consumer (a prefetch, the last input of real work) never moves later:
-    // that only brings it closer to the consumer.
+    // producer of a placed op (a ds, VMEM or prefetch address, the last input of real work) never
+    // moves later: that only brings it closer to its consumer, where it costs a stricter wait.
     bool waitAluAvoidable(const DAGNode* node, const WaitAluNeed& need) const {
         if (!waitAlu_ || !need.any()) return false;
-        if (unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
+        if (unblocksWork(node, 3) || feedsPlacedOp(node, 2)) return false;
         if (need.vaVdst >= 0 &&
             waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) < 0)
             return false;

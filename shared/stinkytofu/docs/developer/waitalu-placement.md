@@ -125,12 +125,13 @@ strict `s_wait_alu`, `vm_vsrc(0)`, kernels changed, barrier positions.
 0. `untilFree` and `requiredGap` on `WaitAluTracker`, with unit tests. No asm change.
 1. Swap: in `pickFreeBest`, a filler whose wait a later slot would drop (`untilFree` finite) ranks
    below every filler of its queue that needs none. Not demoted: a wait no move removes (an EXEC
-   writer's `va_vdst(0)` drain), and the producer of a fixed consumer (`feedsPrefetch`,
-   `unblocksWork`), since moving it later only brings it closer to that consumer. Measured: 4
-   kernels changed, loop `s_wait_alu` 577 -> 575, no barrier moves. VALUs are sparse, so a slot
-   rarely has two candidates. The same rank across the VALU and SALU picks was tried and cost 4
-   waits in mab mxf8 (it reshuffled the prefetch-address VALUs against SALUs); ordering across
-   filler kinds belongs to the pacer's init plan, which sees the whole region.
+   writer's `va_vdst(0)` drain), and a filler that feeds an op a higher level placed (a ds, VMEM,
+   prefetch or tensor_load, `feedsPlacedOp`) or is the last input of real work, since moving it
+   later only brings it closer to its consumer. Measured: no asm change on the 21 kernels. A
+   version without the placed-op exemption changed 4 kernels and looked like -3 waits, but it
+   traded weak `vm_vsrc(6)` waits for strict `va_vdst(0)` ones in front of the ds (strict waits
+   16939 -> 16941). The rank across the VALU and SALU picks cost 4 waits in mab mxf8; ordering
+   across filler kinds belongs to the pacer's init plan. Track strict waits, not only the total.
 2. Filler pacer, replacing the fill quota, critical fillers and the strict-count hold; producers
    of fixed consumers released `requiredGap` WMMAs ahead. This is where most loop waits (a
    `va_vdst` in front of a ds) can go.
