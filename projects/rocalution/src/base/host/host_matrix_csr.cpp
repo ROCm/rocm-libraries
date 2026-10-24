@@ -2223,15 +2223,15 @@ namespace rocalution
 
         int64_t nnz = std::min(2 * maxrow, nrow) * nrow;
 
-        int remaining_nnz = nnz;
+        int64_t remaining_nnz = nnz;
 
         PtrType*   row_offset = NULL;
         int*       col        = NULL;
         ValueType* val        = NULL;
 
         allocate_host(nrow + 1, &row_offset);
-        allocate_host(nnz, &col);
-        allocate_host(nnz, &val);
+        col = (int*)malloc(nnz * sizeof(int));
+        val = (ValueType*)malloc(nnz * sizeof(ValueType));
 
         void*    buffer            = NULL;
         PtrType* temp_pivot_buffer = NULL;
@@ -2306,8 +2306,9 @@ namespace rocalution
 
             if(remaining_nnz < store_size)
             {
-                nnz += static_cast<size_t>(nnz * 1.5f);
-                remaining_nnz += static_cast<size_t>(nnz * 1.5f);
+                int64_t grow = static_cast<int64_t>(nnz * 1.5f);
+                nnz += grow;
+                remaining_nnz += grow;
 
                 LOG_INFO("ILUTFactorize reallocating");
 
@@ -2346,7 +2347,7 @@ namespace rocalution
         }
 
         free(buffer);
-        free(temp_pivot_buffer);
+        free_host(&temp_pivot_buffer);
 
         // pinned memory
         int*       p_col = NULL;
