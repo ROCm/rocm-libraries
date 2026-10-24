@@ -3206,6 +3206,12 @@ class Solution(collections.abc.Mapping):
       if (state["MIWaveTile"][1] % state["VectorWidthB"]) != 0:
         reject(state, printRejectionReason, "MIWaveTile0(%u) should be multiple of VectorWidthB(%u)" % (state["MIWaveTile"][1], state["VectorWidthB"]))
         return
+      # gfx11 WMMA: M/N-major operands with VectorWidth > 1 are repacked into K-pairs only for plain 16-bit LDS data
+      if state["ISA"][0] == 11 and state.get("ConvertAfterDS", False):
+        for tc in ("A", "B"):
+          if state["ProblemType"]["TLU%s" % tc] and state["VectorWidth%s" % tc] > 1 and state.get("TransposeLDS", -1) != 2:
+            reject(state, printRejectionReason, "gfx11 WMMA: VectorWidth%s > 1 on an M/N-major operand is not supported with ConvertAfterDS" % tc)
+            return
 
     if len(problemType["IndicesSummation"]) > 1:
       # not supported with multiple summations, bug is maybe something with

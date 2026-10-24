@@ -775,6 +775,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self._dcpScheduleSingleBufferedFillLate(kernel)
 
+  def wmmaV1VWPack(self, kernel, tc):
+    """gfx11 WMMA v1: an M-major 16-bit operand with VectorWidth > 1 is read from LDS as M-pairs and
+    must be repacked into K-pairs (v_perm_b32) like on the ECC-half path."""
+    if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
+      return False
+    lrvwTile = self.states.lrvwTileA if tc == "A" else self.states.lrvwTileB
+    return lrvwTile > 1 and not kernel["UnrollMajorLDS%s" % tc] and not kernel["ConvertAfterDS"] \
+      and kernel["ProblemType"]["MacDataType%s" % tc].numBytes() == 2
+
   def _dcpThickThinIssueOrder(self, kernel, tensorParametersA="A", tensorParametersB="B"):
     """(thick, thin) of the pair handed in, as the wave assignment sees it."""
     return tdmWaveIssueOrder(kernel, tensorParametersA, tensorParametersB)
@@ -1296,8 +1305,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         instPerRegPackA = 1 / kernel["ProblemType"]["MacDataTypeA"].numRegisters() - 1
         instPerRegPackB = 1 / kernel["ProblemType"]["MacDataTypeB"].numRegisters() - 1
       else:
-        instPerRegPackA = 1 if (kernel["ProblemType"]["MacDataTypeA"].numRegisters() == 0.25) else 0
-        instPerRegPackB = 1 if (kernel["ProblemType"]["MacDataTypeB"].numRegisters() == 0.25) else 0
+        instPerRegPackA = 1 if (kernel["ProblemType"]["MacDataTypeA"].numRegisters() == 0.25 or self.wmmaV1VWPack(kernel, "A")) else 0
+        instPerRegPackB = 1 if (kernel["ProblemType"]["MacDataTypeB"].numRegisters() == 0.25 or self.wmmaV1VWPack(kernel, "B")) else 0
       instPerPackA    = 0 if kernel["UnrollMajorLDSA"] else int(kernel["MIInputPerThreadA"] * kernel["ProblemType"]["MacDataTypeA"].numRegisters() * instPerRegPackA)
       instPerPackB    = 0 if kernel["UnrollMajorLDSB"] else int(kernel["MIInputPerThreadB"] * kernel["ProblemType"]["MacDataTypeB"].numRegisters() * instPerRegPackB)
       packItems = []
@@ -1355,8 +1364,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             packAIdx = packAIdx if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] else 0
             packBIdx = packBIdx if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] else 0
           else:
-            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
-            packBIdx = packAIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
+            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 or self.wmmaV1VWPack(kernel, "A") else 0
+            packBIdx = packAIdx if tPB["localReadInstruction"].blockWidth == 0.25 or self.wmmaV1VWPack(kernel, "B") else 0
 
           numPack = (packAIdx + packBIdx)
           iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
@@ -1506,8 +1515,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         instPerRegPackB = 1 / kernel["ProblemType"]["MacDataTypeB"].numRegisters() - 1
         instPerRegPackMX = 4 - 1
       else:
-        instPerRegPackA = 1 if (kernel["ProblemType"]["MacDataTypeA"].numRegisters() == 0.25) else 0
-        instPerRegPackB = 1 if (kernel["ProblemType"]["MacDataTypeB"].numRegisters() == 0.25) else 0
+        instPerRegPackA = 1 if (kernel["ProblemType"]["MacDataTypeA"].numRegisters() == 0.25 or self.wmmaV1VWPack(kernel, "A")) else 0
+        instPerRegPackB = 1 if (kernel["ProblemType"]["MacDataTypeB"].numRegisters() == 0.25 or self.wmmaV1VWPack(kernel, "B")) else 0
         instPerRegPackMX = 1
       instPerPackMXSA = 0
       instPerPackMXSB = 0
@@ -2334,8 +2343,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             packMXSAIdx = packMXSAIdx if ("MX" in tPA) and (not kernel["UnrollMajorLDSMXSA"]) else 0
             packMXSBIdx = packMXSBIdx if ("MX" in tPB) and (not kernel["UnrollMajorLDSMXSB"]) else 0
           else:
-            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
-            packBIdx = packBIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
+            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 or self.wmmaV1VWPack(kernel, "A") else 0
+            packBIdx = packBIdx if tPB["localReadInstruction"].blockWidth == 0.25 or self.wmmaV1VWPack(kernel, "B") else 0
             packMXSAIdx = 0
             packMXSBIdx = 0
           numPack = (packAIdx + packBIdx + packMXSAIdx + packMXSBIdx)

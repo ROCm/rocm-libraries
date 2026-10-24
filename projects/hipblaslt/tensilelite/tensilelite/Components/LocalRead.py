@@ -859,7 +859,7 @@ class LocalReadMFMA(LocalRead):
             needPackMetadata = tP["isM"] and ((MIInputPerThUnroll * tP["bpeDS"] / (blockWidth * 4) > 1) or (kernel["ProblemType"][MacDataType].numBytes() == 1 and writer.states.lrvwTileMetadata > 1))
             needPack |= needPackMetadata
         else:
-            needPack = blockWidth == 0.25
+            needPack = blockWidth == 0.25 or (tc in ("A", "B") and writer.wmmaV1VWPack(kernel, tc))
         needPack |= (kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]))
         needPack |= kernel["UseF32XEmulation"]
         if isgfx950mx:
