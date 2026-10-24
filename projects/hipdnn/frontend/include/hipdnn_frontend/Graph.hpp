@@ -3229,7 +3229,12 @@ public:
      * Called internally by build() after create_execution_plans().
      *
      * @param policy Controls which plans are compiled:
-     *   - HEURISTICS_CHOICE: compile only the active (top-ranked) plan
+     *   - HEURISTICS_CHOICE: compile the active (top-ranked) plan. If it fails to
+     *     finalize (for example the engine has no solver for this graph), the
+     *     remaining plans are tried in ranked order and the first one that
+     *     compiles becomes active. Plans barred by deselect_engines() or by the
+     *     workspace limit are skipped. If none compiles, the active plan's error
+     *     is returned.
      *   - ALL: compile every plan in _compiledPlans, setting _activePlanIndex
      *     to the first plan that compiles successfully
      *
@@ -3320,7 +3325,8 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        // HEURISTICS_CHOICE path: compile only the active plan (original behavior)
+        // HEURISTICS_CHOICE path: compile the active plan, falling back to the next
+        // ranked plans only when it fails to finalize.
         auto& activePlan = _compiledPlans[_activePlanIndex];
         if(activePlan.barred)
         {
@@ -3345,10 +3351,50 @@ public:
         }
 
         // Set the engine config, finalize the plan, and cache its workspace size.
-        // On failure return a backend error (the original heuristics behavior).
         auto finalizeErr = finalizePlanDescriptor(activePlan);
         if(finalizeErr.is_bad())
         {
+            HIPDNN_FE_LOG_WARN("Failed to finalize active plan (engine "
+                               << activePlan.engineId << "): " << finalizeErr.get_message()
+                               << "; trying the next ranked plans");
+
+            for(size_t i = 0; i < _compiledPlans.size(); ++i)
+            {
+                auto& candidate = _compiledPlans[i];
+                if(i == _activePlanIndex || candidate.barred || !candidate.engineConfigDesc
+                   || !candidate.engineConfigDesc->valid() || !candidate.executionPlanDesc
+                   || !candidate.executionPlanDesc->valid())
+                {
+                    continue;
+                }
+
+                if(_barredEngineIds.count(candidate.engineId) > 0)
+                {
+                    candidate.barred = true;
+                    continue;
+                }
+
+                auto candidateErr = finalizePlanDescriptor(candidate);
+                if(candidateErr.is_bad())
+                {
+                    HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
+                                       << i << " (engine " << candidate.engineId
+                                       << "): " << candidateErr.get_message() << "; skipping");
+                    continue;
+                }
+
+                if(_maxWorkspaceAllowed >= 0 && candidate.workspaceSize > _maxWorkspaceAllowed)
+                {
+                    candidate.barred = true;
+                    continue;
+                }
+
+                HIPDNN_FE_LOG_INFO("Falling back to plan index " << i << " (engine "
+                                                                 << candidate.engineId << ")");
+                setActivePlanState(i, detail::ActivePlanFinalization::FINALIZED);
+                return {ErrorCode::OK, ""};
+            }
+
             return finalizeErr;
         }
 
@@ -3388,8 +3434,9 @@ public:
      *
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine selection
-     * @param policy Build plan policy: HEURISTICS_CHOICE compiles only the
-     *        top-ranked plan; ALL compiles every engine config
+     * @param policy Build plan policy: HEURISTICS_CHOICE compiles the top-ranked
+     *        plan and falls back to the next ranked plans if it fails to
+     *        finalize; ALL compiles every engine config
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
      *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /

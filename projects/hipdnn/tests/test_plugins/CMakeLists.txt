@@ -59,6 +59,9 @@ add_test_plugin(${TEST_GOOD_PLUGIN_NAME} TestGoodPlugin.cpp)
 # test_execute_fails_plugin is a plugin that fails during execution
 add_test_plugin(${TEST_EXECUTE_FAILS_PLUGIN_NAME} TestExecuteFailsPlugin.cpp)
 
+# test_no_solver_plugin reports its engine applicable, then fails to create the execution plan
+add_test_plugin(${TEST_NO_SOLVER_PLUGIN_NAME} TestNoSolverPlugin.cpp)
+
 # test_hashed_name_plugin is a well-behaved plugin whose engine id is the hash of its own engine
 # name, mirroring what HIPDNN_REGISTER_ENGINE does for production plugins. It lives in custom/ so
 # that default/ keeps holding exactly one plugin.

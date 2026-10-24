@@ -495,7 +495,28 @@ std::vector<int64_t>
             continue;
         }
 
-        const auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+        // A plugin that cannot answer for this graph (it threw, or returned a malformed
+        // list) offers no engines; the remaining plugins must still be consulted.
+        std::vector<int64_t> ids;
+        try
+        {
+            ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Skipping plugin '{}': querying its applicable engines failed: {}",
+                plugin->cachedName(),
+                e.what());
+            continue;
+        }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Skipping plugin '{}': querying its applicable engines threw an unknown exception",
+                plugin->cachedName());
+            continue;
+        }
 
         for(const auto& id : ids)
         {
