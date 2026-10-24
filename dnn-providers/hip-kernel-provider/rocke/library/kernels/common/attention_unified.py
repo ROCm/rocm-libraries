@@ -1967,8 +1967,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         transposed routing.
       * dtype in {bf16, fp16} (the transposed softmax keeps m/l/acc in f32;
         fp16 winners were as accurate as flash).
-      * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
-        the sync-dequant loader and its own routing).
+      * FP8 K/V is admitted without sliding window: the sync-dequant loader
+        stages K/V in LDS at the working dtype, which is what the combo reads.
+        The schedule levers the FP8 loader does not wire (K single-buffer,
+        early-V, V double-buffer, Q direct-reg) stay off for it.
       * no softcap / sinks (not wired into the transposed softmax VALU opts;
         the spec validator rejects them).
       * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
@@ -1990,9 +1992,11 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.dtype not in ("bf16", "fp16"):
         return False
-    if problem.use_fp8:
-        return False
     if problem.softcap > 0 or problem.use_sinks:
+        return False
+    # FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+    # at the working dtype), with no sliding window.
+    if problem.use_fp8 and problem.sliding_window > 0:
         return False
     # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
     # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
@@ -2043,6 +2047,9 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool
     exclusive).
     """
     if not _enable_single_batch_combo(problem, arch):
+        return False
+    # The FP8 sync-dequant loader has no in-flight V DMA to prefetch.
+    if problem.use_fp8:
         return False
     if _enable_early_v_schedule(problem, arch):
         return False
@@ -2095,6 +2102,9 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> boo
         143us) -> OFF; d128 long gets no V schedule flag.
     """
     if not _enable_single_batch_combo(problem, arch):
+        return False
+    # The FP8 sync-dequant loader has no async V issue to move earlier.
+    if problem.use_fp8:
         return False
     return problem.head_size == 64 and problem.max_seqlen_q >= 2048
 

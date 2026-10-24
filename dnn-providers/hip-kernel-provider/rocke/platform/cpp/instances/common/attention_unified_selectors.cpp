@@ -192,10 +192,8 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_fp8)
-    {
-        return false;
-    }
+    /* FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+       at the working dtype); no sliding window, as below. */
     if(p->use_alibi || p->use_qq_bias)
     {
         return false;
@@ -361,6 +359,11 @@ static bool enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
+    /* The FP8 sync-dequant loader has no async V issue to move earlier. */
+    if(p->use_fp8)
+    {
+        return false;
+    }
     return p->head_size == 64 && p->max_seqlen_q >= 2048;
 }
 
@@ -373,6 +376,11 @@ static bool enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
 static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 {
     if(!enable_single_batch_combo(p))
+    {
+        return false;
+    }
+    /* The FP8 sync-dequant loader has no in-flight V DMA to prefetch. */
+    if(p->use_fp8)
     {
         return false;
     }

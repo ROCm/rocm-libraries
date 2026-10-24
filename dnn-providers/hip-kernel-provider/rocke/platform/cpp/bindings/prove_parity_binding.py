@@ -2004,6 +2004,12 @@ def problems_gfx950_attention_tiled_2d():
         # ---- fp8 paths ----
         p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True),
         p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True, sliding_window=256),
+        # fp8 single-batch combo: d128/d64 long (early-V off), d64 short (V
+        # double-buffer off), and the sliding-window exclusion.
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_fp8=True),
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_fp8=True),
+        p(512, 1, 32, 32, 128, 16, 512, 4096, use_fp8=True, sliding_window=256),
         # ---- misc flag combinations ----
         p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
