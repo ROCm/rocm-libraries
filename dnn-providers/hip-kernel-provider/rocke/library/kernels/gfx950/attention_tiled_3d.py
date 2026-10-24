@@ -393,8 +393,10 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    if 16 % num_queries_per_kv != 0:
-        return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
+    # A num_queries_per_kv that does not divide BLOCK_M=16 leaves the last
+    # 16 % num_queries_per_kv rows of a q-block as padding; they map past the
+    # block's BLOCK_Q tokens and are masked by the q_len bound or recompute a
+    # row the next q-block owns, so no output changes.
     # ALiBi and QQ-bias are now supported by the tiled 3D kernel; FP8 K/V
     # cache is gated above via kv_storage_dtype.
     return True, "supported"
