@@ -1533,8 +1533,8 @@ static void host_csrmv_general(rocsparse_operation  trans,
             int             dev;
             hipDeviceProp_t prop;
 
-            std::ignore = hipGetDevice(&dev);
-            std::ignore = hipGetDeviceProperties(&prop, dev);
+            CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+            CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
             int WF_SIZE;
             J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1681,8 +1681,8 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
         int             dev;
         hipDeviceProp_t prop;
 
-        std::ignore = hipGetDevice(&dev);
-        std::ignore = hipGetDeviceProperties(&prop, dev);
+        CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1972,8 +1972,8 @@ static void host_csr_lsolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -2082,8 +2082,8 @@ static void host_csr_usolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -8952,16 +8952,13 @@ void host_csr_to_ell(J                     M,
     size_t required_memory  = sizeof(J) * ell_nnz + sizeof(T) * ell_nnz;
     size_t total_memory     = 0;
     size_t available_memory = 0;
-    std::ignore             = hipMemGetInfo(&available_memory, &total_memory);
+    CHECK_HIP_THROW_ERROR(hipMemGetInfo(&available_memory, &total_memory));
 
     if(required_memory > available_memory)
     {
-        std::cerr << "Error: Insufficient memory available for conversion from CSR to ELL format. "
-                     "Required: "
-                  << required_memory << " available: " << available_memory << std::endl
-                  << "Skipping matrix. (File: " << __FILE__ << " Line: " << __LINE__ << ")"
-                  << std::endl;
-        exit(1);
+        std::cerr << "Error: insufficient device memory for the CSR to ELL conversion. Required: "
+                  << required_memory << " available: " << available_memory << std::endl;
+        throw rocsparse_status_memory_error;
     }
 
     ell_col_ind.resize(ell_nnz);

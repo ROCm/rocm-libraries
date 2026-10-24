@@ -303,7 +303,7 @@ public:
 #ifdef GOOGLE_TEST
         allocator::check_guards(this->data(), this->size());
 #endif
-        allocator::free(this->data());
+        allocator::free_noexcept(this->data());
     };
 
     hipError_t memcheck() const
@@ -325,6 +325,8 @@ public:
             if(this->m_val)
             {
                 allocator::free(this->m_val);
+                this->m_val  = nullptr;
+                this->m_size = 0;
             }
             this->m_val  = allocator::malloc(s);
             this->m_size = s;
