@@ -899,7 +899,7 @@ _CONFIGS = {
         tile_size=64,
     ),
     # --- idx56-57: FP8 K/V single-batch combo (sync-dequant loader feeding the
-    #               transposed 32x32 stack; d128 T128 and d64 T64, nw=4)
+    #               transposed 32x32 stack; d128 T64 and d64 T64, nw=4)
     56: dict(
         head_size=128,
         block_size=64,
@@ -921,7 +921,7 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_transposed_half_local_pv=True,
         block_m_per_warp=32,
-        tile_size=128,
+        tile_size=64,
     ),
     57: dict(
         head_size=64,
@@ -961,6 +961,30 @@ _CONFIGS = {
         waves_per_eu=2,
         use_register_pv=True,
         tile_size=32,
+    ),
+    # --- idx59: head_size=192 single-batch combo prefill selector spec (T=64, softmax/MFMA interleave)
+    59: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=64,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_mask_limit=True,
+        use_softmax_mfma_interleave=True,
     ),
 }
 

@@ -206,7 +206,7 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->head_size != 64 && p->head_size != 128)
+    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 192)
     {
         return false;
     }
@@ -250,7 +250,9 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p
     {
         return false;
     }
-    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
+    /* d192 takes the d128 interleave + nw=4 geometry. */
+    return (p->head_size == 128 || p->head_size == 192) && !p->use_fp8
+           && enable_single_batch_combo(p);
 }
 
 /* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
@@ -388,7 +390,8 @@ static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->head_size == 128)
+    /* d128 (and d192, which follows it): vdbuf is a net drag -> OFF. */
+    if(p->head_size != 64)
     {
         return false;
     }
@@ -537,6 +540,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
             }
 
             return 128;
+        }
+        /* FP8 K/V d128 and d192: T=64 (measured on gfx950). */
+        if(p->use_fp8 || p->head_size == 192)
+        {
+            return 64;
         }
         /* d128 occupancy lever: K-single-buffer (see enable_d128_small_tile). */
         if(enable_d128_small_tile(p))

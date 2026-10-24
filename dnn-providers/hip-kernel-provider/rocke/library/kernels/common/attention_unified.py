@@ -1015,8 +1015,9 @@ def _enable_softmax_mfma_interleave(
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
     force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
     """
-    # Shape checks first, as in _enable_d128_small_tile.
-    if problem.head_size != 128 or problem.use_fp8:
+    # Shape checks first, as in _enable_d128_small_tile. d192 takes the d128
+    # interleave + nw=4 geometry.
+    if problem.head_size not in (128, 192) or problem.use_fp8:
         return False
     env = (
         __import__("os")
@@ -1306,6 +1307,11 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         # barrier (all QK reads drained) so it cannot WAR-race -- avoiding the
         # documented gfx942 naive-single-buffer hazard. Default-OFF behind the
         # same env opt-in (golden/production routing unchanged) until landed.
+        # FP8 K/V d128 and d192: T=64. The FP8 sync-dequant loader and the
+        # wider d192 rows both amortise the per-iteration cost better over a
+        # 64-token tile than over 2*block_size (measured on gfx950).
+        if problem.use_fp8 or problem.head_size == 192:
+            return 64
         if _enable_d128_small_tile(problem, arch):
             return 2 * problem.block_size
         return 2 * problem.block_size
@@ -2014,7 +2020,7 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         and problem.block_size == 16
     ):
         return False
-    if problem.head_size not in (64, 128):
+    if problem.head_size not in (64, 128, 192):
         return False
     if problem.max_seqlen_q <= 256:
         return False
@@ -2054,8 +2060,9 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool
     if _enable_early_v_schedule(problem, arch):
         return False
     # d128: vdbuf is a net drag (see docstring) -- OFF; the nw=2 / no-prefetch
-    # path is the winner. This also auto-disables sched_barrier.
-    if problem.head_size == 128:
+    # path is the winner. This also auto-disables sched_barrier. d192 follows
+    # d128.
+    if problem.head_size != 64:
         return False
     return problem.max_seqlen_q <= 1024
 

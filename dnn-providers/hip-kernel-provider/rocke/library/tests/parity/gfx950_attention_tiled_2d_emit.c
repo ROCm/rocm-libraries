@@ -915,7 +915,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         break;
 
     /* FP8 K/V single-batch combo (sync-dequant loader feeding the transposed
-     * 32x32 stack): d128 T128 and d64 T64, nw=4. */
+     * 32x32 stack): d128 T64 and d64 T64, nw=4. */
     case 56:
         s->head_size = 128;
         s->block_size = 64;
@@ -939,7 +939,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_half_local_pv = true;
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
-        s->tile_size = 128;
+        s->tile_size = 64;
         break;
     case 57:
         s->head_size = 64;
@@ -984,6 +984,32 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_register_pv = true;
         s->has_tile_size = true;
         s->tile_size = 32;
+        break;
+    /* head_size=192 single-batch combo prefill selector spec (T=64, softmax/MFMA interleave) */
+    case 59:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        s->use_softmax_mfma_interleave = true;
         break;
     default:
         return -1;
