@@ -4,6 +4,10 @@ Full documentation for hipThreads is available at [https://rocm.docs.amd.com/pro
 
 ## hipThreads 1.0 for ROCm 10.0.0
 
+### Fixes
+
+* Release scheduler and enqueue streams, worknode copy events, and wrapper-function temporary storage to avoid leaks at process shutdown.
+
 We are pleased to introduce hipThreads, a C++-style concurrency library for AMD GPUs. hipThreads brings `std::thread`-like primitives inside GPU kernels, so existing `std::thread` CPU code can be ported to run on AMD GPUs with minimal changes. It is supported on both Linux and Windows.
 
 Highlights of this release:
