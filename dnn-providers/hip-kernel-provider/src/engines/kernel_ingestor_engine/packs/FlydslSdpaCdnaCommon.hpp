@@ -44,6 +44,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
 
@@ -173,6 +174,8 @@ inline constexpr int32_t VARLEN_PACKED = 4;
 inline constexpr std::string_view DROPOUT_P_TOKEN = "flydsl_sdpa_cdna.dropout_p";
 inline constexpr std::string_view DROPOUT_SEED_TOKEN = "flydsl_sdpa_cdna.dropout_seed.uid";
 inline constexpr std::string_view DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_cdna.dropout_offset.uid";
+/// The uid of the RNG dump the dropout mask writer fills, or NO_RNG_DUMP (FlydslSdpaRngDump.hpp).
+inline constexpr std::string_view RNG_DUMP_TOKEN = "flydsl_sdpa_cdna.rng_dump.uid";
 /// 1 for an object built to drop attention probabilities (modification 33), 0 for one built
 /// without; the dual-wave and split decode families build none.
 inline constexpr std::string_view HAS_DROPOUT_FIELD = "has_dropout";
@@ -914,6 +917,20 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
+    // The RNG dump: the keep mask a dropping launch applied, written by the mask writer at
+    // every element, padded rows and keys past a batch's length included.
+    const auto rngDump = servableRngDump(context,
+                                         attributes,
+                                         *dropout,
+                                         *varlen,
+                                         problem.batch,
+                                         problem.numHeads,
+                                         problem.seqLenQ,
+                                         problem.seqLenKv);
+    if(!rngDump.has_value())
+    {
+        return std::nullopt;
+    }
     // Every optional feature the kernels as built do not implement, declined explicitly.
     if(attributes.page_table_k_tensor_uid().has_value()
        || attributes.page_table_v_tensor_uid().has_value()
@@ -931,7 +948,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     // Softmax statistics: the LSE output is served; the split max / sum-exp outputs are not
-    // (the RNG dump is servableDropout's). Asking for stats without naming a tensor to write
+    // (the RNG dump is servableRngDump's). Asking for stats without naming a tensor to write
     // them to is a graph the kernels cannot satisfy.
     if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value())
     {
@@ -1092,6 +1109,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     bound[std::string(DROPOUT_P_TOKEN)] = static_cast<int64_t>(probabilityBits);
     bound[std::string(DROPOUT_SEED_TOKEN)] = dropout->seed;
     bound[std::string(DROPOUT_OFFSET_TOKEN)] = dropout->offset;
+    bound[std::string(RNG_DUMP_TOKEN)] = *rngDump;
     return bound;
 }
 
@@ -1119,6 +1137,7 @@ struct FlydslSdpaCdnaBinding
     float dropoutProbability = 0.0F;
     int64_t dropoutSeed = NO_DROPOUT_TENSOR;
     int64_t dropoutOffset = NO_DROPOUT_TENSOR;
+    int64_t rngDump = NO_RNG_DUMP;
 
     bool padded() const
     {
@@ -1175,6 +1194,7 @@ inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     std::memcpy(&binding.dropoutProbability, &probabilityBits, sizeof(probabilityBits));
     binding.dropoutSeed = read(DROPOUT_SEED_TOKEN);
     binding.dropoutOffset = read(DROPOUT_OFFSET_TOKEN);
+    binding.rngDump = read(RNG_DUMP_TOKEN);
     return binding;
 }
 
@@ -1566,6 +1586,12 @@ inline bool familyKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // An RNG dump is written by the dropout mask writer, which must ship in this object's shard.
+    const auto rngDump = tryGetBoundInt(bound, RNG_DUMP_TOKEN);
+    if(!rngDump.has_value() || (*rngDump != NO_RNG_DUMP && !hasDropoutMaskWriter(kernel)))
+    {
+        return false;
+    }
     // Only the generic kernel takes a window (vendored-kernel modification 11), or an LSE
     // with strides of its own (modification 20).
     const auto windowLo = tryGetBoundInt(bound, WINDOW_TOKEN);
@@ -1927,7 +1953,8 @@ public:
                            BiasStrides biasStrides,
                            int64_t splits = 1,
                            std::optional<IngestorKernelCode> mergeCode = std::nullopt,
-                           CdnaPhiloxSources philoxSources = {})
+                           CdnaPhiloxSources philoxSources = {},
+                           std::optional<DropoutMaskLaunch> dropoutMask = std::nullopt)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -1938,6 +1965,7 @@ public:
         , _splits(splits)
         , _mergeCode(std::move(mergeCode))
         , _philoxSources(philoxSources)
+        , _dropoutMask(std::move(dropoutMask))
     {
     }
 
@@ -1945,6 +1973,12 @@ public:
     const CdnaPhiloxSources& philoxSources() const
     {
         return _philoxSources;
+    }
+
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
     }
 
     /// How many ways the keys are split; the merge kernel runs when more than one.
@@ -2005,6 +2039,7 @@ private:
     int64_t _splits = 1;
     std::optional<IngestorKernelCode> _mergeCode;
     CdnaPhiloxSources _philoxSources;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
 };
 
 /**
@@ -2165,6 +2200,15 @@ public:
             }
             biasStrides = *servable;
         }
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
         return std::make_unique<PreparedFlydslSdpaCdna>(std::move(code),
                                                         binding,
                                                         problem,
@@ -2174,7 +2218,8 @@ public:
                                                         biasStrides,
                                                         splits,
                                                         std::move(mergeCode),
-                                                        cdnaPhiloxSources(context, binding));
+                                                        cdnaPhiloxSources(context, binding),
+                                                        std::move(dropoutMask));
     }
 
     void launch(const Handle& handle,
@@ -2432,6 +2477,18 @@ public:
                       offset2High,
                       dropout.threshold,
                       dropout.scale);
+        // The keep mask the launch above applied, on its stream after it (a dropout object is
+        // never a split one).
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               static_cast<int64_t>(dropout.offset2),
+                                               dropout.threshold);
+        }
         if(splits > 1)
         {
             // Changing this argument list means changing mergeSignature() with it.

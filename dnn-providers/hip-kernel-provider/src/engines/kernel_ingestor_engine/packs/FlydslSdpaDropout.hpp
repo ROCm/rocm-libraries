@@ -21,8 +21,8 @@
 /**
  * @file FlydslSdpaDropout.hpp
  * @brief Dropout on the attention probabilities as every FlyDSL SDPA engine reads it from a
- *        graph: a probability with a seed and an offset tensor, or a mask with a scale, and the
- *        RNG dump output.
+ *        graph: a probability with a seed and an offset tensor, or a mask with a scale. The RNG
+ *        dump output is FlydslSdpaRngDump.hpp's.
  *
  * One function, servableDropout(), decides what of this a graph asks for and whether it is
  * served, and both families' graph matchers call it, so the dropout rules live in one place and
@@ -131,16 +131,16 @@ inline float dropoutScale(float p)
  * Served: a probability in [0, 1) with a seed and an offset isServablePhiloxTensor accepts
  * (both required above 0; at 0, the undropped result, either may be absent). Declined, each a
  * wrong answer rather than an error if it were ignored: a probability outside [0, 1) or NaN, a
- * seed or offset without a probability, a dropout mask or scale tensor (cuDNN's second form),
- * and the RNG dump output, which no kernel writes.
+ * seed or offset without a probability, and a dropout mask or scale tensor (cuDNN's second
+ * form). The RNG dump output is servableRngDump()'s (FlydslSdpaRngDump.hpp), which every
+ * caller runs after this one, since it needs the graph's extents.
  */
 inline std::optional<SdpaDropout> servableDropout(const MatchContext& context,
                                                   const data_objects::SdpaAttributes& attributes)
 {
-    // The mask-and-scale form and the RNG dump: no kernel takes a mask or writes one.
+    // The mask-and-scale form: no kernel takes a mask.
     if(attributes.dropout_mask_tensor_uid().has_value()
-       || attributes.dropout_scale_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value())
+       || attributes.dropout_scale_tensor_uid().has_value())
     {
         return std::nullopt;
     }

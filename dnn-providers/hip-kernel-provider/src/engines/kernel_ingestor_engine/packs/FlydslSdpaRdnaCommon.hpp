@@ -37,6 +37,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
 
@@ -130,6 +131,8 @@ inline constexpr std::string_view RAGGED_OFFSET_KV_TOKEN = "flydsl_sdpa_rdna.rag
 inline constexpr std::string_view DROPOUT_P_TOKEN = "flydsl_sdpa_rdna.dropout_p";
 inline constexpr std::string_view DROPOUT_SEED_TOKEN = "flydsl_sdpa_rdna.dropout_seed.uid";
 inline constexpr std::string_view DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_rdna.dropout_offset.uid";
+/// The uid of the RNG dump the dropout mask writer fills, or NO_RNG_DUMP (FlydslSdpaRngDump.hpp).
+inline constexpr std::string_view RNG_DUMP_TOKEN = "flydsl_sdpa_rdna.rng_dump.uid";
 /// 0 or 1: whether the object drops attention probabilities (AOTriton's ENABLE_DROPOUT). Baked,
 /// so a graph that drops and one that does not each select their own object; absent is 0.
 inline constexpr std::string_view HAS_DROPOUT_FIELD = "has_dropout";
@@ -572,6 +575,19 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
+    // The RNG dump: the keep mask a dropping launch applied, written by the mask writer.
+    const auto rngDump = servableRngDump(context,
+                                         attributes,
+                                         *dropout,
+                                         *varlen,
+                                         problem.batch,
+                                         problem.numHeads,
+                                         problem.seqLenQ,
+                                         problem.seqLenKv);
+    if(!rngDump.has_value())
+    {
+        return std::nullopt;
+    }
     // A bias over packed sequences: the bias is laid out by batch, which a packed launch does
     // not index.
     if(varlen->packed() && biasUid != NO_BIAS)
@@ -616,7 +632,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     // Softmax statistics: the LSE output is served; the split max / sum-exp outputs are not
-    // (the RNG dump is servableDropout's). Asking for stats without naming a tensor to write
+    // (the RNG dump is servableRngDump's). Asking for stats without naming a tensor to write
     // them to is a graph the kernel cannot satisfy.
     if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value())
     {
@@ -716,6 +732,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     bound[std::string(DROPOUT_P_TOKEN)] = floatToken(dropout->probability);
     bound[std::string(DROPOUT_SEED_TOKEN)] = dropout->seed;
     bound[std::string(DROPOUT_OFFSET_TOKEN)] = dropout->offset;
+    bound[std::string(RNG_DUMP_TOKEN)] = *rngDump;
     return bound;
 }
 
@@ -742,6 +759,7 @@ struct FlydslSdpaRdnaBinding
     float dropoutProbability = 0.0F;
     int64_t dropoutSeed = NO_DROPOUT_TENSOR;
     int64_t dropoutOffset = NO_DROPOUT_TENSOR;
+    int64_t rngDump = NO_RNG_DUMP;
 
     /// Whether the graph pads its sequences (per-batch lengths under padding_mask).
     bool padded() const
@@ -797,6 +815,7 @@ inline FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
     binding.dropoutProbability = tokenFloat(read(DROPOUT_P_TOKEN));
     binding.dropoutSeed = read(DROPOUT_SEED_TOKEN);
     binding.dropoutOffset = read(DROPOUT_OFFSET_TOKEN);
+    binding.rngDump = read(RNG_DUMP_TOKEN);
     return binding;
 }
 
@@ -897,6 +916,12 @@ inline bool familyMatches(const MatchContext& context,
     if(!dropoutProbability.has_value()
        || integerMetadata(kernel, HAS_DROPOUT_FIELD).value_or(0)
               != (tokenFloat(*dropoutProbability) > 0.0F ? 1 : 0))
+    {
+        return false;
+    }
+    // An RNG dump is written by the dropout mask writer, which must ship in this object's shard.
+    const auto rngDump = tryGetBoundInt(bound, RNG_DUMP_TOKEN);
+    if(!rngDump.has_value() || (*rngDump != NO_RNG_DUMP && !hasDropoutMaskWriter(kernel)))
     {
         return false;
     }

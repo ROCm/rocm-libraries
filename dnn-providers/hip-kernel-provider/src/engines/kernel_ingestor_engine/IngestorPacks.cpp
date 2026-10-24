@@ -40,6 +40,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaDropoutMask",
+         &registerFlydslSdpaDropoutMaskSymbols,
+         &resetFlydslSdpaDropoutMaskModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,

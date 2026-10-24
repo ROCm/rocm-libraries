@@ -86,6 +86,10 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
 
+/// @see packs/FlydslSdpaDropoutMaskNative.cpp
+void registerFlydslSdpaDropoutMaskSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaDropoutMaskModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();

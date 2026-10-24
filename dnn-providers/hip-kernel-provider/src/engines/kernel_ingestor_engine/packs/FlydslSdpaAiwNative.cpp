@@ -334,6 +334,11 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // An RNG dump is written by the dropout mask writer, which must ship in this object's shard.
+    if(binding.rngDump != NO_RNG_DUMP && !hasDropoutMaskWriter(kernel))
+    {
+        return false;
+    }
 
     // The additive mask: an object built for it, in its dtype; a key axis the object can
     // read (contiguous, unless the object reads any stride).
@@ -470,7 +475,8 @@ public:
                           BiasStrides biasStrides,
                           std::array<int64_t, 2> window,
                           PhiloxSources philox,
-                          std::optional<IngestorKernelCode> fillCode)
+                          std::optional<IngestorKernelCode> fillCode,
+                          std::optional<DropoutMaskLaunch> dropoutMask)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -480,6 +486,7 @@ public:
         , _window(window)
         , _philox(philox)
         , _fillCode(std::move(fillCode))
+        , _dropoutMask(std::move(dropoutMask))
     {
     }
 
@@ -533,6 +540,12 @@ public:
         return _philox;
     }
 
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaRdnaBinding _binding;
@@ -543,6 +556,7 @@ private:
     std::array<int64_t, 2> _window;
     PhiloxSources _philox;
     std::optional<IngestorKernelCode> _fillCode;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
 };
 
 /**
@@ -667,6 +681,16 @@ public:
             lse[2] = std::max<int64_t>(lse[2], 1);
         }
 
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
+
         return std::make_unique<PreparedFlydslSdpaAiw>(
             std::move(code),
             binding,
@@ -677,7 +701,8 @@ public:
             biasStrides,
             windowFor(binding, problem),
             philoxSources(context, binding),
-            std::move(fillCode));
+            std::move(fillCode),
+            std::move(dropoutMask));
     }
 
     void launch(const Handle& handle,
@@ -788,6 +813,17 @@ public:
                          s[4][0],
                          s[4][1],
                          s[4][2]);
+        }
+        // The keep mask the main launch applied, on its stream after it.
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               dropout.offset2,
+                                               dropout.threshold);
         }
     }
 

@@ -216,7 +216,8 @@ public:
                            std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
                            std::array<OperandStrides, 5> strides,
                            BiasStrides biasStrides,
-                           PhiloxSources philox)
+                           PhiloxSources philox,
+                           std::optional<DropoutMaskLaunch> dropoutMask)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -224,6 +225,7 @@ public:
         , _strides(strides)
         , _biasStrides(biasStrides)
         , _philox(philox)
+        , _dropoutMask(std::move(dropoutMask))
     {
     }
 
@@ -265,6 +267,12 @@ public:
         return _philox;
     }
 
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaRdnaBinding _binding;
@@ -273,6 +281,7 @@ private:
     std::array<OperandStrides, 5> _strides;
     BiasStrides _biasStrides;
     PhiloxSources _philox;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
 };
 
 /**
@@ -404,13 +413,24 @@ public:
             }
         }
 
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
+
         return std::make_unique<PreparedFlydslSdpaRdna>(std::move(code),
                                                         binding,
                                                         problem,
                                                         scaleOperand,
                                                         strides,
                                                         biasStrides,
-                                                        philoxSources(context, binding));
+                                                        philoxSources(context, binding),
+                                                        std::move(dropoutMask));
     }
 
     void launch(const Handle& handle,
@@ -507,6 +527,17 @@ public:
                     dropout.offset2,
                     dropout.threshold,
                     dropout.scale);
+        // The keep mask the launch above applied, on its stream after it.
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               dropout.offset2,
+                                               dropout.threshold);
+        }
     }
 
 private:
