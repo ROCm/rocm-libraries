@@ -29,7 +29,7 @@
   - [How Multi-Arch CI decides whether TensileLite runs at all](#how-multi-arch-ci-decides-whether-tensilelite-runs-at-all)
   - [Where these tests actually run](#where-these-tests-actually-run)
 - [Coverage](#coverage)
-- [Improvement Roadmap](#improvement-roadmap)
+- [Improvement Roadmap](#improvement-roadmap), shared with hipBLASLt
 - [Known Risks and Gaps](#known-risks-and-gaps)
 
 ## Unit Testing Strategy
@@ -731,55 +731,24 @@ number nobody could act on.
 
 ## Improvement Roadmap
 
-**This section is not yet a plan.** TensileLite and hipBLASLt are tightly coupled, and their testing
-is being redesigned together under AIHPBLAS-5028 (see
-[../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap)). Follow-up changes will
-replace this section with that shared plan. What is listed here is narrower: tactical fixes found
-while documenting the current state. Each names the ticket that tracks it, for the same reason the
-[Known Risks and Gaps](#known-risks-and-gaps) table does, but the list is neither a commitment nor a
-priority order.
-
-This list only covers TensileLite, rocisa, and the library-logic build-time validation; hipBLASLt's
-C++ client and library items live in
+TensileLite and hipBLASLt share one testing plan, because they are tightly coupled: TensileLite
+generates the kernels hipBLASLt ships, and most of hipBLASLt's correctness signal exercises them. The
+plan, including its testing philosophy, target test kinds, cadence contract, and workstreams, is in
 [../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap).
 
-### Small, self-contained fixes
+The TensileLite items this section used to list are there now, each with its ticket and under the
+workstream it serves: toolchain resolution and the move to TheRock CI under *Consolidate*, sharding
+`tensilelite-common` under *Cadence*, and the `--strict-known-bugs` lane, the characterization-to-unit
+migration, mutation testing, the linter, and type checking under *Keep it honest*.
 
-1. **Make the test suite resolve its own toolchain** (AIHPBLAS-5039). Some characterization tests
-   locate `amdclang++` through a bare `shutil.which` with a `/usr/bin` fallback, while others already
-   use `validateToolchain`, which checks `ROCM_PATH` first. For the bare ones, whether they pass
-   depends on how the surrounding lane happened to order `PATH`, so the same tests behave differently
-   in different lanes for reasons that have nothing to do with the code under test. Resolving the
-   toolchain the same way everywhere removes a recurring source of false failures.
-2. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
-   what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
-   home for it, because the flag cannot be turned on inside the build without failing local developer
-   builds. Worth extending to orphaned entries, which are silently ignored today.
-3. **Run the Python linter that already exists** (AIHPBLAS-5037). `tox -e lint` is configured and
-   invoked by nothing.
-4. **Shard TheRock's `tensilelite-common` job** (AIHPBLAS-5040). gfx950 is on the pull-request path
-   as of the TheRock pin of 2026-10-02, and the job still runs unsharded with a 180-minute timeout.
-   gfx950 takes about two hours, so the job is already a two-hour gate on pull requests. Split the
-   suite across shards.
-
-### Structural changes
-
-1. **Put a number on the characterization-to-unit migration** (AIHPBLAS-5041). The split summary
-   card already computes the characterization-only statement count. Track it over time and set a
-   target on it, so the migration has a gate rather than a dashboard nobody is accountable for.
-   Without this, the union floors are fully satisfiable by a codebase that is pinned everywhere and
-   verified nowhere, and the scaffolding has no expiry date.
-
-### Larger investments
-
-1. **Graduate mutation testing** (AIHPBLAS-3868) from a report-only pilot to a maintained signal on
-   the modules where it has demonstrated value. This is the companion to the migration item above:
-   until a module has real unit tests, its mutation score is the only evidence that its goldens would
-   actually catch a regression rather than just execute the code.
-2. **Type checking on TensileLite** (AIHPBLAS-5038). No type checking exists today despite type hints being a
-   documented style rule. A large dynamically typed code generator with no type verification is a
-   standing risk; see the related C++ static-analysis roadmap item in
-   [../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap).
+The shared plan also proposes how kernel testing is divided across StinkyTofu, TensileLite, a kernel
+corpus layer, and hipBLASLt; see
+[Who tests what](../TESTING.md#who-tests-what). For TensileLite, the proposal narrows what its
+hardware tests are for. TensileLite would own one question: given solution parameters, does it emit
+the kernel those parameters describe? That is answered by its Python unit tests and by one small
+hardware test per code-generation feature. Sweeps over the shapes of shipped kernels, which
+`Tests/common` does in part today, would move to the corpus layer, which tests every shipped kernel
+however it was generated.
 
 ## Known Risks and Gaps
 
@@ -787,7 +756,8 @@ Stated plainly, so none of these are a surprise at release time. This section co
 rocisa, and library-logic validation; hipBLASLt's own C++/client gaps are in
 [../TESTING.md#known-risks-and-gaps](../TESTING.md#known-risks-and-gaps). On the Tracking column, see
 the note there. As of October 2026 every row has a ticket. Each ticket tracks one shortcoming rather
-than a strategy; the shared redesign will regroup them. Math CI is being retired in favor of
+than a strategy, and each one belongs to exactly one workstream in the shared plan at
+[../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap). Math CI is being retired in favor of
 TheRock CI, so the rows about Math CI's `preliminary` job point at the work to move TensileLite's
 testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 
