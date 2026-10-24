@@ -667,6 +667,8 @@ struct RawPagedGraphSpec
     bool seqLens = true;
     DataType pageTableType = DataType::INT32;
     std::optional<int32_t> maxSeqLenKv;
+    // A FLOAT bias [1, 1, 3, biasSkv] (uid 10), from which cuDNN infers the extent.
+    std::optional<int64_t> biasSkv;
 };
 
 flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec& spec)
@@ -728,6 +730,16 @@ flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec&
         attrs.page_table_v_tensor_uid = 9;
         add(9, "PageTableV", spec.pageTableType, tableStrides, tableDims);
     }
+    if(spec.biasSkv.has_value())
+    {
+        const std::vector<int64_t> biasDims = {1, 1, 3, spec.biasSkv.value()};
+        attrs.attn_mask_tensor_uid = 10;
+        add(10,
+            "Bias",
+            DataType::FLOAT,
+            hipdnn_data_sdk::utilities::generateStrides(biasDims),
+            biasDims);
+    }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -781,9 +793,16 @@ INSTANTIATE_TEST_SUITE_P(
                "WithoutSeqLens", {true, true, false, DataType::INT32, std::nullopt}, false},
            PagedApplicabilityCase{
                "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7}, false},
+           // cuDNN infers the extent from the dense V when only K is paged (6), so the table
+           // (3 blocks of 2) fits; see PagedKOnly above.
            // cuDNN: the table has exactly ceil(max_seq_len_kv / block size) entries (2, not 3).
            PagedApplicabilityCase{
                "TableWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 4}, false},
+           // cuDNN infers an unset extent from the bias when both sides are paged.
+           PagedApplicabilityCase{
+               "ExtentFromBias", {true, true, true, DataType::INT32, std::nullopt, 6}, true},
+           PagedApplicabilityCase{
+               "ExtentFromShortBias", {true, true, true, DataType::INT32, std::nullopt, 4}, false},
            PagedApplicabilityCase{
                "FloatPageTable", {true, true, true, DataType::FLOAT, std::nullopt}, false},
            // cuDNN: max_seq_len_kv without paging is rejected.

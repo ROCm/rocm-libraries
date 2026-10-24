@@ -267,6 +267,12 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e4m3_fnuz>>(
             absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
+        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e5m2>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ:
+        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e5m2_fnuz>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         rejectMatchingInfinitiesRequest(matchingInfinities);
         return std::make_unique<CpuIntReferenceValidation<int8_t>>();

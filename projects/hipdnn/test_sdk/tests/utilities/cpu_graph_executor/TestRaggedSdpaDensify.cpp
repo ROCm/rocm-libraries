@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -244,4 +245,99 @@ TEST(TestRaggedSdpaDensify, RaggedBackwardEqualsDensePaddedBackward)
     expectNear(unpack(dQ, Q_TOKENS, SQ, D), dQd, "dQ");
     expectNear(unpack(dK, KV_TOKENS, SKV, D), dKd, "dK");
     expectNear(unpack(dV, KV_TOKENS, SKV, D), dVd, "dV");
+}
+
+// vLLM's shape: ragged Q over a paged K/V cache (with and without a sink) runs through the
+// ragged-as-dense rewrite and equals the dense reference on the unpacked Q, the gathered pages and
+// the same per-batch lengths. The unreferenced cache block holds NaN, so reading it would show.
+TEST(TestRaggedSdpaDensify, RaggedQOverPagedKvEqualsGatheredDense)
+{
+    for(const bool sink : {false, true})
+    {
+        SCOPED_TRACE(sink ? "with sink" : "no sink");
+        auto q = packedValues(10, H * D, 31);
+        Tensor<float> kCache({NUM_BLOCKS, H, BLOCK, D});
+        Tensor<float> vCache({NUM_BLOCKS, H, BLOCK, D});
+        kCache.fillWithRandomValues(-1.0F, 1.0F, 32);
+        vCache.fillWithRandomValues(-1.0F, 1.0F, 33);
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < BLOCK; ++s)
+            {
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    kCache.setHostValue(std::numeric_limits<float>::quiet_NaN(), 2, h, s, d);
+                    vCache.setHostValue(std::numeric_limits<float>::quiet_NaN(), 2, h, s, d);
+                }
+            }
+        }
+        Tensor<int32_t> table({B, 1, TABLE, 1});
+        Tensor<int32_t> seqQ({B, 1, 1, 1});
+        Tensor<int32_t> seqKv({B, 1, 1, 1});
+        for(int64_t b = 0; b < B; ++b)
+        {
+            for(int64_t i = 0; i < TABLE; ++i)
+            {
+                table.setHostValue(PAGE_TABLE[static_cast<size_t>(b * TABLE + i)], b, 0, i, 0);
+            }
+            seqQ.setHostValue(static_cast<int32_t>(Q_LENS[static_cast<size_t>(b)]), b, 0, 0, 0);
+            seqKv.setHostValue(static_cast<int32_t>(KV_LENS[static_cast<size_t>(b)]), b, 0, 0, 0);
+        }
+        Tensor<float> sinkTensor({1, H, 1, 1});
+        sinkTensor.fillWithRandomValues(-1.0F, 1.0F, 34);
+
+        const auto graph = raggedQPagedKvGraph(sink);
+        std::vector<float> o(10 * H * D, -7.0F);
+        auto qOffsets = Q_TOKENS;
+        std::unordered_map<int64_t, void*> pack = {{Q, q.data()},
+                                                   {K, kCache.memory().hostData()},
+                                                   {V, vCache.memory().hostData()},
+                                                   {O, o.data()},
+                                                   {Q_OFFSETS, qOffsets.data()},
+                                                   {SEQ_Q, seqQ.memory().hostData()},
+                                                   {SEQ_KV, seqKv.memory().hostData()},
+                                                   {PAGE_TABLE_K, table.memory().hostData()},
+                                                   {PAGE_TABLE_V, table.memory().hostData()}};
+        if(sink)
+        {
+            pack[SINK] = sinkTensor.memory().hostData();
+        }
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(const_cast<uint8_t*>(graph.data()), graph.size()));
+        executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
+
+        // Expected: gather the pages, run the dense reference, pack O like Q.
+        Tensor<float> qd({B, H, SQ, D});
+        const auto unpacked = unpack(q, Q_TOKENS, SQ, D);
+        std::memcpy(qd.memory().hostData(), unpacked.data(), unpacked.size() * sizeof(float));
+        auto kd = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, seqKv, SKV);
+        auto vd = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, seqKv, SKV);
+        Tensor<float> od({B, H, SQ, D});
+        CpuFpReferenceSdpa::forward(qd,
+                                    kd,
+                                    vd,
+                                    od,
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(0.5F)
+                                        .setBand(-1, 0, false)
+                                        .setSeqLens(&seqQ, &seqKv)
+                                        .setSink(sink ? &sinkTensor : nullptr));
+        for(int64_t b = 0; b < B; ++b)
+        {
+            const auto first = Q_TOKENS[static_cast<size_t>(b)];
+            for(int64_t tok = 0; tok < Q_LENS[static_cast<size_t>(b)]; ++tok)
+            {
+                for(int64_t h = 0; h < H; ++h)
+                {
+                    for(int64_t d = 0; d < D; ++d)
+                    {
+                        const auto got = o[static_cast<size_t>(((first + tok) * H + h) * D + d)];
+                        ASSERT_FALSE(std::isnan(got)) << "b=" << b << " tok=" << tok;
+                        EXPECT_NEAR(got, od.getHostValue(b, h, tok, d), 1e-6F)
+                            << "b=" << b << " tok=" << tok << " h=" << h << " d=" << d;
+                    }
+                }
+            }
+        }
+    }
 }
