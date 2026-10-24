@@ -250,8 +250,6 @@ ConvSolution GetitemBackward::GetSolution(const ExecutionContext& /*context*/,
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(elapsed);
 
-                (void)hipEventDestroy(start.get());
-                (void)hipEventDestroy(stop.get());
                 handle_.EnableProfiling(true);
             };
         };
