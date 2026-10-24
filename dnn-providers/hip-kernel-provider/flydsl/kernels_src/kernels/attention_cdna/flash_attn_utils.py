@@ -50,6 +50,12 @@ _BIAS_NEG_FLOOR = -3.4e38
 # (the -inf arm is poison), which dropped the key-padding mask and let the keys past a
 # ragged Skv into the softmax.
 _BIAS_MASKED_SCORE = -3.4028234663852886e38
+# A strided bias build (modification 31) keeps its scores halved, (q.k * scale + bias)
+# / 2, so an f32 bias at its lowest finite value (-FLT_MAX) stays above the floor and the
+# masked score: the floor is -FLT_MAX / 2, every halved score's lower bound, and the
+# exponent and the LSE take a factor of 2 back. Halving is exact, so every exponent and
+# LSE is bit-for-bit the unhalved build's.
+_BIAS_HALVED_NEG_FLOOR = -1.7014117331926443e38
 
 
 def _no_keys(l_sum):
@@ -60,6 +66,199 @@ def _no_keys(l_sum):
     false for NaN), and `l > 0` is false for NaN too. An integer compare it leaves alone.
     The sum starts at +0 and only adds non-negative terms, so +0 is its only zero."""
     return fx.Float32(l_sum).bitcast(fx.Int32) == fx.Int32(0)
+
+
+# The generic kernel's `varlen_flags` bits (modification 32).
+# Bit 0: per-batch lengths are passed (padding); a padded query row gets O = 0, LSE = -inf.
+VARLEN_PADDED = 1
+# Bit 1: the diagonal is bottom-right, so it moves with each batch's own lengths.
+VARLEN_BOTTOM_RIGHT = 2
+# Bit 2: Q/O and K/V are packed (THD) through row-offset tables, INT32 [B + 1]: sequence b
+# starts at token offset[b] and holds offset[b + 1] - offset[b] tokens (modification 34).
+VARLEN_PACKED = 4
+
+
+def _load_i32(tensor, index):
+    """The wave-uniform int32 at @p tensor's base + @p index."""
+    gep = buffer_ops.get_element_ptr(
+        _extract_aligned_pointer(tensor, address_space=1),
+        fx.Int64(index),
+        elem_type=T.i32,
+    )
+    return fx.Int32(rocdl.readfirstlane(T.i32, _pointer_load(T.i32, gep)))
+
+
+@dataclass
+class _Varlen:
+    """One batch's sequences as a launch with per-batch lengths sees them (modifications
+    32, 34), each an i32: the rows (`len_*`) that are real; the rows a store may write
+    (`view_*`: the launch's on a padded or dense one, the sequence's own when packed,
+    where the rows past it are the next sequence's); the first token of a packed sequence
+    (`tok_*`, 0 otherwise); the bottom-right diagonal's shift; and whether packed."""
+
+    len_q: object
+    len_kv: object
+    view_q: object
+    view_kv: object
+    tok_q: object
+    tok_kv: object
+    shift: object
+    packed: object
+
+
+def _load_varlen(varlen_flags, seq_lens, row_offs, batch_idx, seq_len, seq_len_kv):
+    """Batch @p batch_idx's `_Varlen` (modifications 32, 34).
+
+    Under `VARLEN_PACKED` the row-offset tables @p row_offs give each sequence's first
+    token and its token count; under `VARLEN_PADDED` the INT32 per-batch arrays
+    @p seq_lens give the real rows within it (or within the launch's rows, unpacked).
+    Every count is clamped to [0, the launch's length], as hipDNN's GPU reference clamps
+    lengths. The shift is (Skv_b - Skv) - (Sq_b - Sq) under `VARLEN_BOTTOM_RIGHT`. Each
+    read sits under a real branch on its flag, which arrives with the kernel's arguments,
+    so a dense launch loads nothing and waits on nothing (a branch on the pointers, or a
+    branchless read of a fallback pointer, cost the RDNA kernels' short launches several
+    percent). Built as explicit ``scf.if``s: the ``if`` rewrite is lexical to a kernel's
+    body."""
+    from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
+
+    flags = fx.Int32(varlen_flags)
+    full_q = fx.Int32(seq_len)
+    full_kv = fx.Int32(seq_len_kv)
+    zero = fx.Int32(0)
+
+    def clamp(value, full):
+        low = fx.Int32((value > zero).select(value, zero))
+        return fx.Int32((low < full).select(low, full))
+
+    packed = (flags & fx.Int32(VARLEN_PACKED)) != zero
+    pack_if = _scf.IfOp(as_mlir_value(packed), results_=[T.i32] * 4, has_else=True)
+    with ir.InsertionPoint(pack_if.then_block):
+        values = []
+        for table, full in zip(row_offs, (full_q, full_kv)):
+            first = _load_i32(table, batch_idx)
+            end = _load_i32(table, fx.Index(batch_idx) + fx.Index(1))
+            values += [first, clamp(end - first, full)]
+        tok_q, view_q, tok_kv, view_kv = values
+        _scf.YieldOp([as_mlir_value(v) for v in (tok_q, tok_kv, view_q, view_kv)])
+    with ir.InsertionPoint(pack_if.else_block):
+        _scf.YieldOp([as_mlir_value(v) for v in (zero, zero, full_q, full_kv)])
+    tok_q, tok_kv, view_q, view_kv = [fx.Int32(r) for r in pack_if.results]
+
+    padded = (flags & fx.Int32(VARLEN_PADDED)) != zero
+    pad_if = _scf.IfOp(as_mlir_value(padded), results_=[T.i32] * 2, has_else=True)
+    with ir.InsertionPoint(pad_if.then_block):
+        lengths = [
+            clamp(_load_i32(tensor, batch_idx), view)
+            for tensor, view in zip(seq_lens, (view_q, view_kv))
+        ]
+        _scf.YieldOp([as_mlir_value(v) for v in lengths])
+    with ir.InsertionPoint(pad_if.else_block):
+        _scf.YieldOp([as_mlir_value(v) for v in (view_q, view_kv)])
+    len_q, len_kv = [fx.Int32(r) for r in pad_if.results]
+
+    bottom_right = (flags & fx.Int32(VARLEN_BOTTOM_RIGHT)) != zero
+    shift = fx.Int32(bottom_right.select((len_kv - full_kv) - (len_q - full_q), zero))
+    return _Varlen(len_q, len_kv, view_q, view_kv, tok_q, tok_kv, shift, packed)
+
+
+def _load_seq_lens(varlen_flags, seq_lens, batch_idx, seq_len, seq_len_kv):
+    """Batch @p batch_idx's query and key lengths and its diagonal's shift, as i32
+    (modification 32).
+
+    With `VARLEN_PADDED` set in @p varlen_flags, each length is read from its INT32
+    per-batch array in @p seq_lens and clamped to [0, the launch's length], as hipDNN's
+    GPU reference clamps them; the shift is (Skv_b - Skv) - (Sq_b - Sq) under
+    `VARLEN_BOTTOM_RIGHT`, else 0. Otherwise the launch's lengths and no shift. A real
+    branch on a flag that arrives with the kernel's arguments, so a dense launch loads
+    nothing and waits on nothing (a branch on the pointers, or a branchless read of a
+    fallback pointer, cost the RDNA kernels' short launches several percent). Built as
+    an explicit ``scf.if``: the ``if`` rewrite is lexical to a kernel's body."""
+    from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
+
+    flags = fx.Int32(varlen_flags)
+    full_q = fx.Int32(seq_len)
+    full_kv = fx.Int32(seq_len_kv)
+    zero = fx.Int32(0)
+    padded = (flags & fx.Int32(VARLEN_PADDED)) != zero
+    if_op = _scf.IfOp(as_mlir_value(padded), results_=[T.i32] * 3, has_else=True)
+    with ir.InsertionPoint(if_op.then_block):
+        lengths = []
+        for tensor, full in zip(seq_lens, (full_q, full_kv)):
+            gep = buffer_ops.get_element_ptr(
+                _extract_aligned_pointer(tensor, address_space=1),
+                fx.Int64(batch_idx),
+                elem_type=T.i32,
+            )
+            raw = fx.Int32(rocdl.readfirstlane(T.i32, _pointer_load(T.i32, gep)))
+            low = fx.Int32((raw > zero).select(raw, zero))
+            lengths.append(fx.Int32((low < full).select(low, full)))
+        len_q, len_kv = lengths
+        bottom_right = (flags & fx.Int32(VARLEN_BOTTOM_RIGHT)) != zero
+        shift = fx.Int32(
+            bottom_right.select((len_kv - full_kv) - (len_q - full_q), zero)
+        )
+        _scf.YieldOp([as_mlir_value(v) for v in (len_q, len_kv, shift)])
+    with ir.InsertionPoint(if_op.else_block):
+        _scf.YieldOp([as_mlir_value(v) for v in (full_q, full_kv, zero)])
+    return [fx.Int32(r) for r in if_op.results]
+
+
+# Philox4x32-10, AOTriton's dropout RNG (modification 33): the round of the aiw kernel's
+# `attention_rdna4/philox.py` (Triton's, verbatim), restated here so the CDNA objects
+# digest only their own directory. The constants and the order of the round are the
+# stream's contract; the provider's tests pin the mask it draws bit for bit against a
+# host oracle and AOTriton's own masks.
+_PHILOX_MUL_A = 0xD2511F53
+_PHILOX_MUL_B = 0xCD9E8D57
+_PHILOX_KEY_A = 0x9E3779B9
+_PHILOX_KEY_B = 0xBB67AE85
+_PHILOX_ROUNDS = 10
+
+
+def _philox4x32(c0, c1, k0, k1):
+    """The four 32-bit words of Philox4x32-10 at counter (c0, c1, 0, 0) and key
+    (k0, k1). Raw ``arith`` ops wrap at 32 bits, which is the PRNG's arithmetic; the
+    ``fx`` operators would fold a constant key through unbounded Python ints."""
+    from flydsl._mlir.dialects import arith as _arith  # noqa: PLC0415
+
+    def i32(value):
+        return fx.Int32(value)
+
+    def raw(value):
+        return as_mlir_value(fx.Int32(value))
+
+    mul_a, mul_b = i32(_PHILOX_MUL_A), i32(_PHILOX_MUL_B)
+    key_a, key_b = i32(_PHILOX_KEY_A), i32(_PHILOX_KEY_B)
+    c2 = c3 = i32(0)
+    for _ in range(_PHILOX_ROUNDS):
+        hi_b = _arith.MulUIExtendedOp(raw(mul_b), raw(c2)).high
+        hi_a = _arith.MulUIExtendedOp(raw(mul_a), raw(c0)).high
+        lo_b = _arith.muli(raw(mul_b), raw(c2))
+        lo_a = _arith.muli(raw(mul_a), raw(c0))
+        c0 = i32(_arith.xori(_arith.xori(hi_b, raw(c1)), raw(k0)))
+        c2 = i32(_arith.xori(_arith.xori(hi_a, raw(c3)), raw(k1)))
+        c1 = i32(lo_b)
+        c3 = i32(lo_a)
+        k0 = i32(_arith.addi(raw(k0), raw(key_a)))
+        k1 = i32(_arith.addi(raw(k1), raw(key_b)))
+    return c0, c1, c2, c3
+
+
+def _load_u64_words(tensor):
+    """The 8 bytes at @p tensor's base, as two wave-uniform i32 words (low, high)."""
+    base = _extract_aligned_pointer(tensor, address_space=1)
+    words = []
+    for index in (0, 1):
+        gep = buffer_ops.get_element_ptr(base, fx.Int64(index), elem_type=T.i32)
+        words.append(fx.Int32(rocdl.readfirstlane(T.i32, _pointer_load(T.i32, gep))))
+    return words
+
+
+def _rows_bytes(rows, span):
+    """A buffer view's byte count @p span for @p rows rows, or 0 for none: a padded
+    batch's length may be 0 (modification 32), where (rows - 1) * stride + width would
+    go negative and wrap the record count."""
+    return fx.Index((rows > fx.Index(0)).select(span, fx.Index(0)))
 
 
 _LDS_ALIAS_DOMAIN = '#llvm.alias_scope_domain<id = "flydsl.dualwave_swp.lds">'
@@ -1457,6 +1656,8 @@ class FlashAttnGenericTraits:
     K_COLS: int = 0
     K_LOAD_GUARD: bool = False
     V_LOAD_GUARD: bool = False
+    # f32 (modification 35): bytes per Q/K/V/O element (2 for f16/bf16, 4 for f32).
+    ELEM_BYTES: int = 2
 
     @property
     def cache_tag(self):
@@ -1585,6 +1786,9 @@ def _make_flash_attn_generic_traits(
     k_chunk=None,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
+    # f32 (modification 35): exact-f32 operands take the gfx942-class path on every arch (no HW
+    # transpose, no K16, no permlane O store, no DMA, no KV global prefetch).
+    is_f32 = dtype_str == "f32"
     block_n = 64
     k_sub_n = 32
     warp_size = 64
@@ -1627,8 +1831,12 @@ def _make_flash_attn_generic_traits(
             or (os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_DMA", "0") == "1")
         )
     )
+    if is_f32:
+        enable_gfx942_dma = False
+        enable_dma = False
     enable_gfx942_kv_gpfetch = (
-        _is_gfx942_class(gpu_arch)
+        not is_f32
+        and _is_gfx942_class(gpu_arch)
         and not enable_prefetch_3buf
         and (not enable_dma or enable_gfx942_dma)
         and os.getenv("FLYDSL_FLASH_ATTN_FUNC_ENABLE_KV_GPFETCH", "1") == "1"
@@ -1656,9 +1864,9 @@ def _make_flash_attn_generic_traits(
     num_prefetch_v = 3 if enable_prefetch_3buf else 1
     ck_lds_seq = (1, 2, 0, 1, 0, 1, 2, 0) if enable_prefetch_3buf else (0,)
 
-    use_hw_tr = gpu_arch.startswith("gfx950")
-    use_k16 = gpu_arch.startswith("gfx950")
-    use_permlane_ostore = gpu_arch.startswith("gfx950")
+    use_hw_tr = gpu_arch.startswith("gfx950") and not is_f32
+    use_k16 = gpu_arch.startswith("gfx950") and not is_f32
+    use_permlane_ostore = gpu_arch.startswith("gfx950") and not is_f32
     k_step_qk = 16 if use_k16 else 8
     # K's side -- its LDS tile, load mapping, swizzle and the QK steps per pass -- is a
     # k_chunk-wide column chunk of the head, staged K_CHUNKS times per KV tile
@@ -1681,7 +1889,8 @@ def _make_flash_attn_generic_traits(
     # split, only this workgroup's slice.
     v_width = head_dim if (head_dim_v == head_dim and dv_split == 1) else dv_tile
     # Past 256 the Q packs would fill the register file: re-read per K-step.
-    q_stream = head_dim > 256
+    # f32's packs are twice as wide: from 256 they are re-read too (modification 35).
+    q_stream = head_dim > 256 or (is_f32 and head_dim >= 256)
     # A Q/K bucket whose V is as wide: V and O follow the runtime head dim (modification
     # 17). The merge kernel and the column split know only baked widths.
     v_follows_qk = bool(qk_mask) and head_dim_v == head_dim
@@ -1700,7 +1909,9 @@ def _make_flash_attn_generic_traits(
     stride_token_q = num_heads * head_dim
     stride_token_kv = num_kv_heads * head_dim
     stride_token_v = num_kv_heads * head_dim_v
-    _k_pad_default = 4 if (_is_gfx942_class(gpu_arch) and not enable_dma) else 0
+    _k_pad_default = (
+        4 if ((_is_gfx942_class(gpu_arch) or is_f32) and not enable_dma) else 0
+    )
     _k_pad = int(os.getenv("FLYDSL_FLASH_ATTN_FUNC_K_PAD", str(_k_pad_default)))
     if k_pad is not None:
         _k_pad = int(k_pad)
@@ -1737,6 +1948,9 @@ def _make_flash_attn_generic_traits(
         v_nomajor_dma = False
 
     vec_width = 16 if enable_lds_vec16 else 8
+    if is_f32:
+        # 8 f32 = 32 bytes per lane, the 16-bit path's 16 elements' bytes.
+        vec_width = 8
     assert k_side % vec_width == 0
     # A row that is not a power of two wide is loaded as the next power of two wide, the
     # lanes past its end guarded (modification 26).
@@ -1916,6 +2130,7 @@ def _make_flash_attn_generic_traits(
         K_LOAD_GUARD=k_load_guard,
         V_LOAD_GUARD=v_load_guard,
         K_CHUNKS=k_chunks,
+        ELEM_BYTES=4 if is_f32 else 2,
     )
 
 
@@ -2718,8 +2933,16 @@ class GenericFlashAttnContext:
         sink_stride=None,
         sink_on=None,
         lse_strides=None,
+        varlen_flags=None,
     ):
         self.traits = traits
+        # Per-batch lengths (modification 32): `VARLEN_*` bits, or None for a build that
+        # takes the launch's lengths alone. Set by init_sequence_lengths: the diagonal's
+        # per-batch shift.
+        self.varlen_flags = varlen_flags
+        self.diag_shift_i32 = None
+        # Dropout (modification 33): set by init_dropout on a dropout build.
+        self.dropout = False
         # The LSE output's (batch, head, query) element strides (modification 20); None
         # keeps the packed [B, H, Sq] layout.
         self.lse_strides = lse_strides
@@ -2930,13 +3153,23 @@ class GenericFlashAttnContext:
             self.c_sm_scale_log2e = fx.Float32(_LOG2E)
             self.c_neg_floor = fx.Float32(_BIAS_NEG_FLOOR)
             self.c_masked_score = fx.Float32(_BIAS_MASKED_SCORE)
+            if self.bias_kstrided:
+                # Halved scores (modification 31): an f32 bias reaches -FLT_MAX.
+                self.c_score_scale = self.c_score_scale * fx.Float32(0.5)
+                self.c_sm_scale = fx.Float32(2.0)
+                self.c_sm_scale_log2e = fx.Float32(2.0 * _LOG2E)
+                self.c_neg_floor = fx.Float32(_BIAS_HALVED_NEG_FLOOR)
         self.c_zero_v16f32 = Vec.filled(16, 0.0, fx.Float32)
         self.width_i32 = fx.Int32(traits.WARP_SIZE)
         self.shuf_32_i32 = fx.Int32(32)
         self.lane_xor_32_byte = (fx.Int32(self.lane) ^ self.shuf_32_i32) * fx.Int32(4)
 
-    def init_sequence_lengths(self, CuSeqQ, CuSeqKv):
+    def init_sequence_lengths(self, CuSeqQ, CuSeqKv, row_offs=None):
         traits = self.traits
+        # Packed sequences' first tokens and the rows a store may write (modification
+        # 34): None for a build that reads no row offsets.
+        self.packed_tok = None
+        self.view_q_b = self.seq_len_v
         if const_expr(traits.VARLEN):
             cuq_div = fx.logical_divide(
                 fx.rocdl.make_buffer_tensor(CuSeqQ), fx.make_layout(1, 1)
@@ -2973,6 +3206,40 @@ class GenericFlashAttnContext:
             self.kv_tok_base = self.batch_idx * self.seq_len_kv_v
             self.seqlen_q_b = self.seq_len_v
             self.seqlen_kv_b = self.seq_len_kv_v
+            if self.varlen_flags is not None and row_offs is not None:
+                # Packed sequences too (modification 34): a prefill build reads each
+                # sequence's first token and token count from the row-offset tables when
+                # the launch says so. Its Q, O, K, V and LSE views start at those tokens,
+                # over the batch's rows only -- the rows after them are the next
+                # sequence's, which no store may reach.
+                varlen = _load_varlen(
+                    self.varlen_flags,
+                    (CuSeqQ, CuSeqKv),
+                    row_offs,
+                    self.batch_idx,
+                    self.seq_len,
+                    self.seq_len_kv,
+                )
+                self.diag_shift_i32 = varlen.shift
+                self.seqlen_q_b = fx.Index(varlen.len_q)
+                self.seqlen_kv_b = fx.Index(varlen.len_kv)
+                self.view_q_b = fx.Index(varlen.view_q)
+                self.packed_tok = (fx.Index(varlen.tok_q), fx.Index(varlen.tok_kv))
+            elif self.varlen_flags is not None:
+                # Padding (modification 32): this batch's own lengths, read when the
+                # launch says so, replace the launch's for everything past the grid --
+                # the Q, K and V views, the KV loop's bounds, the masks and the bias's
+                # view -- and its bottom-right diagonal moves with them. The batch and
+                # head bases keep the launch's strides.
+                len_q, len_kv, self.diag_shift_i32 = _load_seq_lens(
+                    self.varlen_flags,
+                    (CuSeqQ, CuSeqKv),
+                    self.batch_idx,
+                    self.seq_len,
+                    self.seq_len_kv,
+                )
+                self.seqlen_q_b = fx.Index(len_q)
+                self.seqlen_kv_b = fx.Index(len_kv)
 
     def init_kv_batch_pointers(self):
         # Dense/varlen fold batch into raw K/V pointers; paged adds page_id per tile.
@@ -2985,7 +3252,7 @@ class GenericFlashAttnContext:
         self.kv_head_byte_offset = (
             fx.Index(0)
             if strides is not None
-            else self.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
+            else self.kv_head_idx * fx.Index(traits.HEAD_DIM * traits.ELEM_BYTES)
         )
         if const_expr(not traits.PAGED):
             off = self.kv_tok_base * self.stride_token_kv_v
@@ -3000,6 +3267,31 @@ class GenericFlashAttnContext:
                     v_off = fx.Index(self.batch_idx) * fx.Index(
                         strides["v_b"]
                     ) + self.kv_head_idx * fx.Index(strides["v_h"])
+                if self.packed_tok is not None:
+                    # A packed sequence starts at its first token (modification 34); 0
+                    # unpacked, where the batch stride places it.
+                    tok_kv = self.packed_tok[1]
+                    off = off + tok_kv * self.stride_token_kv_v
+                    v_off = v_off + tok_kv * self.stride_token_v_v
+                if self.varlen_flags is not None:
+                    # A batch or sequence with no keys runs no KV iteration, but a build
+                    # that loads the first K tile before its loop still reads its clamped
+                    # row, -1: before K's base for a view at the tensor's start. So a
+                    # keyless view at token 0 (every unpacked one) moves one token on,
+                    # making that row its own first (modifications 32, 34). A packed one
+                    # further on reads the previous sequence's last token, in the tensor.
+                    first_tok = (
+                        fx.Index(0) if self.packed_tok is None else self.packed_tok[1]
+                    )
+                    at_start = (self.seqlen_kv_b == fx.Index(0)) & (
+                        first_tok == fx.Index(0)
+                    )
+                    off = off + fx.Index(
+                        at_start.select(self.stride_token_kv_v, fx.Index(0))
+                    )
+                    v_off = v_off + fx.Index(
+                        at_start.select(self.stride_token_v_v, fx.Index(0))
+                    )
             self.k_ptr = buffer_ops.get_element_ptr(
                 self.k_ptr, off, elem_type=self.elem_type
             )
@@ -3037,9 +3329,15 @@ class GenericFlashAttnContext:
             _lse_nrec_bytes = as_mlir_value(
                 _lse_records(self.lse_on, self.lse_per_batch_elems * fx.Index(4))
             )
-            _lse_batch_byte_off = as_mlir_value(
-                self.batch_idx * _lse_batch_elems * fx.Index(4)
-            )
+            _lse_batch_elem_off = self.batch_idx * _lse_batch_elems
+            if self.packed_tok is not None:
+                # A packed LSE's sequence starts at its first query token, its batch
+                # stride passed as 0 (modification 34); stores past the sequence's rows
+                # are dropped (rows_b).
+                _lse_batch_elem_off = (
+                    _lse_batch_elem_off + self.packed_tok[0] * self.lse_stride_n_v
+                )
+            _lse_batch_byte_off = as_mlir_value(_lse_batch_elem_off * fx.Index(4))
             self.lse_rsrc = buffer_ops.create_buffer_resource(
                 LSE,
                 max_size=False,
@@ -3047,21 +3345,53 @@ class GenericFlashAttnContext:
                 base_byte_offset=_lse_batch_byte_off,
             )
 
-    def init_bias(self, Bias, bias_stride0, stride_bias_b, stride_bias_h):
+    def init_bias(
+        self, Bias, bias_stride0, stride_bias_b, stride_bias_h, kstrided=None
+    ):
         """The additive bias's descriptor (modification 12): one (batch, query head) slice,
         rebased at batch * stride_bias_b + head * stride_bias_h and ending at its last
         element, (seq_len - 1) * bias_stride0 + seq_len_kv, so rows and columns past the
-        scores read as zero; a stride of 0 broadcasts that axis."""
+        scores read as zero; a stride of 0 broadcasts that axis.
+
+        A strided bias build (@p kstrided, its key stride and f32 switch; modification
+        31) reads one key at a time: its slice ends at (seq_len - 1) * bias_stride0 +
+        (seq_len_kv - 1) * stride_k + 1 elements of 2 bytes, or 4 for an f32 bias."""
         self.bias_stride0_v = fx.Index(bias_stride0)
-        span = (self.seqlen_q_b - fx.Index(1)) * self.bias_stride0_v + self.seqlen_kv_b
+        self.bias_kstrided = kstrided is not None
+        if kstrided is None:
+            span = (
+                self.seqlen_q_b - fx.Index(1)
+            ) * self.bias_stride0_v + self.seqlen_kv_b
+            elem_bytes = fx.Index(2)
+        else:
+            stride_k, f32_on = kstrided
+            self.bias_stride_k_i32 = fx.Int32(stride_k)
+            self.bias_f32_i32 = fx.Int32(f32_on)
+            span = (
+                (self.seqlen_q_b - fx.Index(1)) * self.bias_stride0_v
+                + (self.seqlen_kv_b - fx.Index(1)) * fx.Index(stride_k)
+                + fx.Index(1)
+            )
+            elem_bytes = fx.Index(2) + fx.Index(2) * fx.Index(f32_on)
+        if self.varlen_flags is not None:
+            # A padded batch with no query rows or no keys reads no bias (modification
+            # 32); the span above would go negative.
+            span = _rows_bytes(
+                fx.Index(
+                    (self.seqlen_q_b < self.seqlen_kv_b).select(
+                        self.seqlen_q_b, self.seqlen_kv_b
+                    )
+                ),
+                span,
+            )
         base = fx.Index(self.batch_idx) * fx.Index(
             stride_bias_b
         ) + self.q_head_idx * fx.Index(stride_bias_h)
         self.bias_rsrc = buffer_ops.create_buffer_resource(
             Bias,
             max_size=False,
-            num_records_bytes=as_mlir_value(span * fx.Index(2)),
-            base_byte_offset=as_mlir_value(base * fx.Index(2)),
+            num_records_bytes=as_mlir_value(span * elem_bytes),
+            base_byte_offset=as_mlir_value(base * elem_bytes),
         )
 
     def _init_strided_descriptors(self, Q, O):  # noqa: E741
@@ -3084,48 +3414,75 @@ class GenericFlashAttnContext:
         )
         batch = fx.Index(self.batch_idx)
 
-        def span_bytes(rows, stride_n, width=head_dim):
-            return as_mlir_value(
-                ((rows - fx.Index(1)) * stride_n + width) * fx.Index(2)
-            )
+        per_batch = self.varlen_flags is not None
+        eb = traits.ELEM_BYTES  # f32 (modification 35)
 
-        def base_bytes(stride_b, head, stride_h):
-            return as_mlir_value(
-                (batch * fx.Index(stride_b) + head * fx.Index(stride_h)) * fx.Index(2)
-            )
+        def span_bytes(rows, stride_n, width=head_dim, may_be_empty=False):
+            span = ((rows - fx.Index(1)) * stride_n + width) * fx.Index(eb)
+            # A padded batch's length may be 0 (modification 32).
+            return as_mlir_value(_rows_bytes(rows, span) if may_be_empty else span)
 
-        self.kv_nrec_bytes = span_bytes(self.seqlen_kv_b, self.stride_token_kv_v)
+        def base_bytes(stride_b, head, stride_h, tok=None, stride_n=None):
+            base = batch * fx.Index(stride_b) + head * fx.Index(stride_h)
+            if tok is not None:
+                # A packed sequence's first token (modification 34); the host passes a
+                # packed operand's batch stride as 0.
+                base = base + tok * stride_n
+            return as_mlir_value(base * fx.Index(eb))
+
+        tok_q, tok_kv = (None, None) if self.packed_tok is None else self.packed_tok
+        self.kv_nrec_bytes = span_bytes(
+            self.seqlen_kv_b, self.stride_token_kv_v, may_be_empty=per_batch
+        )
         self.kv_batch_byte_off = base_bytes(
-            strides["kv_b"], self.kv_head_idx, strides["kv_h"]
+            strides["kv_b"],
+            self.kv_head_idx,
+            strides["kv_h"],
+            tok_kv,
+            self.stride_token_kv_v,
         )
         self.stride_token_o_v = fx.Index(strides["o_n"])
-        q_records = span_bytes(self.seqlen_q_b, self.stride_token_q_v, q_width)
-        o_records = span_bytes(self.seqlen_q_b, self.stride_token_o_v, o_width)
+        q_records = span_bytes(
+            self.seqlen_q_b, self.stride_token_q_v, q_width, may_be_empty=per_batch
+        )
+        # O's view spans the launch's rows, padded ones included: a padded row is
+        # stored as 0 (modification 32). Q's spans the batch's own, so a padded row
+        # reads zeros. A packed sequence's O spans its own rows (modification 34).
+        o_records = span_bytes(
+            self.view_q_b,
+            self.stride_token_o_v,
+            o_width,
+            may_be_empty=self.packed_tok is not None,
+        )
         if const_expr(traits.PACK_GQA):
             # The group's heads too (modification 15).
             group_m1 = fx.Index(self.gqa_group_i32) - fx.Index(1)
+            q_span = (
+                group_m1 * fx.Index(strides["q_h"])
+                + (self.seqlen_q_b - fx.Index(1)) * self.stride_token_q_v
+                + q_width
+            ) * fx.Index(eb)
             q_records = as_mlir_value(
-                (
-                    group_m1 * fx.Index(strides["q_h"])
-                    + (self.seqlen_q_b - fx.Index(1)) * self.stride_token_q_v
-                    + q_width
-                )
-                * fx.Index(2)
+                _rows_bytes(self.seqlen_q_b, q_span) if per_batch else q_span
             )
             o_records = as_mlir_value(
                 (
                     group_m1 * fx.Index(strides["o_h"])
-                    + (self.seqlen_q_b - fx.Index(1)) * self.stride_token_o_v
+                    + (self.seq_len_v - fx.Index(1)) * self.stride_token_o_v
                     + o_width
                 )
-                * fx.Index(2)
+                * fx.Index(eb)
             )
         self.q_rsrc = buffer_ops.create_buffer_resource(
             Q,
             max_size=False,
             num_records_bytes=q_records,
             base_byte_offset=base_bytes(
-                strides["q_b"], self.q_head_idx, strides["q_h"]
+                strides["q_b"],
+                self.q_head_idx,
+                strides["q_h"],
+                tok_q,
+                self.stride_token_q_v,
             ),
         )
         self.o_rsrc = buffer_ops.create_buffer_resource(
@@ -3133,23 +3490,29 @@ class GenericFlashAttnContext:
             max_size=False,
             num_records_bytes=o_records,
             base_byte_offset=base_bytes(
-                strides["o_b"], self.q_head_idx, strides["o_h"]
+                strides["o_b"],
+                self.q_head_idx,
+                strides["o_h"],
+                tok_q,
+                self.stride_token_o_v,
             ),
         )
 
     def _init_bshd_descriptors(self, Q, O):  # noqa: E741
         self.stride_token_o_v = self.stride_token_q_v
         self.kv_nrec_bytes = as_mlir_value(
-            self.seqlen_kv_b * (self.stride_token_kv_v * fx.Index(2))
+            self.seqlen_kv_b
+            * (self.stride_token_kv_v * fx.Index(self.traits.ELEM_BYTES))
         )
         self.kv_batch_byte_off = as_mlir_value(
-            self.kv_tok_base * (self.stride_token_kv_v * fx.Index(2))
+            self.kv_tok_base
+            * (self.stride_token_kv_v * fx.Index(self.traits.ELEM_BYTES))
         )
         q_nrec_bytes = as_mlir_value(
-            self.seqlen_q_b * (self.stride_token_q_v * fx.Index(2))
+            self.seqlen_q_b * (self.stride_token_q_v * fx.Index(self.traits.ELEM_BYTES))
         )
         q_batch_byte_off = as_mlir_value(
-            self.q_tok_base * (self.stride_token_q_v * fx.Index(2))
+            self.q_tok_base * (self.stride_token_q_v * fx.Index(self.traits.ELEM_BYTES))
         )
         self.q_rsrc = buffer_ops.create_buffer_resource(
             Q,
@@ -3170,11 +3533,66 @@ class GenericFlashAttnContext:
         self.q_row = self.q_start + self.wave_q_offset + self.lane_mod_32
         self.q_row_i32 = fx.Int32(self.q_row)
         # The rows a store may write: the query positions, or the packed group's rows.
-        self.rows_b = self.seqlen_q_b
+        # The launch's, padded rows included (modification 32); a packed sequence's own
+        # (modification 34), the rows after it being the next sequence's.
+        self.rows_b = self.view_q_b
         if const_expr(self.traits.PACK_GQA):
             self.rows_b = self.pack_rows
             # The mask compares each row's position, not its packed index.
             self.q_row_i32 = fx.Int32(self.q_row % self.seq_len_v)
+        # Padded rows are stored as O = 0, LSE = -inf (modification 32); padded_rows()
+        # says which, at the stores, so nothing of it is live across the KV loop.
+
+    def padded_rows(self):
+        """(whether this lane's row is a real query position of its batch rather than
+        padding, whether every row of the tile is -- always so on a dense launch), or
+        None for a build without per-batch lengths (modification 32)."""
+        if self.varlen_flags is None:
+            return None
+        len_q = fx.Int32(self.seqlen_q_b)
+        row_live = self.q_row_i32 < len_q
+        tile_live = len_q >= fx.Int32(self.seq_len)
+        if const_expr(not self.traits.PACK_GQA):
+            tile_live = tile_live | (
+                fx.Int32(self.q_start) + fx.Int32(self.traits.BLOCK_M) <= len_q
+            )
+        return row_live, tile_live
+
+    def init_dropout(
+        self, seed, offset, offset2_lo, offset2_hi, threshold, scale
+    ):  # noqa: PLR0913
+        """A dropout build's Philox state (modification 33), AOTriton's scheme: the key
+        is the 8-byte seed at @p seed's base; each run of 4 keys of a row draws one
+        counter, offset1 + offset2 + ((b * Hq + h) * Sq + i) * cdiv(Skv, 4) + j / 4, with
+        offset1 the 8 bytes at @p offset's base, offset2 the two words, and Sq, Skv the
+        launch's lengths (a padded batch's mask is the dense one's); key j takes word
+        j % 4 and is kept iff it, read as an int32, exceeds @p threshold. Kept
+        probabilities are scaled by @p scale, 1 / (1 - p), folded into 1 / l."""
+        traits = self.traits
+        assert not (
+            traits.PACK_GQA or traits.SPLIT_KV
+        ), "a dropout build is a prefill build"
+        self.dropout = True
+        self.ph_key = _load_u64_words(seed)
+        off_lo, off_hi = _load_u64_words(offset)
+        offset_base = (
+            (fx.Int64(off_hi) << fx.Int64(32))
+            | (fx.Int64(off_lo) & fx.Int64(0xFFFFFFFF))
+        ) + (
+            (fx.Int64(offset2_hi) << fx.Int64(32))
+            | (fx.Int64(offset2_lo) & fx.Int64(0xFFFFFFFF))
+        )
+        row_stride = fx.Int64((fx.Int32(self.seq_len_kv) + fx.Int32(3)) >> fx.Int32(2))
+        plane = fx.Int64(self.batch_idx) * fx.Int64(self.num_heads_q_v) + fx.Int64(
+            self.q_head_idx
+        )
+        # This lane's row's first counter: its plane's rows, then its own.
+        self.ph_row_base = (
+            offset_base
+            + (plane * fx.Int64(self.seq_len) + fx.Int64(self.q_row)) * row_stride
+        )
+        self.ph_threshold = fx.Int32(threshold)
+        self.dropout_scale = fx.Float32(scale)
 
     def init_kv_bounds(self):
         traits = self.traits
@@ -3186,6 +3604,10 @@ class GenericFlashAttnContext:
                 self.delta_i32 = fx.Int32(self.seqlen_kv_b) - fx.Int32(self.seqlen_q_b)
             else:
                 self.delta_i32 = fx.Int32(self.diag_offset)
+                if self.diag_shift_i32 is not None:
+                    # A bottom-right diagonal at this batch's own lengths (modification
+                    # 32); 0 for a dense launch or a top-left one.
+                    self.delta_i32 = self.delta_i32 + self.diag_shift_i32
             self.causal_end_raw_i32 = fx.Int32(q_end) + self.delta_i32
             causal_end_i32 = fx.Int32(
                 (self.causal_end_raw_i32 > fx.Int32(0)).select(
@@ -3201,6 +3623,9 @@ class GenericFlashAttnContext:
             # at or below q_start + window_lo.
             if const_expr(self.window_lo is not None):
                 self.win_lo_i32 = fx.Int32(self.window_lo)
+                if self.diag_shift_i32 is not None:
+                    # The window's edge moves with the diagonal (modification 32).
+                    self.win_lo_i32 = self.win_lo_i32 + self.diag_shift_i32
                 lower_raw_i32 = fx.Int32(self.pos_first) + self.win_lo_i32
                 lower_i32 = fx.Int32(
                     (lower_raw_i32 > fx.Int32(0)).select(lower_raw_i32, fx.Int32(0))
@@ -3215,6 +3640,12 @@ class GenericFlashAttnContext:
             self.kv_upper = self.seqlen_kv_b
             self.win_lo_i32 = None
             self.kv_lower = fx.Index(0)
+        if self.varlen_flags is not None and not traits.PACK_GQA:
+            # A query tile wholly past its batch's length runs no KV iteration
+            # (modification 32): its rows are padding, stored as O = 0, LSE = -inf.
+            self.kv_upper = fx.Index(
+                (self.q_start < self.seqlen_q_b).select(self.kv_upper, self.kv_lower)
+            )
         if const_expr(traits.SPLIT_KV):
             # This split's share of the block's KV tiles, whole tiles each, so the
             # masks see the same tile boundaries as an unsplit launch (modification
@@ -4164,9 +4595,11 @@ class GenericQLoader:
             # Past head_dim 256 the packs are read where each K-step uses them
             # (modification 16).
             return _QPackStream(self, q_rsrc, q_row)
+        # f32 (modification 35): a K-chunked build with Q resident holds every chunk's packs
+        # (gemm1_accumulate indexes them by ks + chunk * K_STEPS_QK).
         return [
             self.load_pack(q_rsrc, q_row, ks)
-            for ks in range_constexpr(traits.K_STEPS_QK)
+            for ks in range_constexpr(traits.K_STEPS_QK * traits.K_CHUNKS)
         ]
 
 
@@ -4195,6 +4628,22 @@ class GenericGemmHelper:
         traits = ctx.traits
         if const_expr(traits.USE_K16):
             return fly.mma_atom_call_ssa([ctx.v16f32_type], ctx.mma_atom_k16, a, b, c)
+        if const_expr(traits.DTYPE_STR == "f32"):
+            # f32 (modification 35): one 16-bit K-step (a 4-element pack per lane along K) is four
+            # exact-f32 32x32x2 MFMAs, the j-th taking element j of the same pack from A
+            # and B; both name the same K index on every lane, so the contraction is
+            # exact (DESIGN §1.1).
+            av = Vec(a)
+            bv = Vec(b)
+            acc = c
+            for j in range_constexpr(4):
+                aj, bj, cj, cbsz, abid, blgp = rocdl._split_mfma_operands(
+                    [av[j], bv[j], acc]
+                )
+                acc = rocdl.mfma_f32_32x32x2f32(
+                    ctx.v16f32_type, aj, bj, cj, cbsz, abid, blgp
+                ).result
+            return acc
         if const_expr(traits.DTYPE_STR == "bf16"):
             a = Vec(a).bitcast(fx.Int16)
             b = Vec(b).bitcast(fx.Int16)
@@ -4304,6 +4753,13 @@ class GenericSoftmaxHelper:
         row_off = ctx.q_row * ctx.bias_stride0_v
         out_lo = list(s_raw_lo)
         out_hi = list(s_raw_hi)
+        if const_expr(ctx.bias_kstrided):
+            # One key at a time, at a runtime key stride (0 broadcasts the keys), in f32
+            # or the query's dtype (modification 31): each lane's first key's offset in a
+            # register, every other key's distance from it a scalar.
+            base_i32 = fx.Int32(row_off) + col_base_i32 * ctx.bias_stride_k_i32
+            cols = [moff[r] + extra for extra in (0, traits.K_SUB_N) for r in range(16)]
+            return self._add_bias_kstrided(out_lo, out_hi, base_i32, cols)
         for scores, extra in ((out_lo, 0), (out_hi, traits.K_SUB_N)):
             for g in range_constexpr(4):
                 idx = row_off + fx.Index(col_base_i32 + fx.Int32(moff[4 * g] + extra))
@@ -4320,6 +4776,57 @@ class GenericSoftmaxHelper:
                     )
         return out_lo, out_hi
 
+    def _kstrided_bias(self, base_i32, col, elem_bytes, dtype):
+        """The bias of the key @p col keys past a lane's first, widened to f32: its
+        distance a scalar, so the load takes it as its scalar offset (modification 31).
+        """
+        ctx = self.ctx
+        raw = buffer_ops.buffer_load(
+            ctx.bias_rsrc,
+            as_mlir_value(base_i32),
+            vec_width=1,
+            dtype=dtype,
+            soffset_bytes=ctx.bias_stride_k_i32 * fx.Int32(col * elem_bytes),
+        )
+        return fx.Float32(fx.Float32(raw))
+
+    def _add_bias_kstrided(self, s_lo, s_hi, base_i32, cols):
+        """score * scale + bias over a lane's 32 scores, the bias read one key at a time,
+        as f32 or in the query's dtype by the launch's `bias_f32` (modification 31): any
+        key stride, key length or row pitch is read exactly, and only the branch the
+        launch's dtype takes runs."""
+        ctx = self.ctx
+        # The scores are halved in this build (`_BIAS_HALVED_NEG_FLOOR`): the scale in
+        # c_score_scale, the bias here, both exactly.
+        c = ctx.c_score_scale
+        half = fx.Float32(0.5)
+        fm = ctx.fm_fast
+        f32_on = ctx.bias_f32_i32 != ctx.c_zero_i32
+
+        def biased(scores, first, elem_bytes, dtype):
+            return [
+                fx.fma(
+                    scores[r],
+                    c,
+                    self._kstrided_bias(base_i32, cols[first + r], elem_bytes, dtype)
+                    * half,
+                    fastmath=fm,
+                )
+                for r in range(16)
+            ]
+
+        @flyc.jit
+        def _add(s_lo, s_hi):
+            if f32_on:
+                s_lo = biased(s_lo, 0, 4, T.f32)
+                s_hi = biased(s_hi, 16, 4, T.f32)
+            else:
+                s_lo = biased(s_lo, 0, 2, ctx.elem_dtype)
+                s_hi = biased(s_hi, 16, 2, ctx.elem_dtype)
+            return s_lo, s_hi
+
+        return _add(s_lo, s_hi)
+
     @flyc.jit
     def apply_kv_mask(self, s_raw_lo, s_raw_hi, kv_start):
         ctx = self.ctx
@@ -4333,9 +4840,38 @@ class GenericSoftmaxHelper:
         kv_start_i32 = fx.Int32(kv_start)
         if const_expr(traits.CAUSAL):
             # below-diagonal tiles skip masking; guard carries the two score lists
-            q_start_i32 = fx.Int32(ctx.pos_first) + ctx.delta_i32
-            q_mask_limit_i32 = ctx.q_row_i32 + ctx.delta_i32
-            max_kv_col_i32 = kv_start_i32 + fx.Int32(traits.BLOCK_N - 1)
+            # A row whose diagonal passes the last key (top-left with more queries than
+            # keys, a band past Skv - Sq) sees every key, and the last KV tile's padding
+            # stays masked (modification 30): in a tile that holds padding, each row's
+            # limit is clamped to the last key there and then (a scalar select and a
+            # vector min per tile, nothing kept across the loop), and the block's first
+            # row's diagonal is clamped too, so that tile is masked at all. Clamping the
+            # limit once per workgroup instead, or adding a compare per score, took
+            # registers the 256-row gfx942 tile spills for. A split (decode) build keeps
+            # the plain compare: the provider runs it only on diagonals inside the keys,
+            # which prefill builds serve at any query length.
+            if const_expr(traits.SPLIT_KV):
+                q_start_i32 = fx.Int32(ctx.pos_first) + ctx.delta_i32
+                q_mask_limit_i32 = ctx.q_row_i32 + ctx.delta_i32
+                max_kv_col_i32 = kv_start_i32 + fx.Int32(traits.BLOCK_N - 1)
+            else:
+                last_key_i32 = fx.Int32(ctx.seqlen_kv_b) - fx.Int32(1)
+                max_kv_col_i32 = kv_start_i32 + fx.Int32(traits.BLOCK_N - 1)
+                q_start_raw_i32 = fx.Int32(ctx.pos_first) + ctx.delta_i32
+                q_start_i32 = fx.Int32(
+                    (q_start_raw_i32 < last_key_i32).select(
+                        q_start_raw_i32, last_key_i32
+                    )
+                )
+                key_cap_i32 = fx.Int32(
+                    (max_kv_col_i32 > last_key_i32).select(
+                        last_key_i32, fx.Int32(0x7FFFFFFF)
+                    )
+                )
+                q_limit_raw_i32 = ctx.q_row_i32 + ctx.delta_i32
+                q_mask_limit_i32 = fx.Int32(
+                    (q_limit_raw_i32 < key_cap_i32).select(q_limit_raw_i32, key_cap_i32)
+                )
             tile_needs_mask = max_kv_col_i32 > q_start_i32
             col_base_i32, moff = self._kv_mask_lane_off(kv_start_i32)
             c_neg_inf = c_masked
@@ -4461,6 +4997,44 @@ class GenericSoftmaxHelper:
         l_new = corr * l_running + tile_sum
         return m_new_raw, l_new, corr, p_vals_lo, p_vals_hi
 
+    def dropout_group(self, p_vals, first, kv_start, extra, score=None):
+        """Drop the run of 4 probabilities @p p_vals[first:first + 4] (modification 33),
+        the lane's scores @p score.. (default @p first) of its 16 in a half, @p extra
+        keys right of the first half's: their keys are 4 consecutive ones starting at a
+        multiple of 4 (each lane's column base is one, and so is each run's offset in
+        `_kv_mask_lane_off`), so one Philox draw covers them, key j taking word j % 4. A
+        dropped probability is 0; the row's sum `l` was formed before, so it and the
+        LSE stay undropped."""
+        ctx = self.ctx
+        score = first if score is None else score
+        col_base_i32, moff = self._kv_mask_lane_off(fx.Int32(kv_start))
+        assert all(moff[score + e] == moff[score] + e for e in range(4))
+        assert (moff[score] + extra) % 4 == 0
+        counter = (
+            ctx.ph_row_base
+            + fx.Int64(col_base_i32 >> fx.Int32(2))
+            + fx.Int64((moff[score] + extra) // 4)
+        )
+        words = _philox4x32(
+            fx.Int32(counter),
+            fx.Int32(counter >> fx.Int64(32)),
+            ctx.ph_key[0],
+            ctx.ph_key[1],
+        )
+        out = list(p_vals)
+        for e in range_constexpr(4):
+            keep = fx.Int32(words[e]) > ctx.ph_threshold
+            out[first + e] = keep.select(fx.Float32(p_vals[first + e]), ctx.c_zero_f)
+        return out
+
+    def apply_dropout(self, p_vals_lo, p_vals_hi, kv_start):
+        """Every run of 4 of a lane's 32 probabilities through `dropout_group`."""
+        traits = self.ctx.traits
+        for first in range_constexpr(0, 16, 4):
+            p_vals_lo = self.dropout_group(p_vals_lo, first, kv_start, 0)
+            p_vals_hi = self.dropout_group(p_vals_hi, first, kv_start, traits.K_SUB_N)
+        return p_vals_lo, p_vals_hi
+
     def rescale_o_accs(self, o_accs, corr):
         ctx = self.ctx
         traits = ctx.traits
@@ -4488,7 +5062,11 @@ class GenericSoftmaxHelper:
 
         p_f16 = []
         for r in range_constexpr(16):
-            p_f16.append(fx.Float32(p_vals[r]).to(ctx.elem_dtype))
+            if const_expr(traits.DTYPE_STR == "f32"):
+                # f32 (modification 35): P stays f32 (exactness; AOTriton keeps P in V's dtype).
+                p_f16.append(fx.Float32(p_vals[r]))
+            else:
+                p_f16.append(fx.Float32(p_vals[r]).to(ctx.elem_dtype))
         for pks in range_constexpr(traits.PV_K_STEPS):
             p_base = pks * traits.MFMA_LANE_K
             packs.append(
@@ -4544,6 +5122,7 @@ class GenericSoftmaxHelper:
         neg_scaled_max,
         v_base,
         m_new_raw,
+        kv_start=None,
     ):
         ctx = self.ctx
         traits = ctx.traits
@@ -4567,6 +5146,19 @@ class GenericSoftmaxHelper:
             for j in range_constexpr(traits.MFMA_LANE_K):
                 local_sum = local_sum + p_exp_lo[j]
                 local_sum = local_sum + p_exp_hi[j]
+            if const_expr(ctx.dropout):
+                # Dropped after the sum, so l stays undropped (modification 33).
+                for first in range_constexpr(0, traits.MFMA_LANE_K, 4):
+                    p_exp_lo = self.dropout_group(
+                        p_exp_lo, first, kv_start, 0, score=p_base + first
+                    )
+                    p_exp_hi = self.dropout_group(
+                        p_exp_hi,
+                        first,
+                        kv_start,
+                        traits.K_SUB_N,
+                        score=p_base + first,
+                    )
             p_lo = self.bf16_trunc_pack_v4(p_exp_lo)
             p_hi = self.bf16_trunc_pack_v4(p_exp_hi)
             v_lo = [None] * traits.D_CHUNKS
@@ -4603,7 +5195,8 @@ class GenericStoreHelper:
                         zero_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                     )
         else:
-            zero_pack = Vec.filled(2, 0, fx.Int32)
+            # f32 (modification 35): 4 elements are 4 dwords at 4 bytes each.
+            zero_pack = Vec.filled(traits.ELEM_BYTES, 0, fx.Int32)
             for dc in range_constexpr(traits.D_CHUNKS):
                 for grp in range_constexpr(4):
                     d_col = (
@@ -4613,7 +5206,10 @@ class GenericStoreHelper:
                     )
                     o_global = ctx.global_idx_o(q_row, d_col)
                     buffer_ops.buffer_store(
-                        zero_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
+                        zero_pack,
+                        o_rsrc,
+                        o_global * fx.Index(traits.ELEM_BYTES),
+                        offset_is_bytes=True,
                     )
 
     def with_sink(self, m_final, l_final, q_row):
@@ -4690,6 +5286,20 @@ class GenericStoreHelper:
         off = fx.Index(
             (ctx.lane_div_32 == fx.Index(0)).select(off_row, ctx.lse_oob_off)
         )
+        padded = ctx.padded_rows()
+        if padded is not None:
+            # A padded row's LSE is -inf, on a sink build too: it is padding, not a row
+            # no key reached (modification 32). Stored by its bits through a second,
+            # redirected store rather than selected into the value: fast math merges such
+            # a select with the no-keys test and, assuming no NaN, drops a NaN row's NaN.
+            row_live, _ = padded
+            padded_off = row_live.select(ctx.lse_oob_off, off)
+            off = row_live.select(off, ctx.lse_oob_off)
+            buffer_ops.buffer_store(
+                as_mlir_value(fx.Int32(-8388608)),  # 0xFF800000, -inf
+                ctx.lse_rsrc,
+                as_mlir_value(fx.Int32(padded_off)),
+            )
         buffer_ops.buffer_store(
             as_mlir_value(fx.Float32(lse_val)),
             ctx.lse_rsrc,
@@ -4835,17 +5445,45 @@ class GenericStoreHelper:
                 inv_l = (fx.Float32(l_final) > ctx.c_zero_f).select(
                     inv_l_rcp, ctx.c_zero_f
                 )
+            elif ctx.varlen_flags is not None:
+                # A padded batch may have no keys, so even with no mask a row can sum
+                # to 0: O = 0 rather than 0 * inf (modification 32). "No keys" is
+                # tested on the bits, so a NaN row stays NaN (`_no_keys`).
+                inv_l = _no_keys(l_final).select(ctx.c_zero_f, fx.Float32(inv_l_rcp))
             else:
                 inv_l = inv_l_rcp
+        if ctx.dropout:
+            # Kept probabilities scaled by 1 / (1 - p), O only: the LSE above is the
+            # undropped one (modification 33).
+            inv_l = fx.Float32(inv_l) * ctx.dropout_scale
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(16)
         v_o = [Vec(o_finals[dc]) * inv_l_vec for dc in range_constexpr(traits.D_CHUNKS)]
 
-        if const_expr(traits.USE_PERMLANE_OSTORE):
-            self._store_permlane_o(v_o, o_rsrc, q_row)
-        else:
-            self._store_fallback_o(v_o, o_rsrc, q_row)
+        def store(row_ok=None):
+            if const_expr(traits.USE_PERMLANE_OSTORE):
+                self._store_permlane_o(v_o, o_rsrc, q_row, row_ok)
+            else:
+                self._store_fallback_o(v_o, o_rsrc, q_row, row_ok)
 
-    def _store_permlane_o(self, v_o, o_rsrc, q_row):
+        padded = ctx.padded_rows()
+        if padded is None:
+            store()
+            return
+
+        # A padded row is stored as 0 (modification 32): its words zeroed after they are
+        # packed to the output dtype, never by a select on O's f32 values, which fast math
+        # would fold into 1 / l's and so lose a NaN row's NaN.
+        row_live, _ = padded
+        store(row_live)
+
+    @staticmethod
+    def _row_words(words, row_ok):
+        """Packed output words, or zeros for a row @p row_ok excludes (modification 32)."""
+        if row_ok is None:
+            return words
+        return [row_ok.select(word, fx.Int32(0)) for word in words]
+
+    def _store_permlane_o(self, v_o, o_rsrc, q_row, row_ok=None):
         ctx = self.ctx
         traits = ctx.traits
         pair_i32_ty = ir.Type.parse("!llvm.struct<(i32, i32)>")
@@ -4886,9 +5524,10 @@ class GenericStoreHelper:
                 w1 = is_hi_half.select(y1_b, as_mlir_value(d1_a))
                 w2 = is_hi_half.select(as_mlir_value(d0_b), y0_a)
                 w3 = is_hi_half.select(as_mlir_value(d1_b), y1_a)
-                o_pack = Vec.from_elements(
-                    [fx.Int32(w0), fx.Int32(w1), fx.Int32(w2), fx.Int32(w3)], fx.Int32
-                )
+                words = [fx.Int32(w0), fx.Int32(w1), fx.Int32(w2), fx.Int32(w3)]
+                # A lane's words are its own row's (its xor-32 partner holds the same
+                # row), so a row @p row_ok excludes stores zeros (modification 32).
+                o_pack = Vec.from_elements(self._row_words(words, row_ok), fx.Int32)
                 d_col = fx.Index(dc * traits.D_CHUNK) + (
                     fx.Index(2 * g) + ctx.lane_div_32
                 ) * fx.Index(8)
@@ -4897,9 +5536,36 @@ class GenericStoreHelper:
                     o_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                 )
 
-    def _store_fallback_o(self, v_o, o_rsrc, q_row):
+    def _store_fallback_o(self, v_o, o_rsrc, q_row, row_ok=None):
         ctx = self.ctx
         traits = ctx.traits
+        if const_expr(traits.DTYPE_STR == "f32"):
+            # f32 (modification 35): a lane's 4 consecutive head-dim values are one
+            # dwordx4, stored as their bits so a padded row's zeros are an integer select
+            # (modification 32), never an FP one.
+            for dc in range_constexpr(traits.D_CHUNKS):
+                for grp in range_constexpr(4):
+                    r0 = grp * 4
+                    o4 = Vec.from_elements(
+                        self._row_words(
+                            [
+                                fx.Float32(Vec(v_o[dc])[r0 + i]).bitcast(fx.Int32)
+                                for i in range_constexpr(4)
+                            ],
+                            row_ok,
+                        ),
+                        fx.Int32,
+                    )
+                    d_col = (
+                        fx.Index(dc * traits.D_CHUNK)
+                        + ctx.lane_div_32 * fx.Index(4)
+                        + fx.Index(grp * 8)
+                    )
+                    o_global = ctx.global_idx_o(q_row, d_col)
+                    buffer_ops.buffer_store(
+                        o4, o_rsrc, o_global * fx.Index(4), offset_is_bytes=True
+                    )
+            return
         for dc in range_constexpr(traits.D_CHUNKS):
             for grp in range_constexpr(4):
                 r0 = grp * 4
@@ -4909,7 +5575,8 @@ class GenericStoreHelper:
                 ]
                 pack = Vec.from_elements(o_f16, ctx.elem_dtype).bitcast(fx.Int32)
                 o2 = Vec.from_elements(
-                    [as_mlir_value(pack[0]), as_mlir_value(pack[1])], fx.Int32
+                    self._row_words([fx.Int32(pack[0]), fx.Int32(pack[1])], row_ok),
+                    fx.Int32,
                 )
                 d_col = (
                     fx.Index(dc * traits.D_CHUNK)
