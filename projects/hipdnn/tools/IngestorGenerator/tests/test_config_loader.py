@@ -507,6 +507,13 @@ class TestEmittedIdentifierShape:
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
 
+    def test_census_name_symbol_rejects_cpp_expressions(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(census_name_symbol="NAME();"))
+        with pytest.raises(ConfigError, match="census_name_symbol"):
+            _check_emitted_identifiers(config)
+
     def test_a_local_name_leading_with_a_hyphen_is_rejected(self):
         """`_to_pascal_case` drops the empty leading part, so `-foo` derives a good
         `Foo` while the slug keeps the hyphen and names a directory that reads as a

@@ -32,6 +32,7 @@ from rocke import (
     BF8E5M2,
     F16,
     F32,
+    F64,
     FP8E4M3,
     I8,
     I16,
@@ -186,6 +187,27 @@ class TestCoreIR(unittest.TestCase):
             any(op.name == "memref.global_load" for op in b.kernel.body.ops)
         )
 
+    def test_optimize_kernel_cse_keeps_signed_zeros_apart(self):
+        # 0.0 == -0.0 in Python, but they are different constants: CSE keys a
+        # float by its bits (as the C++ engine does), and still merges two
+        # constants with the same bits.
+        b = IRBuilder("opt_signed_zero")
+        out = b.param("out", PtrType(F32, "global"))
+        for index, value in enumerate((0.0, -0.0, -0.0)):
+            b.global_store(out, b.const_i32(index), b.const_f32(value))
+        b.ret()
+        stats = optimize_kernel(b.kernel)
+        self.assertGreaterEqual(stats.common_subexpressions, 1)
+        stores = [
+            line
+            for line in lower_kernel_to_llvm(b.kernel, arch="gfx942").splitlines()
+            if "store float" in line
+        ]
+        self.assertEqual(len(stores), 3)
+        self.assertIn("store float 0x0000000000000000", stores[0])
+        self.assertIn("store float 0x8000000000000000", stores[1])
+        self.assertIn("store float 0x8000000000000000", stores[2])
+
     def test_param_metadata_lowers_to_llvm_arg_attrs(self):
         b = IRBuilder("metadata_smoke")
         b.param(
@@ -224,6 +246,7 @@ class TestCoreIR(unittest.TestCase):
             (F16, "global_load_f16", "half", 2),
             (BF16, "global_load_bf16", "bfloat", 2),
             (F32, "global_load_f32", "float", 4),
+            (F64, "global_load_f64", "double", 8),
             (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
             (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
         ]
@@ -1001,6 +1024,16 @@ class TestInstances(unittest.TestCase):
 # ---------------------------------------------------------------------
 
 
+def _scalar_f64_global_accesses(ll: str) -> list[str]:
+    """The scalar (not vector) f64 global load and store lines of ``ll``."""
+    return [
+        line.strip()
+        for line in ll.splitlines()
+        if "load double, ptr addrspace(1)" in line
+        or ("store double " in line and "ptr addrspace(1)" in line)
+    ]
+
+
 class TestElementwiseInstance(unittest.TestCase):
     def test_unary_builds(self):
         from rocke.instances import ElementwiseSpec, build_elementwise
@@ -1038,14 +1071,52 @@ class TestElementwiseInstance(unittest.TestCase):
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("fadd double", ll)
 
+    def test_f64_scalar_tail_is_8_byte_aligned(self):
+        # The scalar tail loads and stores claim the 8-byte element alignment,
+        # so their codegen does not depend on the target's unaligned-access
+        # mode. vec=2 add: two loads and one store per tail lane.
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(kernel, arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 6)
+        for line in accesses:
+            self.assertTrue(line.endswith(", align 8"), line)
+
+    def test_f64_abs_clears_the_sign_bit(self):
+        # f64 abs is one sign-bit clear (llvm.fabs.f64), not max(x, -x), whose
+        # maxnum costs several instructions under IEEE mode. f32 keeps max(x, -x).
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="abs", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        self.assertIn("call double @llvm.fabs.f64(double", ll)
+        self.assertNotIn("llvm.maxnum.f64", ll)
+        hip = lower_kernel_to_hip(kernel)
+        self.assertIn(" = fabs(", hip)
+        self.assertNotIn("fabsf", hip)
+
+        ll_f32 = lower_kernel_to_llvm(
+            build_elementwise(ElementwiseSpec(op="abs")), arch="gfx950"
+        )
+        self.assertIn("llvm.maxnum.f32", ll_f32)
+        self.assertNotIn("llvm.fabs", ll_f32)
+
     def test_f64_rejects_transcendental_ops_and_wide_vec(self):
         from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
+        # The reason names the rejected op or vector width, so a spec refused
+        # for some other reason cannot pass.
         for op in ("exp2", "tanh", "silu", "gelu_tanh"):
-            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            ok, reason = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
             self.assertFalse(ok, op)
-        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+            self.assertEqual(reason, f"op '{op}' not supported for f64")
+        ok, reason = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2} for f64")
 
 
 class TestLayerNormInstance(unittest.TestCase):
@@ -1086,18 +1157,64 @@ class TestReduceInstance(unittest.TestCase):
             self.assertIn("define amdgpu_kernel void", ll)
 
     def test_f64_path_builds(self):
+        # An f64 reduction must accumulate in double, not just load double:
+        # every combine step is a double op, no float op appears, and the
+        # LDS pool holds one 8-byte partial per thread (block_size * 8 bytes).
         from rocke.instances import Reduce2DSpec, build_reduce2d
 
-        for op in ("sum", "max", "mean"):
+        combine = {
+            "sum": "fadd double",
+            "max": "@llvm.maxnum.f64(",
+            "mean": "fadd double",
+        }
+        for op, double_combine in combine.items():
             spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
             ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
-            self.assertIn("double", ll)
+            self.assertIn(double_combine, ll, op)
+            self.assertNotIn("fadd float", ll, op)
+            self.assertNotIn("llvm.maxnum.f32", ll, op)
+            pool_bytes = spec.block_size * 8
+            self.assertRegex(ll, rf"@smem_pool\.\S+ = .*\[{pool_bytes} x i8\]", op)
+            lds_stores = [
+                line.strip()
+                for line in ll.splitlines()
+                if line.lstrip().startswith("store ") and "ptr addrspace(3)" in line
+            ]
+            self.assertTrue(lds_stores, op)
+            for line in lds_stores:
+                self.assertTrue(line.startswith("store double "), line)
+
+    def test_f64_output_store_is_8_byte_aligned(self):
+        # The one f64 result store per row claims the 8-byte element alignment.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=4096, op="sum", dtype="f64", vec=2)
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 1)
+        self.assertTrue(accesses[0].endswith(", align 8"), accesses[0])
+
+    def test_f64_mean_divides_by_n(self):
+        # The f64 mean is the sum divided by N (one rounding), not the sum
+        # times 1/N, which rounds twice. N=3072 has no exact reciprocal; its
+        # double bit pattern is 0x40A8000000000000.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=3072, op="mean", dtype="f64", vec=2)
+        ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+        divides = [line.strip() for line in ll.splitlines() if " = fdiv " in line]
+        self.assertEqual(len(divides), 1, divides)
+        self.assertRegex(divides[0], r"= fdiv double %\w+, 0x40A8000000000000$")
+        self.assertNotIn("fmul double", ll)
 
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
 
-        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        # f64 allows only vec=2 (one 16-byte access); the reason says so.
+        ok, reason = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2}")
 
 
 class TestTransposeInstance(unittest.TestCase):
@@ -2736,6 +2853,95 @@ class TestCdnaPrimitives(unittest.TestCase):
                 wgid,
             )
 
+    # ---- chiplet_transform_chunked_runtime (runtime grid and chunk) ----
+    @staticmethod
+    def _eval_scalar_ops(kernel, env):
+        """Evaluate the straight-line i32/i1 scalar ops of ``kernel`` (the
+        remap's whole vocabulary) with ``env`` binding its input values."""
+
+        def div(a, b):
+            return int(a / b)  # sdiv truncates towards zero
+
+        binop = {
+            "arith.add": lambda a, b: a + b,
+            "arith.mul": lambda a, b: a * b,
+            "arith.div": div,
+            "arith.mod": lambda a, b: a - div(a, b) * b,
+            "arith.smax": max,
+        }
+        vals = dict(env)
+        for op in kernel.body.ops:
+            ins = [vals.get(v.name) for v in op.operands]
+            if op.name == "arith.constant":
+                vals[op.result.name] = op.attrs["value"]
+            elif op.name in binop:
+                vals[op.result.name] = binop[op.name](*ins)
+            elif op.name == "arith.cmp":
+                assert op.attrs["pred"] == "lt"
+                vals[op.result.name] = ins[0] < ins[1]
+            elif op.name == "arith.select":
+                vals[op.result.name] = ins[1] if ins[0] else ins[2]
+        return vals
+
+    def _runtime_remap(self, explicit_chunk):
+        from rocke.core.ir import I32, IRBuilder
+        from rocke.helpers.grid import chiplet_transform_chunked_runtime
+
+        b = IRBuilder("chiplet_runtime")
+        p_n = b.param("p_num_wgs", I32)
+        p_chunk = b.param("p_chunk", I32) if explicit_chunk else None
+        wgid = b.block_id_x()
+        out = chiplet_transform_chunked_runtime(
+            b, wgid, num_wgs=p_n, num_xcds=8, chunk_size=p_chunk
+        )
+        return b.kernel, p_n, p_chunk, wgid, out
+
+    def test_chiplet_runtime_reference_is_a_bijection(self):
+        from rocke.helpers.grid import python_chiplet_transform_chunked_runtime
+
+        for num_wgs in list(range(1, 300)) + [1023, 1024, 4097]:
+            for chunk in (None, 1, 3, 16, num_wgs):
+                image = [
+                    python_chiplet_transform_chunked_runtime(
+                        w, num_wgs=num_wgs, num_xcds=8, chunk_size=chunk
+                    )
+                    for w in range(num_wgs)
+                ]
+                with self.subTest(num_wgs=num_wgs, chunk=chunk):
+                    self.assertEqual(sorted(image), list(range(num_wgs)))
+        # The default chunk gives each XCD one contiguous eighth of the
+        # launch: the workgroups the hardware puts on XCD 0 (ids 0, 8, ...)
+        # take logical ids 0..7.
+        on_xcd0 = {
+            python_chiplet_transform_chunked_runtime(w, num_wgs=64, num_xcds=8)
+            for w in range(0, 64, 8)
+        }
+        self.assertEqual(on_xcd0, set(range(8)))
+
+    def test_chiplet_runtime_ir_matches_the_reference(self):
+        # The emitted arithmetic, evaluated op by op, is the pure-Python model
+        # for every grid size and chunk (including grids smaller than the XCD
+        # count, where the default chunk clamps to 1).
+        from rocke.helpers.grid import python_chiplet_transform_chunked_runtime
+
+        for explicit in (False, True):
+            kernel, p_n, p_chunk, wgid, out = self._runtime_remap(explicit)
+            ops = [op.name for op in kernel.body.ops]
+            # One divide for the default chunk, none extra for an explicit one.
+            self.assertEqual(ops.count("arith.div"), 4 if not explicit else 3)
+            self.assertEqual(ops.count("arith.smax"), 1)
+            for num_wgs in (1, 5, 8, 9, 63, 64, 130, 1000):
+                for chunk in (1, 2, 7, 40) if explicit else (None,):
+                    for w in range(num_wgs):
+                        env = {p_n.name: num_wgs, wgid.name: w}
+                        if explicit:
+                            env[p_chunk.name] = chunk
+                        got = self._eval_scalar_ops(kernel, env)[out.name]
+                        want = python_chiplet_transform_chunked_runtime(
+                            w, num_wgs=num_wgs, num_xcds=8, chunk_size=chunk
+                        )
+                        self.assertEqual(got, want, (num_wgs, chunk, w))
+
     def test_super_tile_swizzle_walks_column_first_inside_group(self):
         from rocke.helpers.grid import python_super_tile_swizzle
 
@@ -2840,19 +3046,36 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertNotIn("asm sideeffect", ll)
 
     # ---- wave_all / wave_any ----
-    def test_wave_all_lowers_to_ballot_eq_minus_one(self):
+    def _lower_wave_votes(self, arch):
         from rocke.core.ir import IRBuilder, PtrType, I32
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-        b = IRBuilder("wave_all_smoke")
+        b = IRBuilder("wave_vote_smoke")
         b.kernel.attrs["max_workgroup_size"] = 64
         Out = b.param("Out", PtrType(I32, "global"))
-        all_t = b.wave_all(b.const_i32(1))
-        b.global_store(Out, b.const_i32(0), all_t)
-        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
-        self.assertIn("@llvm.amdgcn.ballot.i64", ll)
-        # Compares ballot to -1 (i.e. all wave64 lanes voted true).
-        self.assertIn("icmp eq i64", ll)
+        pred = b.const_i32(1)
+        b.global_store(Out, b.const_i32(0), b.wave_all(pred))
+        b.global_store(Out, b.const_i32(1), b.wave_any(pred))
+        return lower_kernel_to_llvm(b.kernel, arch=arch)
+
+    def test_wave_all_full_mask_matches_wave_size(self):
+        import re
+
+        # ballot.i64 only sets the low wave_size bits: the full-wave mask
+        # is -1 on wave64 but 0xffffffff on wave32.
+        for arch, full in (
+            ("gfx950", "-1"),
+            ("gfx942", "-1"),
+            ("gfx1151", "4294967295"),
+            ("gfx11-generic", "4294967295"),
+            ("gfx12-generic", "4294967295"),
+            ("gfx1201", "4294967295"),
+        ):
+            with self.subTest(arch=arch):
+                ll = self._lower_wave_votes(arch)
+                self.assertIn("@llvm.amdgcn.ballot.i64", ll)
+                self.assertRegex(ll, rf"icmp eq i64 %\S+, {re.escape(full)}\n")
+                self.assertRegex(ll, r"icmp ne i64 %\S+, 0\n")
 
     # ---- coherency hints ----
     def test_async_buffer_load_lds_addr_propagates_aux(self):
@@ -5294,6 +5517,58 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "mean")
 
 
+class TestGemmEpilogueLowererTarget(unittest.TestCase):
+    """The fused GEMM lowerer with an explicit target needs no GPU.
+
+    A candidate made for a wave64 target must be refused by a lowerer whose
+    explicit target is wave32. The refusal happens before any kernel is
+    built or loaded, so this runs on any host without stand-ins for HIP.
+    """
+
+    def test_wave64_candidate_refused_on_wave32_target(self):
+        from rocke.helpers import (
+            FusionOp,
+            FusionTensor,
+            GemmEpilogueLowerer,
+            GreedyFusionScheduler,
+            build_graph,
+        )
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (128, 64), "fp16", is_input=True),
+                FusionTensor("B", (64, 128), "fp16", is_input=True),
+                FusionTensor("mm", (128, 128), "fp16"),
+                FusionTensor("out", (128, 128), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("mm0", "matmul", ("A", "B"), ("mm",)),
+                FusionOp("relu0", "relu", ("mm",), ("out",)),
+            ],
+            inputs=("A", "B"),
+            outputs=("out",),
+        )
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx950").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        self.assertEqual(cfgs[0].spec.wave_size, 64)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer(arch="gfx1151").build(cfgs[0])
+        msg = str(ctx.exception)
+        head, _, targets = msg.partition(" with one of: ")
+        self.assertEqual(
+            head,
+            f"fused GEMM candidate {cfgs[0].spec.name!r} was made for wave size "
+            "64, but the explicit target gfx1151 has wave size 32. Build the "
+            "candidates and the kernel with the same lowerer, or pass a target "
+            "of wave size 64 explicitly: GemmEpilogueLowerer(arch=...)",
+        )
+        # The suggested targets are the known wave64 targets only.
+        suggested = targets.rstrip(".").split(", ")
+        self.assertIn("gfx950", suggested)
+        self.assertNotIn("gfx1151", suggested)
+
+
 class TestLoweringRegistryBuild(unittest.TestCase):
     """Lowerer tests: candidate generation phase (GPU-agnostic).
 
@@ -5419,6 +5694,48 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertIsNotNone(built.launcher)
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
+
+    def test_gemm_epilogue_build_refuses_candidate_for_other_wave_size(self):
+        """A wave32 candidate is refused on the wave64 active device.
+
+        The candidate comes from a lowerer targeting gfx1151 (wave32); the
+        default lowerer targets the active device, reported as gfx950
+        (wave64). The build must fail with a message naming the device, both
+        wave sizes and how to pass a target, not build for another target.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx1151").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer().build(cfgs[0])
+        msg = str(ctx.exception)
+        self.assertIn("made for wave size 32", msg)
+        self.assertIn("the active device gfx950 has wave size 64", msg)
+        self.assertIn("GemmEpilogueLowerer(arch=...)", msg)
+        self.assertIn("gfx1151", msg)
+
+    def test_gemm_epilogue_explicit_target_overrides_device(self):
+        """An explicit target is used for candidates and build, not the device.
+
+        The active device reports gfx950 (wave64); the lowerer is given
+        gfx1151 (wave32), so its candidates are wave32 WMMA candidates and
+        they build for gfx1151.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        lowerer = GemmEpilogueLowerer(arch="gfx1151")
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        for cfg in cfgs:
+            self.assertEqual(cfg.spec.wave_size, 32)
+        built = lowerer.build(cfgs[0])
+        self.assertIsNotNone(built.launcher)
+        self.assertEqual(built.block_size, cfgs[0].spec.block_size)
 
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (
