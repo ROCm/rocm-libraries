@@ -4,7 +4,7 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "b0958085a97cb03a2c38931b8e2ec86ac78d1563" # 2026-10-20
+    value: "02c590290c37f5b7ec6a6fa9474f99c5356b8cc1" # 2026-10-23 TheRock main (ingestor+SDPA ON); test branch only
   kpack-ref:
     description: "rocm-systems commit whose shared/kpack provides the rocm_kpack packing tooling"
     # Copied into dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake and
