@@ -1365,19 +1365,53 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
     return seg;
 }
 
-/* Alignment for one smem allocation (Python _align). A packed-only type never
- * reaches here: rocke_i_refuse_packed_only_value refuses its LDS tiles. */
-static int ll_smem_align(const rocke_type_t* stype)
+/* Record, per smem global, the widest alignment any access to it claims
+ * (Python _collect_smem_access_align). widest[] is parallel to smem_globals
+ * and starts at 0 ("no aligned access"). */
+static void
+    ll_collect_smem_access_align(rocke_lower_t* L, const rocke_region_t* region, int* widest)
 {
-    if(!stype || !stype->elem || !stype->elem->name)
-        return 4;
-    const char* n = stype->elem->name;
-    if(strcmp(n, "f64") == 0)
-        return 8;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
-       || strcmp(n, "bf8e5m2") == 0)
-        return 16;
-    return 4;
+    if(!region)
+        return;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(!op)
+            continue;
+        int align = rocke_ll_lds_access_align(L, op);
+        if(align > 0 && op->num_operands > 0 && op->operands[0])
+        {
+            const char* gn = ll_val_to_gname(L, op->operands[0]->name);
+            for(size_t g = 0; gn && g < L->smem_globals.len; g++)
+            {
+                if(strcmp(L->smem_globals.data[g].gname, gn) == 0)
+                {
+                    if(align > widest[g])
+                        widest[g] = align;
+                    break;
+                }
+            }
+        }
+        for(int r = 0; r < op->num_regions; r++)
+            ll_collect_smem_access_align(L, op->regions[r], widest);
+    }
+}
+
+/* Alignment for one smem allocation (Python _align): the larger of the
+ * element rule and the widest alignment its accesses claim. A packed-only
+ * type never reaches here: rocke_i_refuse_packed_only_value refuses its LDS
+ * tiles. */
+static int ll_smem_align(const rocke_type_t* stype, int widest)
+{
+    int elem_align = 4;
+    const char* n = (stype && stype->elem) ? stype->elem->name : NULL;
+    if(n && strcmp(n, "f64") == 0)
+        elem_align = 8;
+    else if(n
+            && (strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+                || strcmp(n, "bf8e5m2") == 0))
+        elem_align = 16;
+    return (widest > elem_align) ? widest : elem_align;
 }
 
 void rocke_ll_compute_smem_layout(rocke_lower_t* L)
@@ -1418,6 +1452,11 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     ctx.num_intervals = n;
     ctx.counter = 0;
     ll_liveness_walk(&ctx, L->kernel ? L->kernel->body : NULL, -1);
+
+    int* access_align = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!access_align)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: access_align alloc");
+    ll_collect_smem_access_align(L, L->kernel ? L->kernel->body : NULL, access_align);
 
     /* Fix up allocations with no uses: first_seq = last_seq = 0. */
     for(size_t i = 0; i < n; i++)
@@ -1489,7 +1528,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
         int seg = ll_smem_seg_size(stype);
         sizes[gi] = seg;
-        int aln = ll_smem_align(stype);
+        int aln = ll_smem_align(stype, access_align[gi]);
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
         /* Exclusive (cshuffle no-alias) allocations must not reuse another
@@ -1574,7 +1613,8 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         if(e > pool_size)
             pool_size = e;
     }
-    L->smem_pool_size = (pool_size + 15) & ~15;
+    L->smem_pool_size
+        = (pool_size + ROCKE_LL_SMEM_POOL_ALIGN - 1) & ~(ROCKE_LL_SMEM_POOL_ALIGN - 1);
 
     /* Populate L->smem_offsets in declaration order. */
     for(size_t i = 0; i < n; i++)
@@ -2083,15 +2123,16 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     rocke_strbuf_append(out, "\n");
 
     /* smem pool: a single unified addrspace(3) global backing all smem allocations.
-     * align 16 satisfies all segment alignments (strictest: 16 B for ds_read_b64_tr_b8
-     * on i8/fp8 tiles). */
+     * The pool alignment bounds every segment alignment (an access claims at
+     * most the pool alignment; see rocke_ll_lds_access_align). */
     if(L->smem_globals.len > 0 && L->smem_pool_name && L->smem_pool_size > 0)
     {
         rocke_strbuf_appendf(out,
                              "%s = internal unnamed_addr addrspace(3) "
-                             "global [%d x i8] poison, align 16\n",
+                             "global [%d x i8] poison, align %d\n",
                              L->smem_pool_name,
-                             L->smem_pool_size);
+                             L->smem_pool_size,
+                             ROCKE_LL_SMEM_POOL_ALIGN);
         rocke_strbuf_append(out, "\n");
     }
 
