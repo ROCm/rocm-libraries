@@ -133,7 +133,7 @@ function(add_gtest TEST_NAME TEST_CPP)
   endif()
 
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
-  if(MIOPEN_ENABLE_AI_KERNEL_TUNING)
+  if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     target_link_libraries(${TEST_NAME} frugally-deep::fdeep Eigen3::Eigen)
   endif()
 
