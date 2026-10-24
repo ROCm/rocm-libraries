@@ -58,6 +58,7 @@ from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
 from geko.constants import GEMM_LOG_FIELDS, INDEX_TYPE_MAP
 from geko.library import _bank
+from geko.library.uid_uniqueness import assign_fresh_solution_uids, uniquify_generated_logic
 
 logger = logging.getLogger("GEKO")
 
@@ -165,7 +166,11 @@ def merge_solutions(
     lib_paths = sorted(input_dir.glob(pattern))
     if not lib_paths:
         raise ValueError(f"No valid YAML libraries found in '{input_dir}'")
-    logger.debug(f"Merging solutions, discovered {len(lib_paths)} library files")
+    rewritten = uniquify_generated_logic(lib_paths)
+    logger.debug(
+        f"Merging solutions, discovered {len(lib_paths)} library files; "
+        f"rewrote {rewritten} colliding SolutionUID values"
+    )
 
     # update dependant parameters if StaggerU == 0
     def _sanitize_solution(sol):
@@ -539,6 +544,8 @@ def from_dataframe(
     Note:
         Groups solutions by GEMM type and creates separate library files
         with only the selected solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``. ``TensileMergeLibrary``
+        keeps the base UID when ``SolutionNameMin`` already exists.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -594,6 +601,7 @@ def from_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
 
 
@@ -617,6 +625,8 @@ def from_full_dataframe(
     Note:
         Groups solutions by GEMM type and creates separate library files
         with the best of tuned, reference solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``, including a solution
+        copied from another library such as Origami.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -705,6 +715,7 @@ def from_full_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
     
 

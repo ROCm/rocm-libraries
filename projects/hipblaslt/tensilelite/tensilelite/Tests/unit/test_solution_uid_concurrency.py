@@ -16,6 +16,7 @@ from tensilelite.Common.SolutionIdGen import (
     RANDOM_MASK,
     RANDOM_SHIFT,
     _ms_since_epoch,
+    claim_solution_uid,
     decode_solution_id,
     decode_solution_uid,
     encode_solution_uid,
@@ -23,6 +24,7 @@ from tensilelite.Common.SolutionIdGen import (
     generate_solution_id,
     read_solution_uid,
     regenerate_solution_uid,
+    rewrite_colliding_solution_uids,
 )
 
 pytestmark = pytest.mark.unit
@@ -237,3 +239,64 @@ def test_regenerate_solution_uid_replaces_existing_value() -> None:
     new_uid = regenerate_solution_uid(solution)
     assert new_uid != 42
     assert solution["SolutionUID"] == encode_solution_uid(new_uid)
+
+
+def test_claim_solution_uid_keeps_unused_value() -> None:
+    """A stored UID that is not reserved stays on the solution.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the stored UID is replaced.
+    """
+    solution = {"SolutionUID": "0u5"}
+    seen: set[str] = set()
+    assert claim_solution_uid(solution, seen) == "0u5"
+    assert seen == {"0u5"}
+
+
+def test_claim_solution_uid_regenerates_a_collision() -> None:
+    """A UID already in ``seen`` is replaced.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the colliding UID is kept.
+    """
+    solution = {"SolutionUID": "0u5"}
+    seen = {"0u5"}
+    claimed = claim_solution_uid(solution, seen)
+    assert claimed != "0u5"
+    assert claimed in seen
+    assert solution["SolutionUID"] == claimed
+
+
+def test_rewrite_colliding_solution_uids_changes_only_the_duplicate(tmp_path) -> None:
+    """The second file's colliding line is replaced and the first file is kept.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the first UID changes or the second stays a duplicate.
+    """
+    first = tmp_path / "a.yaml"
+    second = tmp_path / "b.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u5\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u5\n", encoding="utf-8")
+    assert rewrite_colliding_solution_uids([first, second]) == 1
+    assert "SolutionUID: 0u5" in first.read_text(encoding="utf-8")
+    second_text = second.read_text(encoding="utf-8")
+    assert "SolutionUID: 0u5" not in second_text
+    assert "SolutionIndex: 1" in second_text

@@ -1402,7 +1402,8 @@ namespace TensileLite
             double max       = 1000.0;
         };
 
-        int                          index = 0;
+        int                          index       = 0;
+        uint64_t                     solutionUid = 0;
         std::string                  kernelName;
         std::string                  solutionName;
         ThreadSafeValue<std::string> codeObjectFilename;

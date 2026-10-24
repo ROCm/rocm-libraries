@@ -1,9 +1,10 @@
 # Solution UID foundation
 
 `SolutionUID` is a stable 64-bit identifier for a hipBLASLt/TensileLite
-solution. This first migration step provides the identifier format and
-maintenance tooling, but does not assign or consume UIDs in library generation
-or at runtime.
+solution. Library generation assigns one. Until UID selection becomes
+mandatory, library load gives a solution without the field a temporary
+in-memory UID so existing logic continues to build. Runtime selection by UID
+is a later migration step.
 
 ## Identifier format
 
@@ -30,11 +31,11 @@ the optional, unquoted `SolutionUID` field immediately after the local
   SolutionUID: 0u3E
 ```
 
-YAML readers decode the text immediately and all identity, comparison, and
-mapping operations use the unsigned 64-bit value. New dict-format files from
-LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID` immediately
-after `SolutionIndex`. Legacy list-format files keep keys in their existing
-alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
+Decoding is explicit: a reader calls ``decode_solution_uid`` and then uses the
+unsigned 64-bit value for identity, comparison, and mapping. New dict-format
+files from LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID`
+immediately after `SolutionIndex`. Legacy list-format files keep keys in their
+existing alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
 
 ## Regenerate a UID
 
@@ -49,5 +50,6 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-Repository-wide assignment, runtime selection, and mandatory uniqueness are
-introduced by later migration steps.
+One Tensile process, one Geko generation, and one library merge each reject a
+UID collision inside that run. Uniqueness across the shipped logic tree remains
+the ``library-uniqueness`` check. Runtime selection by UID is a later step.

@@ -210,6 +210,90 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
     assert len(libs[0].sizes) == 1
 
 
+def test_from_full_dataframe_replaces_a_copied_reference_uid(tmp_path: Path) -> None:
+    """A reference solution copied into full_libs must not keep its source UID.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the copied Origami UID is still stored.
+    """
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    tuned = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+    ]
+    yaml.safe_dump(tuned, (lib_dir / "a.yaml").open("w"), sort_keys=False)
+
+    origami = tmp_path / "origami.yaml"
+    origami_data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {"TransposeA": 0, "TransposeB": 0, "DataType": 0, "DestDataType": 0, "ComputeDataType": 0},
+        [{"SolutionIndex": 0, "SolutionUID": "0u5", "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Origami",
+    ]
+    yaml.safe_dump(origami_data, origami.open("w"), sort_keys=False)
+    match_table = _write_match_table(tmp_path, {0: [str(origami), 0]})
+
+    df = pd.DataFrame(
+        [
+            {
+                "lib": "a.yaml",
+                "M": 16,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
+                "winner": "reference",
+                "solutionIdx_reference": 0,
+            }
+        ]
+    )
+
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
+
+    uid = libs[0].solutions[0]["SolutionUID"]
+    assert uid != "0u5"
+    assert uid.startswith("0u")
+
+
 def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> None:
     """Regression test: multiple sizes may map to the same source solution.
 
