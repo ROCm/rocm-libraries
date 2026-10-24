@@ -2123,6 +2123,70 @@ void testing_write_file_RSIO()
 }
 
 template <typename T>
+void testing_read_file_RSIO_mixed_precision()
+{
+    // Read a file written in one precision into a matrix of the other precision, for every
+    // format, so that the readers convert the values while reading
+    using U = typename std::conditional<std::is_same<T, float>::value, double, float>::type;
+
+    // Matrix representation, with dimensions that are a multiple of the BCSR block dimension:
+    // [ 1.0  0.0  2.0  0.0 ]
+    // [ 0.0  3.0  0.0  0.0 ]
+    // [ 4.0  0.0  5.0  6.0 ]
+    // [ 0.0  0.0  0.0  7.0 ]
+    const int n              = 4;
+    PtrType   row_offsets[5] = {0, 2, 3, 6, 7};
+    int       col_indices[7] = {0, 2, 1, 0, 2, 3, 3};
+    T         values[7]      = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0};
+    U         dense_ref[16]
+        = {1.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0, 0.0, 5.0, 6.0, 0.0, 0.0, 0.0, 7.0};
+
+    const std::string filename = get_temp_dir() + "test_matrix_mixed_precision.rsio";
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        LocalMatrix<T> matrix;
+        matrix.AllocateCSR("test", 7, n, n);
+        matrix.CopyFromCSR(row_offsets, col_indices, values);
+        matrix.ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(matrix.GetFormat(), format);
+        ASSERT_NO_THROW(matrix.WriteFileRSIO(filename));
+
+        LocalMatrix<U> mat;
+        mat.ReadFileRSIO(filename);
+        EXPECT_EQ(mat.GetFormat(), format);
+        ASSERT_EQ(mat.GetM(), n);
+        ASSERT_EQ(mat.GetN(), n);
+
+        // Compare the dense representation, as some formats store explicit zeros
+        mat.ConvertToCSR();
+        std::vector<PtrType> ptr(n + 1);
+        std::vector<int>     col(mat.GetNnz());
+        std::vector<U>       val(mat.GetNnz());
+        mat.CopyToCSR(ptr.data(), col.data(), val.data());
+
+        U dense[n * n] = {};
+        for(int i = 0; i < n; ++i)
+        {
+            for(PtrType j = ptr[i]; j < ptr[i + 1]; ++j)
+            {
+                dense[i * n + col[j]] += val[j];
+            }
+        }
+
+        for(int i = 0; i < n * n; ++i)
+        {
+            EXPECT_EQ(dense[i], dense_ref[i]);
+        }
+    }
+
+    // Clean up the test file
+    std::remove(filename.c_str());
+}
+
+template <typename T>
 void testing_local_apply(Arguments argus)
 {
     LocalMatrix<T> matrix;
