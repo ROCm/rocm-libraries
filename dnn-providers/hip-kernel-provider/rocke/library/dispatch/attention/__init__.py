@@ -357,7 +357,8 @@ def priority_ranker(
 
 # Per-arch dense candidate order for unpinned contiguous-layout requests.
 _DENSE_AUTO_ORDER = {
-    "gfx942": gfx942_dense.dense_auto_order,
+    # One candidate whose default spec already picks its body.
+    "gfx942": lambda req: (gfx942_dense.CANDIDATE_NAME,),
     "gfx950": gfx950_dense.dense_auto_order,
 }
 

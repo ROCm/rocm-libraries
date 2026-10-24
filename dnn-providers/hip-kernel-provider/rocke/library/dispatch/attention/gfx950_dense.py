@@ -40,15 +40,7 @@ _DENSE_TILE = "default"
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
 _FEATURES = frozenset(
-    {
-        "causal",
-        "sliding_window",
-        "full_attention",
-        "band",
-        "sinks",
-        "lse",
-        "layout_dense",
-    }
+    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
 )
 
 

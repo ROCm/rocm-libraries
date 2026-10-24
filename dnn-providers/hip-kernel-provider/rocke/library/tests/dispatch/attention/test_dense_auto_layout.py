@@ -86,10 +86,12 @@ def test_single_query_row_is_not_routed_to_dense(arch):
         dispatch_attention(_request(arch, seqlen_q=1, mask_type=0))
 
 
-def test_dense_refusal_does_not_fall_back_to_another_kernel():
-    # gfx942 dense has no bottom-right diagonal and nothing else serves dense tensors.
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_dense_refusal_does_not_fall_back_to_another_kernel(arch):
+    # The dense kernels have no head-size-256 body, and no other CDNA kernel
+    # serves contiguous tensors.
     with pytest.raises(ValueError):
-        dispatch_attention(_request("gfx942", seqlen_q=512, seqlen_k=8192, mask_type=2))
+        dispatch_attention(_request(arch, hdim_q=256, hdim_v=256))
 
 
 def test_explicit_pin_is_unchanged():
