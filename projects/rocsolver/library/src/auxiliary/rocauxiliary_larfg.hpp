@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     November 2017
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,9 @@
 #include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
+
+/******************* Device functions ******************************************/
+/*******************************************************************************/
 
 template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
@@ -153,33 +156,110 @@ ROCSOLVER_KERNEL void set_taubeta(T* tauA,
     run_set_taubeta<T, S>(tau, norms + bid, alpha, beta);
 }
 
+/******************* Host functions ********************************************/
+/*******************************************************************************/
+
+template <typename T, typename I>
+bool larfg_use_kernel(const hipDeviceProp_t& props, const I n)
+{
+/*! \brief Overrides the size at which rocSOLVER switches from
+    the kernel to the BLAS implementation when executing LARFG.
+    Define LARFG_SSKER_MAX_N to set a constant switch value. */
+#ifndef LARFG_SSKER_MAX_N
+    //
+    // Use measured bounds for tested devices, otherwise use default bounds.
+    //
+    std::string deviceArch(props.gcnArchName);
+
+    if(deviceArch.find("gfx90a") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 27136;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 20992;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 18944;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 20992;
+        }
+    }
+    else if(deviceArch.find("gfx942") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 98304;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 57344;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 81920;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 57344;
+        }
+    }
+    else if(deviceArch.find("gfx950") != std::string::npos)
+    {
+        if constexpr(std::is_same_v<float, T>)
+        {
+            return n <= 27136;
+        }
+        else if constexpr(std::is_same_v<double, T>)
+        {
+            return n <= 20992;
+        }
+        else if constexpr(std::is_same_v<rocblas_float_complex, T>)
+        {
+            return n <= 18944;
+        }
+        else if constexpr(std::is_same_v<rocblas_double_complex, T>)
+        {
+            return n <= 12800;
+        }
+    }
+
+    return n <= LARFG_SSKER_DEFAULT_MAX_N;
+#else
+    return n <= LARFG_SSKER_MAX_N;
+#endif // LARFG_SSKER_MAX_N
+}
+
 template <typename T, typename I>
 rocblas_status rocsolver_larfg_getMemorySize(const I n,
                                              const I batch_count,
                                              size_t* size_work,
                                              size_t* size_norms)
 {
+    *size_norms = 0;
+    *size_work = 0;
+
     // if quick return no workspace needed
     if(n == 0 || batch_count == 0)
     {
-        *size_norms = 0;
-        *size_work = 0;
         return rocblas_status_success;
     }
 
-    // if small size no workspace needed
-    if(n <= LARFG_SSKER_MAX_N)
-    {
-        *size_norms = 0;
-        *size_work = 0;
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
+    // if small size no workspace needed
+    if(larfg_use_kernel<T>(props, n) && props.warpSize >= 64)
+    {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
-        int device;
-        HIP_CHECK(hipGetDevice(&device));
-        hipDeviceProp_t props;
-        HIP_CHECK(hipGetDeviceProperties(&props, device));
-        if(props.warpSize >= 64)
-            return rocblas_status_success;
+        return rocblas_status_success;
     }
 
     // size of space to store norms
@@ -264,15 +344,12 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     }
 
     // if n is small, use small-size kernel
-    if(true)
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(larfg_use_kernel<T>(*props, n) && props->warpSize >= 64)
     {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
-        const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
-        if(props->warpSize >= 64)
-        {
-            return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x,
-                                   shiftx, incx, stridex, tau, strideP, batch_count);
-        }
+        return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x, shiftx,
+                               incx, stridex, tau, strideP, batch_count);
     }
 
     // everything must be executed with scalars on the device
