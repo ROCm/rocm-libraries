@@ -116,6 +116,12 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
     bool alibi = false;
+    // cuDNN sdpa_fp8 softmax / output scaling: one-element FLOAT scales and amax outputs.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleOTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxOTensor;
 };
 
 template <typename QDataType,
@@ -134,7 +140,11 @@ public:
     std::vector<int64_t> getOutputTensorIds() const override
     {
         std::vector<int64_t> ids = {_params.oTensor.uid};
-        for(const auto* stats : {&_params.lseTensor, &_params.maxTensor, &_params.sumExpTensor})
+        for(const auto* stats : {&_params.lseTensor,
+                                 &_params.maxTensor,
+                                 &_params.sumExpTensor,
+                                 &_params.amaxSTensor,
+                                 &_params.amaxOTensor})
         {
             if(stats->has_value())
             {
@@ -252,6 +262,14 @@ public:
                 *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
         }
 
+        const auto scalar = [&variantPack](const auto& attrs, const char* name) {
+            return attrs.has_value()
+                       ? std::optional<float>(resolveHostScalarOperand(*attrs, variantPack, name))
+                       : std::nullopt;
+        };
+        auto shallowAmaxS = bindStats(_params.amaxSTensor);
+        auto shallowAmaxO = bindStats(_params.amaxOTensor);
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
@@ -278,7 +296,11 @@ public:
                     .setLse(shallowLseTensor.get())
                     .setRowStats(shallowMaxTensor.get(), shallowSumExpTensor.get())
                     .setDescales(
-                        shallowDescaleQ.get(), shallowDescaleK.get(), shallowDescaleV.get()));
+                        shallowDescaleQ.get(), shallowDescaleK.get(), shallowDescaleV.get())
+                    .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
+                                      scalar(_params.descaleSTensor, "SDPA descale_s"))
+                    .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
+                    .setAmax(shallowAmaxS.get(), shallowAmaxO.get()));
     }
 
 private:
@@ -410,13 +432,8 @@ public:
             }
         }
 
-        // Unsupported regardless of dtype: softmax/output (de)quantization. The
-        // forward reference models only q/k/v descales.
-        if(nodeAttributes->descale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_o_tensor_uid().has_value()
-           || nodeAttributes->amax_s_tensor_uid().has_value()
-           || nodeAttributes->amax_o_tensor_uid().has_value())
+        // cuDNN sdpa_fp8 softmax / output scaling and amax outputs (fp8 inputs only).
+        if(!isSupportedSdpaFp8Scaling(*nodeAttributes, tensorMap, IS_FP8_INPUT))
         {
             return false;
         }
@@ -523,6 +540,18 @@ public:
                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                                  : nullptr);
         params.alibi = nodeAttributes->alibi_mask();
+        for(auto [uid, bound] :
+            {std::pair{nodeAttributes->scale_s_tensor_uid(), &params.scaleSTensor},
+             std::pair{nodeAttributes->descale_s_tensor_uid(), &params.descaleSTensor},
+             std::pair{nodeAttributes->scale_o_tensor_uid(), &params.scaleOTensor},
+             std::pair{nodeAttributes->amax_s_tensor_uid(), &params.amaxSTensor},
+             std::pair{nodeAttributes->amax_o_tensor_uid(), &params.amaxOTensor}})
+        {
+            if(uid.has_value())
+            {
+                *bound = unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
         if(nodeAttributes->max_tensor_uid().has_value())
         {
             params.maxTensor

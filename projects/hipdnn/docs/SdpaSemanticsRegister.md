@@ -247,6 +247,25 @@ batch when `seq_len_q/kv` are set).
 - **Other use cases:** cuDNN added these for Muon-clip style score monitoring; FlashAttention and vLLM expose only
   the LSE.
 
+### SEM-024: fp8 softmax and output scaling (cuDNN sdpa_fp8)
+
+- **Status:** Matches cuDNN up to 128 keys per row; above that it differs by tile (below).
+- **cuDNN:** with fp8 Q/K/V: S = (Q K^T) * descale_q * descale_k * scale (+ bias, masks); P is the unnormalized
+  exp(S - m), stored in the input fp8 type as fp8(P * scale_s), and P @ V is multiplied by descale_s * descale_v;
+  the result is divided by the sum of the *unquantized* exp (plus the sink term). O = fp8(O_f * scale_o);
+  amax_o = max |O_f|. cuDNN's reference computes this online per 128-key tile, so m is the running row max of
+  the tiles seen so far, not the final one.
+  - Source: cudnn-frontend `test/python/sdpa/fp8_ref.py` (compute_ref), scales from `helpers.py`.
+- **hipDNN:** the references quantize exp(S - Max) with the final row max (Max includes the sink). With at most
+  128 keys this is exactly cuDNN's computation: the fp8 golden bundles (`generate_sdpa_fwd_golden.py
+  --fp8-scaling`) reproduce cuDNN's `compute_ref` bit for bit. With more keys, earlier tiles see a smaller m and
+  their P lands on different fp8 codes; the difference is a quantization artifact, not a different softmax.
+  amax_s = max exp(S - Max) over live keys before scale_s (1 for any row whose max is a key; below 1 when the sink
+  dominates). Encoding is round-to-nearest-even and saturating (hipdnn_data_sdk); PyTorch's cast does not
+  saturate, which only matters past the fp8 range. scale_s / descale_s need fp8 inputs; scale_o and the amax
+  outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined.
+- **Contract:** cuDNN for <= 128 keys. A tile-faithful mode would need the tile size as an input.
+
 ### SEM-020: Softcap
 
 - **Status:** Extension, implemented in the references only; not expressible in the graph.

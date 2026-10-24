@@ -2188,7 +2188,7 @@ void expectFp8ForwardMatchesCpu()
 
     Tensor<float> oCpu({BATCH, H, SQ, D});
     Tensor<float> oGpu({BATCH, H, SQ, D});
-    Tensor<float> lseCpu({BATCH, H, SQ});
+    Tensor<float> lseCpu({BATCH, H, SQ, 1}); // the GPU reference takes the LSE as rank 3
     Tensor<float> lseGpu({BATCH, H, SQ});
     oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
     lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
@@ -2213,7 +2213,18 @@ void expectFp8ForwardMatchesCpu()
             .setLse(&lseGpu)
             .setDescales(&descaleQ, &descaleK, &descaleV));
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
-    assertAllClose(lseCpu, lseGpu, gpuRefFwdTolerance<float>());
+    lseGpu.memory().hostData();
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                EXPECT_NEAR(lseGpu.getHostValue(b, h, s), lseCpu.getHostValue(b, h, s, 0), 1e-5F)
+                    << "b=" << b << " h=" << h << " s=" << s;
+            }
+        }
+    }
 }
 
 // Every non-NaN bit pattern decodes on the device exactly as on the host: with one key the
@@ -2301,5 +2312,216 @@ TEST(TestGpuSdpaFwdFp8, PerHeadDescaleOnPagedKvThrows)
                          .setSeqLens(&lenQ, &lenKv)
                          .setPaged(&table, &table, 6)
                          .setDescales(&scalar, &perHead, &scalar))),
+                 std::invalid_argument);
+}
+
+// ============================================================================
+// cuDNN sdpa_fp8 softmax and output scaling (SEM-024) on the GPU.
+// ============================================================================
+
+namespace
+{
+
+// Floats that probe an fp8 encoder: every code's value, the midpoints between neighbours (ties)
+// and the floats either side of them, out-of-range and tiny values, and random values.
+template <typename Fp8>
+std::vector<float> fp8EncodeProbes()
+{
+    std::vector<float> xs;
+    for(unsigned c = 0; c < 256; ++c)
+    {
+        if(isFp8NanBits<Fp8>(c))
+        {
+            continue;
+        }
+        Fp8 a{};
+        a.data = static_cast<uint8_t>(c);
+        const auto va = static_cast<float>(a);
+        xs.push_back(va);
+        if(c + 1 < 256 && !isFp8NanBits<Fp8>(c + 1) && (c & 0x7Fu) != 0x7Fu)
+        {
+            Fp8 b{};
+            b.data = static_cast<uint8_t>(c + 1);
+            const float mid = 0.5f * (va + static_cast<float>(b));
+            xs.push_back(mid);
+            xs.push_back(std::nextafter(mid, 1e9f));
+            xs.push_back(std::nextafter(mid, -1e9f));
+        }
+    }
+    for(const float x : {1000.0f, -1000.0f, 1e-30f, -1e-30f, 0.0f, -0.0f})
+    {
+        xs.push_back(x);
+    }
+    Tensor<float> random({512});
+    random.fillWithRandomValues(-300.0f, 300.0f, SEED_Q);
+    for(int64_t i = 0; i < 512; ++i)
+    {
+        xs.push_back(random.getHostValue(i));
+    }
+    return xs;
+}
+
+// With one key the softmax weight is exactly 1, so O_f = V and O = Fp8(V * 1): the device encoder
+// (GpuRefTypes.h fp8E4m3FromFloat) must give the host encoder's bits for every probe.
+template <typename Fp8>
+void expectFp8DeviceEncodeMatchesHost()
+{
+    const auto xs = fp8EncodeProbes<Fp8>();
+    const auto n = static_cast<int64_t>(xs.size());
+    Tensor<float> q({1, 1, 1, 1});
+    Tensor<float> k({1, 1, 1, 1});
+    Tensor<float> v({1, 1, 1, n});
+    q.fillWithValue(0.0f);
+    k.fillWithValue(0.0f);
+    for(int64_t e = 0; e < n; ++e)
+    {
+        v.setHostValue(xs[static_cast<size_t>(e)], 0, 0, 0, e);
+    }
+    Tensor<Fp8> o({1, 1, 1, n});
+    GpuFpReferenceSdpa::fprop<float, float, float, Fp8>(
+        q, k, v, o, GpuSdpaFwdOptions<float>{}.setOutputScale(1.0f));
+    o.memory().hostData();
+    int mismatches = 0;
+    for(int64_t e = 0; e < n; ++e)
+    {
+        const float x = xs[static_cast<size_t>(e)];
+        const auto want = Fp8(x).data;
+        const auto got = o.getHostValue(0, 0, 0, e).data;
+        if(want != got && ++mismatches <= 8)
+        {
+            ADD_FAILURE() << std::hexfloat << "x=" << x << std::hex << " host=0x"
+                          << static_cast<int>(want) << " device=0x" << static_cast<int>(got);
+        }
+    }
+    EXPECT_EQ(mismatches, 0) << "of " << n << " probes";
+}
+
+// GQA, bottom-right causal, every cuDNN sdpa_fp8 scale and both amax outputs, fp8 O. O_f differs
+// between devices by summation order, so an fp8 code may flip where O_f * scaleO sits on a
+// rounding boundary: decoded values must agree to one fp8 step and almost every code exactly.
+template <typename Fp8>
+void expectFp8ScaledForwardMatchesCpu()
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 6;
+    constexpr int64_t SKV = 9;
+    constexpr int64_t D = 16;
+    Tensor<Fp8> q({BATCH, H, SQ, D});
+    Tensor<Fp8> k({BATCH, HKV, SKV, D});
+    Tensor<Fp8> v({BATCH, HKV, SKV, D});
+    fillFp8(q, SEED_Q + 10);
+    fillFp8(k, SEED_K + 10);
+    fillFp8(v, SEED_V + 10);
+    Tensor<float> descaleQ({1});
+    Tensor<float> descaleK({1});
+    Tensor<float> descaleV({1});
+    descaleQ.fillWithValue(0.5f);
+    descaleK.fillWithValue(0.75f);
+    descaleV.fillWithValue(1.25f);
+
+    Tensor<Fp8> oCpu({BATCH, H, SQ, D});
+    Tensor<Fp8> oGpu({BATCH, H, SQ, D});
+    Tensor<float> amaxSCpu({1});
+    Tensor<float> amaxOCpu({1});
+    Tensor<float> amaxSGpu({1});
+    Tensor<float> amaxOGpu({1});
+    amaxSGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    amaxOGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    const auto scaleS = 32.0f;
+    const auto scaleO = 8.0f;
+    CpuFpReferenceSdpa::forward<Fp8, Fp8, Fp8, Fp8>(
+        q,
+        k,
+        v,
+        oCpu,
+        SdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setBand(-1, 0, false)
+            .setDescales(&descaleQ, &descaleK, &descaleV)
+            .setSoftmaxScales(scaleS, 1.0f / scaleS)
+            .setOutputScale(scaleO)
+            .setAmax(&amaxSCpu, &amaxOCpu));
+    GpuFpReferenceSdpa::fprop<Fp8, Fp8, Fp8, Fp8>(q,
+                                                  k,
+                                                  v,
+                                                  oGpu,
+                                                  GpuSdpaFwdOptions<float>{}
+                                                      .setScale(0.25f)
+                                                      .setBand(-1, 0, false)
+                                                      .setDescales(&descaleQ, &descaleK, &descaleV)
+                                                      .setSoftmaxScales(scaleS, 1.0f / scaleS)
+                                                      .setOutputScale(scaleO)
+                                                      .setAmax(&amaxSGpu, &amaxOGpu));
+    oGpu.memory().hostData();
+    amaxSGpu.memory().hostData();
+    amaxOGpu.memory().hostData();
+    EXPECT_EQ(amaxSGpu.getHostValue(0), amaxSCpu.getHostValue(0));
+    EXPECT_NEAR(
+        amaxOGpu.getHostValue(0), amaxOCpu.getHostValue(0), 1e-5f * amaxOCpu.getHostValue(0));
+
+    int64_t exact = 0;
+    int64_t total = 0;
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    const auto c = static_cast<float>(oCpu.getHostValue(b, h, s, d));
+                    const auto g = static_cast<float>(oGpu.getHostValue(b, h, s, d));
+                    // One E4M3 step is at most 1/8 of the value (2^-9 below the normals).
+                    EXPECT_NEAR(g, c, std::fabs(c) / 8.0f + 0.002f)
+                        << "b=" << b << " h=" << h << " s=" << s << " d=" << d;
+                    exact
+                        += oCpu.getHostValue(b, h, s, d).data == oGpu.getHostValue(b, h, s, d).data
+                               ? 1
+                               : 0;
+                    ++total;
+                }
+            }
+        }
+    }
+    EXPECT_GE(exact * 100, total * 99) << exact << " of " << total << " codes equal";
+}
+
+} // namespace
+
+TEST(TestGpuSdpaFwdFp8, OcpE4m3DeviceEncodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceEncodeMatchesHost<fp8_e4m3>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE4m3DeviceEncodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceEncodeMatchesHost<fp8_e4m3_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE4m3ScaledForwardMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ScaledForwardMatchesCpu<fp8_e4m3>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE4m3ScaledForwardMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ScaledForwardMatchesCpu<fp8_e4m3_fnuz>();
+}
+
+// P is stored in Q's fp8 format, so softmax scaling needs fp8 Q, as on the CPU.
+TEST(TestGpuSdpaFwdFp8, SoftmaxScalingNeedsFp8Q)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> q({1, 1, 1, 2});
+    Tensor<float> o({1, 1, 1, 2});
+    q.fillWithValue(1.0f);
+    EXPECT_THROW(GpuFpReferenceSdpa::fprop(
+                     q, q, q, o, GpuSdpaFwdOptions<float>{}.setSoftmaxScales(2.0f, 0.5f)),
                  std::invalid_argument);
 }

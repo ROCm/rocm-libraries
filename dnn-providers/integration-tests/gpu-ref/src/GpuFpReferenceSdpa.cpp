@@ -97,7 +97,8 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        const std::vector<int64_t>& rowMaxStrides,
                                        void* rowSumExpPtr,
                                        const std::vector<int64_t>& rowSumExpStrides,
-                                       bool alibi)
+                                       bool alibi,
+                                       const SdpaFp8Softmax& fp8)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -155,6 +156,15 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.rowMaxStr = toSdpaStrides(rowMaxStrides);
     args.rowSumExpStr = toSdpaStrides(rowSumExpStrides);
     args.score.alibi = alibi ? 1 : 0;
+    args.pFp8Format = static_cast<int>(fp8.format);
+    args.scaleS = fp8.scaleS;
+    args.descaleS = fp8.descaleS;
+    args.amaxS = fp8.amaxS;
+    if(fp8.amaxS != nullptr)
+    {
+        // The kernel max-reduces into amaxS (values >= 0), so it starts at 0.
+        detail::throwOnHipError(hipMemset(fp8.amaxS, 0, sizeof(float)), "hipMemset");
+    }
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
@@ -263,7 +273,7 @@ void GpuFpReferenceSdpa::launchSdpaDequant(const void* in,
     const std::vector<std::string> defines
         = {std::string("-DIN_TYPE=") + inType, std::string("-DCOMPUTE_TYPE=float")};
     auto& kernel = detail::GpuRefKernelCompiler::instance().getOrCompile(
-        "GpuRefSdpaDequant.cpp", defines, "sdpaDequantRef");
+        "GpuRefSdpaFp8.cpp", defines, "sdpaDequantRef");
 
     SdpaDequantArgs args{};
     args.in = in;
@@ -279,6 +289,41 @@ void GpuFpReferenceSdpa::launchSdpaDequant(const void* in,
     args.descaleBatchStride = static_cast<long long>(descaleBatchStride);
     args.descaleHeadStride = static_cast<long long>(descaleHeadStride);
     args.headsPerKv = static_cast<long long>(headsPerKv);
+    detail::launchKernelForElements(kernel.function(), elements, &args, sizeof(args));
+}
+
+// --- fp8 output scale launcher ---
+
+void GpuFpReferenceSdpa::launchSdpaScaleOut(const float* in,
+                                            const std::vector<int64_t>& dims,
+                                            const std::vector<int64_t>& outStrides,
+                                            void* out,
+                                            float scale,
+                                            float* amax,
+                                            const char* outType)
+{
+    const std::vector<std::string> defines
+        = {std::string("-DO_TYPE=") + outType, std::string("-DCOMPUTE_TYPE=float")};
+    auto& kernel = detail::GpuRefKernelCompiler::instance().getOrCompile(
+        "GpuRefSdpaFp8.cpp", defines, "sdpaScaleOutRef");
+
+    SdpaScaleOutArgs args{};
+    args.in = in;
+    args.out = out;
+    args.outStr = toSdpaStrides(outStrides);
+    int64_t elements = 1;
+    for(size_t i = 0; i < 4; ++i)
+    {
+        args.dims[i] = static_cast<long long>(dims[i]);
+        elements *= dims[i];
+    }
+    args.scale = scale;
+    args.amax = amax;
+    if(amax != nullptr)
+    {
+        // The kernel max-reduces |O_f| into amax, so it starts at 0.
+        detail::throwOnHipError(hipMemset(amax, 0, sizeof(float)), "hipMemset");
+    }
     detail::launchKernelForElements(kernel.function(), elements, &args, sizeof(args));
 }
 

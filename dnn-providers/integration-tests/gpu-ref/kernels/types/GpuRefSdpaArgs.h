@@ -91,6 +91,13 @@ struct SdpaFwdArgs
     void* rowSumExp;
     SdpaStrides rowMaxStr;
     SdpaStrides rowSumExpStr;
+    // cuDNN sdpa_fp8 softmax scaling (SEM-024): P @ V uses
+    // fp8(exp(s - Max) * scaleS) * descaleS / Sum_exp, in format pFp8Format (0 = off, 1 = OCP
+    // E4M3, 2 = FNUZ). amaxS (nullptr = off, zeroed by the host) gets max exp(s - Max).
+    int pFp8Format;
+    float scaleS;
+    float descaleS;
+    float* amaxS;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -206,6 +213,25 @@ struct SdpaDequantArgs
     const float* descale;
     long long descaleBatchStride, descaleHeadStride;
     long long headsPerKv;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)
+
+// --- fp8 output scaling (cuDNN sdpa_fp8 scale_o / amax_o) ---
+// out (O_TYPE, outStr) = in (packed float, dims) * scale; amax (nullptr = off, zeroed by the
+// host) gets max |in|.
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
+struct SdpaScaleOutArgs
+{
+    const float* in;
+    void* out;
+    SdpaStrides outStr;
+    long long dims[4];
+    float scale;
+    float* amax;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
