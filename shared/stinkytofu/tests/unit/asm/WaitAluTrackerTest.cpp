@@ -56,6 +56,26 @@ class WaitAluTrackerTest : public ::testing::Test {
                  "] = " + kWmma + "\n";
         return s;
     }
+
+    // Commit `followers` one by one: untilFree drops by one per op and query() clears the
+    // counter exactly when it reaches 0.
+    static void expectCountsDown(WaitAluTracker& t, const StinkyInstruction& consumer,
+                                 WaitAluHideOp op, const std::vector<StinkyInstruction*>& followers,
+                                 bool vm) {
+        auto waits = [&] {
+            const WaitAluNeed n = t.query(consumer);
+            return (vm ? n.vmVsrc : n.vaVdst) >= 0;
+        };
+        int left = t.untilFree(consumer, op);
+        ASSERT_GT(left, 0);
+        ASSERT_LE(static_cast<size_t>(left), followers.size());
+        for (size_t i = 0; left > 0; ++i, --left) {
+            EXPECT_TRUE(waits());
+            t.commit(*followers[i]);
+            EXPECT_EQ(t.untilFree(consumer, op), left - 1);
+        }
+        EXPECT_FALSE(waits());
+    }
 };
 
 // untilFree counts down by one per WMMA and reaches 0 exactly when query() drops the va_vdst.
@@ -131,6 +151,66 @@ TEST_F(WaitAluTrackerTest, RequiredGapUsesFormWmma) {
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma), 0);
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[3], WaitAluHideOp::Wmma), -1);
     EXPECT_GT(t.requiredGap(*insts[1], *insts[3], WaitAluHideOp::Wmma, insts[0]), 0);
+}
+
+// A VALU overwriting a flat_prefetch address is freed by flat ops (both FIFOs).
+TEST_F(WaitAluTrackerTest, FlatPrefetchAddressOverwrite) {
+    std::string body = "  \"st.flat_prefetch_b8\"(v[0:1]) { issueCycles = 1, latencyCycles = 1 }\n";
+    for (int i = 0; i < 16; ++i)
+        body += "  \"st.flat_prefetch_b8\"(v[" + std::to_string(2 + 2 * i) + ":" +
+                std::to_string(3 + 2 * i) + "]) { issueCycles = 1, latencyCycles = 1 }\n";
+    body += "  v0 = \"st.v_mov_b32\"(v100) { issueCycles = 1, latencyCycles = 1 }\n";
+    std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 18u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    const std::vector<StinkyInstruction*> followers(insts.begin() + 1, insts.end() - 1);
+    expectCountsDown(t, *insts.back(), WaitAluHideOp::Flat, followers, /*vm=*/true);
+}
+
+// A VALU overwriting a global_prefetch address is freed by TEX-FIFO ops, not LDS ones.
+TEST_F(WaitAluTrackerTest, GlobalPrefetchAddressOverwrite) {
+    std::string body =
+        "  \"st.global_prefetch_b8\"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }\n";
+    for (int i = 0; i < 16; ++i)
+        body += "  \"st.global_prefetch_b8\"(v" + std::to_string(10 + i) +
+                ", s[0:1]) { issueCycles = 1, latencyCycles = 1 }\n";
+    body += "  v0 = \"st.v_mov_b32\"(v100) { issueCycles = 1, latencyCycles = 1 }\n";
+    std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 18u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    EXPECT_EQ(t.untilFree(*insts.back(), WaitAluHideOp::Lds), -1);
+    const std::vector<StinkyInstruction*> followers(insts.begin() + 1, insts.end() - 1);
+    expectCountsDown(t, *insts.back(), WaitAluHideOp::Tex, followers, /*vm=*/true);
+}
+
+// An EXEC writer drains va_vdst whenever any VALU is in flight; no WMMA count hides it.
+TEST_F(WaitAluTrackerTest, ExecWriterNeverHidden) {
+    const std::vector<StinkyInstruction*> insts =
+        parse("  v[0:7] = " + std::string(kWmma) + "\n" +
+              "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n" +
+              "  s0 = \"st.s_and_saveexec_b32\"(s1) { issueCycles = 1, latencyCycles = 2 }\n");
+    ASSERT_EQ(insts.size(), 3u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    t.commit(*insts[1]);
+    EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma), -1);
+}
+
+// Before any WMMA issued, untilFree takes the form from formWmma; a non-WMMA gives none.
+TEST_F(WaitAluTrackerTest, UntilFreeUsesFormWmma) {
+    const std::vector<StinkyInstruction*> insts =
+        parse("  v[0:7] = " + std::string(kWmma) + "\n" +
+              "  v40 = \"st.v_mov_b32\"(v41) { issueCycles = 1, latencyCycles = 1 }\n" +
+              "  v100 = \"st.ds_load_b32\"(v40) " + kDsAttrs + "\n");
+    ASSERT_EQ(insts.size(), 3u);
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[1]);
+    EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma), -1);
+    EXPECT_EQ(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
+    EXPECT_GT(t.untilFree(*insts[2], WaitAluHideOp::Wmma, insts[0]), 0);
+    EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
 }
 
 }  // namespace

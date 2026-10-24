@@ -1,27 +1,49 @@
-# Scoreboard-driven VALU placement (gfx1250 DAG)
+# Scoreboard-driven filler placement (gfx1250 DAG)
 
 Design for replacing the CDNA5 DAG's cycle hazard model with InsertWaitAlu's scoreboard. Status:
 proposed. It extends [DAG placement of prefetches and wait-prone fillers](dag-wait-and-prefetch-placement.md).
 
-## Rule
+## Rules
 
-InsertWaitAlu decides whether an `s_wait_alu` is inserted, so its scoreboard (`WaitAluTracker`)
-is the only source of truth. The DAG asks it, for a candidate at the current point, "if I place
-this here, will the pass insert a wait?"
+1. **The scoreboard is the only source of truth for waits.** InsertWaitAlu decides whether an
+   `s_wait_alu` is inserted, so the DAG asks its scoreboard (`WaitAluTracker`) and keeps no wait
+   model of its own: no cycle counts, no hide thresholds. The DAG only decides the final order.
+2. **A VALU co-issues with WMMAs only if no wait is inserted.** If `query()` says it would wait,
+   it does not issue in that slot. The smallest wait is taken only when nothing else can issue,
+   WMMAs included.
+3. **Placement levels are strict.** Barrier location > last ds > WMMA queue > WMMA tail >
+   prefetch > ds pacer > fillers. Avoiding a wait never moves a node a higher level placed.
+4. **Fillers move by swapping, not by delay.** A VALU or SALU only trades slots with another
+   filler. A swap keeps the number of filler slots per window, so WMMAs and ds stay where they
+   are. Delaying a filler alone pushes it into a later window, where it competes with that
+   window's ds and fillers.
 
-- No wait: place it.
-- Wait: place a different VALU in this slot, and this one where it needs no wait (earlier or
-  later, see below).
-- No wait-free choice: place the one with the smallest wait.
+### The two cases
 
-The goal is fewer stalls. No wait is best; otherwise the weakest wait.
+- **The consumer is fixed** (a prefetch, a ds the pacer placed, a VMEM or tensor_load): the
+  producer moves earlier, swapping with an earlier filler.
 
-The DAG keeps no wait model of its own: no cycle counts, no hide thresholds. It only asks the
-scoreboard and decides the final order. Every count below comes from `WaitAluTracker`.
+  ```text
+  before: vX(slot 3) ... vAddr(slot 9) -> prefetch(vAddr)   too close: wait
+  after:  vAddr(slot 3) ... vX(slot 9) -> prefetch(vAddr)   no wait
+  ```
 
-The placement levels stay strictly ordered (barrier location, last ds, WMMA queue, WMMA tail,
-prefetch, ds pacer, fillers). Avoiding a wait never moves a node a higher level placed: it moves
-the VALUs around that node.
+- **The consumer is free to move** (another filler): it moves later, swapping with a later
+  filler.
+
+  ```text
+  before: vP(slot 3) -> vC(slot 4, reads vP: wait) -> vY(slot 7)
+  after:  vP(slot 3) -> vY(slot 4) -> vC(slot 7)            no wait
+  ```
+
+If no swap removes the wait, the weakest wait is taken.
+
+### SALU sgpr to memory address
+
+A SALU write of an sgpr that an SMEM, tensor_load or VMEM reads as an address stalls the wave if
+the gap is under 8 cycles; the hardware interlocks, so nothing has to be inserted. It is placed by
+the first case above: the SALU producer goes as early as it is ready. There is no threshold and no
+cycle count, only "producer first".
 
 ## What the scoreboard counts
 
@@ -29,21 +51,12 @@ The unit is "N instructions of a class in between", never cycles (`InsertWaitAlu
 
 | Wait | Pair | Count | Hidden (no wait) when |
 | --- | --- | --- | --- |
-| `va_vdst` | VALU or WMMA writes a VGPR, a later op reads it | VA-pipe ops after the producer | WMMA (XDL) or plain VALU (CSMACC) producer followed by `HWModel::WaitHide` matrix ops (11–13 by form, times the form's step) with no DPMACC/TRANS op since; or an earlier wait drained it |
-| `vm_vsrc` | ds/VMEM reads a VGPR, a later VALU overwrites it | ops after the reader in the same FIFO (LDS or TEX) | 11 ops in that FIFO followed the reader (`vmVsrcLds`/`vmVsrcTex`), a bridge op hid it, or it drained |
+| `va_vdst` | VALU or WMMA writes a VGPR, a later non-VALU reads it | VA-pipe ops after the producer | 11–13 WMMAs (by form, `HWModel::WaitHide`) follow a plain VALU (CSMACC) or WMMA (XDL) producer with no f64/transcendental op since; or an earlier wait drained it |
+| `vm_vsrc` | ds/VMEM reads a VGPR, a later VALU overwrites it | ops after the reader in the same FIFO (LDS or TEX) | 11 ops in that FIFO follow the reader, a bridge op hid it, or it drained |
 
 Otherwise the wait is the count, capped at 14 (`va_vdst`) or 6 (`vm_vsrc`). A larger count is a
-weaker wait: `va_vdst(5)` beats `va_vdst(1)`.
-
-## Why reorder the VALU queue, not delay or advance a VALU
-
-A VALU issues only into a VALU co-issue slot of the active WMMA window (`isValuPickable()`), and
-only when no ds is ready and the fill quota allows (`findSmallestPickableNonWmma`). WMMAs and ds
-set the slots; VALUs fill what is left. Delaying a VALU alone hands its slot to the next candidate,
-the fill quota can then close the window, and the VALU lands in a later window where it competes
-with that window's ds and VALUs (a short dependent WMMA gets `v_nop` padding instead). Advancing
-one takes a slot from the next VALU in line. Choosing which ready VALU fills each slot keeps the
-slot count and the WMMA/ds placement unchanged.
+weaker wait. A VALU or WMMA consumer never gets a `va_vdst` (`computeWaitForInst`), so a VALU
+feeding a WMMA operand is not a pair.
 
 In the main loop of the gfx1250 perf kernels VALUs are sparse (0–1 per WMMA window) and most
 loop waits are a `va_vdst` in front of a ds whose address a VALU just computed:
@@ -55,8 +68,8 @@ loop waits are a `va_vdst` in front of a ds whose address a VALU just computed:
 | medium mxf8 | 96 / 36 / 204 | 12 / 11 / 11 | 23 / 11 |
 | maf bbs | 768 / 24 / 384 | 39 / 3 / 0 | 39 / 3 |
 
-Those ds are placed by the pacer or the last-ds rule, so the fix is to issue the address VALU
-earlier in the VALU order, not to move the ds.
+A plain VALU feeding a ds address needs about 12 WMMAs before the ds, so its producer has to
+move whole windows earlier; reordering inside one window only weakens that wait.
 
 ## Mechanism
 
@@ -66,47 +79,43 @@ earlier in the VALU order, not to move the ds.
 scoreboard:
 
 - `query(inst)`: the wait `inst` needs if it issues next.
-- `untilFree(inst, op)`: how many more `op`s (`Wmma`, `Lds`, `Tex`, `Flat`) must issue before
-  `inst` no longer needs the wait that kind of op hides; -1 if none will. It counts ops that touch
-  no VGPR on a copy of the scoreboard, so it is exact for the hides and an upper bound where an
-  anchored flat op would drain sooner.
+- `untilFree(inst, op, formWmma)`: how many more `op`s (`Wmma`, `Lds`, `Tex`, `Flat`) must issue
+  before `inst` no longer needs the wait that kind of op hides; -1 if none will. It counts ops
+  that touch no VGPR on a copy of the scoreboard, so it is exact for the hides and an upper bound
+  where an anchored flat op would drain sooner.
 - `requiredGap(producer, consumer, op, formWmma)`: the same count for `consumer` right after
-  `producer` with nothing else in flight. The WMMA form is the one already issued, else
-  `formWmma`'s.
+  `producer`, with nothing else in flight.
 
-### Pick: rank the VALU queue by the scoreboard
+Both take the WMMA form the `va_vdst` hide counts from the WMMAs already issued, else from
+`formWmma` (an XDL WMMA), so a BB's first region does not see every VALU pair as unhideable.
 
-`pickFreeBest(valuQueue)` already chooses among every ready VALU. Rank by `waitAlu_->query()`
-first: no wait, then the one `untilFree` says frees soonest, then the weakest wait, then the
-existing keys (link urgency below, MSB bank,
-elapse, id). A candidate that needs both counters is compared by the sum of its two counts.
-`otherQueue` (SALU) ranks the same way where its picks carry a wait.
+### Filler pacer
 
-### Init: pre-scan the pairs and link them
+Fillers (VALU and SALU) get a plan in `onInitRegion`, like `DsSpreadPacer` plans ds:
 
-In `onInitRegion`, walk the region's def-use chains once and ask `requiredGap` for each
-producer-consumer pair; a non-zero answer is a pair that waits if the two end up too close. For each, record on the VALU side which way
-it should move, as a per-node field set at init (not a DAG edge):
+1. **Producers of fixed consumers first.** Each is released by its consumer's planned window
+   minus `requiredGap` WMMAs (VALU), or as soon as it is ready (SALU to memory address).
+2. **The rest are spread evenly** over the remaining windows. The default is one per window (the
+   current fill quota, `ceil(fillers / WMMAs)`); a window takes extra fillers to catch up when the
+   region is behind the plan, or when a producer of a fixed consumer cannot be swapped in time.
+3. **The pick fills a released slot with the best released filler:** no wait first, then the one
+   `untilFree` says frees soonest, then plan order. A filler that would wait is swapped for the
+   next released one; that is rule 4.
 
-- **VALU feeds a placed consumer** (ds, prefetch, VMEM address or data, WMMA operand): the VALU
-  should issue at least `requiredGap(..., Wmma)` WMMA windows before the consumer's planned
-  window. A plain VALU feeding a ds address needs about 12, so this moves it whole windows earlier;
-  reordering inside one window only weakens that wait. Store that window as the VALU's need-by window. It does not have to be exact; the
-  pick ranks VALUs with an earlier need-by ahead of others that are equally wait-free.
-- **VALU overwrites a ds/VMEM source** (`vm_vsrc`): the VALU should come after enough ops in that
-  FIFO. Store the reader's planned position as a not-before hint; the pick's `query()` decides
-  when it is actually clean.
+The pacer re-anchors each stage at the barrier that actually issued, so one late barrier does not
+release a catch-up burst in the next stage (rule-conflicts F4).
 
-The pick path reads these fields; no phase gets its own guard.
+It replaces the fill quota, `needWindow_` / critical fillers, and the strict-count hold in
+`needsWaitAlu`.
 
-## Removed once the A/B shows fewer waits
+### What goes away
 
-- The cycle hazard model: the cycle lanes of `hazardGates_`, `getHazardWait`, `DAGNode::hazardDeadline`,
-  the `cumCycles` pre-scan in `StinkyDAGSchedulerPass.cpp`, and the `promoteDuePrefetchHoist` /
-  `promoteDueFillerHoist` rules. `SaluSgprToMemAddr` and `ValuVgprToVmemAddr` go with it; the
-  pipe-op rule `WmmaVgprSrcToDsWrite` stays.
-- The strict-count hold in `needsWaitAlu` (`WaitAluHoldStrictCount`, released two windows before
-  a barrier wait).
+- The cycle hazard model: the cycle lanes of `hazardGates_`, `getHazardWait`,
+  `DAGNode::hazardDeadline`, the `cumCycles` pre-scan in `StinkyDAGSchedulerPass.cpp`, and the
+  `promoteDuePrefetchHoist` / `promoteDueFillerHoist` rules. `ValuVgprToVmemAddr` is covered by
+  the scoreboard; `SaluSgprToMemAddr` becomes a "producer first" tag in the pre-scan. The pipe-op
+  rule `WmmaVgprSrcToDsWrite` stays.
+- The fill quota, critical fillers and the strict-count hold, once the pacer covers them.
 
 ## Steps
 
@@ -114,14 +123,14 @@ Each step is one commit, checked with the GPU-less A/B on the 21 gfx1250 perf ke
 strict `s_wait_alu`, `vm_vsrc(0)`, kernels changed, barrier positions.
 
 0. `untilFree` and `requiredGap` on `WaitAluTracker`, with unit tests. No asm change.
-1. Rank `pickFreeBest(valuQueue)` by `query()` and `untilFree()`.
-2. Pre-scan need-by windows for VALUs feeding placed consumers, and use them in the rank.
-3. Not-before hints for `vm_vsrc` pairs.
-4. Remove the cycle hazard model and the strict-count hold.
+1. Rule 2: a VALU that `query()` says would wait does not co-issue.
+2. Pick ranking by `query()` / `untilFree()` (swap inside the released fillers).
+3. Filler pacer, replacing the fill quota, critical fillers and the strict-count hold.
+4. Remove the cycle hazard model; SALU to memory address becomes "producer first".
 
 ## Open
 
-- `WaitAluTracker` starts each BB empty, where the pass seeds it from predecessors, so loop-carried
-  producers are not seen at the top of the loop body.
-- Whether a pair whose consumer is a WMMA (operand written by a VALU) should move the VALU or let
-  the WMMA queue hide it.
+- `WaitAluTracker` starts each BB empty, where the pass seeds it from its predecessors, so
+  loop-carried producers are not seen at the top of the loop body. Seed the tracker from the
+  pass's BB entry state.
+- When a candidate needs both `va_vdst` and `vm_vsrc`, how their two counts combine in the rank.
