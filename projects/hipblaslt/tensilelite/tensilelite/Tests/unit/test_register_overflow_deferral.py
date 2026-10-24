@@ -105,6 +105,9 @@ def _writer(vgprs=256, agprs=0, sgprs=64, standing=0):
         overflowPendingRA=0,
         invalidLSUCode=False,
         doubleVgpr=False,
+        # An over-budget PLSIN kernel exits loudly rather than being stubbed, so
+        # judgeRegisterBudget reads this. Off here: these are gfx1250 kernels.
+        postLoopStoreInNll=False,
         regCaps={"MaxVgpr": _MAX_VGPR, "MaxSgpr": _MAX_SGPR,
                  "PhysicalMaxSgpr": 800, "PhysicalMaxVgprCU": 4096 * 32},
         archCaps={"MaxWavesPerSimd": 10, "DeviceLDS": 327680, "LdsGranularity": 1024},
