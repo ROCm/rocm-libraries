@@ -1085,7 +1085,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "v_pk_fma_f16" not in src
                     assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
             seen.add(kernel["BaseName"])
-    assert len(seen) == 41
+    assert len(seen) == 49
     assert len(grouped) == 5
 
 

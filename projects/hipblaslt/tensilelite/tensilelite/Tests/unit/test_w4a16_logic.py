@@ -38,7 +38,7 @@ def test_q27b_equality_dispatch_keys():
     assert len(serialized["table"]) == len(expected)
     for row in serialized["table"]:
         solution = logic["Solutions"][row["index"]]
-        if row["key"][1] == 1:
+        if row["key"][1] <= 4:
             # Decode: dot2 WaveSplitK with A and B fed straight from global reads.
             assert solution["WaveSplitK"]
             assert solution["DirectToVgprDot2A"] and solution["DirectToVgprDot2B"]
@@ -47,7 +47,7 @@ def test_q27b_equality_dispatch_keys():
             assert solution["EnableMatrixInstruction"]
             assert solution.get("CustomKernelName", "") == ""
             assert solution["WorkGroupMapping"] in (1, 4)
-            if row["key"][1] in (2, 3, 4) or row["key"] == [34816, 2048, 1, 5120]:
+            if row["key"] == [34816, 2048, 1, 5120]:
                 assert solution["WorkGroup"] == [32, 8, 1]
                 assert solution["MacroTile0"] == 64
                 assert solution["MacroTile1"] == 256
