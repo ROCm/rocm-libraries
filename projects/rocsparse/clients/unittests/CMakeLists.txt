@@ -197,6 +197,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_extra_csrgemm.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
+  unit_test_internal_hostblocks_bsr_ind.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_bsrgemm.cpp
   # --- csrgemm / bsrgemm calc grid.x clamps [AISPARSE-677] -----------------
