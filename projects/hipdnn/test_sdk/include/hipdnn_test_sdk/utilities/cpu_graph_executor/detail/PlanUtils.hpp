@@ -147,7 +147,8 @@ bool isSupportedSdpaPadding(const SdpaAttributesType& nodeAttributes, const Tens
 /// - paging needs padding (both seq_len tensors), as cuDNN requires;
 /// - each page table is INT32 [B, 1, tableSize, 1] over a rank-4 [blocks, H, blockSize, D]
 ///   container;
-/// - max_seq_len_kv must fit every page table (tableSize * blockSize);
+/// - max_seq_len_kv must fit every page table, whose size must be exactly
+///   ceil(max_seq_len_kv / blockSize) as in cuDNN;
 /// - a non-paged K or V must already be dense [B, H, maxSeqKv, D];
 /// - a bias's last dim must be maxSeqKv or 1.
 /// Returns 0 for a non-paged node, which must not set max_seq_len_kv (cuDNN rejects it).
@@ -232,6 +233,20 @@ int64_t sdpaPagedMaxSeqKv(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttrib
             return -1;
         }
     }
+    // cuDNN's paged cache load takes a table of exactly ceil(maxSeqKv / blockSize) entries per batch
+    // (cudnn-frontend paged_cache_load.h); a wider one is declined.
+    for(const auto& [table, container] :
+        {std::pair{pageK, attrs.k_tensor_uid()}, std::pair{pageV, attrs.v_tensor_uid()}})
+    {
+        if(table.has_value())
+        {
+            const auto blockSize = dimsOf(container)[2];
+            if(blockSize <= 0 || dimsOf(table.value())[2] != (maxSeqKv + blockSize - 1) / blockSize)
+            {
+                return -1;
+            }
+        }
+    }
     if(attrs.attn_mask_tensor_uid().has_value())
     {
         const auto maskDims = dimsOf(attrs.attn_mask_tensor_uid().value());
@@ -313,6 +328,40 @@ bool isSupportedSdpaDropout(const SdpaAttributesType& attrs, const TensorMap& te
            && (m->Get(0) == q->Get(0) || m->Get(0) == 1)
            && (m->Get(1) == q->Get(1) || m->Get(1) == 1) && m->Get(2) == q->Get(2)
            && m->Get(3) == k->Get(2);
+}
+
+/// cuDNN's block-sparse mask as the references implement it (SEM-025): UINT8
+/// [B, H_q, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)], where Skv is the paged key extent when K/V
+/// are paged. Absent is supported.
+template <typename TensorMap>
+bool isSupportedSdpaBlockMask(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                              const TensorMap& tensorMap)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto uid = attrs.block_mask_tensor_uid();
+    if(!uid.has_value())
+    {
+        return true;
+    }
+    const auto maskIt = tensorMap.find(uid.value());
+    const auto qIt = tensorMap.find(attrs.q_tensor_uid());
+    const auto kIt = tensorMap.find(attrs.k_tensor_uid());
+    if(maskIt == tensorMap.end() || qIt == tensorMap.end() || kIt == tensorMap.end()
+       || maskIt->second->data_type() != DataType::UINT8 || maskIt->second->dims() == nullptr
+       || qIt->second->dims() == nullptr || kIt->second->dims() == nullptr
+       || maskIt->second->dims()->size() != 4 || qIt->second->dims()->size() != 4
+       || kIt->second->dims()->size() != 4)
+    {
+        return false;
+    }
+    constexpr int64_t TILE = 128;
+    const auto paged = sdpaPagedMaxSeqKv(attrs, tensorMap);
+    const int64_t seqKv = paged > 0 ? paged : kIt->second->dims()->Get(2);
+    const auto* q = qIt->second->dims();
+    const auto* m = maskIt->second->dims();
+    const auto tilesKv = (seqKv + TILE - 1) / TILE;
+    return m->Get(0) == q->Get(0) && m->Get(1) == q->Get(1)
+           && m->Get(2) == (q->Get(2) + TILE - 1) / TILE && m->Get(3) == (tilesKv + 7) / 8;
 }
 
 /// The cuDNN sdpa_fp8 softmax / output scaling the references implement (SEM-024): with fp8

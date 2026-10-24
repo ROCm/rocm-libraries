@@ -141,7 +141,7 @@ dimension must be reduced.
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | Not supported | - |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported | - |
-| Block-sparse attention | Not supported | Not supported | - |
+| Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |

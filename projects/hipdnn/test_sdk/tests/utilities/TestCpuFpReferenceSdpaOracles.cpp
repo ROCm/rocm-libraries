@@ -1064,3 +1064,71 @@ TEST(TestCpuFpReferenceSdpaClosedForm, Fp8SoftmaxScalingNeedsFp8Q)
         q, k, v, o, SdpaFwdOptions<float>{}.setOutputScale(2.0F))));
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0F, TOL);
 }
+
+// cuDNN's block mask (SEM-025) is a -inf bias on every cleared 128 x 128 tile: bit i of byte j
+// covers tile column 8 j + i. Shapes cross tile and byte boundaries (3 x 10 tiles, 2 bytes).
+TEST(TestCpuFpReferenceSdpaProperty, BlockMaskEqualsNegInfBiasOnClearedTiles)
+{
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 300;
+    constexpr int64_t SKV = 1200;
+    constexpr int64_t D = 4;
+    Tensor<float> q({1, H, SQ, D});
+    Tensor<float> k({1, H, SKV, D});
+    Tensor<float> v({1, H, SKV, D});
+    q.fillWithRandomValues(-1.0F, 1.0F, 171);
+    k.fillWithRandomValues(-1.0F, 1.0F, 172);
+    v.fillWithRandomValues(-1.0F, 1.0F, 173);
+    Tensor<uint8_t> blockMask({1, H, 3, 2});
+    Tensor<float> bias({1, H, SQ, SKV});
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t tq = 0; tq < 3; ++tq)
+        {
+            for(int64_t byte = 0; byte < 2; ++byte)
+            {
+                // Varying patterns; tile column 0 stays set so no row loses every key.
+                auto bits = static_cast<unsigned>((0xA5 + 37 * (h * 6 + tq * 2 + byte)) & 0xFF);
+                bits |= byte == 0 ? 1U : 0U;
+                blockMask.setHostValue(static_cast<uint8_t>(bits), 0, h, tq, byte);
+            }
+        }
+        for(int64_t sq = 0; sq < SQ; ++sq)
+        {
+            for(int64_t skv = 0; skv < SKV; ++skv)
+            {
+                const auto tile = skv / 128;
+                const auto byte = blockMask.getHostValue(0, h, sq / 128, tile / 8);
+                const bool kept
+                    = ((static_cast<unsigned>(byte) >> static_cast<unsigned>(tile % 8)) & 1U) != 0;
+                bias.setHostValue(kept ? 0.0F : NEG_INF, 0, h, sq, skv);
+            }
+        }
+    }
+    Tensor<float> oMasked({1, H, SQ, D});
+    Tensor<float> oBias({1, H, SQ, D});
+    Tensor<float> lseMasked({1, H, SQ, 1});
+    Tensor<float> lseBias({1, H, SQ, 1});
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        q,
+        k,
+        v,
+        oMasked,
+        SdpaFwdOptions<float>{}.setScale(0.5F).setBlockMask(&blockMask).setLse(&lseMasked));
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        q,
+        k,
+        v,
+        oBias,
+        SdpaFwdOptions<float>{}
+            .setScale(0.5F)
+            .setMask(static_cast<const TensorBase<float>*>(&bias))
+            .setLse(&lseBias));
+    expectAllNear(oMasked, oBias, TOL, "O");
+    expectAllNear(lseMasked, lseBias, TOL, "LSE");
+
+    Tensor<uint8_t> wrongShape({1, H, 3, 1});
+    EXPECT_THROW((CpuFpReferenceSdpa::forward<float, float, float, float>(
+                     q, k, v, oMasked, SdpaFwdOptions<float>{}.setBlockMask(&wrongShape))),
+                 std::invalid_argument);
+}

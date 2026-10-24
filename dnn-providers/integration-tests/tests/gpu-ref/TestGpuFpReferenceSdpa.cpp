@@ -2525,3 +2525,59 @@ TEST(TestGpuSdpaFwdFp8, SoftmaxScalingNeedsFp8Q)
                      q, q, q, o, GpuSdpaFwdOptions<float>{}.setSoftmaxScales(2.0f, 0.5f)),
                  std::invalid_argument);
 }
+
+// ============================================================================
+// cuDNN block mask (SEM-025): GPU reference vs CPU reference, with GQA, padding and bottom-right
+// causal, on shapes that cross tile and mask-byte boundaries.
+// ============================================================================
+
+TEST(TestGpuSdpaFwdBlockMaskFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 260;
+    constexpr int64_t SKV = 1100;
+    constexpr int64_t D = 8;
+    Tensor<float> q({BATCH, H, SQ, D});
+    Tensor<float> k({BATCH, HKV, SKV, D});
+    Tensor<float> v({BATCH, HKV, SKV, D});
+    q.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
+    v.fillWithRandomValues(-1.0f, 1.0f, SEED_V);
+    Tensor<uint8_t> blockMask({BATCH, H, 3, 2});
+    for(int64_t i = 0; i < static_cast<int64_t>(blockMask.elementCount()); ++i)
+    {
+        blockMask.memory().hostData()[i] = static_cast<uint8_t>((0x5A + 29 * i) & 0xFF);
+    }
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    seqLenQ.setHostValue(260, 0, 0, 0, 0);
+    seqLenQ.setHostValue(200, 1, 0, 0, 0);
+    seqLenKv.setHostValue(1100, 0, 0, 0, 0);
+    seqLenKv.setHostValue(700, 1, 0, 0, 0);
+
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oCpu,
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.3f)
+                                    .setBand(-1, 0, false)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setBlockMask(&blockMask));
+    GpuFpReferenceSdpa::fprop(q,
+                              k,
+                              v,
+                              oGpu,
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(0.3f)
+                                  .setBand(-1, 0, false)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setBlockMask(&blockMask));
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+}

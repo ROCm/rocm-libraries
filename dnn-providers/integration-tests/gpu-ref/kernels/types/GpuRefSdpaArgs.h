@@ -39,6 +39,10 @@ struct SdpaScoreParams
     // batch's valid lengths.
     long long leftBound, rightBound;
     int topLeftAlignment;
+    // cuDNN block-sparse mask (SEM-025), UINT8 [B, H, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)]:
+    // a clear bit masks a 128 x 128 score tile. nullptr disables it (the backward has none).
+    const unsigned char* blockMask;
+    SdpaStrides blockMaskStr;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

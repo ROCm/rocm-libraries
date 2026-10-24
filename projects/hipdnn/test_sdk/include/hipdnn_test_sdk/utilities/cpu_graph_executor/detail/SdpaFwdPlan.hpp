@@ -122,6 +122,8 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleOTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxSTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxOTensor;
+    // cuDNN block-sparse mask, UINT8 (SEM-025).
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> blockMaskTensor;
 };
 
 template <typename QDataType,
@@ -267,6 +269,12 @@ public:
                        ? std::optional<float>(resolveHostScalarOperand(*attrs, variantPack, name))
                        : std::nullopt;
         };
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<uint8_t>> shallowBlockMask;
+        if(_params.blockMaskTensor.has_value())
+        {
+            shallowBlockMask = createShallowTensor<uint8_t>(
+                *_params.blockMaskTensor, variantPack.at(_params.blockMaskTensor->uid));
+        }
         auto shallowAmaxS = bindStats(_params.amaxSTensor);
         auto shallowAmaxO = bindStats(_params.amaxOTensor);
 
@@ -293,6 +301,7 @@ public:
                     .setSink(shallowSink.get())
                     .setDropout(shallowDropoutMask.get(), dropoutScale)
                     .setAlibi(_params.alibi)
+                    .setBlockMask(shallowBlockMask.get())
                     .setLse(shallowLseTensor.get())
                     .setRowStats(shallowMaxTensor.get(), shallowSumExpTensor.get())
                     .setDescales(
@@ -391,8 +400,8 @@ public:
             return false;
         }
 
-        // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        // cuDNN block-sparse mask: UINT8, one bit per 128 x 128 score tile.
+        if(!isSupportedSdpaBlockMask(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -545,7 +554,8 @@ public:
              std::pair{nodeAttributes->descale_s_tensor_uid(), &params.descaleSTensor},
              std::pair{nodeAttributes->scale_o_tensor_uid(), &params.scaleOTensor},
              std::pair{nodeAttributes->amax_s_tensor_uid(), &params.amaxSTensor},
-             std::pair{nodeAttributes->amax_o_tensor_uid(), &params.amaxOTensor}})
+             std::pair{nodeAttributes->amax_o_tensor_uid(), &params.amaxOTensor},
+             std::pair{nodeAttributes->block_mask_tensor_uid(), &params.blockMaskTensor}})
         {
             if(uid.has_value())
             {
