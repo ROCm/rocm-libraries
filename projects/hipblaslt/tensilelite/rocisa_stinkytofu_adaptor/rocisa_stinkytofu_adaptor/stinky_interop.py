@@ -18,6 +18,12 @@ def _arch_to_list(arch: Any) -> List[int]:
     return list(_caps.normalize_isa_key(arch))
 
 
+# InsertDelayAluPass reads this off Function metadata. Same string as
+# stinkytofu::kSigTotalVgprsMetaKey. Absent or 0 means "unknown" and the pass
+# inserts s_delay_alu; native toStinkyTofuModule always stamps it.
+_SIG_TOTAL_VGPRS_META_KEY = "SignatureKernelDescriptor.totalVgprs"
+
+
 class StinkyAsmModuleWithAdapterSignature:
     """Behavioural subset of stinkytofu's ``StinkyAsmModuleWithSignature`` (C++).
 
@@ -31,6 +37,27 @@ class StinkyAsmModuleWithAdapterSignature:
     def __init__(self, inner: Any, signature: Any) -> None:
         self._inner = inner
         self._signature = signature
+        self._stamp_total_vgprs()
+
+    def _stamp_total_vgprs(self) -> None:
+        """Expose per-wave VGPR allocation before the optimization pipeline.
+
+        Port of the setMetaData(kSigTotalVgprsMetaKey) call in
+        toStinkyTofuModule. The value is kernelDescriptor.totalVgprs, the
+        count emitted as ``.amdhsa_next_free_vgpr``.
+        """
+        if self._signature is None:
+            return
+        kd = getattr(self._signature, "kernelDescriptor", None)
+        if kd is None or not hasattr(kd, "totalVgprs"):
+            return
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        setter = getattr(leaf, "setMetaDataU64", None)
+        if setter is None:
+            return
+        setter(_SIG_TOTAL_VGPRS_META_KEY, int(kd.totalVgprs))
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
@@ -38,6 +65,9 @@ class StinkyAsmModuleWithAdapterSignature:
     def emitAssembly(self) -> str:
         out = ""
         if self._signature is not None:
+            self._refreshTotalInstructionBytes()
+            self._refreshSgprCount()
+            self._refreshVgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
         set_dirs = getattr(self._inner, "getSetDirectives", None)
@@ -45,6 +75,95 @@ class StinkyAsmModuleWithAdapterSignature:
             out += set_dirs()
         out += self._inner.emitAssembly()
         return out
+
+    def _refreshTotalInstructionBytes(self) -> None:
+        """Copy the pipeline's instruction-byte total onto the signature.
+
+        Port of ``StinkyAsmModuleWithSignature::emitAssembly``:
+        ``AccumulateInstructionSizePass`` stores the total on the asm module,
+        and the signature prints ``STINKY_TOTAL_INST_BYTES`` plus
+        ``.amdhsa_inst_pref_size`` from that value.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        getter = getattr(leaf, "getTotalInstructionBytes", None)
+        setter = getattr(self._signature, "setTotalInstructionBytes", None)
+        if getter is None or setter is None:
+            return
+        total = int(getter())
+        if total >= 0:
+            setter(total)
+
+    def _refreshSgprCount(self) -> None:
+        """Take the declared SGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshSgprCount``. Tensile
+        declares ``sgprPool.size()``, the pool high-water mark, which still
+        counts registers that were checked back in and appear in no operand,
+        so the count arrives too high. Only that number moves, and only
+        downwards: everything else in the descriptor states what the hardware
+        does before entry, and a flow whose registers did not move keeps the
+        producer's number.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredSgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.numSgprPreload, list(kd.sgprWorkGroup)))
+        if required == 0 or required >= kd.totalSgprs:
+            return
+        self._signature.setGprs(kd.totalVgprs, kd.totalAgprs, required)
+
+    def _refreshVgprCount(self) -> None:
+        """Take the declared VGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshVgprCount``. The
+        producer's pool still counts registers that were checked back in, so
+        ``.amdhsa_next_free_vgpr`` arrives too high. A colouring can also need
+        more than was reserved, so this moves in both directions. Goes through
+        ``setDeclaredVgprs``, which leaves the ``Num VGPR`` comment on the
+        producer's figure and does nothing when AGPRs share the register file.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredVgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.vgprWorkItem))
+        if required == 0:
+            return
+        setter = getattr(self._signature, "setDeclaredVgprs", None)
+        if setter is None:
+            return
+        setter(required)
+
+    def getDeclaredSgprCount(self) -> int:
+        """SGPRs the descriptor declares, as ``.amdhsa_next_free_sgpr``.
+
+        Ask after ``emitAssembly()``: the refresh has then replaced the
+        producer's estimate with the count the emitted code uses. Matches
+        ``StinkyAsmModuleWithSignature::getDeclaredSgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalSgprs)
+
+    def getDeclaredVgprCount(self) -> int:
+        """VGPRs the descriptor declares, as ``.amdhsa_next_free_vgpr``.
+
+        Ask after ``emitAssembly()``. Where AGPRs share the register file the
+        refresh leaves the producer's number, so this returns that number.
+        Matches ``StinkyAsmModuleWithSignature::getDeclaredVgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalVgprs)
 
     def getName(self) -> str:
         return self._inner.getName()
@@ -63,6 +182,37 @@ class StinkyAsmModuleWithAdapterSignature:
 
     def getModule(self) -> Any:
         return self._inner
+
+
+def _apply_optimization_config(signature: Any, options: Any) -> None:
+    """Fill the signature the way C++ ``toStinkyTofuModule`` does.
+
+    Native conversion does not copy ``descriptionTopic`` / ``descriptionList``.
+    It calls ``setOptimizationConfig`` from ModuleOptions; the descriptor then
+    prints the Optimizations block as raw text. Drop the TextBlock copies so
+    they cannot print a second copy when comments are enabled.
+    """
+    setter = getattr(signature, "setOptimizationConfig", None)
+    if setter is None or not options:
+        return
+    gro = options.get("UseSgprForGRO", 0)
+    setter(
+        (int(options.get("TileA0", 0)), int(options.get("TileB0", 0))),
+        (int(options.get("SubGroup0", 0)), int(options.get("SubGroup1", 0))),
+        (int(options.get("WaveGroup0", 0)), int(options.get("WaveGroup1", 0))),
+        int(options.get("VectorWidthA", 0)),
+        int(options.get("VectorWidthB", 0)),
+        int(options.get("GlobalReadVectorWidthA", 0)),
+        int(options.get("GlobalReadVectorWidthB", 0)),
+        bool(options.get("DirectToLdsA", False)),
+        bool(options.get("DirectToLdsB", False)),
+        int(gro),
+    )
+    if hasattr(signature, "descriptionTopic"):
+        signature.descriptionTopic = _code.TextBlock("")
+    clearer = getattr(signature, "clearDescription", None)
+    if clearer is not None:
+        clearer()
 
 
 def _convert_options(options: Any) -> dict:
@@ -118,4 +268,5 @@ def toStinkyTofuModule(
     inner = module.to_stinky_asm(arch_list, logical_name=logical_name, options=st_options)
     if signature is None:
         return inner
+    _apply_optimization_config(signature, options)
     return StinkyAsmModuleWithAdapterSignature(inner, signature)

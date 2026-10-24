@@ -11,6 +11,8 @@ real TensileLite assembly emitter end-to-end **without a GPU**:
                 ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
                 ->  KernelWriterAssembly.getSourceFileString  ->  assembly text
 
+When this process imported stinkytofu, non-gfx1250 kernels are emitted by a native-rocisa worker via ``_mapKernelsByBackend``; gfx1250 stays here.
+
 Only the *emit* is exercised here; assembling to a code object (amdclang++) and
 running on hardware are deliberately out of scope. The emitted text is
 deterministic given a pinned toolchain/ISA once random label suffixes are
@@ -179,6 +181,105 @@ def _prepare_kernel(kernel, splitGSU=False):
     return base
 
 
+_GFX1250 = (12, 5)
+
+
+def _needs_native_rocisa_worker(kernel):
+    """True when a stinkytofu process must emit this non-gfx1250 kernel in a native-rocisa worker."""
+    import rocisa
+
+    if getattr(rocisa, "_BACKEND", "") != "stinkytofu":
+        return False
+    return tuple(kernel["ISA"])[:2] != _GFX1250
+
+
+def _result_tuple(base, res, canonical):
+    src = res.src
+    if canonical:
+        src = canonicalize_asm(src)
+    elif isinstance(src, (bytes, bytearray)):
+        src = src.decode(errors="replace")
+    return base, src, res.err
+
+
+def _emit_in_process(kwa, kernel, splitGSU, canonical):
+    from tensilelite.TensileCreateLibrary.Run import processKernelSource
+
+    ri = _init_rocisa_for(kernel)
+    base = _prepare_kernel(kernel, splitGSU)
+    res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), splitGSU, kernel)
+    return _result_tuple(base, res, canonical)
+
+
+def _emit_native_batch(kwa, kernels, splitGSU, canonical):
+    """Emit these non-gfx1250 kernels on one native-rocisa worker pool."""
+    import functools
+
+    from tensilelite.TensileCreateLibrary.Run import (
+        _mapKernelsByBackend,
+        processKernelSourceNativeInit,
+    )
+
+    bases = [_prepare_kernel(kernel, splitGSU) for kernel in kernels]
+    asmpath = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+    native_fn = functools.partial(
+        processKernelSourceNativeInit,
+        kwa,
+        asmpath,
+        False,
+        splitGSU,
+        compress=False,
+    )
+    # Adapter is active and every kernel is non-gfx1250, so only native_fn runs.
+    results = _mapKernelsByBackend(native_fn, native_fn, kernels)
+    return [_result_tuple(base, res, canonical) for base, res in zip(bases, results)]
+
+
+def emit_prepared_kernels(kwa, kernels, splitGSU=False, canonical=True):
+    """Return ``[(basename, source, err), ...]``, keeping gfx1250 here and sending other ISAs through ``_mapKernelsByBackend``."""
+    native = []
+    native_at = []
+    out = [None] * len(kernels)
+    for i, kernel in enumerate(kernels):
+        if _needs_native_rocisa_worker(kernel):
+            native.append(kernel)
+            native_at.append(i)
+        else:
+            out[i] = _emit_in_process(kwa, kernel, splitGSU, canonical)
+    if native:
+        for i, item in zip(native_at, _emit_native_batch(kwa, native, splitGSU, canonical)):
+            out[i] = item
+    return out
+
+
+def emit_one_kernel(kwa, kernel, splitGSU=False, canonical=True):
+    """Emit one kernel with the same ISA split as :func:`emit_prepared_kernels`."""
+    return emit_prepared_kernels(kwa, [kernel], splitGSU=splitGSU, canonical=canonical)[0]
+
+
+def run_where_backend_matches_isa(isa, fn, *args):
+    """Run ``fn(*args)`` here for gfx1250, or in a native-rocisa worker when the live KernelWriter must stay with the emit."""
+    import rocisa
+
+    if getattr(rocisa, "_BACKEND", "") != "stinkytofu" or tuple(isa)[:2] == _GFX1250:
+        return fn(*args)
+
+    from tensilelite.Common.Parallel import ParallelMap2
+    from tensilelite.TensileCreateLibrary.Run import _native_rocisa_workers
+
+    def _invoke(_unused):
+        return fn(*args)
+
+    with _native_rocisa_workers():
+        return ParallelMap2(
+            _invoke,
+            [None],
+            "native rocisa",
+            multiArg=False,
+            return_as="list",
+        )[0]
+
+
 def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=None):
     """Emit assembly for every unique kernel produced by ``logic_path``.
 
@@ -191,31 +292,13 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     name) — used to draw a few representative kernels from very large tuned
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
-    import rocisa
-    from tensilelite.TensileCreateLibrary.Run import (
-        generateKernelObjectsFromSolutions,
-        processKernelSource,
-    )
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     asm = get_assembler()
 
-    def _emit(kwa, kernel):
-        ri = _init_rocisa_for(kernel)  # independent of any prior arch's state
-        data = ri.getData()
-        outOptions = ri.getOutputOptions()
-        base = _prepare_kernel(kernel, splitGSU)
-        res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
-        src = res.src
-        if canonical:
-            src = canonicalize_asm(src)
-        elif isinstance(src, (bytes, bytearray)):
-            src = src.decode(errors="replace")
-        return base, src, res.err
-
-    results = []
     with _isolated_globals():
         sols = _solutions_from_logic_unguarded(logic_path)
         kernels = generateKernelObjectsFromSolutions(sols)
@@ -223,9 +306,7 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
             # stable subset by kernel name so the cap is deterministic
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(asm, DebugConfig())
-
-        for kernel in kernels:
-            results.append(_emit(kwa, kernel))
+        results = emit_prepared_kernels(kwa, kernels, splitGSU=splitGSU, canonical=canonical)
 
     results.sort(key=lambda t: t[0])
     return results
