@@ -753,6 +753,176 @@ def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> No
         )
 
 
+# The sizes one raw buffer load or store moves: the i8, i16, i32, v2i32 and v4i32
+# forms of the raw buffer intrinsics. The hardware range-checks an access of 4
+# bytes or more per 4-byte component and a 1- or 2-byte access whole, so the
+# narrow forms are the ones that keep a byte-exact last element.
+_BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
+
+
+def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
+    """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
+
+    The element is any scalar whose width is whole bytes; ``count`` is an int
+    and ``count`` elements together must make one of
+    :data:`_BUFFER_ACCESS_BYTES`. The C++ builder
+    (``rocke_i_buffer_access_bytes``, whose count is a C int) refuses with the
+    same texts.
+    """
+    if isinstance(elem, (VectorType, PtrType, SmemType)):
+        raise TypeError(
+            f"{op_name}: the element type must be a scalar, got {elem.name}"
+        )
+    bits = type_bits(elem)
+    if bits % 8 != 0:
+        raise ValueError(
+            f"{op_name}: {elem.name} elements are {bits} bits, not whole bytes; "
+            "a buffer access moves whole bytes"
+        )
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError(f"{op_name}: n must be an int, got {count!r}")
+    if count < 1:
+        raise ValueError(f"{op_name}: n must be at least 1, got {count}")
+    nbytes = count * bits // 8
+    if nbytes not in _BUFFER_ACCESS_BYTES:
+        raise ValueError(
+            f"{op_name}: {count} x {elem.name} is {nbytes} bytes; a buffer access "
+            "moves 1, 2, 4, 8 or 16 bytes"
+        )
+    return nbytes
+
+
+def _buffer_vector_bytes(op_name: str, role: str, vector_type: Type) -> int:
+    """The bytes a buffer access whose ``role`` (the loaded result, the stored
+    value) has type ``vector_type`` moves, or refuse it.
+
+    Both are vectors; their elements and width follow
+    :func:`_buffer_access_bytes`. The C++ engine refuses with the same texts.
+    """
+    if not isinstance(vector_type, VectorType):
+        raise TypeError(
+            f"{op_name}: the {role} must be a vector, got {vector_type.name}; "
+            "a one-element vector is vector_splat(x, 1)"
+        )
+    return _buffer_access_bytes(op_name, vector_type.elem, vector_type.count)
+
+
+def _buffer_op_bytes(op: Op) -> int:
+    """:func:`_buffer_vector_bytes` for a built ``tile.buffer_load_vN`` (three
+    operands, one result: the loaded vector) or ``tile.buffer_store_vN`` (four
+    operands, the last the stored vector, no result), after its operand and
+    result counts: serialized IR reaches the verifier and the lowerings without
+    passing the builder. The C++ engine (``rocke_i_buffer_op_bytes``) refuses
+    with the same texts."""
+    if op.name == "tile.buffer_load_vN":
+        operands, results, role = 3, 1, "result"
+        expected = "3 operands / 1 result"
+    elif op.name == "tile.buffer_store_vN":
+        operands, results, role = 4, 0, "value"
+        expected = "4 operands / 0 results"
+    else:
+        raise ValueError(f"{op.name} is not a buffer_load_vN or buffer_store_vN op")
+    if len(op.operands) != operands or len(op.results) != results:
+        raise ValueError(
+            f"{op.name}: expected {expected}, got {len(op.operands)} / "
+            f"{len(op.results)}"
+        )
+    access_type = op.results[0].type if results else op.operands[3].type
+    return _buffer_vector_bytes(op.name, role, access_type)
+
+
+def _global_ptr_offset_error(
+    ptr_type: Type, byte_off_type: Type, result_type: Optional[Type] = None
+) -> Optional[str]:
+    """The error for a ``global_ptr_offset`` whose operands (and, once built,
+    result) have these types, or None when they are valid.
+
+    The pointer is a global pointer and the result has its type. The offset is
+    i64 and is not widened implicitly: it may be negative (the result may point
+    before the allocation), and zero-extending an i32 would turn -1 into 4 GiB.
+    The builder, the verifier and every lowering use this rule, and the C++
+    engine (``rocke_i_global_ptr_offset_error``) reports the same texts.
+    """
+    if not isinstance(ptr_type, PtrType) or ptr_type.space != "global":
+        return f"global_ptr_offset ptr must be a global pointer, got {ptr_type.name}"
+    if byte_off_type != I64:
+        return (
+            f"global_ptr_offset byte_off must be i64, got {byte_off_type.name}; "
+            "widen it with sext (a signed offset) or zext (an unsigned one)"
+        )
+    if result_type is not None and result_type != ptr_type:
+        return (
+            "global_ptr_offset result must have the pointer's type "
+            f"{ptr_type.name}, got {result_type.name}"
+        )
+    return None
+
+
+def _global_ptr_offset_op_error(op: "Op") -> Optional[str]:
+    """:func:`_global_ptr_offset_error` for a built ``tile.global_ptr_offset``
+    op, after its operand and result counts: serialized IR reaches the verifier
+    and the lowerings without passing the builder."""
+    if len(op.operands) != 2 or len(op.results) != 1:
+        return "global_ptr_offset expects two operands and one result"
+    ptr, byte_off = op.operands
+    return _global_ptr_offset_error(ptr.type, byte_off.type, op.results[0].type)
+
+
+# The two branches of an scf.if_else, in region order.
+_IF_ELSE_BRANCHES = ("then", "else")
+
+
+def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
+    """The ``scf.yield`` that gives ``op``'s results their values on branch
+    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
+    results.
+
+    Every ``scf.if_else`` has one condition and two branches. One with results
+    ends each branch in an ``scf.yield`` of one value per result, of the
+    result's type, and never a buffer descriptor: a descriptor is a
+    ``<4 x i32>`` in the IR but an opaque ``ptr addrspace(8)`` (HIP
+    ``rsrc_t``) once lowered, so neither a phi nor a variable can carry it.
+    The builder, the verifier and every lowering refuse anything else with
+    these texts, in both engines (``rocke_i_if_else_branch_yield``); the
+    counts are checked first, as serialized IR reaches the verifier and the
+    lowerings without passing the builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    if not op.results:
+        return None
+    name = _IF_ELSE_BRANCHES[branch]
+    count = len(op.results)
+    region = op.regions[branch]
+    if not region.ops or region.ops[-1].name != "scf.yield":
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must end in "
+            f"scf.yield of {count} values"
+        )
+    yld = region.ops[-1]
+    if len(yld.operands) != count:
+        raise ValueError(
+            f"scf.if_else has {count} results, but its {name} branch yields "
+            f"{len(yld.operands)} values"
+        )
+    for index, (result, value) in enumerate(zip(op.results, yld.operands)):
+        if value.op is not None and value.op.name == "tile.buffer_rsrc":
+            raise ValueError(
+                f"scf.if_else result {index}: its {name} branch yields a buffer "
+                "descriptor, which an if/else cannot carry; yield the values the "
+                "descriptor is built from and build it after the if/else"
+            )
+        if value.type != result.type:
+            raise ValueError(
+                f"scf.if_else result {index} is {result.type.name}, but its {name} "
+                f"branch yields {value.type.name}"
+            )
+    return yld
+
+
 # ----------------------------- Values / Ops ------------------------------
 
 
@@ -5157,6 +5327,20 @@ class IRBuilder:
             raise ValueError("s_setprio level must be in 0..3")
         self._op("tile.s_setprio", attrs={"level": int(level)})
 
+    def trap(self) -> None:
+        """Abort the kernel: ``call void @llvm.trap()`` (HIP
+        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+
+        A taken trap ends the kernel with a hardware exception. What the host
+        sees depends on the HIP runtime: the launch reports an error, or the
+        runtime aborts the process. Either way the process cannot use the GPU
+        afterwards. So a trap is the last resort, for a condition the host
+        checks before the launch and that must still never reach a memory
+        access on the device. Put it under a branch on that condition
+        (``scf_if``).
+        """
+        self._op("tile.trap")
+
     # ----- buffer resources + async DRAM->LDS -----
 
     def global_ptr_add(self, ptr: Value, byte_off: Value) -> Value:
@@ -5173,6 +5357,29 @@ class IRBuilder:
         """
         return self._op(
             "tile.global_ptr_add",
+            [ptr, byte_off],
+            [ptr.type],
+            result_name_hint="gptr",
+        ).result
+
+    def global_ptr_offset(self, ptr: Value, byte_off: Value) -> Value:
+        """Return ``ptr`` moved by ``byte_off`` bytes as a new global pointer
+        (same type), which may point outside the allocation ``ptr`` points into.
+
+        Lowers to ``getelementptr i8, ptr addrspace(1) ptr, i64 byte_off``
+        without ``inbounds``. :meth:`global_ptr_add` promises the compiler that
+        its result stays inside the allocation (a result outside it is poison,
+        and the compiler may fold on that promise); this op makes no such
+        promise. Use it for an address that may land outside the tensor: one
+        that is only compared, converted to an integer, or handed to a buffer
+        descriptor that range-checks every access. ``byte_off`` is i64 and may
+        be negative; widen an i32 offset with :meth:`sext` or :meth:`zext`.
+        """
+        error = _global_ptr_offset_error(ptr.type, byte_off.type)
+        if error:
+            raise TypeError(error)
+        return self._op(
+            "tile.global_ptr_offset",
             [ptr, byte_off],
             [ptr.type],
             result_name_hint="gptr",
@@ -5212,35 +5419,32 @@ class IRBuilder:
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
-        Supported dtypes and widths:
-          - f16 / bf16 (2-byte): n in {2, 4, 8} → dwords = n // 2
-          - f32 / i32  (4-byte): n in {1, 2, 4} → dwords = n
+        ``dtype`` is any scalar whose width is whole bytes (i8, u8, fp8, bf8,
+        i16, f16, bf16, i32, f32, i64, f64), and the ``n`` elements together
+        move 1, 2, 4, 8 or 16 bytes. The access is one ``i8``, ``i16``,
+        ``i32``, ``<2 x i32>`` or ``<4 x i32>`` load, bitcast to the
+        ``<n x dtype>`` result. The HIP lowering has no vector type for u8 or
+        i64 elements, so those two lower through LLVM only.
 
-        The raw `<dwords x i32>` payload is bitcast to `<n x dtype>` so
-        the returned Value has the correct IR type for the smem store.
-        Bounds-checked: an out-of-range voffset returns 0 (the
-        runbook §6.1 lever for tail-safe loads).
+        Out of range bytes read 0. The hardware checks an access of 4 bytes
+        or more per 4-byte component and a 1- or 2-byte access whole, so a
+        load that straddles the end of the buffer keeps only its whole
+        in-range components, and only a 1- or 2-byte load reads a last
+        element that ends off a 4-byte boundary.
+
+        Attrs: ``elem_type``, and ``dwords`` for an access of whole dwords.
+        Both lowerings take the access width from the result type.
         """
-        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
-        eb = _elem_bytes.get(dtype.name)
-        if eb is None:
-            raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
-        if n <= 0 or (n * eb) % 4 != 0:
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
-                "of dwords"
-            )
-        dwords = (n * eb) // 4
-        if dwords not in (1, 2, 4):
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} → dwords={dwords} "
-                "must be 1, 2, or 4"
-            )
+        nbytes = _buffer_access_bytes("buffer_load_vN", dtype, n)
+        attrs: dict[str, Any] = {}
+        if nbytes >= 4:
+            attrs["dwords"] = nbytes // 4
+        attrs["elem_type"] = dtype.name
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],
             [VectorType(dtype, n)],
-            attrs={"dwords": int(dwords), "elem_type": dtype.name},
+            attrs=attrs,
             result_name_hint=f"bl{n}",
         ).result
 
@@ -5410,6 +5614,24 @@ class IRBuilder:
             [rsrc, voffset, soffset, value],
             attrs={"dwords": int(n)},
         )
+
+    def buffer_store_vN(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+    ) -> None:
+        """Dtype-generic vectorised `raw_ptr_buffer_store` of a vector value.
+
+        The store twin of :meth:`buffer_load_vN`: ``value`` is a vector of any
+        scalar whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. It is
+        bitcast to one ``i8``, ``i16``, ``i32``, ``<2 x i32>`` or ``<4 x i32>``
+        and stored with the matching raw buffer store.
+
+        Out of range bytes are not written. The hardware checks a store of 4
+        bytes or more per 4-byte component and a 1- or 2-byte store whole: a
+        store that straddles the end of the buffer writes only its whole
+        in-range components and leaves every other byte untouched.
+        """
+        _buffer_vector_bytes("buffer_store_vN", "value", value.type)
+        self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
 
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
@@ -5856,7 +6078,7 @@ class IRBuilder:
         self._emit(op)
         return _IfBuilder(self, op, then_r)
 
-    def scf_if_else(self, cond: Value):
+    def scf_if_else(self, cond: Value, result_types: Sequence[Type] = ()):
         """Runtime if/else branch (converging control flow).
 
         Both the ``then`` and ``else`` regions converge at the same join
@@ -5874,10 +6096,36 @@ class IRBuilder:
                 with else_ctx:
                     # code executed when cond is false
                     b.sync()
+
+        With ``result_types`` the if/else yields one value per type: each
+        branch ends in ``scf_yield`` of values of those types, and the
+        returned builder's ``results`` are the values of the branch that ran
+        (an LLVM ``phi``; in HIP, variables declared before the ``if`` and
+        assigned in both branches)::
+
+            branch = b.scf_if_else(ok, result_types=[VectorType(F16, 8)])
+            with branch as (then_ctx, else_ctx):
+                with then_ctx:
+                    b.scf_yield(b.buffer_load_vN(rsrc, voffset, soffset, F16, 8))
+                with else_ctx:
+                    b.scf_yield(b.zero_vec_f16(8))
+            (value,) = branch.results
+
+        Leaving the ``with`` refuses a branch that does not end that way.
         """
+        for t in result_types:
+            _refuse_packed_only_value("scf.if_else", t)
+        results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
-        op = Op(name="scf.if_else", operands=[cond], regions=[then_r, else_r])
+        op = Op(
+            name="scf.if_else",
+            operands=[cond],
+            results=results,
+            regions=[then_r, else_r],
+        )
+        for r in results:
+            r.op = op
         self._emit(op)
         return _IfElseBuilder(self, op, then_r, else_r)
 
@@ -5968,6 +6216,7 @@ PURE_OP_NAMES = {
     "tile.smem_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
+    "tile.global_ptr_offset",
     "tile.lane_id",
     "tile.ds_bpermute",
     "tile.ds_read_tr16_b64",
@@ -6102,4 +6351,13 @@ class _IfElseBuilder:
         return self._then_ctx, self._else_ctx
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        pass  # regions were already popped by their own context managers
+        # The regions were already popped by their own context managers. Once
+        # both branches are built, refuse one that does not yield the results.
+        if exc_type is None:
+            for branch in range(len(_IF_ELSE_BRANCHES)):
+                _if_else_branch_yield(self.op, branch)
+
+    @property
+    def results(self) -> List[Value]:
+        """The values the branch that ran yields, one per result type."""
+        return list(self.op.results)

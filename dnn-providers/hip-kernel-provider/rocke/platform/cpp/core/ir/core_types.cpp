@@ -297,6 +297,155 @@ int rocke_i_type_bits(const rocke_type_t* t)
     return rocke_require_dtype_info(t->name)->encoded_bits;
 }
 
+/* Python core/ir.py::_buffer_access_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_access_bytes(
+    const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap)
+{
+    int bits;
+    int64_t nbytes;
+    if(elem->kind != ROCKE_TYPE_SCALAR)
+    {
+        snprintf(
+            err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
+        return 0;
+    }
+    bits = rocke_i_type_bits(elem);
+    if(bits % 8 != 0)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: %s elements are %d bits, not whole bytes; a buffer access moves whole bytes",
+                 op_name,
+                 elem->name,
+                 bits);
+        return 0;
+    }
+    if(count < 1)
+    {
+        snprintf(err, err_cap, "%s: n must be at least 1, got %d", op_name, count);
+        return 0;
+    }
+    /* In 64 bits: count * bits overflows an int for a large count (Python's
+     * ints do not overflow, and the texts must match). */
+    nbytes = (int64_t)count * bits / 8;
+    if(nbytes != 1 && nbytes != 2 && nbytes != 4 && nbytes != 8 && nbytes != 16)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: %d x %s is %lld bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+                 op_name,
+                 count,
+                 elem->name,
+                 (long long)nbytes);
+        return 0;
+    }
+    return (int)nbytes;
+}
+
+/* Python core/ir.py::_buffer_vector_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_vector_bytes(
+    const char* op_name, const char* role, const rocke_type_t* t, char* err, size_t err_cap)
+{
+    if(t->kind != ROCKE_TYPE_VECTOR)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: the %s must be a vector, got %s; a one-element vector is vector_splat(x, 1)",
+                 op_name,
+                 role,
+                 t->name);
+        return 0;
+    }
+    return rocke_i_buffer_access_bytes(op_name, t->elem, t->count, err, err_cap);
+}
+
+/* Python core/ir.py::_buffer_op_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap)
+{
+    int operands, results;
+    const char* role;
+    const char* expected;
+    if(op->opcode == ROCKE_OP_TILE_BUFFER_LOAD_VN)
+    {
+        operands = 3;
+        results = 1;
+        role = "result";
+        expected = "3 operands / 1 result";
+    }
+    else if(op->opcode == ROCKE_OP_TILE_BUFFER_STORE_VN)
+    {
+        operands = 4;
+        results = 0;
+        role = "value";
+        expected = "4 operands / 0 results";
+    }
+    else
+    {
+        snprintf(err, err_cap, "%s is not a buffer_load_vN or buffer_store_vN op", op->name);
+        return 0;
+    }
+    if(op->num_operands != operands || op->num_results != results)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: expected %s, got %d / %d",
+                 op->name,
+                 expected,
+                 op->num_operands,
+                 op->num_results);
+        return 0;
+    }
+    return rocke_i_buffer_vector_bytes(
+        op->name, role, results ? op->results[0]->type : op->operands[3]->type, err, err_cap);
+}
+
+/* Python core/ir.py::_global_ptr_offset_error; the texts are the Python engine's. */
+const char* rocke_i_global_ptr_offset_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* byte_off_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap)
+{
+    if(ptr_type->kind != ROCKE_TYPE_PTR || !ptr_type->space
+       || strcmp(ptr_type->space, "global") != 0)
+    {
+        snprintf(
+            buf, cap, "global_ptr_offset ptr must be a global pointer, got %s", ptr_type->name);
+        return buf;
+    }
+    if(!rocke_type_eq(byte_off_type, rocke_i64()))
+    {
+        snprintf(buf,
+                 cap,
+                 "global_ptr_offset byte_off must be i64, got %s; widen it with sext (a signed "
+                 "offset) or zext (an unsigned one)",
+                 byte_off_type->name);
+        return buf;
+    }
+    if(result_type && !rocke_type_eq(result_type, ptr_type))
+    {
+        snprintf(buf,
+                 cap,
+                 "global_ptr_offset result must have the pointer's type %s, got %s",
+                 ptr_type->name,
+                 result_type->name);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_global_ptr_offset_op_error. */
+const char* rocke_i_global_ptr_offset_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 2 || op->num_results != 1)
+    {
+        snprintf(buf, cap, "global_ptr_offset expects two operands and one result");
+        return buf;
+    }
+    return rocke_i_global_ptr_offset_error(
+        op->operands[0]->type, op->operands[1]->type, op->results[0]->type, buf, cap);
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -892,7 +1041,15 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.assume_range",
 
     /* arith.fdot2 */
-    "arith.fdot2"};
+    "arith.fdot2",
+    /* tile.* dtype-generic buffer store */
+    "tile.buffer_store_vN",
+
+    /* tile.* global pointer offset without inbounds */
+    "tile.global_ptr_offset",
+
+    /* tile.* kernel abort */
+    "tile.trap"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1177,7 +1334,15 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.assume_range         */ true,
 
     /* arith.fdot2 */
-    /* arith.fdot2                */ false};
+    /* arith.fdot2                */ false,
+    /* tile.* dtype-generic buffer store (effectful) */
+    /* buffer_store_vN            */ false,
+
+    /* tile.* global pointer offset without inbounds (address arithmetic) */
+    /* global_ptr_offset          */ true,
+
+    /* tile.* kernel abort (effectful) */
+    /* trap                       */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

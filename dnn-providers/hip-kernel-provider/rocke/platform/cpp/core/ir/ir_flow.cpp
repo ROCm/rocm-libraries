@@ -1131,6 +1131,24 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_ADD, ops, 2, ptr->type, NULL, "gptr");
 }
 
+rocke_value_t*
+    rocke_b_global_ptr_offset(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off)
+{
+    rocke_value_t* ops[2];
+    char err[256];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr || !byte_off)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_ptr_offset: NULL operand");
+    if(const char* error
+       = rocke_i_global_ptr_offset_error(ptr->type, byte_off->type, NULL, err, sizeof err))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    ops[0] = ptr;
+    ops[1] = byte_off;
+    return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, ops, 2, ptr->type, NULL, "gptr");
+}
+
 rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr)
 {
     if(!rocke_i_live(b))
@@ -1184,9 +1202,10 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, ops, 3, rty, &attrs, hint);
 }
 
-/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
- * f16/bf16 take n in {2, 4, 8}, f32/i32 take n in {1, 2, 4}; the
- * <dwords x i32> payload is typed <n x dtype>. */
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN): any
+ * scalar whose width is whole bytes, n elements moving 1, 2, 4, 8 or 16 bytes;
+ * the result is <n x dtype>. Attrs: dwords for a whole-dword access, then
+ * elem_type, in the Python builder's order. */
 rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* voffset,
@@ -1196,38 +1215,19 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
 {
     rocke_value_t* ops[3];
     rocke_attr_map_t attrs;
-    int elem_bytes;
-    int dwords;
+    int nbytes;
+    char err[ROCKE_ERR_MSG_CAP];
     char hint[16];
     if(!rocke_i_live(b))
         return NULL;
     if(!rsrc || !voffset || !soffset || !dtype)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load_vN: NULL operand");
-    if(dtype == rocke_f16() || dtype == rocke_bf16())
-        elem_bytes = 2;
-    else if(dtype == rocke_f32() || dtype == rocke_i32())
-        elem_bytes = 4;
-    else
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "buffer_load_vN: unsupported dtype '%s'", dtype->name);
-    if(n <= 0 || (n * elem_bytes) % 4 != 0)
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "buffer_load_vN: n=%d dtype=%s is not a whole number of dwords",
-            n,
-            dtype->name);
-    dwords = (n * elem_bytes) / 4;
-    if(!(dwords == 1 || dwords == 2 || dwords == 4))
-        return (rocke_value_t*)rocke_i_set_err(b,
-                                               ROCKE_ERR_VALUE,
-                                               "buffer_load_vN: n=%d dtype=%s -> dwords=%d "
-                                               "must be 1, 2, or 4",
-                                               n,
-                                               dtype->name,
-                                               dwords);
+    nbytes = rocke_i_buffer_access_bytes("buffer_load_vN", dtype, n, err, sizeof(err));
+    if(nbytes == 0)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err);
     attrs = rocke_i_attrs(b);
-    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    if(nbytes >= 4)
+        rocke_attr_set_int(b, &attrs, "dwords", (int64_t)(nbytes / 4));
     rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
     /* result_name_hint = f"bl{n}" */
     snprintf(hint, sizeof(hint), "bl%d", n);
@@ -1442,6 +1442,34 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
     ops[2] = soffset;
     ops[3] = value;
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN_F32, ops, 4, &attrs);
+}
+
+/* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN). */
+void rocke_b_buffer_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voffset,
+                             rocke_value_t* soffset,
+                             rocke_value_t* value)
+{
+    rocke_value_t* ops[4];
+    char err[ROCKE_ERR_MSG_CAP];
+    if(!rocke_i_live(b))
+        return;
+    if(!rsrc || !voffset || !soffset || !value)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_store_vN: NULL operand");
+        return;
+    }
+    if(rocke_i_buffer_vector_bytes("buffer_store_vN", "value", value->type, err, sizeof(err)) == 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err);
+        return;
+    }
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN, ops, 4, NULL);
 }
 
 /* ============================ barriers / scheduling ===================== */
@@ -2087,6 +2115,13 @@ void rocke_b_s_setprio(rocke_ir_builder_t* b, int level)
     rocke_i_op0(b, ROCKE_OP_TILE_S_SETPRIO, NULL, 0, &attrs);
 }
 
+void rocke_b_trap(rocke_ir_builder_t* b)
+{
+    if(!rocke_i_live(b))
+        return;
+    rocke_i_op0(b, ROCKE_OP_TILE_TRAP, NULL, 0, NULL);
+}
+
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level)
 {
     rocke_attr_map_t attrs;
@@ -2425,6 +2460,14 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond)
 
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
 {
+    return rocke_b_scf_if_else_results(b, cond, NULL, 0);
+}
+
+rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
+                                            rocke_value_t* cond,
+                                            const rocke_type_t* const* result_types,
+                                            int num_results)
+{
     rocke_if_else_t out;
     rocke_region_t* then_r;
     rocke_region_t* else_r;
@@ -2439,6 +2482,11 @@ rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL cond");
         return out;
     }
+    if(num_results < 0 || (num_results > 0 && !result_types))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL result types");
+        return out;
+    }
 
     then_r = rocke_i_new_region(b, "then");
     else_r = rocke_i_new_region(b, "else");
@@ -2446,13 +2494,105 @@ rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
         return out;
     regions[0] = then_r;
     regions[1] = else_r;
-    op = rocke_i_op(b, ROCKE_OP_SCF_IF_ELSE, &cond, 1, NULL, 0, NULL, regions, 2, "v", NULL);
+    /* Python names the results self._fresh("if"); an if/else without results
+     * names nothing. */
+    op = rocke_i_op(b,
+                    ROCKE_OP_SCF_IF_ELSE,
+                    &cond,
+                    1,
+                    result_types,
+                    num_results,
+                    NULL,
+                    regions,
+                    2,
+                    num_results > 0 ? "if" : "v",
+                    NULL);
     if(!op)
         return out;
     out.op = op;
     out.then_region = then_r;
     out.else_region = else_r;
     return out;
+}
+
+bool rocke_i_if_else_branch_yield(
+    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
+{
+    static const char* const branch_names[2] = {"then", "else"};
+    const char* name = branch_names[branch];
+    const rocke_region_t* region;
+    const rocke_op_t* yld;
+    int count = op->num_results;
+    int i;
+
+    *out_yield = NULL;
+    /* The counts first: serialized IR reaches the verifier and the lowerings
+     * without passing the builder. */
+    if(op->num_operands != 1 || op->num_regions != 2)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else: expected 1 condition / 2 branches, got %d / %d",
+                 op->num_operands,
+                 op->num_regions);
+        return false;
+    }
+    if(count == 0)
+        return true;
+    region = op->regions[branch];
+    if(region->num_ops == 0 || region->ops[region->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else has %d results, so its %s branch must end in scf.yield of %d values",
+                 count,
+                 name,
+                 count);
+        return false;
+    }
+    yld = region->ops[region->num_ops - 1];
+    if(yld->num_operands != count)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else has %d results, but its %s branch yields %d values",
+                 count,
+                 name,
+                 yld->num_operands);
+        return false;
+    }
+    for(i = 0; i < count; i++)
+    {
+        const rocke_type_t* result_type = op->results[i]->type;
+        const rocke_value_t* value = yld->operands[i];
+        const rocke_type_t* value_type = value->type;
+        /* A descriptor is <4 x i32> in the IR but an opaque ptr addrspace(8)
+         * (HIP rsrc_t) once lowered: neither a phi nor a variable carries it. */
+        if(value->op && value->op->opcode == ROCKE_OP_TILE_BUFFER_RSRC)
+        {
+            snprintf(err,
+                     err_cap,
+                     "scf.if_else result %d: its %s branch yields a buffer descriptor, which an "
+                     "if/else cannot carry; yield the values the descriptor is built from and "
+                     "build it after the if/else",
+                     i,
+                     name);
+            return false;
+        }
+        if(!rocke_type_eq(value_type, result_type))
+        {
+            snprintf(err,
+                     err_cap,
+                     "scf.if_else result %d is %s, but its %s branch yields %s",
+                     i,
+                     result_type->name,
+                     name,
+                     value_type->name);
+            return false;
+        }
+    }
+    *out_yield = yld;
+    return true;
 }
 
 void rocke_b_ret(rocke_ir_builder_t* b)

@@ -62,6 +62,9 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -787,6 +790,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
+    "trap": "declare void @llvm.trap()",
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -831,6 +835,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.load.f16": (
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    # 1-byte buffer load and store: the narrowest access, range-checked whole,
+    # for 1-byte elements (i8, u8, fp8, bf8) one at a time.
+    "raw.ptr.buffer.load.i8": (
+        "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.store.i8": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8("
+        "i8, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
@@ -1251,6 +1265,24 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
             ArchDomainWarning(key, arch, table.flavor, cell.status, cell.evidence),
             stacklevel=4,
         )
+
+
+class _BufferAccessForm(NamedTuple):
+    """The raw buffer intrinsic form that moves one access of a given width."""
+
+    suffix: str  # the intrinsic's type suffix: raw.ptr.buffer.load.<suffix>
+    llvm_type: str  # the integer type the access is loaded or stored as
+    load_hint: str  # the name hint of the loaded integer
+
+
+# One form per buffer access width in bytes (core/ir.py _BUFFER_ACCESS_BYTES).
+_BUFFER_ACCESS_FORMS: dict[int, _BufferAccessForm] = {
+    1: _BufferAccessForm("i8", "i8", "bli8"),
+    2: _BufferAccessForm("i16", "i16", "bli16"),
+    4: _BufferAccessForm("i32", "i32", "bli32"),
+    8: _BufferAccessForm("v2i32", "<2 x i32>", "blv2"),
+    16: _BufferAccessForm("v4i32", "<4 x i32>", "blv4"),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -5477,6 +5509,18 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off without ``inbounds``: the result may point outside
+        # the allocation, so the compiler must not assume it does not.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        self._current().emit(
+            f"  {op.result.name} = getelementptr i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {self._operand(off)}"
+        )
+
     def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
         if len(op.operands) != 1 or len(op.results) != 1:
             raise ValueError("global_ptr_to_i64 expects one operand and one result")
@@ -6006,6 +6050,10 @@ class _Lowerer:
         level = int(op.attrs["level"])
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        self._need("trap")
+        self._current().emit("  call void @llvm.trap()")
+
     # ----- buffer-rsrc + async DRAM->LDS -----
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
@@ -6136,43 +6184,49 @@ class _Lowerer:
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
-        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
-        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
-        (4-byte) elements.
+        One raw buffer load of the result's width (``_BUFFER_ACCESS_FORMS``),
+        bitcast to the ``<n x elem>`` result.
         """
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count  # elements in the result vector
-        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
-        llvm_elem = _LLVM_ELEM[elem_type]
-        if dwords == 1:
-            self._need("raw.ptr.buffer.load.i32")
-            tmp = self._fresh("bli32")
-            self._current().emit(
-                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
-            )
-        else:
-            intr = f"raw.ptr.buffer.load.v{dwords}i32"
-            self._need(intr)
-            tmp = self._fresh(f"blv{dwords}")
-            self._current().emit(
-                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
-            )
+        result_type = op.result.type
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.load.{form.suffix}")
+        tmp = self._fresh(form.load_hint)
+        self._current().emit(
+            f"  {tmp} = call {form.llvm_type} "
+            f"@llvm.amdgcn.raw.ptr.buffer.load.{form.suffix}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
+            f"{_llvm_type(result_type)}"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer store: the value bitcast to one
+        integer of its width (``_BUFFER_ACCESS_FORMS``) and stored with the
+        matching raw buffer store."""
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.store.{form.suffix}")
+        bc = self._fresh("bsbc")
+        self._current().emit(
+            f"  {bc} = bitcast {_llvm_type(val.type)} {self._operand(val)} to "
+            f"{form.llvm_type}"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.{form.suffix}("
+            f"{form.llvm_type} {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         """Dtype-generic scalar buffer load (single element, OOB-clamped).
@@ -7206,7 +7260,18 @@ class _Lowerer:
             br label %if.end
           if.end:
             [continuation]
+
+        An if/else with results takes each result from the ``scf.yield``
+        that ends each branch, through one ``phi`` per result at the head of
+        ``if.end``::
+
+          if.end:
+            %if7 = phi float [ %a, %if.then ], [ %b, %if.else ]
         """
+        # Refuse a malformed if/else, or a branch that does not yield the
+        # results, before reading the op or emitting.
+        for branch in range(2):
+            _if_else_branch_yield(op, branch)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7223,7 +7288,7 @@ class _Lowerer:
         cur.terminated = True
 
         # Lower then branch (then_blk is now _current).
-        self.lower_region(then_region)
+        then_values = self._lower_if_else_branch(op, then_region)
         then_last = self._current()
         # then falls through to join; use another placeholder.
         if not then_last.terminated:
@@ -7234,7 +7299,7 @@ class _Lowerer:
         else_blk = self._new_block("if.else")
 
         # Lower else branch.
-        self.lower_region(else_region)
+        else_values = self._lower_if_else_branch(op, else_region)
         else_last = self._current()
 
         # Create join block (becomes _current for subsequent ops).
@@ -7242,6 +7307,12 @@ class _Lowerer:
         if not else_last.terminated:
             else_last.emit(f"  br label %{end_blk.label}")
             else_last.terminated = True
+        for result, then_value, else_value in zip(op.results, then_values, else_values):
+            end_blk.emit(
+                f"  {result.name} = phi {_llvm_type(result.type)} "
+                f"[ {then_value}, %{then_last.label} ], "
+                f"[ {else_value}, %{else_last.label} ]"
+            )
 
         # Backpatch placeholders in the predecessor and then blocks.
         for blk in (cur, then_last):
@@ -7249,6 +7320,16 @@ class _Lowerer:
                 line = line.replace("%IF_ELSE", f"%{else_blk.label}")
                 line = line.replace("%IF_END", f"%{end_blk.label}")
                 blk.lines[i] = line
+
+    def _lower_if_else_branch(self, op: Op, region: Region) -> List[str]:
+        """Lower one branch of the scf.if_else ``op``; return the operands its
+        closing ``scf.yield`` gives the results (none when ``op`` has none)."""
+        if not op.results:
+            self.lower_region(region)
+            return []
+        self._yield_stack.append([])
+        self.lower_region(region)
+        return self._yield_stack.pop()
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
