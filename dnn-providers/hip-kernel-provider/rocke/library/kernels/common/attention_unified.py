@@ -3481,6 +3481,21 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
             per_cu = 6 if problem.head_size == 64 else 4
             cap = 64 if problem.max_seqlen_k < 8192 else 128
             return max(2, min(per_cu * problem.num_cus // ctas, cap))
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and int(problem.target_ctas) <= 0
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Head-size-256 decode: about 2 CTAs per CU (its LDS footprint
+            # halves the resident CTAs of the smaller heads), and at least two
+            # pages per segment.
+            ctas = problem.num_seqs * problem.num_kv_heads
+            return max(
+                2,
+                min(2 * problem.num_cus // ctas, 128, problem.max_seqlen_k // 32),
+            )
         pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
@@ -3694,7 +3709,7 @@ def _gfx942_3d_decode_ctas_per_segment(
 
 # Head sizes per arch for which decode routes to the 3D segment kernel past the
 # shared selector (``_decode_prefers_3d``).
-_DECODE_3D_HEAD_SIZES = {"gfx942": (64, 128), "gfx950": (128, 256)}
+_DECODE_3D_HEAD_SIZES = {"gfx942": (64, 128, 256), "gfx950": (128, 256)}
 
 
 def _decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:

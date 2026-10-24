@@ -1,8 +1,8 @@
 """gfx942/gfx950 all-decode routes to the split-KV 3D kernel where the shared
 2D/3D selector picks 2D (large-batch grids, short KV); windowed decode, other
 head sizes, prefill, other arches and caches past the gfx942 3D K/V loader keep
-the shared selector. Few-CTA head-size-256 gfx950 decode keeps two pages per
-segment."""
+the shared selector. Head-size-256 decode keeps two pages per segment (gfx942
+also about 2 CTAs per CU)."""
 
 from __future__ import annotations
 
@@ -37,10 +37,11 @@ def test_decode_routes_3d(arch, hq, batch, skv):
     assert p.select_path(arch) == "3d"
 
 
-def test_gfx950_d256_short_kv_routes_3d():
-    p = _decode("gfx950", 1, 16, 2, 512, head_size=256)
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_d256_short_kv_routes_3d(arch):
+    p = _decode(arch, 1, 16, 2, 512, head_size=256)
     assert p.select_path() == "2d"
-    assert p.select_path("gfx950") == "3d"
+    assert p.select_path(arch) == "3d"
 
 
 @pytest.mark.parametrize(
@@ -49,7 +50,6 @@ def test_gfx950_d256_short_kv_routes_3d():
         ("gfx942", _decode("gfx942", 128, 64, 8, 4096, sliding_window=128)),
         ("gfx950", _decode("gfx950", 128, 64, 8, 4096, sliding_window=128)),
         ("gfx942", _decode("gfx942", 512, 64, 8, 4096)),
-        ("gfx942", _decode("gfx942", 1, 16, 2, 512, head_size=256)),
         ("gfx950", _decode("gfx950", 1, 16, 2, 512, head_size=64)),
         ("gfx1250", _decode("gfx950", 128, 64, 8, 4096)),
     ],
@@ -57,7 +57,6 @@ def test_gfx950_d256_short_kv_routes_3d():
         "gfx942_window",
         "gfx950_window",
         "gfx942_over_3d_kv_limit",
-        "gfx942_d256",
         "gfx950_d64",
         "other_arch",
     ],
@@ -87,3 +86,12 @@ def test_prefill_unchanged(arch):
 def test_gfx950_few_cta_d256_decode_keeps_two_pages_per_segment(skv, segments):
     p = _decode("gfx950", 1, 16, 2, skv, head_size=256)
     assert _num_segments(p, "gfx950") == segments
+
+
+@pytest.mark.parametrize(
+    "hq,hkv,skv,segments",
+    [(16, 2, 512, 16), (16, 2, 2048, 64), (16, 2, 16384, 128), (64, 64, 2048, 9)],
+)
+def test_gfx942_d256_decode_split(hq, hkv, skv, segments):
+    p = _decode("gfx942", 1, hq, hkv, skv, head_size=256)
+    assert _num_segments(p, "gfx942") == segments
