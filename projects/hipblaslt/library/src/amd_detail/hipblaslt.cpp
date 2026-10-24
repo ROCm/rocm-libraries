@@ -424,6 +424,11 @@ try
         static_cast<void>(hipFree(d_Synchronizer));
         CHECK_HIP_ERROR(e);
     }
+    // hipMemset only enqueues both clears on the null stream, which streams
+    // created non-blocking do not wait for. Finish them before the handle is
+    // used: a clear that lands during a Stream-K matmul can erase a ready flag
+    // that another workgroup is waiting on, and that workgroup spins forever.
+    CHECK_HIP_ERROR(hipStreamSynchronize(0));
 
     err = hipGetDevice(&deviceId);
     if(err == hipSuccess)
