@@ -11,6 +11,7 @@ states those rules as the hooks of the shared
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from itertools import product
@@ -109,6 +110,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             # Sliding window keeps its own three-phase band loop.
             "causal_diag_split": lambda s: bool(s.causal)
             and int(s.sliding_window) == 0,
+            "kv_segments": lambda s: _kv_segments_in_scope(s),
         },
         policy_knobs=(
             "exp_per_pv_step",
@@ -136,11 +138,38 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "v_row_pad": lambda s: s.resolved_use_cfvst(),
             "causal_diag_split": lambda s: bool(s.causal)
             and int(s.sliding_window) == 0,
+            "kv_segments": lambda s: _kv_segments_in_scope(s),
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,
     ),
 }
+
+
+def _kv_segments_in_scope(spec) -> bool:
+    """The KV-segment split exists only on the plain default grid."""
+    return not (
+        spec.persistent
+        or int(spec.sliding_window)
+        or spec.use_sinks
+        or spec.emit_lse
+        or spec.ragged
+        or spec.varlen
+        or spec.paged
+    )
+
+
+def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
+    """KV-segment count for a default-grid dense launch of ``work_items`` CTAs.
+
+    Splits only a grid with fewer work items than CUs, aiming at about two CTAs per
+    CU: the power of two nearest ``2 * num_cus / work_items``, capped at
+    ``max_segments``. A grid that already covers the device runs unsplit, since the
+    split's partial-output traffic and combine pass then cost more than they buy."""
+    if work_items <= 0 or num_cus <= 0 or work_items >= num_cus:
+        return 1
+    ratio = 2.0 * num_cus / work_items
+    return max(1, min(max_segments, 1 << max(0, round(math.log2(ratio)))))
 
 
 def _dense_arch(arch: str) -> _DenseTuningArch:
@@ -313,6 +342,15 @@ class DenseSpace(WavesPerEuSpace):
     ] = None
 
     def recorded(self, base):
+        # A moving bottom-right diagonal on the default grid resolves its query
+        # tile and KV-segment count per problem (the short-chunk rule), so both
+        # are recorded there. Every other base keeps its key unchanged.
+        if (
+            getattr(base, "causal_bottom_right", False)
+            and int(base.seqlen_q) != int(base.seqlen_kv)
+            and not base.persistent
+        ):
+            return self.recorded_fields | {"block_m", "kv_segments"}
         return self.recorded_fields
 
     def axes(self, base):
