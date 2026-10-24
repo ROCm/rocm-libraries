@@ -44,7 +44,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Reduction | FP16, BFP16, FP32 | All | CPU Reference | Ragged tensors rejected; see [Reduction Modes](#reduction-modes) |
 | Resample Forward | FP16, BFP16, FP32 | Op-defined | CPU Reference | MAXPOOL / AVGPOOL modes only; optional INT32 index output |
 | Resample Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | Same modes as forward; MAXPOOL requires the INT32 index tensor |
-| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 E4M3 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | CPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset`; see [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
@@ -128,6 +128,9 @@ dimension must be reduced.
 
 ### SDPA Restrictions
 
+Design, the full feature table for both references, and how they are tested:
+[SdpaReferenceImplementations.md](SdpaReferenceImplementations.md).
+
 | Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
 |---------|--------------------|---------------------|---------------|
 | Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. | Required input |
@@ -139,16 +142,16 @@ dimension must be reduced.
 | `padding_mask` without both seq_len tensors | Not supported | Not supported | Not supported |
 | Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
-| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | Not supported | - |
-| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported | - |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K, V or both, each with its own block size; table width `ceil(max_seq_len_kv / block_size)`; an unset extent is inferred as cuDNN does (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) | - |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite | - |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
 
 "Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
-Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output or an
-output in the input's FP8 format; ragged
+Dense FP8 forward is registered for `FP8_E4M3`, `FP8_E4M3_FNUZ`, `FP8_E5M2` and `FP8_E5M2_FNUZ` inputs
+with `BFP16` output or an output in the input's FP8 format; ragged
 FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
 
 The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical
