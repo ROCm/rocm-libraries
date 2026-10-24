@@ -562,15 +562,18 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged + sliding_window is rejected by the spec validator, so no
-        dense variant admits the request."""
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length plus sliding_window is rejected by the spec
+        validator, so no dense variant admits the request. The graph is not
+        ragged, so the reason names the length, the tile and the window."""
         req = _gfx950_dense_req(seqlen_q=500, seqlen_k=500, sliding_window=128)
         with self.assertRaises(ValueError) as cm:
             _spec(req)
-        err_msg = str(cm.exception).lower()
-        self.assertIn("ragged", err_msg)
+        err_msg = str(cm.exception)
+        self.assertIn("seqlen_q 500 is not a multiple of block_m 256", err_msg)
+        self.assertIn("seqlen_kv 500 is not a multiple of block_n 64", err_msg)
         self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(

@@ -752,7 +752,10 @@ def test_supports_rejects_non_gfx942():
         # the persistent build/decode tests and the SWA coverage below. use_sinks
         # is supported too; see the sink tests below.
         (dict(varlen=True), "varlen"),
-        (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
+        (
+            dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
+            "seqlen_q 1000 is not a multiple of block_m 256",
+        ),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
