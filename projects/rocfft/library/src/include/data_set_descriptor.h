@@ -437,6 +437,29 @@ struct data_descriptor_t
     bool is_contiguous() const;
 
     /**
+     * @brief Checks whether two distinct logical indices of this object's index range
+     * (all axes, length and batch) map to the same in-buffer position.
+     *
+     * @return `true` iff the layout is self-aliasing. An empty layout is not self-aliasing;
+     * a non-unit logical span with a zero in-buffer stride is; axes of unit logical span
+     * never contribute to aliasing, whatever their stride. Only the axes matter: positions
+     * are compared within one plane, relative to its offset, so the array type, precision
+     * and per-plane offsets play no role.
+     *
+     * @note Ported from the O(1)-storage implementation of `array_valid` (clients'
+     * shared/array_validator.cpp, commit d644cffc0c), which returns the negation.
+     * Storage does not depend on the spans (O(rank^2) at most). Layouts whose sorted
+     * strides nest (each stride no smaller than the previous span times stride) are
+     * resolved in O(rank log rank); otherwise, the worst-case time grows exponentially
+     * with the number of axes of non-unit span and linearly with the in-buffer extent.
+     *
+     * @warning As in the reference, the in-buffer extent (sum over axes of stride
+     * times (span - 1)) and the intermediate Bezout products (up to stride times
+     * extent) are assumed not to overflow `ptrdiff_t`; results are unspecified otherwise.
+     */
+    bool is_self_aliasing() const;
+
+    /**
      * @param[in] other data descriptor to be compared to this one.
      * @return `true` iff this object and `other` are strictly identical, including
      * their precisions, array types (an unset value only equals an unset value) and

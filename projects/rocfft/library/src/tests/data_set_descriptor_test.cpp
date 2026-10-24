@@ -91,6 +91,13 @@ namespace
                 return ret;
         }
     }
+
+    // brute force: enumerate the in-buffer positions of all logical indices
+    bool brute_force_self_aliasing(const data_descriptor_t& layout)
+    {
+        const auto offsets = all_offsets(layout);
+        return std::set<size_t>(offsets.begin(), offsets.end()).size() != offsets.size();
+    }
 }
 
 // Every test restarts its generator from random_seed, so a failing case replays
@@ -1851,4 +1858,124 @@ TEST_F(data_descriptor_test, split_length_axis_round_trip)
         EXPECT_EQ(s.logical_count(), d.logical_count());
         EXPECT_EQ(all_offsets(s), all_offsets(d));
     }
+}
+
+TEST_F(data_descriptor_test, self_aliasing_contiguous_and_padded)
+{
+    // contiguous 1D/2D/3D, with one or two batch axes
+    EXPECT_FALSE(data_descriptor_t::default_full_layout({8}, 3).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t::default_full_layout({4, 8}, 3).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t::default_full_layout({4, 8, 2}, {3, 2}).is_self_aliasing());
+    // padded strides and distances
+    EXPECT_FALSE(data_descriptor_t::default_full_layout({8, 6}, 3, true).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t::full_layout({4, 8}, {1, 6}, 3, 64).is_self_aliasing());
+    // axes laid out in non-increasing stride order
+    EXPECT_FALSE(data_descriptor_t::full_layout({4, 8}, {8, 1}, 3, 32).is_self_aliasing());
+}
+
+TEST_F(data_descriptor_test, self_aliasing_zero_strides_and_overlaps)
+{
+    // zero stride along a non-unit span: length axis, then batch axis
+    EXPECT_TRUE(data_descriptor_t({0, 0}, {4, 3}, {0, 4}).is_self_aliasing());
+    EXPECT_TRUE(data_descriptor_t::full_layout({4}, {1}, 3, 0).is_self_aliasing());
+    // overlapping batches (distance < length * stride), and the touching limit
+    EXPECT_TRUE(data_descriptor_t::full_layout({4}, {1}, 3, 3).is_self_aliasing());
+    EXPECT_TRUE(data_descriptor_t::full_layout({4, 8}, {1, 4}, 2, 31).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t::full_layout({4}, {1}, 3, 4).is_self_aliasing());
+    // unit spans never alias, whatever their stride (and lower bound)
+    EXPECT_FALSE(data_descriptor_t({0, 0, 0}, {4, 1, 1}, {1, 0, 0}, 1).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t({0, 2}, {4, 3}, {1, 0}).is_self_aliasing());
+    EXPECT_FALSE(data_descriptor_t({5, 0}, {6, 1}, {0, 0}).is_self_aliasing());
+    // an empty range has no two distinct indices
+    EXPECT_FALSE(data_descriptor_t({0, 0}, {0, 3}, {1, 0}).is_self_aliasing());
+}
+
+// positions are compared within one plane: array type, precision and offsets play no role
+TEST_F(data_descriptor_test, self_aliasing_ignores_type_and_offsets)
+{
+    const auto packed      = data_descriptor_t::full_layout({4}, {1}, 3, 4);
+    const auto overlapping = data_descriptor_t::full_layout({4}, {1}, 3, 3);
+    for(const std::array<size_t, 2>& offsets : {std::array<size_t, 2>{0, 0}, {3, 1}, {100, 2}})
+    {
+        EXPECT_FALSE(
+            with_type(packed, rocfft_precision_single, rocfft_array_type_complex_planar, offsets)
+                .is_self_aliasing());
+        EXPECT_TRUE(
+            with_type(
+                overlapping, rocfft_precision_double, rocfft_array_type_complex_planar, offsets)
+                .is_self_aliasing());
+    }
+}
+
+TEST_F(data_descriptor_test, self_aliasing_interleaved_axes)
+{
+    // positions {0, 2, 4} + {0, 3}: interleaved (3 < 3 * 2), no collision
+    EXPECT_FALSE(data_descriptor_t({0, 0}, {3, 2}, {2, 3}).is_self_aliasing());
+    // {0, 2, 4} + {0, 3, 6}: still no collision (3 * 2 needs a 4th element along axis 0)
+    EXPECT_FALSE(data_descriptor_t({0, 0}, {3, 3}, {2, 3}).is_self_aliasing());
+    // {0, 2, 4, 6} + {0, 3, 6}: 3 * 2 == 2 * 3
+    EXPECT_TRUE(data_descriptor_t({0, 0}, {4, 3}, {2, 3}).is_self_aliasing());
+    // same, shifted by non-zero lower bounds
+    EXPECT_FALSE(data_descriptor_t({2, 1}, {5, 4}, {2, 3}).is_self_aliasing());
+    EXPECT_TRUE(data_descriptor_t({1, 1}, {5, 4}, {2, 3}).is_self_aliasing());
+}
+
+TEST_F(data_descriptor_test, self_aliasing_multiple_batch_axes)
+{
+    EXPECT_FALSE(data_descriptor_t({0, 0, 0}, {4, 8, 3}, {1, 4, 32}, 2).is_self_aliasing());
+    // (0, 7, 0) and (0, 0, 1) both at 28
+    EXPECT_TRUE(data_descriptor_t({0, 0, 0}, {4, 8, 3}, {1, 4, 28}, 2).is_self_aliasing());
+    // batch axes interleaved with the length axis: {0, 2, 4, 6} + {0, 1} + {0, 8, 16}
+    EXPECT_FALSE(data_descriptor_t({0, 0, 0}, {4, 2, 3}, {2, 1, 8}, 2).is_self_aliasing());
+    // (0, 0, 1) and (3, 1, 0) both at 7
+    EXPECT_TRUE(data_descriptor_t({0, 0, 0}, {4, 2, 3}, {2, 1, 7}, 2).is_self_aliasing());
+    // a unit-span batch axis with zero distance is irrelevant
+    EXPECT_FALSE(data_descriptor_t({0, 0, 0}, {4, 2, 1}, {2, 1, 0}, 2).is_self_aliasing());
+}
+
+// Embedded layouts keep all axes (other length axes become batch axes): same answer.
+TEST_F(data_descriptor_test, self_aliasing_embedded)
+{
+    const auto valid    = data_descriptor_t::full_layout({4, 8, 2}, {1, 4, 32}, 3, 64);
+    const auto aliasing = data_descriptor_t::full_layout({4, 8, 2}, {1, 4, 30}, 3, 64);
+    ASSERT_FALSE(valid.is_self_aliasing());
+    ASSERT_TRUE(aliasing.is_self_aliasing());
+    const std::vector<std::set<size_t>> subsets = {{0}, {1}, {2}, {0, 2}, {1, 2}};
+    for(const auto& S : subsets)
+    {
+        EXPECT_FALSE(valid.get_layout_for_len_axes(S).is_self_aliasing());
+        EXPECT_TRUE(aliasing.get_layout_for_len_axes(S).is_self_aliasing());
+    }
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        const auto L = random_full_layout();
+        SCOPED_TRACE("L " + L.str());
+        EXPECT_FALSE(L.is_self_aliasing());
+        auto S_vec = random_permutation(L.get_len_rank());
+        S_vec.resize(uniform(1, L.get_len_rank()));
+        const std::set<size_t> S(S_vec.begin(), S_vec.end());
+        EXPECT_FALSE(L.get_layout_for_len_axes(S).is_self_aliasing());
+    }
+}
+
+TEST_F(data_descriptor_test, self_aliasing_matches_brute_force)
+{
+    size_t num_aliasing = 0;
+    for(size_t i = 0; i < 5 * num_random_cases; i++)
+    {
+        const auto rank       = uniform(2, 5);
+        const auto batch_rank = uniform(1, std::min<size_t>(2, rank - 1));
+        const auto lower      = random_vec(rank, 0, 2);
+        auto       upper      = random_vec(rank, 1, 4);
+        for(size_t dim = 0; dim < rank; dim++)
+            upper[dim] += lower[dim];
+        const data_descriptor_t layout(lower, upper, random_vec(rank, 0, 12), batch_rank);
+        SCOPED_TRACE("layout " + layout.str());
+        const bool expected = brute_force_self_aliasing(layout);
+        EXPECT_EQ(layout.is_self_aliasing(), expected);
+        num_aliasing += expected;
+    }
+    // both outcomes must actually be exercised
+    EXPECT_GT(num_aliasing, 0u);
+    EXPECT_LT(num_aliasing, 5 * num_random_cases);
 }
