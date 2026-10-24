@@ -234,6 +234,8 @@ def build_dgrad(
     tile_n,
     tile_k,
     split_k=1,
+    tap_outer_k=False,
+    halo=None,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -260,6 +262,8 @@ def build_dgrad(
             warp_tile_k=wtk,
             wave_size=wave_size,
             split_k=split_k,
+            tap_outer_k=tap_outer_k,
+            **(halo or {}),
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
 
@@ -575,6 +579,33 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
+
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.common.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -875,6 +906,10 @@ def build_direct_4c(
     *,
     block_q=4,
     block_groups=16,
+    dtype="fp16",
+    dgrad_fused_weights=False,
+    dgrad_weights_lds=False,
+    stage_rows=False,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -893,14 +928,68 @@ def build_direct_4c(
             KH=KH,
             KW=KW,
             PAD=PAD,
+            dtype=dtype,
         )
         spec = DirectConv4cSpec(
             problem=p,
             name=name,
             block_q=block_q,
             block_groups=block_groups,
+            dgrad_fused_weights=dgrad_fused_weights,
+            dgrad_weights_lds=dgrad_weights_lds,
+            stage_rows=stage_rows,
+            waves_q=block_q // 4 if stage_rows else 1,
         )
         return build_direct_conv_4c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_mfma_dgrad_fused(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    cpg,
+    kpg,
+    *,
+    dtype,
+    fold_k32,
+    weights_lds,
+    block_groups=2,
+    block_h=8,
+    knobs=None,
+):
+    """Single-kernel generic direct-MFMA dgrad (DirectConvSpec over the
+    transposed problem, fused weights, row guard); ``knobs`` adds further
+    DirectConvSpec fields."""
+
+    def _build():
+        from dataclasses import replace
+
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            build_direct_conv,
+            make_dgrad_fprop_spec,
+        )
+
+        p = DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
+        )
+        spec = make_dgrad_fprop_spec(
+            p,
+            block_q=16,
+            block_groups=block_groups,
+            block_h=block_h,
+            fold_k32=fold_k32,
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=weights_lds,
+            row_guard=True,
+        )
+        spec = replace(spec, name=name, **(knobs or {}))
+        return build_direct_conv(spec, arch=arch)
 
     return _build
 
@@ -1008,6 +1097,7 @@ def build_direct_depthwise(
     *,
     block_w=16,
     block_waves=2,
+    wave_size=64,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1032,6 +1122,7 @@ def build_direct_depthwise(
             name=name,
             block_w=block_w,
             block_waves=block_waves,
+            wave_size=wave_size,
         )
         return _build_dw(spec, arch=arch)
 
@@ -1130,6 +1221,37 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_dgrad_win(
+    name, arch, N, H, W, groups, KH, PAD, dtype, **knobs
+):
+    """Windowed depthwise dgrad (stride 1); ``knobs`` are the spec's."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradWindowedSpec,
+            build_direct_depthwise_dgrad_windowed,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseDgradWindowedSpec(problem=p, name=name, **knobs)
+        return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+
+    return _build
+
+
 def build_direct_nongrouped(
     name,
     arch,
@@ -1176,6 +1298,48 @@ def build_direct_nongrouped(
         )
         spec = DirectNongroupedConvSpec(problem=p, name=name, **spec_kw)
         return build_direct_conv_nongrouped(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
+    """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
+    fold; ``problem`` overrides the DirectConvProblem fields (unused by the
+    fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
+    where the C++ engine is gated byte-identical by check_byte_identity.py."""
+
+    def _build():
+        from kernels.common import conv_direct_dw_wgrad as dw
+        from kernels.common import conv_direct_wgrad_gather as wg
+        from kernels.common import conv_direct_wgrad_tiled as wt
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        if kind == "fold":
+            return dw.build_dw_wgrad_fold(
+                dw.DwWgradFoldSpec(name=name, **spec_kw), arch=arch
+            )
+        kw = dict(
+            N=2,
+            H=16,
+            W=32,
+            groups=1,
+            cpg=64,
+            kpg=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        kw.update(problem)
+        p = DirectConvProblem(**kw)
+        spec_cls, build = {
+            "tiled": (wt.DirectWgradTiledSpec, wt.build_direct_wgrad_tiled),
+            "dw_lds": (dw.DwWgradLdsSpec, dw.build_dw_wgrad_lds),
+            "dw_cols": (dw.DwWgradColsSpec, dw.build_dw_wgrad_cols),
+            "gather": (wg.WgradGatherSpec, wg.build_wgrad_gather),
+        }[kind]
+        return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
 
     return _build
 
@@ -1229,6 +1393,7 @@ def build_direct_depthwise_col(
     block_w=4,
     block_waves=1,
     dtype="fp16",
+    wave_size=64,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1256,6 +1421,7 @@ def build_direct_depthwise_col(
             block_w=block_w,
             block_waves=block_waves,
             dtype=dtype,
+            wave_size=wave_size,
         )
         return _build_dwcol(spec, arch=arch)
 
@@ -1905,6 +2071,36 @@ def cases():
             group_merge=8,
         ),
     )
+    # gfx1250 WMMA (wave32, 16x16x32): the depthwise problem unmerged
+    # (grid-per-group) and merged on both epilogues, plus a dense-grouped
+    # problem (groups=4, cpg=kpg=16) unmerged.
+    conv_g4 = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)
+    for tag, prob, gm, epi, vec_c in (
+        ("n2h14c64k64r3g64/dw_unmerged", conv_dw, 1, "default", None),
+        ("n2h14c64k64r3g64/dw_gm4_direct", conv_dw, 4, "default", 1),
+        ("n2h14c64k64r3g64/dw_gm8_cshuffle", conv_dw, 8, "cshuffle", None),
+        ("n2h14c64k64r3g4/g4_cshuffle", conv_g4, 1, "cshuffle", None),
+    ):
+        add(
+            "conv",
+            f"conv/gfx1250/{tag}",
+            "gfx1250",
+            build_conv(
+                "irhash_conv_1250_" + tag.split("/")[1],
+                "gfx1250",
+                prob,
+                wave_size=32,
+                wtm=16,
+                wtn=16,
+                wtk=32,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                epilogue=epi,
+                vector_size_c=vec_c,
+                group_merge=gm,
+            ),
+        )
 
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
     # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
@@ -2484,6 +2680,45 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=64,
+        ),
+    )
+    # The stride-1 tap-outer K loop (tap_outer_k) of the same kernel.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_tapk",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_g4_s1_tapk",
+            "gfx950",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            tap_outer_k=True,
+        ),
+    )
+    # The dY halo mode of that loop (dy_halo=2), sized for Wo <= 8.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_halo2",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_g4_s1_halo2",
+            "gfx950",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            tap_outer_k=True,
+            halo={"dy_halo": 2, "halo_max_wo": 8},
         ),
     )
     # gfx1151 WMMA grouped (wave32, 16x16x16) -- stride=1 only.
@@ -3419,6 +3654,21 @@ def cases():
                 **_kw,
             ),
         )
+    # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
+    # magic sum carries a real multiply-high term (a power-of-two ratio has multiplier 1).
+    for _dim, _three_d in (("2d", False), ("3d", True)):
+        add(
+            "attention",
+            f"attention/gfx950/scalar{_dim}_fp16_d128_q40_kv8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar{_dim}_q40_kv8",
+                "gfx950",
+                three_d=_three_d,
+                num_query_heads=40,
+                num_kv_heads=8,
+            ),
+        )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
     # 4-warp GQA V-transpose (gfx942) routes.
@@ -3540,6 +3790,39 @@ def cases():
             PAD=1,
             block_q=4,
             block_groups=16,
+        ),
+    )
+    # --- 4c bf16 (mfma_f32_4x4x4_bf16), gfx950 and gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_bf16_n2h13",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_bf16",
+            "gfx950",
+            N=2,
+            H=13,
+            W=13,
+            groups=32,
+            block_q=4,
+            block_groups=16,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/4c_bf16_n1h8",
+        "gfx942",
+        build_direct_4c(
+            "irhash_direct4c_942_bf16",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            block_q=8,
+            block_groups=16,
+            dtype="bf16",
         ),
     )
     # --- 8c, gfx950 ---
@@ -3977,6 +4260,225 @@ def cases():
         ),
     )
 
+    # --- conv_direct_dgrad: 4c dgrad (forward 4c kernel, transposed problem) ---
+    # Fused gathered weights (gfx942), LDS-staged weights with transpose reads
+    # and the row-staged runtime row stream (gfx950); the branch matrix and
+    # the C++ twin live in library/tests/parity/conv_direct_dgrad_ext_emit.*.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx942/4c_dgrad_fw_fp16_n1h8",
+        "gfx942",
+        build_direct_4c(
+            "irhash_direct4c_dgrad_942_fw",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            block_q=8,
+            block_groups=16,
+            dgrad_fused_weights=True,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/4c_dgrad_fwl_bf16_n2h13",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_dgrad_950_fwl",
+            "gfx950",
+            N=2,
+            H=13,
+            W=13,
+            groups=32,
+            block_q=4,
+            block_groups=16,
+            dtype="bf16",
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=True,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/4c_dgrad_fwl_sr2_bf16_n2h9",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_dgrad_950_sr2",
+            "gfx950",
+            N=2,
+            H=9,
+            W=21,
+            groups=64,
+            block_q=8,
+            block_groups=32,
+            dtype="bf16",
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=True,
+            stage_rows=True,
+        ),
+    )
+    # --- conv_direct_dgrad: generic direct-MFMA dgrad, fused weights ---
+    # The forward row stream over the transposed problem reading the original
+    # weights (gathered, or LDS-staged transpose reads on gfx950), row guard
+    # on. Python-only family (no C++ twin of the generic builder yet).
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c16_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c16",
+            "gfx950",
+            N=2,
+            H=7,
+            W=13,
+            groups=32,
+            cpg=16,
+            kpg=16,
+            dtype="bf16",
+            fold_k32=False,
+            weights_lds=True,
+            knobs={"waves_per_eu": 4},
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c32_k32_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c32k32",
+            "gfx950",
+            N=2,
+            H=7,
+            W=13,
+            groups=16,
+            cpg=32,
+            kpg=32,
+            dtype="bf16",
+            fold_k32=True,
+            weights_lds=True,
+            block_groups=1,
+        ),
+    )
+    # The row-stream knobs: the policy's stack (two-row prefetch, LDS-only
+    # row barrier, XCD row-band order, column pad, staged output) on a
+    # whole-image tile with the early exit, and the split-M stack with
+    # 32-wide atoms.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c16_stream_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c16_stream",
+            "gfx950",
+            N=8,
+            H=7,
+            W=13,
+            groups=32,
+            cpg=16,
+            kpg=16,
+            dtype="bf16",
+            fold_k32=False,
+            weights_lds=True,
+            block_h=16,
+            knobs={
+                "row_exit": True,
+                "waves_per_eu": 4,
+                "prefetch_rows": 2,
+                "lds_only_sync": True,
+                "xcd_tiles": True,
+                "lds_pad": 8,
+                "stage_out": True,
+            },
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c32_k32_wm2_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c32k32_wm2",
+            "gfx950",
+            N=8,
+            H=7,
+            W=13,
+            groups=16,
+            cpg=32,
+            kpg=32,
+            dtype="bf16",
+            fold_k32=True,
+            weights_lds=True,
+            block_groups=1,
+            knobs={
+                "prefetch_rows": 2,
+                "lds_only_sync": True,
+                "waves_m": 2,
+                "xcd_tiles": True,
+            },
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx942/mfma_dgrad_fw_c12_fp16",
+        "gfx942",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_942_fw_c12",
+            "gfx942",
+            N=1,
+            H=9,
+            W=11,
+            groups=8,
+            cpg=12,
+            kpg=12,
+            dtype="fp16",
+            fold_k32=False,
+            weights_lds=False,
+            block_h=16,
+        ),
+    )
+    # --- conv_direct_dgrad: windowed depthwise dgrad (stride 1) ---
+    # The dot2 VALU form and the Toeplitz MFMA form, both gfx950; the branch
+    # matrix and the C++ twin live in library/tests/parity/conv_direct_dgrad_ext_emit.*.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_win_dot2_k7",
+        "gfx950",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_950_dot2_k7",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            KH=7,
+            PAD=3,
+            dtype="bf16",
+            block_w=7,
+            block_h=14,
+            dot2=True,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_win_mfma_k7",
+        "gfx950",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_950_mfma_k7",
+            "gfx950",
+            N=3,
+            H=14,
+            W=14,
+            groups=64,
+            KH=7,
+            PAD=3,
+            dtype="bf16",
+            block_waves=8,
+            block_h=14,
+            mfma=True,
+            w_fold=2,
+            prefetch_rows=2,
+        ),
+    )
+
     # --- conv_direct_nongrouped: non-grouped (groups == 1) direct conv ---
     # LDS halo-reuse tile, tap-shared activation fragments, fragment-order
     # weights, hoisted staging predication. One case per structural branch; the
@@ -4032,6 +4534,117 @@ def cases():
             ),
         )
 
+    # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
+    # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
+    # Every case needs llvm23 (TDM), so the other flavors record them as
+    # expected failures. The C++ twin is gated by
+    # library/tests/parity/conv_direct_dgrad_wmma_emit.*.
+    def build_direct_dgrad_wmma_case(dtype, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _over in (
+        ("bf16_default", "bf16", {}),
+        (
+            "fp16_tn2_st3_pf",
+            "fp16",
+            dict(
+                tiles_c=2,
+                tiles_p=2,
+                tile_w=8,
+                tile_n=2,
+                stages=3,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
+    # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
+    # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
+    # depthwise partial-slot kernels and their fold, and the small-C gather.
+    # The full branch matrix (and the C++ twins) lives in
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 95+).
+    for _case_id, _kind, _prob, _over in (
+        ("tiled_bf16_c128", "tiled", dict(cpg=128, kpg=128, H=30), {}),
+        (
+            "tiled_qg2_pingpong",
+            "tiled",
+            {},
+            dict(
+                q_groups=2,
+                pingpong=True,
+                waves_k=2,
+                wave_k16=1,
+                rows_per_seg=12,
+                prefetch=3,
+            ),
+        ),
+        (
+            "tiled_fp16_unfold4",
+            "tiled",
+            dict(N=4, H=15, W=40, dtype="fp16"),
+            dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
+        ),
+        ("fold_t9", "fold", {}, dict(taps=9)),
+        (
+            "dw_cols_c3_7x7_s2",
+            "dw_cols",
+            dict(groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2, H=20),
+            {},
+        ),
+        ("dw_lds_c64", "dw_lds", dict(groups=64, cpg=1, kpg=1), {}),
+        (
+            "gather_c3_s2",
+            "gather",
+            dict(cpg=3, kpg=24, stride=2, H=32, W=64),
+            {},
+        ),
+        (
+            "gather_c24_tr",
+            "gather",
+            dict(cpg=24, kpg=96, stride=2, H=30, W=40),
+            dict(wave_k16=1, waves_k=6, rows_per_seg=8, target_blocks=256),
+        ),
+    ):
+        add(
+            "conv_direct_wgrad",
+            f"conv_direct_wgrad/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_wgrad(
+                f"irhash_direct_wgrad_{_case_id}", "gfx950", _kind, _prob, **_over
+            ),
+        )
+
     # --- conv_direct_depthwise_tiled: output-stationary depthwise direct conv ---
     # Runtime filter-row loop, sliding input-row window, one weight row in
     # registers. Mirrors library/tests/parity/conv_direct_grouped_emit.*
@@ -4064,6 +4677,64 @@ def cases():
                 f"irhash_direct_dw_tiled_{_case_id}", _arch, **_shape, **_over
             ),
         )
+
+    # Depthwise forward direct kernels on the wave32 gfx1250, built at its wave
+    # size; plus the preloading kernel as a logical wave64 (no cross-lane
+    # operation, so it runs as two hardware waves). Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 114+).
+    for _tag, _wave in (("dw_n4h16_w32", 32), ("dw_n4h16_w64", 64)):
+        add(
+            "conv_direct",
+            f"conv_direct/gfx1250/{_tag}",
+            "gfx1250",
+            build_direct_depthwise(
+                f"irhash_directdw_1250_{_tag}",
+                "gfx1250",
+                N=4,
+                H=16,
+                W=16,
+                groups=64,
+                block_w=16,
+                block_waves=1,
+                wave_size=_wave,
+            ),
+        )
+    add(
+        "conv_direct",
+        "conv_direct/gfx1250/dw_col_s2_fp16_w32",
+        "gfx1250",
+        build_direct_depthwise_col(
+            "irhash_dwcol_1250_s2_fp16",
+            "gfx1250",
+            N=2,
+            H=12,
+            W=12,
+            groups=96,
+            stride=2,
+            block_h=8,
+            block_w=2,
+            wave_size=32,
+        ),
+    )
+    add(
+        "conv_direct_depthwise_tiled",
+        "conv_direct_depthwise_tiled/gfx1250/bf16_k5_bwv2_w32",
+        "gfx1250",
+        build_direct_depthwise_tiled(
+            "irhash_direct_dw_tiled_1250_bf16_k5",
+            "gfx1250",
+            N=2,
+            H=16,
+            W=16,
+            groups=96,
+            KH=5,
+            PAD=2,
+            block_w=8,
+            block_h=2,
+            block_waves=2,
+            wave_size=32,
+        ),
+    )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel
@@ -4179,6 +4850,73 @@ def cases():
         "gfx1201",
         build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
     )
+
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 

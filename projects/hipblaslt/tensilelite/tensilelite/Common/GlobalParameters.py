@@ -198,6 +198,13 @@ globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+# Where A/B data come from. None keeps the default: mxDataGenerator for MX inputs only.
+# True:  A/B come from mxDataGenerator whether MX or not (non-MX A/B must be FP8/BF8), so F8 and
+#        MXF8 runs of the same problem get the same A/B bytes.
+# False: A/B use DataInitTypeA/B through the non-MX init path whether MX or not (Trig gives the
+#        plain F8 pattern) and MX scales use DataInitTypeMXSA/MXSB. MX data must be FP8/BF8/FP4
+#        (MXF8, MXF4, NVF4).
+globalParameters["MXDataGenerator"] = None
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
 # does not select a compiled tile-processing or work-assignment family.
@@ -418,6 +425,13 @@ globalParameters["StinkyTofuModuleOptions"] = {}
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
+
+# StinkyTofu register-allocation dump, for debugging a colouring. Each kernel that
+# runs allocation writes what it saw and did -- the IR before the lift, the SSA form,
+# its live ranges, and each attempt's placement table -- to
+# <StinkyTofuCostOutputDir>/<kernel>/ra/, or ./<kernel>/ra/ when that is unset.
+# Changes no code, so it is global rather than part of the kernel name.
+globalParameters["StinkyTofuRegisterAllocationDump"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
@@ -659,6 +673,10 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel: a mode 0..3, or a StinkyTofu config
+    # string such as "apply,classes=vs". See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
@@ -777,6 +795,7 @@ globalParameterTypeOverrides = {
     "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
+    "MXDataGenerator":         {type(None), bool},  # unset keeps the per-problem default
 }
 
 

@@ -37,6 +37,18 @@ if(BUILD_TESTING)
   install(TARGETS rocke_tf32 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_tf32)
 
+  add_executable(rocke_fp8_scale_conversion_gate core/test_fp8_scale_conversion_gate.cpp)
+  target_link_libraries(rocke_fp8_scale_conversion_gate PRIVATE rocke_core)
+  add_test(NAME rocke_fp8_scale_conversion_gate COMMAND rocke_fp8_scale_conversion_gate)
+  set_tests_properties(rocke_fp8_scale_conversion_gate PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_fp8_scale_conversion_gate)
+  set_target_properties(rocke_fp8_scale_conversion_gate
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_fp8_scale_conversion_gate
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_fp8_scale_conversion_gate)
+
   add_executable(rocke_storage core/test_storage.cpp)
   target_link_libraries(rocke_storage PRIVATE rocke_core)
   add_test(NAME rocke_storage COMMAND rocke_storage)
@@ -133,6 +145,23 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
+  # QkScaleSpec validation in the C++ engine: the Python messages, bad value included.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_qk_scale_spec_validate.cpp")
+    add_executable(rocke_qk_scale_spec_validate core/test_qk_scale_spec_validate.cpp)
+    target_link_libraries(rocke_qk_scale_spec_validate PRIVATE rocke_core)
+    add_test(NAME rocke_qk_scale_spec_validate
+             COMMAND rocke_qk_scale_spec_validate)
+    set_tests_properties(rocke_qk_scale_spec_validate
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_qk_scale_spec_validate)
+    set_target_properties(rocke_qk_scale_spec_validate
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_qk_scale_spec_validate
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_qk_scale_spec_validate)
+  endif()
+
   # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
   # io helpers, through the C++ builders and HIP/LLVM lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
@@ -147,6 +176,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_nontemporal_hip)
+  endif()
+
+  # The buffer descriptor word (DWORD3) the HIP lowerer emits per target, and
+  # its agreement with the LLVM lowerer's word.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
+    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
+    target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
+    add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
+    set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_rsrc_hip)
+    set_target_properties(rocke_buffer_rsrc_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_buffer_rsrc_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_buffer_rsrc_hip)
   endif()
 
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
@@ -197,6 +242,23 @@ if(BUILD_TESTING)
                  rocke_xf32_bf16x3_lowering)
   endif()
 
+  # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
+  # both C++ lowerers, the verifier and the constant folder.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
+    add_executable(rocke_unsigned_int_ops core/test_unsigned_int_ops.cpp)
+    target_link_libraries(rocke_unsigned_int_ops PRIVATE rocke_core)
+    add_test(NAME rocke_unsigned_int_ops COMMAND rocke_unsigned_int_ops)
+    set_tests_properties(rocke_unsigned_int_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
+    set_target_properties(rocke_unsigned_int_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unsigned_int_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unsigned_int_ops)
+  endif()
+
   # f64 op rejection and f64 vector arithmetic in both C++ lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_f64_lowering.cpp")
     add_executable(rocke_f64_lowering core/test_f64_lowering.cpp)
@@ -227,6 +289,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_opcode_values)
+  endif()
+
+  # The E8M0 scale decoder reads its byte unsigned in both C++ lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mx_scale_decode.cpp")
+    add_executable(rocke_mx_scale_decode core/test_mx_scale_decode.cpp)
+    target_link_libraries(rocke_mx_scale_decode PRIVATE rocke_core)
+    add_test(NAME rocke_mx_scale_decode COMMAND rocke_mx_scale_decode)
+    set_tests_properties(rocke_mx_scale_decode
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mx_scale_decode)
+    set_target_properties(rocke_mx_scale_decode
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mx_scale_decode
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mx_scale_decode)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
@@ -305,6 +383,8 @@ if(BUILD_TESTING)
     # Python recipe tests need the native VM in relocated test artifacts.
     install(TARGETS rocke_portable_ir_replay_cli
             RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
+    install(FILES "${ROCKE_BUILD_ID_MANIFEST}"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------
