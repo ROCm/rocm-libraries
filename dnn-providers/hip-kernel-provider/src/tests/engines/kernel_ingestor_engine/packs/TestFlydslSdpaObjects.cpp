@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -542,6 +544,48 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
               << " launches\n";
     ::testing::Test::RecordProperty("objects", static_cast<int>(kernels.size()));
     ::testing::Test::RecordProperty("staged", static_cast<int>(staged.size()));
+}
+
+// ---------------------------------------------------------------------------
+// host: the graph schema the engines claim
+// ---------------------------------------------------------------------------
+
+// Every FlyDSL SDPA engine's UED claims the graph schema its matchers were last reviewed
+// against: each field the schema added up to it is gated where it is read, or by
+// usesUnreadSchemaFields (FlydslSdpaShared.hpp; COVERAGE.md "Graph schema"). The claim is the
+// newest version this SDK defines, so a ragged graph reaches the matchers; an SDK that adds a
+// version fails the first check until its fields are reviewed and both values move together
+// (gen_descriptors.py SDPA_SDK_VERSION).
+TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
+{
+    const hipdnn_data_sdk::utilities::Version reviewed{std::string("1.4.0")};
+    EXPECT_EQ(
+        hipdnn_data_sdk::utilities::Version{
+            std::string(hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION)}
+            .str(),
+        reviewed.str())
+        << "the SDK defines a graph schema the FlyDSL SDPA matchers were not reviewed against";
+    // A packed graph with every 1.x feature: overridable shapes aside, which the matchers
+    // decline themselves, it is within the claim.
+    const auto& packedFloor
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, true, true, true);
+    for(const auto op : {"sdpa_rdna",
+                         "sdpa_rdna_decode",
+                         "sdpa_aiw",
+                         "sdpa_cdna",
+                         "sdpa_cdna_dualwave",
+                         "sdpa_cdna_decode"})
+    {
+        const auto* staged = findLoadedSet(std::string("hipkernel:flydsl_") + op);
+        if(staged == nullptr)
+        {
+            EXPECT_TRUE(flydslShippedArches(op).empty())
+                << "this build ships " << op << " but loaded no objects for it";
+            continue;
+        }
+        EXPECT_EQ(staged->engine.sdkVersion.str(), reviewed.str()) << op;
+        EXPECT_FALSE(staged->engine.sdkVersion < packedFloor) << op;
+    }
 }
 
 // ---------------------------------------------------------------------------

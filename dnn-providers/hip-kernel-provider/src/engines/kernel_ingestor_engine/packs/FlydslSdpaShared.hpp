@@ -107,6 +107,35 @@ inline bool computesInFloat(const MatchContext& context)
            || computeType == data_objects::DataType::BFLOAT16;
 }
 
+/**
+ * @brief Whether the graph uses a schema field no SDPA matcher reads where it reads a tensor,
+ *        each declined: overridable shapes (graph schema 1.1.0), whose execute-time shapes no
+ *        matcher has seen; and a ragged offset multiplier (1.4.0) on a tensor with no ragged
+ *        offset, which no dense tensor can mean.
+ *
+ * The engines claim every graph schema through 1.4.0 (their UEDs' `sdk_version`), so every
+ * field up to it is gated: these two here, and the rest where each tensor is read --
+ * pass-by-value (1.2.0), ragged offsets and declared alignments (1.3.0), and a ragged
+ * tensor's multiplier (1.4.0, isPackedThrough).
+ */
+inline bool usesUnreadSchemaFields(const MatchContext& context)
+{
+    if(context.graph.getGraph().is_override_shape_enabled())
+    {
+        return true;
+    }
+    for(const auto& entry : context.graph.getTensorMap())
+    {
+        const auto* tensor = entry.second;
+        if(tensor != nullptr && !tensor->ragged_offset_tensor_uid().has_value()
+           && tensor->ragged_offset_multiplier() != 1)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// The largest softmax scale every FlyDSL SDPA kernel serves. Real graphs use 1/sqrt(d) or a
 /// temperature near 1; far above this each family overflows f32 at a different point (the
 /// CDNA causal objects' running-max floor times scale * log2(e) passes FLT_MAX near 2.4e8),

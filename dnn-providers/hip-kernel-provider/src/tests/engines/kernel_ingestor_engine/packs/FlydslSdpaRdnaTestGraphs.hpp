@@ -310,6 +310,11 @@ struct SdpaGraphSpec
     std::set<int64_t> unpackedTensors;
     std::map<int64_t, int64_t> raggedOffsetOf;
     std::map<int64_t, int64_t> raggedMultiplierOf;
+    /// Per tensor uid left dense: a ragged offset multiplier set with no ragged offset
+    /// (graph schema 1.4.0's field, which no dense tensor can mean).
+    std::map<int64_t, int64_t> strayMultiplierOf;
+    /// The graph's opt-in to execute-time override shapes (graph schema 1.1.0).
+    bool overrideShapeEnabled = false;
     /// The tables' dtype, dims and batch stride, over INT32, [B + 1, 1, 1, 1] and 1.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> raggedOffsetDataType;
     std::vector<int64_t> raggedOffsetDims;
@@ -469,6 +474,11 @@ inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
         multiplier = declaredMultiplier != spec.raggedMultiplierOf.end()
                          ? declaredMultiplier->second
                          : (*strides)[2];
+    }
+    if(const auto stray = spec.strayMultiplierOf.find(uid);
+       stray != spec.strayMultiplierOf.end() && !ragged.has_value())
+    {
+        multiplier = stray->second;
     }
     const auto declared = spec.alignment.find(uid);
     return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -878,6 +888,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     graphBuilder.add_name(name);
     graphBuilder.add_tensors(tensorsVector);
     graphBuilder.add_nodes(nodesVector);
+    graphBuilder.add_is_override_shape_enabled(spec.overrideShapeEnabled);
     builder.Finish(graphBuilder.Finish());
     return builder;
 }
@@ -1016,6 +1027,13 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
          [](SdpaGraphSpec& s) { s.computeDataType = data_objects::DataType::INT32; });
     edit("ComputeTypeFp8",
          [](SdpaGraphSpec& s) { s.computeDataType = data_objects::DataType::FP8_E4M3; });
+
+    // The graph schema fields no tensor read covers (usesUnreadSchemaFields): execute-time
+    // override shapes (1.1.0), and a ragged offset multiplier on a dense tensor (1.4.0).
+    edit("OverrideShapeEnabled", [](SdpaGraphSpec& s) { s.overrideShapeEnabled = true; });
+    edit("RaggedMultiplierOnADenseQ", [](SdpaGraphSpec& s) {
+        s.strayMultiplierOf[FLYDSL_SDPA_RDNA_Q_UID] = s.heads * s.headDim;
+    });
 
     // Each operand's declared alignment, below what the kernels' accesses assume.
     edit("QAlignedTo8", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_Q_UID] = 8; });

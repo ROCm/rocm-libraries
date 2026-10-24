@@ -432,6 +432,29 @@ every such score is masked, so nothing is padded and nothing pads the softmax.
 A row no key reaches — a narrow window, or bottom-right causal with more
 queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
+**Graph schema.** Before a matcher runs, the ingestor declines a graph whose schema floor
+(hipDNN's `computeMinimumEnginePluginApiVersion`) is above the engine's UED `sdk_version`.
+Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.4.0**, the newest version
+the SDK defines (`K_MAX_SUPPORTED_API_VERSION`), so ragged graphs reach the matchers; each
+field the schema added up to it is gated:
+
+| Schema | Field | Gate |
+|---|---|---|
+| 1.1.0 | graph `is_override_shape_enabled` | declined (`usesUnreadSchemaFields`): no matcher sees the execute-time shapes |
+| 1.2.0 | tensor `is_runtime_pass_by_value` | the scale tensor must be one (`isServableScaleTensor`); a Philox seed or offset may be (`isServablePhiloxTensor`); every other tensor declines one where it is read (operands, LSE, bias, sink, lengths, offset tables, RNG dump) |
+| 1.3.0 | tensor `ragged_offset_tensor_uid` | Q/K/V/O: compact THD or cuDNN's packed form, else declined (§5.9, §7.10); the LSE: packed through Q's table or dense; every other tensor declines it |
+| 1.3.0 | tensor `alignment` | `declaresAlignment` wherever a device tensor is read: Q/K/V/O and the bias 16 bytes, LSE, lengths, offset tables and RNG dump 4, sink 2, seed and offset on the device 8 |
+| 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
+
+`TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
+fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **What still
+stands between a ragged graph and these engines:** the provider itself declares engine
+plugin API 1.2.0 (`src/core/PluginPublic.cpp`), and hipDNN's backend skips a plugin below a
+graph's floor, so through the backend no hip-kernel-provider engine receives a ragged graph
+yet. Raising that is a provider-wide change: the non-ingestor engines (`asm_sdpa`,
+`hip_mlops`, `hip_flash2`) would then receive ragged and aligned graphs with no version gate
+of their own.
+
 ### 5.3 Against common SDPA feature requirements
 
 | # | Requirement | Status |

@@ -441,7 +441,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
-    if(!computesInFloat(context))
+    if(!computesInFloat(context) || usesUnreadSchemaFields(context))
     {
         return std::nullopt;
     }
