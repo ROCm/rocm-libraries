@@ -55,4 +55,6 @@ template <typename T>
 void unit_check_near(
     int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU, double rtol = -1.0, double atol = -1.0);
 
+void unit_check_condition(bool cond);
+
 #endif // UNIT_HPP
