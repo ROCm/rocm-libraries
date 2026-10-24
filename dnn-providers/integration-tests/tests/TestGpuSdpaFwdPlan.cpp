@@ -18,6 +18,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaFwdTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "RaggedGraphTestUtils.hpp"
@@ -31,6 +33,9 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
+using hipdnn_test_sdk::utilities::FloatOperandSpec;
+using hipdnn_test_sdk::utilities::OperandStorage;
 
 namespace
 {
@@ -136,8 +141,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }
 
-// Ragged tensors are not yet supported by the GPU SDPA reference.
-// TODO: remove once supported.
+// The dense plan rejects ragged tensors; ragged nodes go to GpuSdpaRaggedFwdPlan.
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -202,13 +206,13 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
-        // max_tensor_uid (running max softmax stat) is not produced by the reference.
+        // A max_tensor_uid naming no tensor is not applicable (Max itself is supported).
         SdpaAttributesT attrs;
         attrs.max_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
-        // sum_exp_tensor_uid (running sum-exp softmax stat) is not produced by the reference.
+        // A sum_exp_tensor_uid naming no tensor is not applicable (Sum_exp itself is supported).
         SdpaAttributesT attrs;
         attrs.sum_exp_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));
@@ -246,6 +250,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
 
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
 
     const int64_t batch = DIMS[0];
     const int64_t numHeads = DIMS[1];
@@ -286,16 +291,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     // Reference: the same kernel via a direct fprop() with a rank-3 lse and identical inputs.
     Tensor<float> oRef(DIMS);
     Tensor<float> lseRef(lseDims);
-    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
-                                                                 k,
-                                                                 v,
-                                                                 oRef,
-                                                                 std::nullopt,
-                                                                 /*attnMask=*/nullptr,
-                                                                 /*leftBound=*/-1,
-                                                                 /*rightBound=*/-1,
-                                                                 /*topLeftAlignment=*/true,
-                                                                 &lseRef);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+        q, k, v, oRef, GpuSdpaFwdOptions<float>{}.setLse(&lseRef));
 
     // Same kernel + identical inputs, so plan and direct outputs match within a tight bound.
     const float tolerance = 1e-5f;
@@ -306,13 +303,16 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
         << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
 }
 
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
+// The graph plan computes P in fp32 (an independent oracle, SEM-012), not with the provider's
+// bf16 P rounding, which stays available only through fprop's explicit probabilityMode.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
     using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
 
     const std::vector<int64_t> qDims = {1, 1, 1, 1};
@@ -358,25 +358,16 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
         k,
         v,
         oProviderMode,
-        /*attnScaleValue=*/1.0f,
-        /*attnMask=*/nullptr,
-        /*leftBound=*/-1,
-        /*rightBound=*/-1,
-        /*topLeftAlignment=*/true,
-        /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
+        GpuSdpaFwdOptions<float>{}.setScale(1.0f).setProbabilityMode(
+            SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE));
 
     Tensor<bfloat16> oFloatMode(oDims);
     GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, bfloat16, float>(
-        q,
-        k,
-        v,
-        oFloatMode,
-        /*attnScaleValue=*/1.0f);
+        q, k, v, oFloatMode, GpuSdpaFwdOptions<float>{}.setScale(1.0f));
 
     ASSERT_NE(static_cast<float>(oProviderMode.memory().hostData()[0]),
               static_cast<float>(oFloatMode.memory().hostData()[0]));
-    EXPECT_EQ(static_cast<float>(oProviderMode.memory().hostData()[0]),
+    EXPECT_EQ(static_cast<float>(oFloatMode.memory().hostData()[0]),
               static_cast<float>(oPlan.memory().hostData()[0]));
 }
 
@@ -389,6 +380,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
 
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
 
     constexpr int64_t SCALE_UID = 15;
     constexpr float SCALE_VALUE = 2.0f;
@@ -437,16 +429,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
     oPlan.markDeviceModified();
 
     Tensor<float> oRef(DIMS);
-    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
-                                                                 k,
-                                                                 v,
-                                                                 oRef,
-                                                                 SCALE_VALUE,
-                                                                 /*attnMask=*/nullptr,
-                                                                 /*leftBound=*/-1,
-                                                                 /*rightBound=*/-1,
-                                                                 /*topLeftAlignment=*/true,
-                                                                 /*lse=*/nullptr);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+        q, k, v, oRef, GpuSdpaFwdOptions<float>{}.setScale(SCALE_VALUE));
 
     const float tolerance = 1e-5f;
     const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
@@ -491,7 +475,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
     scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
     EXPECT_TRUE(isApplicableWith(scale));
 
-    scale.storage = OperandStorage::DEVICE;
+    scale.storage = OperandStorage::TENSOR;
     EXPECT_TRUE(isApplicableWith(scale));
 
     scale.dims = {2};
@@ -501,22 +485,24 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
 // Regression guard for the provider P->bf16 rounding gate. The cast is a property
 // of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
 // bf16-in/fp32-out config must still round P before P@V. Compile-time because
-// sdpaProbabilityMode is constexpr; no device required.
+// providerSdpaProbabilityMode is constexpr; no device required.
 TEST(TestGpuSdpaFwdPlanBuilder, ProbabilityModeKeyedOnInputsNotOutput)
 {
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
 
-    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
+    static_assert(REFERENCE_SDPA_PROBABILITY_MODE == SdpaSoftmaxProbabilityMode::FLOAT,
+                  "the graph plans must use fp32 softmax probabilities");
+    static_assert(providerSdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
                       == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "all-bf16 must round softmax probabilities to bf16 before P@V");
-    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
+    static_assert(providerSdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
                       == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "bf16 inputs with fp32 output must still round P to bf16 before P@V");
-    static_assert(sdpaProbabilityMode<float, float, float, float>()
+    static_assert(providerSdpaProbabilityMode<float, float, float, float>()
                       == SdpaSoftmaxProbabilityMode::FLOAT,
                   "fp32 inputs must not round the softmax probabilities");
-    static_assert(sdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
+    static_assert(providerSdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
                       == SdpaSoftmaxProbabilityMode::FLOAT,
                   "a non-bf16 P@V input must not select the bf16 P-storage cast");
 
@@ -748,7 +734,8 @@ void expectMaskedPlanMatchesReferences()
     // The CPU oracle reads host data, so it runs before any device upload.
     Tensor<float> oCpu(DIMS);
     hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::
-        forward<float, float, float, float, float, MaskT>(q, k, v, oCpu, std::nullopt, &mask);
+        forward<float, float, float, float, float, MaskT>(
+            q, k, v, oCpu, hipdnn_test_sdk::utilities::SdpaFwdOptions<MaskT>{}.setMask(&mask));
 
     Tensor<float> oPlan(DIMS);
     Tensor<float> oFloatPlan(DIMS);
@@ -796,4 +783,128 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithHalfMask)
 TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
 {
     expectMaskedPlanMatchesReferences<DataType::BFLOAT16>();
+}
+
+// fp8, as on the CPU: all three FLOAT Q/K/V descales are required, a paged K needs a scalar
+// descale, and the cuDNN sdpa_fp8 scales and amax outputs are one-element FLOAT tensors with
+// scale_s and descale_s together, fp8 inputs only and no dropout. Each case changes one field of
+// an accepted graph.
+TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const auto applicable = [](const auto& builder, const SdpaGraphSpec& spec) {
+        auto graphBuilder = makeSdpaGraph(spec);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    const GpuSdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::BFLOAT16>
+        ocp;
+    const GpuSdpaFwdPlanBuilder<DataType::FP8_E4M3_FNUZ,
+                                DataType::FP8_E4M3_FNUZ,
+                                DataType::FP8_E4M3_FNUZ,
+                                DataType::BFLOAT16>
+        fnuz;
+    const GpuSdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::FP8_E4M3>
+        ocpToFp8;
+    const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16>
+        bf16;
+
+    // Descales.
+    EXPECT_TRUE(applicable(ocp, {}));
+    SdpaGraphSpec spec;
+    spec.fp8Type = DataType::FP8_E4M3_FNUZ;
+    EXPECT_TRUE(applicable(fnuz, spec));
+    EXPECT_FALSE(applicable(ocp, spec)) << "dtype keys the builder";
+    spec = {};
+    spec.descales = 2;
+    EXPECT_FALSE(applicable(ocp, spec)) << "descale_v missing";
+    spec.descales = 0;
+    EXPECT_FALSE(applicable(ocp, spec)) << "no descales";
+    spec = {};
+    spec.pagedK = true;
+    EXPECT_TRUE(applicable(ocp, spec)) << "paged K with a scalar descale";
+    spec.descaleKDims = {1, 2, 1, 1};
+    EXPECT_FALSE(applicable(ocp, spec)) << "paged K with a per-head descale";
+    spec = {};
+    spec.fp8Type = DataType::BFLOAT16;
+    EXPECT_FALSE(applicable(bf16, spec)) << "descales on bf16 inputs";
+    spec.descales = 0;
+    EXPECT_TRUE(applicable(bf16, spec)) << "the same graph without descales";
+
+    // Softmax / output scaling and amax.
+    spec = {};
+    spec.withFullScaling();
+    EXPECT_TRUE(applicable(ocp, spec));
+    spec.oType = DataType::FP8_E4M3;
+    EXPECT_TRUE(applicable(ocpToFp8, spec)) << "fp8 output";
+    spec = {};
+    spec.withFullScaling().scaleS = false;
+    EXPECT_FALSE(applicable(ocp, spec)) << "descale_s without scale_s";
+    spec = {};
+    spec.withFullScaling().descaleS = false;
+    EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
+    for(auto SdpaGraphSpec::*field :
+        {&SdpaGraphSpec::scaleO, &SdpaGraphSpec::amaxS, &SdpaGraphSpec::amaxO})
+    {
+        spec = {};
+        spec.*field = true;
+        EXPECT_TRUE(applicable(ocp, spec)) << "each of scale_o / amax_s / amax_o alone";
+    }
+    spec = {};
+    spec.withFullScaling().scalingType = DataType::HALF;
+    EXPECT_FALSE(applicable(ocp, spec)) << "scales are read as float";
+    spec = {};
+    spec.withFullScaling().scalingDims = {1, 2, 1, 1};
+    EXPECT_FALSE(applicable(ocp, spec)) << "scales are single elements";
+    spec = {};
+    spec.withFullScaling().dropout = true;
+    EXPECT_FALSE(applicable(ocp, spec)) << "dropout does not combine with fp8 scaling";
+    spec.withFullScaling().dropout = false;
+    EXPECT_TRUE(applicable(ocp, spec));
+    spec = {};
+    spec.fp8Type = DataType::BFLOAT16;
+    spec.descales = 0;
+    spec.scaleO = true;
+    EXPECT_FALSE(applicable(bf16, spec)) << "scale_o on bf16 inputs";
+}
+
+// cuDNN's block mask (SEM-025), the same rules as the CPU plan test.
+TEST(TestGpuSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16>
+        bf16;
+    const auto applicable = [&bf16](const SdpaGraphSpec& spec) {
+        auto graphBuilder = makeSdpaGraph(spec);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return bf16.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    SdpaGraphSpec spec;
+    spec.fp8Type = DataType::BFLOAT16;
+    spec.descales = 0;
+    spec.blockMaskType = DataType::UINT8;
+    EXPECT_TRUE(applicable(spec));
+    spec.blockMaskType = DataType::INT8;
+    EXPECT_FALSE(applicable(spec)) << "UINT8 only";
+    spec.blockMaskType = DataType::UINT8;
+    for(const auto& dims : std::vector<std::vector<int64_t>>{
+            {2, 2, 1, 1}, {1, 1, 1, 1}, {1, 2, 2, 1}, {1, 2, 1, 2}, {1, 2, 1}})
+    {
+        spec.blockMaskDims = dims;
+        EXPECT_FALSE(applicable(spec)) << "dims must be [B, H_q, ceil(Sq/128), ceil(tiles/8)]";
+    }
 }

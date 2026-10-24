@@ -137,6 +137,27 @@ TensorAttributesT makeScalarAttr(int64_t uid, bool isRuntimePassByValue, bool wi
 
 } // namespace
 
+TEST(TestFlatbufferUtils, IsPassByValueTensorObjectFalseForOrdinaryDataTensor)
+{
+    const auto attr = makeScalarAttr(1, /*isRuntimePassByValue=*/false, /*withValue=*/false);
+    EXPECT_FALSE(isPassByValueTensor(attr));
+}
+
+TEST(TestFlatbufferUtils, IsPassByValueTensorObjectTrueForBakedValue)
+{
+    const auto attr = makeScalarAttr(1, /*isRuntimePassByValue=*/false, /*withValue=*/true);
+    EXPECT_TRUE(isPassByValueTensor(attr));
+}
+
+TEST(TestFlatbufferUtils, IsPassByValueTensorObjectTrueForRuntimePassByValue)
+{
+    const auto userSupplied = makeScalarAttr(1, /*isRuntimePassByValue=*/true, /*withValue=*/false);
+    EXPECT_TRUE(isPassByValueTensor(userSupplied));
+
+    const auto withDefault = makeScalarAttr(1, /*isRuntimePassByValue=*/true, /*withValue=*/true);
+    EXPECT_TRUE(isPassByValueTensor(withDefault));
+}
+
 using hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack;
 using hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack;
 

@@ -241,28 +241,31 @@ std::optional<MaskParameters> maskFor(const data_objects::SdpaAttributes& attrib
         = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     const int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    if(left < UNBOUNDED || right < UNBOUNDED || !fitsI32(left) || !fitsI32(right))
+    // left_bound = 0 keeps no keys (cuDNN rejects it).
+    if(left < UNBOUNDED || right < UNBOUNDED || left == 0 || !fitsI32(left) || !fitsI32(right))
     {
         return std::nullopt;
     }
 
+    // The deprecated causal flags compose the way cuDNN's setters do (and as
+    // resolveDiagonalBand / extractDiagonalBandParams resolve them): right bound 0
+    // unless one is set, BOTTOM_RIGHT for causal_mask_bottom_right, explicit bounds
+    // on top.
+    const bool deprecated = topLeftDeprecated || bottomRightDeprecated;
+    const int64_t resolvedRight = deprecated && right == UNBOUNDED ? 0 : right;
+    const bool bottomRight
+        = bottomRightDeprecated
+          || attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+
     MaskParameters result;
-    // The deprecated causal flags override any bounds and alignment, exactly as
-    // the hipDNN reference resolves them (extractDiagonalBandParams).
-    if(topLeftDeprecated || bottomRightDeprecated)
+    result.bottomRight = static_cast<int32_t>(bottomRight);
+    // The kernel's window_left counts the keys left of the diagonal; cuDNN's left_bound
+    // counts the diagonal too (SdpaSemanticsRegister SEM-001).
+    result.left = left == UNBOUNDED ? -1 : static_cast<int32_t>(left - 1);
+    result.right = static_cast<int32_t>(resolvedRight);
+    if(left != UNBOUNDED || resolvedRight != UNBOUNDED)
     {
-        result.kind = MaskKind::CAUSAL;
-        result.right = 0;
-        result.bottomRight = static_cast<int32_t>(bottomRightDeprecated);
-        return result;
-    }
-    result.bottomRight = static_cast<int32_t>(attributes.diagonal_alignment()
-                                              == data_objects::DiagonalAlignment::BOTTOM_RIGHT);
-    result.left = static_cast<int32_t>(left);
-    result.right = static_cast<int32_t>(right);
-    if(left != UNBOUNDED || right != UNBOUNDED)
-    {
-        result.kind = left == UNBOUNDED && right == 0 ? MaskKind::CAUSAL : MaskKind::WINDOW;
+        result.kind = left == UNBOUNDED && resolvedRight == 0 ? MaskKind::CAUSAL : MaskKind::WINDOW;
     }
     return result;
 }

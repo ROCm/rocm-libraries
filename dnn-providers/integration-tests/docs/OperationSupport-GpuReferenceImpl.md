@@ -61,8 +61,9 @@ The following table lists the operations currently executable through the GPU gr
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
-| SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
+| SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, ALiBi; ragged through the dense rewrite. No Philox dropout (the backward node has no `rng_dump`) or sinks (no `dsink` output) |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 
@@ -73,7 +74,6 @@ The following table lists the operations currently executable through the GPU gr
 | Convolution Backward Data | `ReferenceCapabilityError` ("GPU plan not yet implemented") | `GpuFpReferenceConvolution::dgrad` exists |
 | Convolution Backward Weights | `ReferenceCapabilityError` | `GpuFpReferenceConvolution::wgrad` exists |
 | BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
-| SDPA Backward | `ReferenceCapabilityError` | None |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
 | Resample Backward | "Unsupported node type" error | None |
@@ -117,6 +117,7 @@ but are not reachable through graph-level verification.
 | Reduction | `GpuReductionPlanBuilder` | `GpuReductionSignatureKey` | Reduction over the requested dimensions |
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
+| SDPA Backward | `GpuSdpaBwdPlanBuilder` | `GpuSdpaBwdSignatureKey` | Scaled dot-product attention gradients (dQ, dK, dV, dBias) |
 
 ### Pointwise Operations
 
@@ -146,21 +147,37 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 
 ### SDPA Restrictions
 
+Design, the full feature table for both references, and how they are tested:
+[SdpaReferenceImplementations.md](../../../projects/hipdnn/docs/SdpaReferenceImplementations.md).
+
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
-| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone |
-| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
-| Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | Not supported |
-| Paged KV cache, block-sparse attention | Not supported | Not supported |
-| Softmax max / sum-exp stats outputs | Not supported | - |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
+| FP8 (descale) inputs | `FP8_E4M3`, `FP8_E5M2` and their FNUZ forms, with `BFP16` output; requires all three `FLOAT` Q/K/V descales (scalar or `[B, H_kv, 1, 1]`; a paged K or V needs a scalar), rejected for other inputs. Q/K/V are dequantized on the device first, as in the CPU reference. cuDNN `sdpa_fp8` softmax and output scaling (`scale_s` with `descale_s`, `scale_o`, `amax_s`, `amax_o`; one-element `FLOAT`; not with dropout) as in the CPU reference (SEM-024); `BFP16` or input-format FP8 output | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V read in place through INT32 page tables, as the CPU reference (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) |
+| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Not supported |
+| `padding_mask` without both seq_len tensors | Not supported | Not supported |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite |
+| Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Not supported |
+| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference (forward and backward follow the CPU table) | Not supported |
+| Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported, as in the CPU reference | Through the dense rewrite (below) |
+| Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
-The ragged plan requires the RFC-0014 `[B, S, H, D]` token-major layout with a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its Q/K/V/O tensors has a `ragged_offset`; a
-partly ragged node is rejected there instead of running as dense. The harness records the
-dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
-(`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
+The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
+strides and an `INT32` `ragged_offset` aux on every primary. A node is keyed as ragged when any of
+its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
+plan rejects any ragged tensor. So a partly ragged node is declined. The CPU reference keys and gates
+ragged nodes the same way.
+
+Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
+rewrite (`RaggedSdpaDensify.hpp`, shared with the CPU reference; the GPU executor stages the packed buffers
+through the host): the packed tensors are unpacked into dense padded ones with the
+per-batch lengths as `seq_len_q/kv`, the dense plan runs, and the outputs are packed back. They
+therefore support everything the dense forward column and the SDPA Backward row list. Supplied `seq_len` tensors
+(cuDNN's ragged + padding form) must not exceed the packed lengths.
 
 ## Validators
 
@@ -194,8 +211,8 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
-| SDPA Backward | Yes | No |
+| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense incl. FP8 E4M3 / E4M3 FNUZ and variable seq. len.; ragged incl. FP8 E4M3) |
+| SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
 | Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
@@ -217,7 +234,7 @@ otherwise the GPU lane reports `OUTSIDE_OP_SET` for it. The set is currently **C
 - **BFP16**: Brain floating point (16-bit)
 - **FP32**: Single-precision floating point (32-bit)
 - **FP64**: Double-precision floating point (64-bit), reduction compute type only
-- **FP8 E4M3**: 8-bit floating point, ragged SDPA only
+- **FP8 E4M3**: 8-bit floating point (OCP, and the gfx942 FNUZ encoding for dense SDPA), SDPA forward inputs only
 - **INT8, UINT8, INT32**: Integer datatypes, validators only
 
 ### Layouts

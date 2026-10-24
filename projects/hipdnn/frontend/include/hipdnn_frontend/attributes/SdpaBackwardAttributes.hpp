@@ -495,6 +495,8 @@ public:
         setInput(InputNames::Offset, offset);
         return *this;
     }
+    // cuDNN semantics: left_bound = L keeps L keys up to and including the diagonal
+    // (FlashAttention's window_size_left = L - 1). Must be positive, or -1 for unbounded.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_diagonal_band_left_bound(int64_t value)
     {

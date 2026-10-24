@@ -5,11 +5,15 @@
 
 #include "hipdnn_data_sdk/utilities/RaggedTensor.hpp"
 #include "hipdnn_data_sdk/utilities/Tensor.hpp"
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
@@ -55,6 +59,13 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
     return std::nullopt;
 }
 
+/// Product of `dims`. An empty dims vector counts as one element (a scalar).
+inline int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand)
+{
+    return std::accumulate(
+        operand.dims.begin(), operand.dims.end(), int64_t{1}, std::multiplies<>());
+}
+
 template <typename T>
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> createShallowTensor(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
@@ -80,6 +91,49 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptiona
     const std::unordered_map<int64_t, void*>& variantPack)
 {
     return tensorDetails.has_value() ? bindShallowTensor<T>(*tensorDetails, variantPack) : nullptr;
+}
+
+/// Reads a scalar operand on the host and returns it as a float, converting from its data type.
+/// A scalar operand is stored one of three ways:
+///  - baked: the value lives in the graph, and the variant pack may omit it.
+///  - runtime pass-by-value: a pure runtime scalar is read through the host pointer in its
+///    variant-pack slot; one with a default uses the graph value.
+///  - ordinary tensor: the variant-pack slot holds the tensor buffer, which must be host memory
+///    here. The first element is read.
+inline float
+    readHostFloatOperand(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand,
+                         const std::unordered_map<int64_t, void*>& variantPack,
+                         const char* name)
+{
+    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(operand))
+    {
+        return hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+            operand, variantPack, name);
+    }
+    return hipdnn_flatbuffers_sdk::utilities::readHostScalarAs<float>(
+        variantPack.at(operand.uid), operand.data_type, name);
+}
+
+/// Binds an optional FLOAT operand that lives in host memory, such as an SDPA descale. Returns
+/// nullptr when the operand is absent. A pass-by-value scalar is copied into a one-element tensor.
+/// An ordinary tensor is viewed in place with its own dims and strides.
+inline std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> bindOptionalHostFloatOperand(
+    const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& operand,
+    const std::unordered_map<int64_t, void*>& variantPack,
+    const char* name)
+{
+    if(!operand.has_value())
+    {
+        return nullptr;
+    }
+    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(*operand))
+    {
+        auto staged
+            = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(std::vector<int64_t>{1});
+        staged->fillWithValue(readHostFloatOperand(*operand, variantPack, name));
+        return staged;
+    }
+    return bindShallowTensor<float>(*operand, variantPack);
 }
 
 template <typename T>

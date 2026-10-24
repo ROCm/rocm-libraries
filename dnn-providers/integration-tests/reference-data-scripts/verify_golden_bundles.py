@@ -229,8 +229,133 @@ def warn_unexpected_top_level_directories(
             result.warning(path, "unexpected top-level directory")
 
 
+# RFC 0011 4.2 ("Forward-Backward Generation Constraint"): a backward bundle's
+# O and LSE come from a forward pass, and if that forward pass is regenerated on
+# its own the backward bundle stays internally consistent with its stale inputs
+# while silently describing a different reference implementation. forward_source
+# is what makes that detectable, so it is mandatory on backward bundles -- the
+# one case where RFC 0011 requires a .meta.json at all rather than allowing the
+# tolerance fallback.
+FORWARD_SOURCE_FIELDS = ("method", "version", "generated_at")
+
+
+def validate_forward_source(
+    metadata: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str,
+    base_dir: Path | None,
+) -> None:
+    forward_source = metadata.get("forward_source")
+    if forward_source is None:
+        result.error(
+            path,
+            f"{prefix}forward_source is required on backward bundles "
+            "(RFC 0011 4.2): it names the forward pass whose O and LSE this "
+            "bundle's gradients were computed from",
+        )
+        return
+    if not isinstance(forward_source, dict):
+        result.error(path, f"{prefix}forward_source must be an object")
+        return
+
+    for key in FORWARD_SOURCE_FIELDS:
+        value = forward_source.get(key)
+        if not isinstance(value, str) or not value.strip():
+            result.error(
+                path,
+                f"{prefix}forward_source.{key} is required and must be a "
+                "non-empty string",
+            )
+
+    validate_forward_source_pairing(forward_source, path, result, prefix, base_dir)
+
+
+def validate_forward_source_pairing(
+    forward_source: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str,
+    base_dir: Path | None,
+) -> None:
+    """Cross-check forward_source against the forward bundle it names.
+
+    RFC 0011 4.2 asks for exactly this comparison: a difference in method,
+    version or generation timestamp means the forward bundle was regenerated
+    without its backward partner, which no test would otherwise catch.
+
+    The `bundle` field is optional, because RFC 0011's own example omits it; the
+    check is skipped, rather than failed, when it is absent or when the forward
+    bundle is not on disk (a backward bundle can legitimately be verified
+    without its partner pulled).
+    """
+    bundle = forward_source.get("bundle")
+    if bundle is None or base_dir is None:
+        return
+    if not isinstance(bundle, str) or not bundle.strip():
+        result.error(path, f"{prefix}forward_source.bundle must be a non-empty string")
+        return
+
+    forward_graph = (base_dir / bundle).resolve()
+    forward_meta = forward_graph.with_suffix(".meta.json")
+    if forward_graph.suffix != ".json" or forward_graph.name.endswith(".meta.json"):
+        result.error(
+            path,
+            f"{prefix}forward_source.bundle must point at the forward bundle's "
+            f"graph JSON (got '{bundle}')",
+        )
+        return
+    if not forward_meta.is_file():
+        # Verifying one subtree at a time is normal, and a backward bundle's
+        # forward partner is in a sibling directory, so an absent partner is not
+        # itself a defect. The pairing is cross-checked whenever both are in
+        # scope, which is the case for a whole-tree run.
+        return
+
+    try:
+        metadata = json.loads(forward_meta.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        result.error(
+            path, f"{prefix}forward_source bundle metadata is not parseable: {error}"
+        )
+        return
+    if not isinstance(metadata, dict):
+        result.error(path, f"{prefix}forward_source bundle metadata is not an object")
+        return
+
+    if metadata.get("direction") not in (None, "forward"):
+        result.error(
+            path,
+            f"{prefix}forward_source names '{bundle}', which is not a forward "
+            f"bundle (direction '{metadata.get('direction')}')",
+        )
+
+    # The forward bundle records its generation timestamp as generated_at and
+    # the method that produced it as reference_backend; forward_source restates
+    # both. Drift between them is the stale-pairing this check exists to find.
+    for source_key, forward_key in (
+        ("method", "reference_backend"),
+        ("generated_at", "generated_at"),
+    ):
+        expected = metadata.get(forward_key)
+        actual = forward_source.get(source_key)
+        if expected is None or actual is None:
+            continue
+        if expected != actual:
+            result.error(
+                path,
+                f"{prefix}forward_source.{source_key} is '{actual}' but "
+                f"'{bundle}' records {forward_key} '{expected}'; the forward "
+                "bundle was regenerated without its backward partner",
+            )
+
+
 def validate_metadata_fields(
-    metadata: dict, path: Path, result: VerificationResult, prefix: str = ""
+    metadata: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+    base_dir: Path | None = None,
 ) -> None:
     for key in ("generator", "reference_source"):
         value = metadata.get(key)
@@ -238,6 +363,33 @@ def validate_metadata_fields(
             result.error(
                 path, f"{prefix}{key} is required and must be a non-empty string"
             )
+
+    direction = metadata.get("direction")
+    if direction is not None and direction not in ("forward", "backward"):
+        result.error(
+            path,
+            f"{prefix}direction must be 'forward' or 'backward' when present "
+            f"(got {direction!r})",
+        )
+
+    strategy = metadata.get("reference_strategy")
+    strategy_present = isinstance(strategy, str) and strategy.strip()
+    if direction == "backward":
+        if not strategy_present:
+            # RFC 0011 4.1 lists reference_strategy as mandatory whenever a
+            # .meta.json is present. It is enforced here only for backward
+            # bundles, which RFC 0011 requires to carry metadata at all; making
+            # it a hard error everywhere would reject the forward bundles
+            # migrated from the old test system, which the RFC explicitly
+            # allows to have no metadata.
+            result.error(
+                path,
+                f"{prefix}reference_strategy is required on backward bundles "
+                "(RFC 0011 4.1)",
+            )
+        validate_forward_source(metadata, path, result, prefix, base_dir)
+    elif not strategy_present and strategy is not None:
+        result.error(path, f"{prefix}reference_strategy must be a non-empty string")
 
 
 def validate_metadata(path: Path, result: VerificationResult) -> None:
@@ -251,7 +403,7 @@ def validate_metadata(path: Path, result: VerificationResult) -> None:
         result.error(path, "metadata JSON is not an object")
         return
 
-    validate_metadata_fields(metadata, path, result)
+    validate_metadata_fields(metadata, path, result, base_dir=path.parent)
 
 
 def is_integer(value: object) -> bool:
@@ -1113,8 +1265,18 @@ def validate_sweep_case(
             f"case '{case_label}' metadata is required and must be an object",
         )
     else:
+        # A sweep case's forward_source path is written relative to the case's
+        # own golden directory, which is where its tensors live.
+        golden_spec = case.get("golden")
+        case_base_dir = None
+        if isinstance(golden_spec, dict) and isinstance(golden_spec.get("path"), str):
+            case_base_dir = (sweep_path.parent / golden_spec["path"]).parent
         validate_metadata_fields(
-            metadata, sweep_path, result, prefix=f"case '{case_label}' metadata "
+            metadata,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' metadata ",
+            base_dir=case_base_dir,
         )
 
     golden = case.get("golden")

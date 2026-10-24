@@ -224,6 +224,8 @@ inline const std::vector<DeprecatedCausalMaskCase>& deprecatedCausalMaskCases()
                                  std::nullopt},
         DeprecatedCausalMaskCase{
             "LeftBoundBelowMinusOne", false, false, -2, 0, ALIGN_TOP_LEFT, std::nullopt},
+        // cuDNN's left_bound counts the diagonal key, so 0 keeps no keys (SEM-001).
+        DeprecatedCausalMaskCase{"LeftBoundZero", false, false, 0, 0, ALIGN_TOP_LEFT, std::nullopt},
         DeprecatedCausalMaskCase{"BoundsOnlyTopLeftCausal",
                                  false,
                                  false,

@@ -57,6 +57,12 @@ enum class MaskType : int
 
 // The diagonal band an SDPA (forward or backward) attribute set requests, with
 // the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
+//
+// leftBound is in the kernels' (FlashAttention/AITER window_size_left)
+// convention: the number of keys kept left of the diagonal, -1 for unbounded.
+// The graph's left_bound is cuDNN's, which counts the diagonal key too, so
+// resolveDiagonalBand() stores left_bound - 1 (SdpaSemanticsRegister SEM-001).
+// rightBound means the same in both conventions.
 struct DiagonalBand
 {
     int64_t leftBound;
@@ -100,8 +106,8 @@ inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ
 // alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
 // TOP_LEFT is the schema default and indistinguishable from an unset alignment.
 //
-// Setting both booleans, or a bound below -1, throws
-// HipdnnPluginException(INVALID_VALUE).
+// Setting both booleans, a bound below -1, or left_bound = 0 (cuDNN rejects it:
+// it keeps no keys) throws HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
@@ -128,13 +134,20 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
             "SDPA: left_bound and right_bound must be >= -1 (got left_bound=" + std::to_string(left)
                 + ", right_bound=" + std::to_string(right) + ")");
     }
+    if(left == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound must be positive or -1 (unbounded); 0 keeps no keys");
+    }
+    const int64_t kernelLeft = left > 0 ? left - 1 : -1;
 
     if(!causalDeprecated && !bottomRightDeprecated)
     {
-        return {left, right, attrs.diagonal_alignment()};
+        return {kernelLeft, right, attrs.diagonal_alignment()};
     }
 
-    return {left,
+    return {kernelLeft,
             right >= 0 ? right : 0,
             bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
 }

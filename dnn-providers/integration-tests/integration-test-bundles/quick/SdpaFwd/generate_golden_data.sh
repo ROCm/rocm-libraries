@@ -18,6 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOLDEN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GENERATOR="$(cd "$GOLDEN_ROOT/../reference-data-scripts" && pwd)/generate_sdpa_fwd_golden.py"
+PAGED_GENERATOR="$(dirname "$GENERATOR")/generate_sdpa_fwd_paged_golden.py"
 
 if [[ ! -f "$GENERATOR" ]]; then
     echo "ERROR: Generator script not found at: $GENERATOR"
@@ -31,6 +32,7 @@ TIER="${1:-all}"
 # for every bundle to regenerate the same data.
 SCALE_D128="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(128)))')"
 SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
+SCALE_D64="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(64)))')"
 
 # DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
 # .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
@@ -77,6 +79,17 @@ generate_bundle() {
             echo "  remote: $DVC_REMOTE"
         done
     } > "$dvc_file"
+}
+
+# Paged bundles: the paged generator writes the complete .tensors.dvc pointer
+# (golden-data remote, md5 and size) and an empty .support.json itself.
+generate_paged_bundle() {
+    local outdir="$1"
+    local name="$2"
+    shift 2
+    outdir="$(resolve_tier_outdir "$outdir" "$name")"
+    mkdir -p "$outdir/$name"
+    python3 "$PAGED_GENERATOR" --base-filename "$outdir/$name/$name" "$@"
 }
 
 # --- quick tier: Small bundles only ---
@@ -197,8 +210,36 @@ if [[ "${GENERATE_TIER_B:-0}" == "1" ]]; then
     echo ""
 fi
 
-# --- Ragged (RFC-0014) bundles (not validated by the reference executors,
-# which reject ragged tensors). Generate in isolation with:
+# --- Discriminating bundles: seq_len_q != seq_len_kv per batch and Sq != Skv, so a
+# reference that computes the bottom-right offset from the maximum lengths, or swaps
+# the alignments, fails them (the group bundles above have equal lengths and cannot
+# tell). Batch 1 of the padded set has Sq > Skv, so bottom-right gives it dead rows
+# (O = 0, LSE = -inf). Window bounds follow SdpaSemanticsRegister.md SEM-001 (cuDNN's
+# left_bound). Generate in isolation with:
+#   GENERATE_DISCRIMINATING=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
+    echo "=== Generating discriminating bundles ==="
+
+    PADNEQ=(--q-dims 3 2 64 64 --v-dims 3 2 96 64 --seq-lens-q 17 64 5 --seq-lens-kv 96 40 33
+            --stats --seed 7 --attn-scale 0.125)
+    for causal in none top_left bottom_right; do
+        case "$causal" in
+            none) name=padneq_nomask ;;
+            top_left) name=padneq_causal_tl ;;
+            bottom_right) name=padneq_causal_br ;;
+        esac
+        generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/$name" "Small" "${PADNEQ[@]}" --causal "$causal"
+    done
+    generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/neq_causal_br_gqa" "Small" --causal bottom_right \
+        --q-dims 1 4 64 64 --v-dims 1 2 96 64 --stats --seed 7 --attn-scale 0.125
+    generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/neq_causal_tl_gqa" "Small" --causal top_left \
+        --q-dims 1 4 96 64 --v-dims 1 2 64 64 --stats --seed 7 --attn-scale 0.125
+
+    echo ""
+fi
+
+# --- Ragged (RFC-0014) bundles (validated by both reference executors' ragged
+# plans). Generate in isolation with:
 #   GENERATE_RAGGED=1 bash generate_golden_data.sh none ---
 if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     echo "=== Generating ragged bundles ==="
@@ -219,6 +260,147 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd192_causal_ragged"
     generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
         --q-dims 3 2 256 192 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
+
+    echo ""
+fi
+
+# --- Paged K/V (vLLM paged attention) bundles, dense or ragged Q. Generate in
+# isolation with:
+#   GENERATE_PAGED=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_PAGED:-0}" == "1" ]]; then
+    echo "=== Generating paged bundles ==="
+
+    # Decode: dense Q (Sq=1), GQA 8/2, an empty sequence and partial last blocks.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_paged"
+    generate_paged_bundle "$OUTDIR" "Decode" --dtype bf16 \
+        --num-heads-q 8 --num-heads-kv 2 --head-dim 128 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --causal bottom_right --seed 42 --attn-scale "$SCALE_D128"
+
+    # Speculative decode: dense Q (Sq=4), MQA, one page table bound to K and V.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_causal_paged"
+    generate_paged_bundle "$OUTDIR" "SpecDecode" --dtype fp16 \
+        --num-heads-q 4 --num-heads-kv 1 --head-dim 64 --seq-q 4 \
+        --block-size 32 --max-seq-len-kv 96 --seq-lens-kv 96 5 0 \
+        --shared-page-table --causal bottom_right --seed 42 --attn-scale "$SCALE_D64"
+
+    # Mixed prefill/decode: ragged Q, interleaved (2*D row pitch) K/V, packed LSE.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged_paged"
+    generate_paged_bundle "$OUTDIR" "Mixed" --dtype bf16 \
+        --num-heads-q 8 --num-heads-kv 2 --head-dim 128 \
+        --ragged-q --seq-lens-q 5 1 0 3 \
+        --block-size 16 --max-seq-len-kv 64 --seq-lens-kv 20 33 0 3 \
+        --interleaved-kv --stats --causal bottom_right --seed 42 --attn-scale "$SCALE_D128"
+
+    # Mixed with a sliding window (left_bound 8: 8 keys including the diagonal); batch 2
+    # has Q rows but no keys.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_window_ragged_paged"
+    generate_paged_bundle "$OUTDIR" "Mixed" --dtype fp16 \
+        --num-heads-q 4 --num-heads-kv 2 --head-dim 64 \
+        --ragged-q --seq-lens-q 6 1 4 \
+        --block-size 16 --max-seq-len-kv 80 --seq-lens-kv 70 1 0 \
+        --causal bottom_right --window-left 8 --seed 42 --attn-scale "$SCALE_D64"
+
+    echo ""
+fi
+
+# --- Paged K/V bundles with attention sinks (gpt-oss: one sink logit per query
+# head, N(0, 1), FLOAT as cuDNN takes them; adapters convert vLLM's model-dtype
+# sinks). Generate in isolation with:
+#   GENERATE_SINKS=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_SINKS:-0}" == "1" ]]; then
+    echo "=== Generating paged bundles with attention sinks ==="
+
+    # Decode: dense Q (Sq=1), GQA 8 (16/2), an empty sequence (O = 0), one page
+    # table bound to K and V as vLLM passes it. No LSE, so the CDNA paged engine
+    # (which has no LSE output) can serve it too.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd64_causal_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Decode" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --shared-page-table --sinks --causal bottom_right --seed 42 \
+        --attn-scale "$SCALE_D64"
+
+    # Mixed prefill/decode with gpt-oss's 128-token sliding window (cuDNN left_bound
+    # 128 keeps 128 keys including the diagonal, SEM-001),
+    # ragged Q, a sequence with Q rows but no keys, separate K and V containers with
+    # a 2*D row pitch (the strides of an interleaved K|V cache) and one shared page
+    # table.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd64_window_ragged_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Mixed" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 \
+        --ragged-q --seq-lens-q 5 1 2 3 1 \
+        --block-size 16 --max-seq-len-kv 256 --seq-lens-kv 200 33 0 3 150 \
+        --interleaved-kv --shared-page-table --sinks --causal bottom_right \
+        --window-left 128 --seed 42 --attn-scale "$SCALE_D64"
+
+    # fp16 decode with LSE (the sink is part of it; an empty sequence has LSE = sink).
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_causal_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Decode" --dtype fp16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --shared-page-table --sinks --stats --causal bottom_right --seed 7 \
+        --attn-scale "$SCALE_D64"
+
+    echo ""
+fi
+
+# --- Reference-feature bundles: one quick bundle per feature the SDPA references implement
+# beyond the dense float baseline (fp8 scaling, E5M2, block mask, ALiBi, Max/Sum_exp), plus
+# standard-tier bundles at longer sequences, which only the GPU reference lane runs (the CPU lane
+# validates quick bundles; see SdpaReferenceImplementations.md). Generate in isolation with:
+#   GENERATE_REFERENCE_FEATURES=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_REFERENCE_FEATURES:-0}" == "1" ]]; then
+    echo "=== Generating reference-feature bundles ==="
+    FP8="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8"
+    BF16="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16"
+
+    # cuDNN sdpa_fp8 softmax/output scaling (S_kv <= 128: one cuDNN tile, SEM-024).
+    generate_bundle "$FP8/hd128_scaled_gqa_nomask" "Small" --dtype fp8 --fp8-scaling \
+        --q-dims 2 4 64 128 --v-dims 2 2 128 128 --stats --seed 61 --attn-scale "$SCALE_D128"
+    generate_bundle "$FP8/hd128_scaled_gqa_causal_br" "Small" --dtype fp8 --fp8-scaling \
+        --q-dims 2 4 64 128 --v-dims 2 2 128 128 --causal bottom_right --stats --seed 62 \
+        --attn-scale "$SCALE_D128"
+    # OCP E5M2 inputs: descale only (BF16 O), and with fp8 scaling (E5M2 O).
+    generate_bundle "$FP8/e5m2_hd128_causal_batch" "Small" --dtype fp8 --fp8-format e5m2 \
+        --q-dims 2 4 128 128 --v-dims 2 4 128 128 --causal bottom_right --stats --seed 81 \
+        --attn-scale "$SCALE_D128"
+    generate_bundle "$FP8/e5m2_hd128_scaled_gqa_nomask" "Small" --dtype fp8 --fp8-format e5m2 \
+        --fp8-scaling --q-dims 2 4 64 128 --v-dims 2 2 128 128 --stats --seed 82 \
+        --attn-scale "$SCALE_D128"
+    # Block mask across tile boundaries (256 x 384: 2 x 3 tiles).
+    generate_bundle "$BF16/block_mask_nomask" "Small" --dtype bf16 --block-mask \
+        --q-dims 2 2 256 64 --v-dims 2 2 384 64 --attn-scale 0.125 --stats --seed 71
+    generate_bundle "$BF16/block_mask_causal_br_gqa" "Small" --dtype bf16 --block-mask \
+        --q-dims 2 4 256 64 --v-dims 2 2 384 64 --attn-scale 0.125 --causal bottom_right \
+        --stats --seed 72
+    # ALiBi with 6 query heads (cuDNN's non-power-of-two slope branch), GQA, Sq != Skv.
+    generate_bundle "$BF16/alibi_causal_tl_h6" "Small" --dtype bf16 --alibi --causal top_left \
+        --q-dims 2 6 64 64 --v-dims 2 3 96 64 --attn-scale 0.125 --stats --seed 91
+    # Max / Sum_exp outputs.
+    generate_bundle "$BF16/row_stats_gqa_causal_br" "Small" --dtype bf16 --row-stats --stats \
+        --causal bottom_right --q-dims 2 4 96 64 --v-dims 2 2 160 64 --attn-scale 0.125 --seed 92
+
+    # Standard tier (GPU lane): the same features at longer sequences.
+    STD="$GOLDEN_ROOT/standard/SdpaFwd"
+    generate_bundle "$STD/bhsd/bf16/block_mask_gqa" "Medium" --dtype bf16 --block-mask \
+        --q-dims 1 8 1024 64 --v-dims 1 2 2048 64 --attn-scale 0.125 --stats --seed 93
+    generate_bundle "$STD/bhsd/bf16/alibi_causal_tl" "Medium" --dtype bf16 --alibi \
+        --causal top_left --q-dims 1 12 1024 64 --v-dims 1 4 1024 64 --attn-scale 0.125 \
+        --stats --seed 94
+    generate_bundle "$STD/bhsd/fp8/hd128_causal_batch" "Medium" --dtype fp8 \
+        --q-dims 1 8 1024 128 --v-dims 1 8 1536 128 --causal bottom_right --stats --seed 95 \
+        --attn-scale "$SCALE_D128"
+    generate_paged_bundle "$STD/bshd/bf16/hd128_causal_paged" "LongDecode" --dtype bf16 \
+        --num-heads-q 32 --num-heads-kv 8 --head-dim 128 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 4096 --seq-lens-kv 4096 1000 2500 17 \
+        --stats --causal bottom_right --seed 96 --attn-scale "$SCALE_D128"
+    generate_paged_bundle "$STD/bshd/bf16/hd64_window_ragged_paged_sinks" "Long" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 \
+        --ragged-q --seq-lens-q 300 1 64 \
+        --block-size 32 --max-seq-len-kv 2048 --seq-lens-kv 2048 700 64 \
+        --sinks --stats --causal bottom_right --window-left 128 --seed 97 \
+        --attn-scale "$SCALE_D64"
 
     echo ""
 fi

@@ -4,9 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -40,10 +42,31 @@ namespace
 // When `maskDataType` is engaged (any dtype, including DataType::UNSET), a [1, 1, 4, 4] mask
 // tensor of that dtype is added under uid 10 and attrs.attn_mask_tensor_uid is set to 10. When
 // disengaged the mask is left as `attrs` has it, so a caller-set attn_mask_tensor_uid dangles.
-flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
-                                                   std::optional<DataType> maskDataType
-                                                   = std::nullopt)
+struct RawDbiasSpec
 {
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
+// An extra tensor the caller wires into `attrs` itself (dropout mask / scales).
+struct RawBwdExtraTensor
+{
+    int64_t uid;
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
+// When `dBias` is engaged, a dBias output tensor with that dtype and dims is added under uid 11
+// and attrs.dbias_tensor_uid is set to 11. `extras` are added as given.
+flatbuffers::FlatBufferBuilder
+    makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
+                        std::optional<DataType> maskDataType = std::nullopt,
+                        const std::optional<RawDbiasSpec>& dBias = std::nullopt,
+                        const std::vector<int64_t>& statsDims = {1, 2, 4, 1},
+                        DataType statsDataType = DataType::FLOAT,
+                        const std::vector<RawBwdExtraTensor>& extras = {})
+{
+    constexpr int64_t DBIAS_UID = 11;
     constexpr int64_t Q_UID = 1;
     constexpr int64_t K_UID = 2;
     constexpr int64_t V_UID = 3;
@@ -56,7 +79,6 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs
     constexpr int64_t MASK_UID = 10;
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    const std::vector<int64_t> statsDims = {1, 2, 4, 1};
     const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
     const std::vector<int64_t> maskDims = {1, 1, 4, 4};
     const auto maskStrides = hipdnn_data_sdk::utilities::generateStrides(maskDims);
@@ -90,13 +112,27 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs
     addTensor(V_UID, "V", DataType::FLOAT, strides, dims);
     addTensor(O_UID, "O", DataType::FLOAT, strides, dims);
     addTensor(DO_UID, "dO", DataType::FLOAT, strides, dims);
-    addTensor(STATS_UID, "Stats", DataType::FLOAT, statsStrides, statsDims);
+    addTensor(STATS_UID, "Stats", statsDataType, statsStrides, statsDims);
     addTensor(DQ_UID, "dQ", DataType::FLOAT, strides, dims);
     addTensor(DK_UID, "dK", DataType::FLOAT, strides, dims);
     addTensor(DV_UID, "dV", DataType::FLOAT, strides, dims);
     if(maskDataType.has_value())
     {
         addTensor(MASK_UID, "Mask", maskDataType.value(), maskStrides, maskDims);
+    }
+    std::vector<int64_t> dBiasStrides;
+    if(dBias.has_value())
+    {
+        attrs.dbias_tensor_uid = DBIAS_UID;
+        dBiasStrides = hipdnn_data_sdk::utilities::generateStrides(dBias->dims);
+        addTensor(DBIAS_UID, "dBias", dBias->dataType, dBiasStrides, dBias->dims);
+    }
+    std::vector<std::vector<int64_t>> extraStrides;
+    extraStrides.reserve(extras.size());
+    for(const auto& extra : extras)
+    {
+        extraStrides.push_back(hipdnn_data_sdk::utilities::generateStrides(extra.dims));
+        addTensor(extra.uid, "extra", extra.dataType, extraStrides.back(), extra.dims);
     }
 
     auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
@@ -134,26 +170,18 @@ TEST(TestSdpaBwdPlan, ExecutePlan)
     // the backward math uses O for the correction term D = sum(dO * O), and
     // SdpaBwdPlan always forwards Stats to backward() as the LSE tensor.
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward<float, float, float, float>(planTensorBundle.qTensor,
-                                                            planTensorBundle.kTensor,
-                                                            planTensorBundle.vTensor,
-                                                            planTensorBundle.oTensor,
-                                                            std::nullopt,
-                                                            noMask,
-                                                            -1,
-                                                            -1,
-                                                            true,
-                                                            &planTensorBundle.statsTensor);
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
-                                                            directTensorBundle.kTensor,
-                                                            directTensorBundle.vTensor,
-                                                            directTensorBundle.oTensor,
-                                                            std::nullopt,
-                                                            noMask,
-                                                            -1,
-                                                            -1,
-                                                            true,
-                                                            &directTensorBundle.statsTensor);
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        planTensorBundle.qTensor,
+        planTensorBundle.kTensor,
+        planTensorBundle.vTensor,
+        planTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}.setMask(noMask).setLse(&planTensorBundle.statsTensor));
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        directTensorBundle.qTensor,
+        directTensorBundle.kTensor,
+        directTensorBundle.vTensor,
+        directTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}.setMask(noMask).setLse(&directTensorBundle.statsTensor));
 
     auto graphTuple = buildSdpaBwdGraph(planTensorBundle, DataType::FLOAT);
     auto& graph = std::get<0>(graphTuple);
@@ -183,8 +211,7 @@ TEST(TestSdpaBwdPlan, ExecutePlan)
         directTensorBundle.dqTensor,
         directTensorBundle.dkTensor,
         directTensorBundle.dvTensor,
-        std::nullopt,
-        &directTensorBundle.statsTensor);
+        SdpaBwdOptions<float>{}.setLse(&directTensorBundle.statsTensor));
 
     const float tolerance = 1e-4f;
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -211,26 +238,24 @@ TEST(TestSdpaBwdPlan, ExecutePlanWithRuntimeScaleFromPack)
     // the same scale, since SdpaBwdPlan always forwards Stats as the LSE tensor.
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
     float scaleHostValue = 0.25f;
-    CpuFpReferenceSdpa::forward<float, float, float, float>(planTensorBundle.qTensor,
-                                                            planTensorBundle.kTensor,
-                                                            planTensorBundle.vTensor,
-                                                            planTensorBundle.oTensor,
-                                                            scaleHostValue,
-                                                            noMask,
-                                                            -1,
-                                                            -1,
-                                                            true,
-                                                            &planTensorBundle.statsTensor);
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
-                                                            directTensorBundle.kTensor,
-                                                            directTensorBundle.vTensor,
-                                                            directTensorBundle.oTensor,
-                                                            scaleHostValue,
-                                                            noMask,
-                                                            -1,
-                                                            -1,
-                                                            true,
-                                                            &directTensorBundle.statsTensor);
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        planTensorBundle.qTensor,
+        planTensorBundle.kTensor,
+        planTensorBundle.vTensor,
+        planTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}
+            .setScale(scaleHostValue)
+            .setMask(noMask)
+            .setLse(&planTensorBundle.statsTensor));
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        directTensorBundle.qTensor,
+        directTensorBundle.kTensor,
+        directTensorBundle.vTensor,
+        directTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}
+            .setScale(scaleHostValue)
+            .setMask(noMask)
+            .setLse(&directTensorBundle.statsTensor));
     auto graphTuple = buildSdpaBwdGraph(
         planTensorBundle, DataType::FLOAT, /*runtimeScaleHostPtr=*/&scaleHostValue);
     auto& graph = std::get<0>(graphTuple);
@@ -264,8 +289,7 @@ TEST(TestSdpaBwdPlan, ExecutePlanWithRuntimeScaleFromPack)
         directTensorBundle.dqTensor,
         directTensorBundle.dkTensor,
         directTensorBundle.dvTensor,
-        scaleHostValue,
-        &directTensorBundle.statsTensor);
+        SdpaBwdOptions<float>{}.setScale(scaleHostValue).setLse(&directTensorBundle.statsTensor));
 
     const float tolerance = 1e-4f;
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -348,16 +372,15 @@ TEST_P(TestSdpaBwdPlanDeprecatedCausalMask, MatchesMergedExplicitBounds)
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
     for(auto* bundle : {&deprecatedBundle, &mergedBundle})
     {
-        CpuFpReferenceSdpa::forward<float, float, float, float>(bundle->qTensor,
-                                                                bundle->kTensor,
-                                                                bundle->vTensor,
-                                                                bundle->oTensor,
-                                                                std::nullopt,
-                                                                noMask,
-                                                                param.mergedLeftBound,
-                                                                param.mergedRightBound,
-                                                                mergedTopLeft,
-                                                                &bundle->statsTensor);
+        CpuFpReferenceSdpa::forward<float, float, float, float>(
+            bundle->qTensor,
+            bundle->kTensor,
+            bundle->vTensor,
+            bundle->oTensor,
+            SdpaFwdOptions<float>{}
+                .setMask(noMask)
+                .setBand(param.mergedLeftBound, param.mergedRightBound, mergedTopLeft)
+                .setLse(&bundle->statsTensor));
     }
 
     executeSdpaBwdPlan(deprecatedBundle, param.deprecated);
@@ -548,6 +571,343 @@ TEST(TestSdpaBwdPlanMask, MaskTensorWithUnsetDtypeIsNotApplicable)
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
     EXPECT_THROW(executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), {}),
                  CpuReferenceNotApplicableError);
+}
+
+// Attributes the backward reference does not implement must make the graph not applicable rather
+// than be ignored: an ignored attribute lets a provider that also ignores it pass validation.
+struct UnsupportedBwdAttributeCase
+{
+    const char* name;
+    void (*apply)(SdpaBackwardAttributesT&);
+};
+
+class TestSdpaBwdPlanUnsupportedAttribute : public TestWithParam<UnsupportedBwdAttributeCase>
+{
+};
+
+TEST(TestSdpaBwdPlan, RawBaselineGraphIsApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST_P(TestSdpaBwdPlanUnsupportedAttribute, IsNotApplicable)
+{
+    SdpaBackwardAttributesT attrs;
+    GetParam().apply(attrs);
+    auto graphBuilder = makeRawSdpaBwdGraph(attrs);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    EXPECT_THROW(executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), {}),
+                 CpuReferenceNotApplicableError);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaBwdPlanUnsupportedAttribute,
+    Values(UnsupportedBwdAttributeCase{"AlibiMask",
+                                       [](SdpaBackwardAttributesT& a) { a.alibi_mask = true; }},
+           // cuDNN: padding_mask requires both seq_len tensors.
+           UnsupportedBwdAttributeCase{"PaddingMaskWithoutSeqLens",
+                                       [](SdpaBackwardAttributesT& a) { a.padding_mask = true; }},
+           // Only the probability is set: no seed/offset/mask tensors accompany it.
+           UnsupportedBwdAttributeCase{
+               "DropoutProbability",
+               [](SdpaBackwardAttributesT& a) { a.dropout_probability = 0.1F; }},
+           // dBias has the bias tensor's shape, so it cannot be produced without a bias.
+           UnsupportedBwdAttributeCase{
+               "DbiasWithoutMask", [](SdpaBackwardAttributesT& a) { a.dbias_tensor_uid = 11; }}),
+    [](const TestParamInfo<UnsupportedBwdAttributeCase>& info) { return info.param.name; });
+
+// dBias must have exactly the mask's shape and dtype (cuDNN: the bias gradient is reduced back to
+// the bias tensor's shape). The raw graph's mask is FLOAT [1, 1, 4, 4].
+TEST(TestSdpaBwdPlanDbias, MatchingShapeAndDtypeIsApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST(TestSdpaBwdPlanDbias, DtypeMismatchIsNotApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::HALF, {1, 1, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST(TestSdpaBwdPlanDbias, ShapeMismatchIsNotApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 2, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+// The plan writes dBias, and it equals the reference called directly.
+TEST(TestSdpaBwdPlanDbias, ExecuteMatchesDirectReference)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dO(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> stats({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> mask({1, 1, 4, 4});
+    q.fillWithRandomValues(-1.0F, 1.0F, 91);
+    k.fillWithRandomValues(-1.0F, 1.0F, 92);
+    v.fillWithRandomValues(-1.0F, 1.0F, 93);
+    dO.fillWithRandomValues(-1.0F, 1.0F, 94);
+    mask.fillWithRandomValues(-1.0F, 1.0F, 95);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask).setLse(&stats));
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQ(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dK(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dV(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dBias({1, 1, 4, 4});
+    dBias.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {5, dO.memory().hostData()},
+                                                            {6, stats.memory().hostData()},
+                                                            {7, dQ.memory().hostData()},
+                                                            {8, dK.memory().hostData()},
+                                                            {9, dV.memory().hostData()},
+                                                            {10, mask.memory().hostData()},
+                                                            {11, dBias.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dKRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dVRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dBiasRef({1, 1, 4, 4});
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQRef,
+        dKRef,
+        dVRef,
+        SdpaBwdOptions<float>{}.setLse(&stats).setMask(&mask).setDBias(&dBiasRef));
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(dBias, dBiasRef));
+    EXPECT_TRUE(exactValidation.allClose(dQ, dQRef));
+}
+
+// Explicit-mask dropout (cuDNN custom dropout): FLOAT mask [B|1, H|1, Sq, Skv], one-element FLOAT
+// dropout_scale, optional one-element FLOAT dropout_scale_inv. The raw graph is [1, 2, 4, 8].
+constexpr int64_t BWD_DROPOUT_MASK_UID = 20;
+constexpr int64_t BWD_DROPOUT_SCALE_UID = 21;
+constexpr int64_t BWD_DROPOUT_SCALE_INV_UID = 22;
+
+TEST(TestSdpaBwdPlanDropout, Applicability)
+{
+    const auto applicable = [](bool withScale,
+                               bool withScaleInv,
+                               DataType maskType,
+                               const std::vector<int64_t>& maskDims) {
+        SdpaBackwardAttributesT attrs;
+        attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+        std::vector<RawBwdExtraTensor> extras = {{BWD_DROPOUT_MASK_UID, maskType, maskDims}};
+        if(withScale)
+        {
+            attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+            extras.push_back({BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}});
+        }
+        if(withScaleInv)
+        {
+            attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+            extras.push_back({BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}});
+        }
+        auto graphBuilder = makeRawSdpaBwdGraph(
+            attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    EXPECT_TRUE(applicable(true, true, DataType::FLOAT, {1, 2, 4, 4}));
+    EXPECT_TRUE(applicable(true, false, DataType::FLOAT, {1, 1, 4, 4}));
+    EXPECT_FALSE(applicable(false, false, DataType::FLOAT, {1, 2, 4, 4}));
+    EXPECT_FALSE(applicable(true, true, DataType::HALF, {1, 2, 4, 4}));
+    EXPECT_FALSE(applicable(true, true, DataType::FLOAT, {1, 2, 4, 5}));
+}
+
+// The executor wires the mask and both scales from the variant pack into the reference.
+TEST(TestSdpaBwdPlanDropout, ExecuteMatchesDirectReference)
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+    attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+    attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+    auto graphBuilder
+        = makeRawSdpaBwdGraph(attrs,
+                              std::nullopt,
+                              std::nullopt,
+                              {1, 2, 4, 1},
+                              DataType::FLOAT,
+                              {{BWD_DROPOUT_MASK_UID, DataType::FLOAT, {1, 2, 4, 4}},
+                               {BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}},
+                               {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dO(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> stats({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> mask({1, 2, 4, 4});
+    hipdnn_data_sdk::utilities::Tensor<float> scale({1, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> scaleInv({1, 1, 1, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 101);
+    k.fillWithRandomValues(-1.0F, 1.0F, 102);
+    v.fillWithRandomValues(-1.0F, 1.0F, 103);
+    dO.fillWithRandomValues(-1.0F, 1.0F, 104);
+    // Drop every third (head, query, key) position.
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        for(int64_t sq = 0; sq < 4; ++sq)
+        {
+            for(int64_t skv = 0; skv < 4; ++skv)
+            {
+                mask.setHostValue(((h + sq + skv) % 3 == 0) ? 0.0F : 1.0F, 0, h, sq, skv);
+            }
+        }
+    }
+    scale.fillWithValue(1.5F);
+    scaleInv.fillWithValue(1.0F / 1.5F);
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setLse(&stats));
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQ(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dK(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dV(dims);
+    const std::unordered_map<int64_t, void*> variantPack
+        = {{1, q.memory().hostData()},
+           {2, k.memory().hostData()},
+           {3, v.memory().hostData()},
+           {4, o.memory().hostData()},
+           {5, dO.memory().hostData()},
+           {6, stats.memory().hostData()},
+           {7, dQ.memory().hostData()},
+           {8, dK.memory().hostData()},
+           {9, dV.memory().hostData()},
+           {BWD_DROPOUT_MASK_UID, mask.memory().hostData()},
+           {BWD_DROPOUT_SCALE_UID, scale.memory().hostData()},
+           {BWD_DROPOUT_SCALE_INV_UID, scaleInv.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dKRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dVRef(dims);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQRef,
+        dKRef,
+        dVRef,
+        SdpaBwdOptions<float>{}.setLse(&stats).setDropout(&mask, 1.5F, 1.0F / 1.5F));
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(dQ, dQRef));
+    EXPECT_TRUE(exactValidation.allClose(dK, dKRef));
+    EXPECT_TRUE(exactValidation.allClose(dV, dVRef));
+
+    // The graph's scales matter: without them the gradients differ.
+    hipdnn_data_sdk::utilities::Tensor<float> dVNoScale(dims);
+    CpuFpReferenceSdpa::backward(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQRef,
+        dKRef,
+        dVNoScale,
+        SdpaBwdOptions<float>{}.setLse(&stats).setDropout(&mask, std::nullopt, std::nullopt));
+    EXPECT_FALSE(exactValidation.allClose(dV, dVNoScale));
+}
+
+// Stats may be rank-3 [B, H, Sq] (the checked-in backward bundles use it) or rank-4
+// [B, H, Sq, 1]; both give identical gradients. Stats must be FLOAT.
+TEST(TestSdpaBwdPlanStats, Rank3StatsEqualRank4)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dO(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> stats({1, 2, 4, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 61);
+    k.fillWithRandomValues(-1.0F, 1.0F, 62);
+    v.fillWithRandomValues(-1.0F, 1.0F, 63);
+    dO.fillWithRandomValues(-1.0F, 1.0F, 64);
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setLse(&stats));
+
+    std::vector<hipdnn_data_sdk::utilities::Tensor<float>> grads;
+    for(const auto& statsDims : {std::vector<int64_t>{1, 2, 4, 1}, std::vector<int64_t>{1, 2, 4}})
+    {
+        auto graphBuilder
+            = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims);
+        grads.emplace_back(dims);
+        grads.emplace_back(dims);
+        grads.emplace_back(dims);
+        const auto n = grads.size();
+        const std::unordered_map<int64_t, void*> variantPack
+            = {{1, q.memory().hostData()},
+               {2, k.memory().hostData()},
+               {3, v.memory().hostData()},
+               {4, o.memory().hostData()},
+               {5, dO.memory().hostData()},
+               {6, stats.memory().hostData()},
+               {7, grads[n - 3].memory().hostData()},
+               {8, grads[n - 2].memory().hostData()},
+               {9, grads[n - 1].memory().hostData()}};
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+        executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+    }
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    for(size_t i = 0; i < 3; ++i)
+    {
+        EXPECT_TRUE(exactValidation.allClose(grads[i], grads[i + 3])) << "gradient " << i;
+    }
+}
+
+TEST(TestSdpaBwdPlanStats, NonFloatOrBadShapeIsNotApplicable)
+{
+    CpuReferenceGraphExecutor executor;
+    for(const auto& [statsDims, type] :
+        {std::pair{std::vector<int64_t>{1, 2, 4, 1}, DataType::HALF},
+         std::pair{std::vector<int64_t>{1, 2, 4, 2}, DataType::FLOAT},
+         std::pair{std::vector<int64_t>{8}, DataType::FLOAT}})
+    {
+        auto graphBuilder = makeRawSdpaBwdGraph(
+            SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims, type);
+        EXPECT_FALSE(
+            executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    }
 }
 
 TEST(TestSdpaBwdPlanMask, DanglingMaskUidIsNotApplicable)
