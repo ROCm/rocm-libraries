@@ -610,6 +610,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     static constexpr int kCriticalSlackWmmas = 20;
     // Window by which each filler must issue so what it feeds is not delayed (INT_MAX: none).
     std::vector<int> needWindow_;
+    // needWindow_ moved earlier by the WMMAs the scoreboard needs between the filler and the
+    // placed op it feeds for that op to need no va_vdst. Ranks fillers, producer first.
+    std::vector<int> needByWindow_;
     int regionCoIssueSlots_ = 0;
     bool isCriticalFiller(const DAGNode* n) const {
         return n->id < needWindow_.size() && needWindow_[n->id] != INT_MAX &&
@@ -1486,6 +1489,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestElapse = INT_MIN;
     int bestWait = 0;
     int bestAff = 0;
+    int bestNeed = INT_MAX;
     bool bestYields = false;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
         const WaitAluNeed need = waitAlu_ ? waitAlu_->query(*n->inst) : WaitAluNeed{};
@@ -1502,6 +1506,8 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         // when currentMsb_ == -1 (nothing matches), so unchanged behavior until a
         // real tie.
         const int aff = (n->requiredMsb != -1 && n->requiredMsb == currentMsb_) ? 1 : 0;
+        // Producer first: the earlier its need-by window, the sooner it goes.
+        const int needBy = n->id < needByWindow_.size() ? needByWindow_[n->id] : INT_MAX;
         // A filler whose s_wait_alu a later slot would drop ranks last (fillerYieldsSlot); then
         // free nodes rank above hidden-stall ones; within a tier, prefer same-bank (larger aff),
         // then largest elapse.
@@ -1513,15 +1519,18 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
             better = true;
         else if (nYields != bestYields)
             better = !nYields;
+        else if (nHazard != curHazard)
+            better = !nHazard;
+        else if (needBy != bestNeed)
+            better = needBy < bestNeed;
         else
-            better = (!nHazard && curHazard) ||
-                     (nHazard == curHazard &&
-                      (aff > bestAff || (aff == bestAff && elapse > bestElapse)));
+            better = aff > bestAff || (aff == bestAff && elapse > bestElapse);
         if (better) {
             best = n;
             bestElapse = elapse;
             bestWait = wait;
             bestAff = aff;
+            bestNeed = needBy;
             bestYields = nYields;
         }
     }
@@ -3574,22 +3583,42 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
     };
-    for (bool changed = true; changed;) {
-        changed = false;
-        for (unsigned id = deps.dag.nodes.size(); id-- > 0;) {
-            if (!isFillerInst(*deps.dag.nodes[id].inst)) continue;
-            int need = needWindow_[id];
-            for (unsigned succ : deps.dag.graph[id]) {
-                const int via = planned[succ] != INT_MAX       ? planned[succ]
-                                : needWindow_[succ] != INT_MAX ? needWindow_[succ] - 1
-                                                               : INT_MAX;
-                need = std::min(need, via);
-            }
-            if (need < needWindow_[id]) {
-                needWindow_[id] = need;
-                changed = true;
+    // WMMAs the scoreboard needs between a filler and the placed op it feeds for the op to need no
+    // va_vdst; 0 when no count of WMMAs hides it.
+    std::unordered_map<uint64_t, int> gapCache;
+    auto gapWmmas = [&](unsigned id, unsigned succ) {
+        if (!waitAlu_) return 0;
+        auto [it, fresh] = gapCache.try_emplace((uint64_t(id) << 32) | succ, 0);
+        if (fresh)
+            it->second = std::max(
+                0, waitAlu_->requiredGap(*deps.dag.nodes[id].inst, *deps.dag.nodes[succ].inst,
+                                         WaitAluHideOp::Wmma, formWmma_));
+        return it->second;
+    };
+    // Latest window per filler: the planned window of the nearest placed op it feeds, less `gap`
+    // for that edge, less one per filler hop still to go.
+    auto planNeed = [&](std::vector<int>& need, bool withGap) {
+        need.assign(deps.dag.nodes.size(), INT_MAX);
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (unsigned id = deps.dag.nodes.size(); id-- > 0;) {
+                if (!isFillerInst(*deps.dag.nodes[id].inst)) continue;
+                int w = need[id];
+                for (unsigned succ : deps.dag.graph[id]) {
+                    const int via = planned[succ] != INT_MAX
+                                        ? planned[succ] - (withGap ? gapWmmas(id, succ) : 0)
+                                    : need[succ] != INT_MAX ? need[succ] - 1
+                                                            : INT_MAX;
+                    w = std::min(w, via);
+                }
+                if (w < need[id]) {
+                    need[id] = w;
+                    changed = true;
+                }
             }
         }
-    }
+    };
+    planNeed(needWindow_, false);
+    planNeed(needByWindow_, true);
 }
 }  // namespace
