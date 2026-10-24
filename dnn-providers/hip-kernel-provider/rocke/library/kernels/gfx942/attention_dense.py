@@ -469,6 +469,11 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   every tile. Off by default: the peel is recorded negative (register
     #   pressure on the gfx942 tiled_2d kernel); kept to re-measure on dense.
     causal_diag_split: bool = field(default=False, kw_only=True)
+    # window_wave_skip: causal sliding window only -- a wave whose 32 query rows see
+    #   no key of a tile (all past the diagonal or all behind the window) skips that
+    #   tile's score, softmax and PV step; staging and barriers stay in every wave.
+    #   Off by default; the dispatch narrow-window geometry turns it on.
+    window_wave_skip: bool = field(default=False, kw_only=True)
     # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
     #   [B, Hq, Sq, 1] through a trailing ``lse_ptr`` kernel argument. Off by default;
     #   off emits no new IR, so the shipped kernel and its goldens are unchanged.
@@ -758,6 +763,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append(f"fence{spec.pv_sched_fence_mask:x}")
     if spec.causal_diag_split:
         parts.append("dsplit")
+    if spec.window_wave_skip:
+        parts.append("wskip")
     if spec.emit_lse:
         parts.append("lse")
     if spec.kv_segments != 1:
@@ -1259,6 +1266,8 @@ def supports_attention_dense(
                 "pv_sched_fence_mask and iglp are exclusive: iglp owns the loop "
                 "schedule"
             )
+    if spec.window_wave_skip and not (spec.causal and spec.sliding_window):
+        return False, "window_wave_skip applies only to a causal sliding window"
     if spec.causal_diag_split and (not spec.causal or spec.sliding_window):
         return False, (
             "causal_diag_split applies only to causal attention without a sliding "
@@ -2034,44 +2043,12 @@ def _build_attention_dense_single_buffer(
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
 
-        def tile_body(j, carry, masked):
+        def tile_compute(j, carry, masked):
+            """Score, mask, online-softmax and PV for one staged tile; returns
+            ``(m, l, *O)``."""
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
-
-            if spec.iglp:
-                # Runbook lever 7: one canned-scheduler hint at the loop-body top.
-                # Only meaningful on the cfvst path (in-loop ds_write to interleave).
-                b.iglp_opt(spec.iglp_mode)
-
-            if USE_CFVST:
-                load_tile(j)  # K async DMA -> K_lds
-                v_payload = _cfvst_load_v(
-                    j
-                )  # V register buffer_loads (natural [token,dim])
-                # Drain BOTH the K async DMA and the V register loads (all vmcnt)
-                # before the V perm+store reads those registers and before QK reads
-                # K_lds.
-                b.s_waitcnt(vmcnt=0)
-                _cfvst_store_v(v_payload)  # perm_b32 -> ds_write V_lds[dim,token]
-                # Publish K_lds (DMA) AND V_lds (ds_write) to all waves. This MUST
-                # drain lgkmcnt for the V ds_write and cannot be a bare s_barrier:
-                # gfx90a+ set FeatureBackOffBarrier, so LLVM would sink the lgkm wait
-                # past the barrier to the ds_read consumer (the P0 read-after-barrier
-                # race, now on the tile-START barrier because V publication is an
-                # in-loop ds_write). sync_lds_only() emits the lgkm drain BEFORE the
-                # barrier (CK Tile block_sync_lds). vmcnt is already 0, no full sync.
-                b.sync_lds_only()
-            else:
-                # Naive (D64): K and V both async-DMA'd into their natural layout.
-                # Drain the DMA (vmcnt) then a plain barrier -- V is not an in-loop
-                # ds_write here, so the tile-start barrier needs no lgkm drain (the
-                # DMA landed the data; the trailing sync_lds_only guards the
-                # read-before-overwrite).
-                load_tile(j)
-                b.s_waitcnt(vmcnt=0)
-                b.s_barrier_bare()
-
             s = do_qk()
             # Every visited tile gets the causal upper bound; W > 0 additionally
             # applies the window lower bound (redundant no-op compares on tiles
@@ -2080,8 +2057,13 @@ def _build_attention_dense_single_buffer(
             # causal path (where it is the causal bound); the arg is kept for
             # signature parity with the gfx950 do_mask, which does use upper=False.
             # masked=False only for below-diagonal tiles of the diagonal split.
-            if masked:
+            if masked is True:
                 do_mask(s, j, lower=(SW > 0), upper=True)
+            elif masked:
+                # (lower, upper) pair from the sliding-window phase split.
+                lower, upper = masked
+                if lower or upper:
+                    do_mask(s, j, lower=lower, upper=upper)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
@@ -2145,6 +2127,83 @@ def _build_attention_dense_single_buffer(
             o_acc = do_pv(o_acc, p_packs)
             if PV_PRIORITY:
                 b.s_setprio(0)
+            return (m_new, l_new, *o_acc)
+
+        # Wave-uniform skip of (wave, tile) pairs a sliding window fully masks.
+        WAVE_SKIP = spec.window_wave_skip
+        _skip_ctr = [0]
+
+        def tile_body(j, carry, masked):
+            m_i = carry[0]
+            l_i = carry[1]
+            o_acc = list(carry[2 : 2 + D_TILES])
+
+            if spec.iglp:
+                # Runbook lever 7: one canned-scheduler hint at the loop-body top.
+                # Only meaningful on the cfvst path (in-loop ds_write to interleave).
+                b.iglp_opt(spec.iglp_mode)
+
+            if USE_CFVST:
+                load_tile(j)  # K async DMA -> K_lds
+                v_payload = _cfvst_load_v(
+                    j
+                )  # V register buffer_loads (natural [token,dim])
+                # Drain BOTH the K async DMA and the V register loads (all vmcnt)
+                # before the V perm+store reads those registers and before QK reads
+                # K_lds.
+                b.s_waitcnt(vmcnt=0)
+                _cfvst_store_v(v_payload)  # perm_b32 -> ds_write V_lds[dim,token]
+                # Publish K_lds (DMA) AND V_lds (ds_write) to all waves. This MUST
+                # drain lgkmcnt for the V ds_write and cannot be a bare s_barrier:
+                # gfx90a+ set FeatureBackOffBarrier, so LLVM would sink the lgkm wait
+                # past the barrier to the ds_read consumer (the P0 read-after-barrier
+                # race, now on the tile-START barrier because V publication is an
+                # in-loop ds_write). sync_lds_only() emits the lgkm drain BEFORE the
+                # barrier (CK Tile block_sync_lds). vmcnt is already 0, no full sync.
+                b.sync_lds_only()
+            else:
+                # Naive (D64): K and V both async-DMA'd into their natural layout.
+                # Drain the DMA (vmcnt) then a plain barrier -- V is not an in-loop
+                # ds_write here, so the tile-start barrier needs no lgkm drain (the
+                # DMA landed the data; the trailing sync_lds_only guards the
+                # read-before-overwrite).
+                load_tile(j)
+                b.s_waitcnt(vmcnt=0)
+                b.s_barrier_bare()
+
+            if WAVE_SKIP:
+                # Sliding window: skip the whole score/softmax/PV step for a wave
+                # whose 32 query rows see no key of this tile -- every key is past
+                # the causal diagonal or behind the window for all of them. The
+                # running (m, l, O) state is exactly what a fully masked tile leaves.
+                # The 0/1-trip loop is wave-uniform (readfirstlane), so the K/V
+                # staging above and the trailing barrier stay in every wave.
+                key0 = b.mul(j, b.const_i32(BN))
+                past_diag = b.cmp_gt(key0, b.add(q_tok0, b.const_i32(31)))
+                behind_window = b.cmp_le(
+                    b.add(key0, b.const_i32(BN - 1)), b.sub(q_tok0, b.const_i32(SW))
+                )
+                trips = b.readfirstlane(
+                    b.select(
+                        b.lor(past_diag, behind_window), b.const_i32(0), b.const_i32(1)
+                    )
+                )
+                _skip_ctr[0] += 1
+                tag = _skip_ctr[0]
+                sk = b.scf_for_iter(
+                    b.const_i32(0),
+                    trips,
+                    b.const_i32(1),
+                    [(f"wm{tag}", m_i), (f"wl{tag}", l_i)]
+                    + [(f"wo{dt}_{tag}", o_acc[dt]) for dt in range(D_TILES)],
+                    iv_name=f"ws{tag}",
+                )
+                with sk as (_iv, sc):
+                    b.scf_yield(*tile_compute(j, sc, masked))
+                m_new, l_new = sk.results[0], sk.results[1]
+                o_acc = list(sk.results[2 : 2 + D_TILES])
+            else:
+                m_new, l_new, *o_acc = tile_compute(j, carry, masked)
             # Tile done; the next iteration refills the SINGLE K/V buffer (K via async
             # DMA, V via the perm_b32 ds_write), so every wave's LDS reads must have
             # LANDED (not just issued) before any wave starts writing. This MUST drain
@@ -2227,6 +2286,47 @@ def _build_attention_dense_single_buffer(
             )
             with loop as (j, carry):
                 tile_body(j, carry, masked=True)
+        elif causal and SW and SWt >= n_per:
+            # Sliding-window band loop split in three phases when the window spans
+            # the query block (SWt >= n_per):
+            #   L: [start_tile, mid_lo)  window-edge tiles: window bound only (every
+            #                            key is below the block's first query)
+            #   M: [mid_lo, mid_hi)      interior: mask-free
+            #   R: [mid_hi, n_up)        diagonal tiles: causal bound only (every key
+            #                            is at or past the block's first query, so
+            #                            inside every row's window)
+            # A narrower window keeps the single loop with both bounds: its M phase
+            # is empty and both edges need both bounds, so a split only adds code.
+            diag_start = b.mul(qb, b.const_i32(n_per))
+            left_end = b.add(diag_start, b.const_i32(n_per - SWt))
+
+            def _clamp(x, lo, hi):
+                x = b.select(b.cmp_lt(x, lo), lo, x)  # max(x, lo)
+                return b.select(b.cmp_lt(x, hi), x, hi)  # min(x, hi)
+
+            mid_lo = _clamp(left_end, start_tile, n_up)
+            mid_hi = _clamp(diag_start, mid_lo, n_up)
+            phases = (
+                ("kl", start_tile, mid_lo, True, False),
+                ("km", mid_lo, mid_hi, False, False),
+                ("kt", mid_hi, n_up, False, True),
+            )
+            args = iter_args
+            for iv, lo, hi, lower, upper in phases:
+                loop = b.scf_for_iter(
+                    lo,
+                    hi,
+                    b.const_i32(1),
+                    args,
+                    iv_name=iv,
+                    elide_trailing_barrier=False,
+                )
+                with loop as (j, carry):
+                    tile_body(j, carry, masked=(lower, upper))
+                args = [
+                    (f"{name}_{iv}", val)
+                    for (name, _), val in zip(iter_args, loop.results)
+                ]
         else:
             loop = b.scf_for_iter(
                 loop_lo if KVS > 1 else (start_tile if SW else b.const_i32(0)),

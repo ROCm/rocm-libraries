@@ -69,6 +69,29 @@ def _default_block_m(req: AttentionRequest) -> int:
     return bm
 
 
+# Sliding-window geometry. A causal band of width W visits about block_m + W keys
+# per query row, so a 256-row block over a narrow band spends most of its tiles on
+# masked work. Window widths up to this many keys count as narrow.
+_NARROW_WINDOW = 256
+
+
+def _narrow_window_geometry(head_size, dtype):
+    """``(block_m, block_n, window_wave_skip)`` for a narrow sliding-window band.
+
+    128-row query blocks on the one-CTA-per-block grid. D128 halves the KV tile to
+    32 keys, which halves its K/V LDS footprint so two CTAs fit per CU, and skips
+    the (wave, tile) pairs the band fully masks, whose SIMD slot the co-resident
+    CTA then fills; bf16 D64 goes to 64-row blocks (its waves-per-eu 4 build is
+    small enough to keep several CTAs resident per CU). Depends only on
+    compile-time fields, so one binary still serves every runtime shape.
+    """
+    if head_size == 128:
+        return 128, 32, True
+    if dtype == "bf16":
+        return 64, _DENSE_BLOCK_N, False
+    return 128, _DENSE_BLOCK_N, False
+
+
 def _base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
@@ -81,11 +104,6 @@ def _base_spec(req: AttentionRequest):
     the compiled binary can disagree. Every gfx942-private codegen knob stays at
     the concrete spec's default; the knob space varies them.
     """
-    from kernels.gfx942.attention_dense import (
-        Gfx942AttentionDenseSpec,
-        _tuned_waves_per_eu,
-    )
-
     # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
     # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
     # be defending against an input shape that cannot reach this function.
@@ -93,18 +111,46 @@ def _base_spec(req: AttentionRequest):
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
-    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    mask_type = _parse_attention_mask_type(req.mask_type)
-    bm = _default_block_m(req)
-    bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
-    dtype = req.dtype.lower()
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did.
-    persistent = head_size == 128
+    spec = _make_spec(
+        req,
+        _default_block_m(req),
+        _DENSE_BLOCK_N,
+        persistent=head_size == 128,
+    )
+    if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
+        bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
+        narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
+        # Keep the default geometry for any request the narrow one cannot serve.
+        if _supports(narrow, arch="gfx942")[0]:
+            spec = narrow
+    return spec
+
+
+def _make_spec(
+    req: AttentionRequest,
+    bm: int,
+    bn: int,
+    *,
+    persistent: bool,
+    window_wave_skip: bool = False,
+):
+    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry."""
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        _tuned_waves_per_eu,
+    )
+
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    head_size = int(req.hdim_q)
+    dtype = req.dtype.lower()
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
+    # not a block_m/block_n multiple). Cross-attention ragged is left to the
+    # validator.
+    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
     # matches against ``features`` below, so a band this body cannot shift (a
     # bottom-right window) reaches ``supports_attention_dense`` and is rejected
@@ -161,6 +207,7 @@ def _base_spec(req: AttentionRequest):
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
         kv_segments=kv_segments,
+        window_wave_skip=window_wave_skip,
     )
 
 
@@ -202,8 +249,10 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         features=frozenset(
             {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
         ),
-        # _base_spec picks these from the dtype, head size and work count.
-        recorded=frozenset({"block_m", "persistent", "waves_per_eu"}),
+        # _base_spec picks these from the dtype, head size, work count and window.
+        recorded=frozenset(
+            {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
+        ),
     )
 
 

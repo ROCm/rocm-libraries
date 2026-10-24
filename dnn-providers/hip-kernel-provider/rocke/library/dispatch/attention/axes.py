@@ -318,6 +318,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("o_store_width", 4, (1, 2, 4)),
     _values("causal_diag_split", False, (True,)),
     _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
+    _values("window_wave_skip", False, (True,)),
 )
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never

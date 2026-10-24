@@ -100,9 +100,8 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        spec_type = (
-            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
-        )
+        gfx942_only = d.get("emit_lse", False) or d.get("window_wave_skip", False)
+        spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_gfx942(**over):
@@ -208,6 +207,30 @@ def _cases():
         ),
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
             sliding_window=128
+        ),
+        # Window spanning the query block (W >= block_m): three-phase band loop
+        # (window-bound / mask-free / causal-bound) on the persistent grid, and the
+        # narrow-band dispatch geometry for D64 bf16 (64-row blocks).
+        "attention_dense_gfx942/persist_swa_d128_bf16_w256": mk(
+            sliding_window=256,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_sink_d64_bf16_w128": mk_dispatch(
+            head_size=64, sliding_window=128, use_sinks=True
+        ),
+        # Wave-uniform skip of fully masked (wave, tile) pairs on the persistent grid
+        # (the dispatch D128 case above covers the one-CTA-per-block grid).
+        "attention_dense_gfx942/persist_swa_wskip_d128_fp16_w128": mk(
+            dtype="fp16",
+            sliding_window=128,
+            block_m=128,
+            block_n=32,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            window_wave_skip=True,
         ),
         # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
