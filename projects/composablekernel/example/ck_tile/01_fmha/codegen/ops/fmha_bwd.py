@@ -348,6 +348,7 @@ class FmhaBwdDQDKDVTileSize:
     allow_mask: bool = False
     tdm_kr_ktr: bool = False
     mask_only: bool = False
+    nomask_only: bool = False
     qdo_slots: int = 0
     # Decode tile whose global->LDS traffic goes through TDM. gfx12 only; the
     # gfx950 decode tiles leave this off and keep the original pipeline.
@@ -599,6 +600,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
                 FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True, tdm_decode=True),
                 FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=768, allow_mask=True, mask_only=True, tdm_decode=True),
+                # No-mask d128: wins over the 32x64 tile once the grid fills the device.
+                FmhaBwdDQDKDVTileSize( 32,  32, 128,  32, 128,  32,  32,  128,  128,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  1, 32, dispatch_min_grid=1536, nomask_only=True, tdm_decode=True),
             ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
@@ -1175,6 +1178,8 @@ def get_bwd_blobs(
             if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
                 continue
             if ("no" in mask) and tile.mask_only:
+                continue
+            if ("no" not in mask) and tile.nomask_only:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue

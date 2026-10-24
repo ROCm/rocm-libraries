@@ -490,6 +490,31 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         lse = load_tile(lse_lds_read_window);
         d   = load_tile(d_lds_read_window);
 
+        // K/V prefetch (TDM policy only). K/V live in LDS only until they are
+        // copied into k/v/kt registers at the top of each iteration, so the
+        // next tile can be issued into the same buffer right after that copy
+        // and its transfer then overlaps the whole iteration instead of being
+        // waited on at the top of the next one. No extra LDS.
+        // Q/dO share the K/V region; their register copies above completed in
+        // the WaitAllMem barriers, so tile 0 may be issued now.
+        constexpr bool kPrefetchKV = Policy::kUsesTdm;
+        index_t kv_tiles_issued    = 0;
+        auto issue_kv_tile         = [&]() {
+            Policy::template LoadBlockToLds<KDataType, kQKHeaddim>(k_lds_write_window,
+                                                                   k_dram_window);
+            move_tile_window(k_dram_window, {kN0, 0});
+            Policy::template LoadBlockToLds<VDataType, kVHeaddim>(v_lds_write_window,
+                                                                  v_dram_window);
+            move_tile_window(v_dram_window, {kN0, 0});
+            kv_tiles_issued += 1;
+        };
+        if constexpr(kPrefetchKV)
+        {
+            // LSE/D sit inside the V region; their LDS reads must retire first.
+            block_sync_lds();
+            issue_kv_tile();
+        }
+
         auto main_body = [&](auto is_prologue_, auto is_epilogue_) mutable {
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
@@ -506,16 +531,27 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
             if constexpr(is_epilogue)
             {
-                Policy::template LoadBlockToLds<KDataType, kQKHeaddim>(k_lds_write_window,
-                                                                       k_dram_window);
-                move_tile_window(k_dram_window, {kN0, 0});
-                Policy::template LoadBlockToLds<VDataType, kVHeaddim>(v_lds_write_window,
-                                                                      v_dram_window);
-                move_tile_window(v_dram_window, {kN0, 0});
+                if constexpr(!kPrefetchKV)
+                {
+                    Policy::template LoadBlockToLds<KDataType, kQKHeaddim>(k_lds_write_window,
+                                                                           k_dram_window);
+                    move_tile_window(k_dram_window, {kN0, 0});
+                    Policy::template LoadBlockToLds<VDataType, kVHeaddim>(v_lds_write_window,
+                                                                          v_dram_window);
+                    move_tile_window(v_dram_window, {kN0, 0});
+                }
                 Policy::WaitBlockToLds();
                 k_reg_tensor = load_tile(k_lds_read_window);
                 v_reg_tensor = load_tile(v_lds_read_window);
                 load_tile_transpose(kt_reg_tensor, kt_lds_read_window);
+                if constexpr(kPrefetchKV)
+                {
+                    // Every wave's K/V LDS reads must retire before the next
+                    // tile overwrites the buffer.
+                    block_sync_lds();
+                    if(kv_tiles_issued < num_total_loop)
+                        issue_kv_tile();
+                }
             }
             if constexpr(is_epilogue)
             {
