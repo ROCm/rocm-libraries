@@ -203,7 +203,12 @@ def compute_lse(Q, K, scale, H_q, H_kv, keep_mask=None, attn_bias=None):
 
 def save_tensor_bin(tensor, path):
     t = tensor.contiguous().cpu()
-    if t.dtype in (torch.bfloat16, torch.float16, torch.float8_e4m3fn):
+    if t.dtype in (
+        torch.bfloat16,
+        torch.float16,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    ):
         raw = t.view(torch.uint8).numpy().tobytes()
     else:
         raw = t.numpy().tobytes()
