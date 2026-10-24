@@ -166,6 +166,10 @@ namespace rocblaslt
         constexpr uint32_t c_probeSlots = 512;
         // Misses in a row before the hint drops to 0.
         constexpr uint32_t c_resetMisses = 2;
+        // Least workspace reported for the top heuristic result in adaptive
+        // mode, capped by the caller's limit: origami's static-grid
+        // partial-tile limit, enough for StreamK hybrid re-grids under any hint.
+        constexpr size_t c_adaptiveWorkspace = size_t(128) << 20;
 
         // The adaptive hint applies in StreamK AUTO or ON mode when neither the
         // desc nor the handle sets an explicit sm_count_target.
