@@ -2132,6 +2132,153 @@ TEST(TestCpuFpReferenceSdpaFp64, SoftcapClosedFormAndLargeCapLimit)
     EXPECT_THROW(run(-1.0f), std::invalid_argument);
 }
 
+// cuDNN's ALiBi slopes (cudnn-frontend fp16_ref.py): for 8 heads 2^-1 .. 2^-8; for 6 heads the 4
+// power-of-two slopes 2^-2, 2^-4, 2^-6, 2^-8 followed by 2^-1, 2^-3.
+TEST(TestCpuFpReferenceSdpaFp64, AlibiSlopesMatchCudnn)
+{
+    for(int64_t h = 0; h < 8; ++h)
+    {
+        EXPECT_DOUBLE_EQ(CpuFpReferenceSdpa::alibiSlope(h, 8), std::pow(2.0, -(h + 1.0)));
+    }
+    const std::vector<double> six = {0.25, 0.0625, 0.015625, 0.00390625, 0.5, 0.125};
+    for(int64_t h = 0; h < 6; ++h)
+    {
+        EXPECT_DOUBLE_EQ(CpuFpReferenceSdpa::alibiSlope(h, 6), six[static_cast<size_t>(h)]);
+    }
+}
+
+// ALiBi closed form: Q = K = 0, so each score is the ALiBi term (skv - sq) * m. With top-left
+// causal masking and one head (m = 2^-8 ... for H = 1 the slope is 2^-8), row 2 weights keys
+// 0, 1, 2 by exp(-2m), exp(-m), 1. V is the key index, so O is the weighted mean index.
+TEST(TestCpuFpReferenceSdpaFp64, AlibiClosedForm)
+{
+    Tensor<double> q({1, 1, 3, 2});
+    Tensor<double> k({1, 1, 3, 2});
+    Tensor<double> v({1, 1, 3, 1});
+    Tensor<double> o({1, 1, 3, 1});
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    for(int64_t j = 0; j < 3; ++j)
+    {
+        v.setHostValue(static_cast<double>(j), 0, 0, j, 0);
+    }
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                0,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                std::nullopt,
+                                std::nullopt,
+                                nullptr,
+                                nullptr,
+                                true);
+    const double m = CpuFpReferenceSdpa::alibiSlope(0, 1);
+    EXPECT_DOUBLE_EQ(m, std::pow(2.0, -8.0));
+    const double w0 = std::exp(-2.0 * m);
+    const double w1 = std::exp(-m);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (w1 + 2.0) / (w0 + w1 + 1.0), 1e-12);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0 / (std::exp(-m) + 1.0), 1e-12);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-12);
+}
+
+// ALiBi has no parameters: the backward is the ordinary one through the shifted probabilities.
+TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr float SCALE = 1.2f;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ, HEAD_DIM});
+    Tensor<float> bias({SEQ, SEQ});
+    q.fillWithRandomValues(-0.8f, 0.8f, 9700);
+    k.fillWithRandomValues(-0.8f, 0.8f, 9701);
+    v.fillWithRandomValues(-0.5f, 0.5f, 9702);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 9703);
+    bias.fillWithRandomValues(-0.5f, 0.5f, 9704);
+
+    const auto fwd = [&]() {
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    SCALE,
+                                    &bias,
+                                    -1,
+                                    0,
+                                    true,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    std::nullopt,
+                                    std::nullopt,
+                                    nullptr,
+                                    nullptr,
+                                    true);
+    };
+    fwd();
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ, HEAD_DIM});
+    Tensor<float> dBias({SEQ, SEQ});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 SCALE,
+                                 nullptr,
+                                 &bias,
+                                 -1,
+                                 0,
+                                 true,
+                                 &dBias,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 std::nullopt,
+                                 true);
+
+    auto fwdLoss = [&]() -> double {
+        fwd();
+        return computeDotProductLoss(dO, o);
+    };
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ, HEAD_DIM}, fwdLoss, "dQ (alibi)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ, HEAD_DIM}, fwdLoss, "dK (alibi)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ, HEAD_DIM}, fwdLoss, "dV (alibi)");
+    checkGradient(bias, dBias, {SEQ, SEQ}, fwdLoss, "dBias (alibi)");
+}
+
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
 {
     // Combined: GQA + causal mask

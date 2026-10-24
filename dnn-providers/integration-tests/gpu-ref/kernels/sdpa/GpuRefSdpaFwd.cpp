@@ -57,6 +57,22 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 #endif
 }
 
+// cuDNN's ALiBi slope for query head h (CpuFpReferenceSdpa::alibiSlope): 2^(-8 (h + 1) / n) for
+// the closest power of two n <= numHeads, then 2^(-4 (2 j + 1) / n) for the remaining heads.
+__device__ inline float alibiSlope(long long h, long long numHeads)
+{
+    long long n = 1;
+    while(n * 2 <= numHeads)
+    {
+        n *= 2;
+    }
+    if(h < n)
+    {
+        return exp2f(-8.0f * static_cast<float>(h + 1) / static_cast<float>(n));
+    }
+    return exp2f(-4.0f * static_cast<float>(2 * (h - n) + 1) / static_cast<float>(n));
+}
+
 // cuDNN Max / Sum_exp outputs (CpuFpReferenceSdpa rowMax / rowSumExp), written by the dv == 0
 // thread of each row like the LSE.
 __device__ inline void writeRowStats(const SdpaFwdArgs& args,
@@ -191,6 +207,11 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
                 maskOffset += idxI * args.maskStr.s[i];
             }
             s += toAccum(mask[maskOffset]);
+        }
+        if(args.alibi != 0)
+        {
+            s += static_cast<COMPUTE_TYPE>(skv - sq)
+                 * static_cast<COMPUTE_TYPE>(alibiSlope(h, args.numHeads));
         }
 
         // (b) Sliding-window mask (applied after the additive mask).

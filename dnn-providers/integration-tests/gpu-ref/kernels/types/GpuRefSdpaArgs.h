@@ -74,6 +74,8 @@ struct SdpaFwdArgs
     void* rowSumExp;
     SdpaStrides rowMaxStr;
     SdpaStrides rowSumExpStr;
+    // cuDNN ALiBi: nonzero adds (skv - sq) * slope(h) after the bias (SEM-021).
+    int alibi;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -120,6 +122,7 @@ struct SdpaBwdArgs
     float dropoutScale;
     float dropoutScaleInv;
     float softcap; // > 0 enables the logit softcap, as in SdpaFwdArgs
+    int alibi; // nonzero enables cuDNN ALiBi, as in SdpaFwdArgs
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

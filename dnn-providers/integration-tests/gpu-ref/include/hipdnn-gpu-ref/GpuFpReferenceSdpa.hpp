@@ -114,7 +114,8 @@ public:
         std::optional<float> dropoutScale = std::nullopt,
         std::optional<float> softcap = std::nullopt,
         hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr)
+        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr,
+        bool alibi = false)
     {
         validateSoftcap(softcap);
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
@@ -281,7 +282,8 @@ public:
                       rowMax != nullptr ? rowMax->memory().deviceData() : nullptr,
                       rowMax != nullptr ? rowMax->strides() : std::vector<int64_t>{},
                       rowSumExp != nullptr ? rowSumExp->memory().deviceData() : nullptr,
-                      rowSumExp != nullptr ? rowSumExp->strides() : std::vector<int64_t>{});
+                      rowSumExp != nullptr ? rowSumExp->strides() : std::vector<int64_t>{},
+                      alibi);
 
         o.memory().markDeviceModified();
         for(auto* stats : {lse, rowMax, rowSumExp})
@@ -335,7 +337,8 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
         std::optional<float> dropoutScale = std::nullopt,
         std::optional<float> dropoutScaleInv = std::nullopt,
-        std::optional<float> softcap = std::nullopt)
+        std::optional<float> softcap = std::nullopt,
+        bool alibi = false)
     {
         validateSoftcap(softcap);
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
@@ -449,6 +452,7 @@ public:
         launch.dropoutScale = dropoutScale.value_or(1.0F);
         launch.dropoutScaleInv = dropoutScaleInv.value_or(1.0F);
         launch.softcap = softcap.value_or(0.0F);
+        launch.alibi = alibi;
         launchSdpaBwd(launch, defines);
 
         dQ.memory().markDeviceModified();
@@ -497,6 +501,7 @@ private:
         float dropoutScale = 1.0F;
         float dropoutScaleInv = 1.0F;
         float softcap = 0.0F; // 0 = no softcap
+        bool alibi = false; // cuDNN ALiBi (SEM-021)
         int64_t leftBound = -1;
         int64_t rightBound = -1;
         bool topLeftAlignment = true;
@@ -621,7 +626,8 @@ private:
                               void* rowMaxPtr = nullptr,
                               const std::vector<int64_t>& rowMaxStrides = {},
                               void* rowSumExpPtr = nullptr,
-                              const std::vector<int64_t>& rowSumExpStrides = {});
+                              const std::vector<int64_t>& rowSumExpStrides = {},
+                              bool alibi = false);
 
     // Logit softcap (reference-only extension, SEM-020): finite and > 0 when given.
     static void validateSoftcap(std::optional<float> softcap)

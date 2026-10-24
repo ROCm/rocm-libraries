@@ -1233,6 +1233,32 @@ TEST(TestSdpaFwdPlanRowStats, ApplicabilityRequiresFloatOutputs)
     }
 }
 
+// cuDNN ALiBi is applicable only with top-left causal masking (SEM-021): right bound 0 (directly
+// or through causal_mask) and top-left alignment.
+TEST(TestSdpaFwdPlanAlibi, ApplicableOnlyWithTopLeftCausal)
+{
+    const auto applicable = [](SdpaAttributesT attrs) {
+        attrs.alibi_mask = true;
+        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    SdpaAttributesT causal;
+    causal.right_bound = 0;
+    EXPECT_TRUE(applicable(causal));
+    SdpaAttributesT deprecatedCausal;
+    deprecatedCausal.causal_mask = true;
+    EXPECT_TRUE(applicable(deprecatedCausal));
+    EXPECT_FALSE(applicable(SdpaAttributesT{}));
+    SdpaAttributesT window;
+    window.right_bound = 2;
+    EXPECT_FALSE(applicable(window));
+    SdpaAttributesT bottomRight;
+    bottomRight.right_bound = 0;
+    bottomRight.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_FALSE(applicable(bottomRight));
+}
+
 // The executor writes Max and Sum_exp from the same row statistics as the LSE:
 // LSE = Max + log(Sum_exp), and both equal the reference called directly.
 TEST(TestSdpaFwdPlanRowStats, ExecuteWritesMaxAndSumExpConsistentWithLse)

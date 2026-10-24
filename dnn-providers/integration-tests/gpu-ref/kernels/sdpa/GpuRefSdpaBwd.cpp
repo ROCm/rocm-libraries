@@ -26,6 +26,22 @@ static_assert(__is_same(COMPUTE_TYPE, float), "GpuRefSdpaBwd requires COMPUTE_TY
 namespace
 {
 
+// cuDNN's ALiBi slope for query head h (CpuFpReferenceSdpa::alibiSlope): 2^(-8 (h + 1) / n) for
+// the closest power of two n <= numHeads, then 2^(-4 (2 j + 1) / n) for the remaining heads.
+__device__ inline float alibiSlope(long long h, long long numHeads)
+{
+    long long n = 1;
+    while(n * 2 <= numHeads)
+    {
+        n *= 2;
+    }
+    if(h < n)
+    {
+        return exp2f(-8.0f * static_cast<float>(h + 1) / static_cast<float>(n));
+    }
+    return exp2f(-4.0f * static_cast<float>(2 * (h - n) + 1) / static_cast<float>(n));
+}
+
 __device__ inline long long
     liveLength(const int* lens, long long stride, long long b, long long full)
 {
@@ -84,6 +100,11 @@ __device__ COMPUTE_TYPE
             offset += idx * a.maskStr.s[i];
         }
         s += toAccum(mask[offset]);
+    }
+    if(a.alibi != 0)
+    {
+        s += static_cast<COMPUTE_TYPE>(skv - sq)
+             * static_cast<COMPUTE_TYPE>(alibiSlope(h, a.numHeads));
     }
     return s;
 }

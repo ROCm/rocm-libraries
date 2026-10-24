@@ -73,6 +73,27 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
     return {leftBound, rightBound, isTopLeft};
 }
 
+/// cuDNN ALiBi is supported only as cuDNN defines it: with top-left causal masking (right bound 0
+/// once the deprecated flags are resolved, top-left alignment), SdpaSemanticsRegister SEM-021.
+/// Works for forward and backward attributes; never throws.
+template <typename SdpaAttributesType>
+bool isSupportedSdpaAlibi(const SdpaAttributesType& nodeAttributes)
+{
+    if(!nodeAttributes.alibi_mask())
+    {
+        return true;
+    }
+    try
+    {
+        const auto band = extractDiagonalBandParams(nodeAttributes, "SDPA ALiBi");
+        return band.rightBound == 0 && band.topLeftAlignment;
+    }
+    catch(const std::invalid_argument&)
+    {
+        return false;
+    }
+}
+
 /// Whether the SDPA node's padding attributes are ones the references implement. Padding is
 /// given by both seq_len_q and seq_len_kv, each INT32 with one value per batch ([B, 1, 1, 1]).
 /// padding_mask without both tensors, or only one tensor, is declined (cuDNN requires both). The

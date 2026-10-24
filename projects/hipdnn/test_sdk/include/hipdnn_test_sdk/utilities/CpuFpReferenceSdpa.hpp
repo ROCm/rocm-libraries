@@ -152,6 +152,9 @@ public:
     /// @param rowSumExp        Optional cuDNN Sum_exp output [B, H, Sq, 1] (float): sum of
     ///                         exp(s - rowMax) over the live keys plus exp(sink - rowMax). 0 where
     ///                         rowMax is -inf. LSE = rowMax + log(rowSumExp).
+    /// @param alibi            cuDNN ALiBi: adds (skv - sq) * slope(h) after the bias, with
+    ///                         cuDNN's per-query-head slopes (alibiSlope). cuDNN pairs it with
+    ///                         top-left causal masking; the graph plans enforce that (SEM-021).
     /// @param softcap          Optional logit softcap c: scores become c * tanh(s / c) after the
     ///                         attention scale and before bias and masks. A hipDNN extension the
     ///                         graph API cannot express yet (register SEM-020).
@@ -183,7 +186,8 @@ public:
                         std::optional<float> dropoutScale = std::nullopt,
                         std::optional<float> softcap = std::nullopt,
                         hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr,
+                        bool alibi = false)
     {
         if(q.dims().size() != 4)
         {
@@ -371,6 +375,15 @@ public:
                     const auto maskIndices = computeMaskIndex(attnMask->dims(), b, h, sq, skv);
                     scores[static_cast<size_t>(skv)]
                         += static_cast<ComputeDataType>(attnMask->getHostValue(maskIndices));
+                }
+            }
+            if(alibi)
+            {
+                const auto slope = static_cast<ComputeDataType>(alibiSlope(h, numHeads));
+                for(int64_t skv = 0; skv < liveKv; ++skv)
+                {
+                    scores[static_cast<size_t>(skv)]
+                        += static_cast<ComputeDataType>(skv - sq) * slope;
                 }
             }
 
@@ -659,7 +672,8 @@ public:
         const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
         std::optional<float> dropoutScale = std::nullopt,
         std::optional<float> dropoutScaleInv = std::nullopt,
-        std::optional<float> softcap = std::nullopt)
+        std::optional<float> softcap = std::nullopt,
+        bool alibi = false)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -942,6 +956,12 @@ public:
                                 scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
                                     attnMask->getHostValue(maskIndices));
                             }
+                            if(alibi)
+                            {
+                                scores[static_cast<size_t>(skv)]
+                                    += static_cast<ComputeDataType>(skv - sq)
+                                       * static_cast<ComputeDataType>(alibiSlope(hQ, numHeadsQ));
+                            }
 
                             // Recompute probability using LSE:
                             // P[skv] = exp(score[skv] - lse)
@@ -989,6 +1009,12 @@ public:
                                     = computeMaskIndex(attnMask->dims(), b, hQ, sq, skv);
                                 scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
                                     attnMask->getHostValue(maskIndices));
+                            }
+                            if(alibi)
+                            {
+                                scores[static_cast<size_t>(skv)]
+                                    += static_cast<ComputeDataType>(skv - sq)
+                                       * static_cast<ComputeDataType>(alibiSlope(hQ, numHeadsQ));
                             }
 
                             maxVal = std::max(maxVal, scores[static_cast<size_t>(skv)]);
@@ -1176,6 +1202,26 @@ public:
         dQ.memory().markHostModified();
         dK.memory().markHostModified();
         dV.memory().markHostModified();
+    }
+
+private:
+public:
+    /// cuDNN's ALiBi slope for query head h of numHeads (cudnn-frontend get_alibi_slope and
+    /// fp16_ref.py): 2^(-8 (h + 1) / n) for the closest power of two n <= numHeads, then the
+    /// interleaved 2^(-4 (2 j + 1) / n) slopes for the remaining heads.
+    static double alibiSlope(int64_t h, int64_t numHeads)
+    {
+        int64_t n = 1;
+        while(n * 2 <= numHeads)
+        {
+            n *= 2;
+        }
+        if(h < n)
+        {
+            return std::pow(2.0, -8.0 * static_cast<double>(h + 1) / static_cast<double>(n));
+        }
+        const auto j = h - n;
+        return std::pow(2.0, -4.0 * static_cast<double>(2 * j + 1) / static_cast<double>(n));
     }
 
 private:

@@ -101,6 +101,7 @@ struct SdpaBwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleInvTensor;
+    bool alibi = false;
 };
 
 template <typename QDataType,
@@ -227,7 +228,9 @@ public:
                                                       shallowSeqLenKv.get(),
                                                       shallowDropoutMask.get(),
                                                       dropoutScale,
-                                                      dropoutScaleInv);
+                                                      dropoutScaleInv,
+                                                      std::nullopt,
+                                                      _params.alibi);
     }
 
 private:
@@ -319,8 +322,7 @@ public:
                 tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
         }
 
-        // Unsupported mask modes
-        if(nodeAttributes->alibi_mask())
+        if(!isSupportedSdpaAlibi(*nodeAttributes))
         {
             return false;
         }
@@ -433,6 +435,7 @@ public:
                              nodeAttributes->seq_len_kv_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
                                  : nullptr);
+        params.alibi = nodeAttributes->alibi_mask();
         for(auto [uid, field] :
             {std::pair{nodeAttributes->dropout_mask_tensor_uid(), &params.dropoutMaskTensor},
              std::pair{nodeAttributes->dropout_scale_tensor_uid(), &params.dropoutScaleTensor},
