@@ -18,38 +18,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <cstdlib>
+#include "../../../shared/CLI11.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
 #include <random>
-#include <string>
 
 // Seed for randomized tests; replay a failing run with --seed <value>.
 size_t random_seed = std::random_device{}();
 
 int main(int argc, char** argv)
 {
-    ::testing::InitGoogleTest(&argc, argv); // strips --gtest_* flags from argv
+    // strips --gtest_* flags from argv; prints gtest's help for -h/--help
+    ::testing::InitGoogleTest(&argc, argv);
 
-    for(int i = 1; i < argc; ++i)
-    {
-        const std::string arg = argv[i];
-        try
-        {
-            if(arg == "--seed" && i + 1 < argc)
-                random_seed = std::stoull(argv[++i]);
-            else if(arg.starts_with("--seed="))
-                random_seed = std::stoull(arg.substr(7));
-            else
-                throw std::invalid_argument(arg);
-        }
-        catch(const std::exception&)
-        {
-            std::cerr << "Unrecognized argument: " << arg << "\nUsage: " << argv[0]
-                      << " [--seed <value>] [gtest options]" << std::endl;
-            return EXIT_FAILURE;
-        }
-    }
+    CLI::App app{"rocFFT internal tests"};
+    app.add_option(
+        "--seed", random_seed, "Seed for randomized tests; replay a failing run with its value");
+    CLI11_PARSE(app, argc, argv);
 
     // keep --gtest_list_tests output parseable for gtest_discover_tests
     if(!::testing::GTEST_FLAG(list_tests))
