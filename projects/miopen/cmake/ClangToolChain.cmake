@@ -36,7 +36,6 @@
 # Platform-specific compiler configuration
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
     # No canonical ROCm install location exists on Windows, so leave the default
     # empty. Users must either supply -DROCM_CMAKE_PATH=... explicitly or have
     # hipconfig discoverable on PATH.
@@ -227,6 +226,26 @@ if(DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH)
         message(STATUS "Added ${ROCM_PATH} to CMAKE_PREFIX_PATH for finding HIP package")
     else()
         message(VERBOSE "ROCM_PATH already in CMAKE_PREFIX_PATH")
+    endif()
+endif()
+
+# MIOpen embeds a Windows VERSIONINFO resource (MIOpen.rc and friends) that needs a resource
+# compiler. Prefer llvm-rc from the ROCm LLVM toolchain (next to clang++), then any rc on PATH.
+# Leave CMAKE_RC_COMPILER unset if neither is found: cmake/ResourceCompiler.cmake probes whatever
+# ends up here, falls back to the Windows SDK rc.exe, and fails configuration with actionable
+# guidance only if nothing usable exists.
+#
+# The NOTREQUIRED test matters. CMake pins the resource compiler into
+# CMakeFiles/<ver>/CMakeRCCompiler.cmake and re-reads it on every subsequent configure, and only
+# strings ending in -NOTFOUND are falsy -- so a bare "NOT CMAKE_RC_COMPILER" would be permanently
+# false on any build directory that has ever recorded the NOTREQUIRED sentinel, and this block
+# would silently never run again. Matching the sentinel explicitly keeps the search live, and is
+# what cmake/ResourceCompiler.cmake and hipBLASLt's equivalent guard already do.
+if(WIN32 AND (NOT CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND"))
+    get_filename_component(_miopen_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_MIOPEN_RC_COMPILER NAMES llvm-rc rc HINTS "${_miopen_llvm_bin}")
+    if(_MIOPEN_RC_COMPILER)
+        set(CMAKE_RC_COMPILER "${_MIOPEN_RC_COMPILER}")
     endif()
 endif()
 
