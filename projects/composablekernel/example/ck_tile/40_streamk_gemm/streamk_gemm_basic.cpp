@@ -94,9 +94,9 @@ std::tuple<float, ck_tile::index_t> gemm(const ck_tile::StreamKHostArgs& args,
 
     if(!Kernel::IsSupportedArgument(kernel_args))
     {
-        // Clear the output C tensor results after each repetition of the kernel
-        hipGetErrorString(hipMemsetAsync(
-            args.e_ptr, 0, args.M * args.N * sizeof(CDataType), stream_config.stream_id_));
+        // Launching anyway reads and writes past the tensors (for example an extent
+        // that is not a multiple of the vector load size), so refuse the problem.
+        throw std::runtime_error("Arguments not supported for Stream-K kernel!");
     }
 
     if(stream_config.log_level_ > 0)

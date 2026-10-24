@@ -47,6 +47,7 @@ from codegen_common import (  # noqa: E402
     gemm_lockstep_vector_bytes,
     gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
+    streamk_atomic_c_reject_reason,
 )
 from unified_gemm_codegen import (  # noqa: E402
     CKTileKernelGenerator,
@@ -235,6 +236,30 @@ class TestResolution(unittest.TestCase):
         # bf16 C width 1 = 2 bytes: below the 4-byte buffer atomic.
         self.assertIn("atomic", _resolve("rrr", (8, 1, 1), variant="stream_k")[1])
         self.assertIsNone(_resolve("rrr", (8, 1, 2), variant="stream_k")[1])
+
+    def test_stream_k_linear_and_tree_allow_sub_dword_c(self):
+        # Linear and tree store C with a plain store, so a 2-byte C is legal; atomic
+        # (the default) still rejects it, and None defers the check to the caller.
+        for strategy in ("linear", "tree", None):
+            vec, reason = _resolve(
+                "rrr", (8, 1, 1), variant="stream_k", reduction_strategy=strategy
+            )
+            self.assertIsNone(reason, strategy)
+            self.assertEqual(vec, (8, 1, 1))
+        self.assertIn(
+            "atomic",
+            _resolve("rrr", (8, 1, 1), variant="stream_k", reduction_strategy="atomic")[1],
+        )
+        # The strategy only matters for Stream-K.
+        self.assertIsNone(_resolve("rrr", (8, 1, 1), reduction_strategy="atomic")[1])
+
+    def test_streamk_atomic_c_reject_reason(self):
+        self.assertIn("atomic", streamk_atomic_c_reject_reason("atomic", 1, "bf16"))
+        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 2, "bf16"))
+        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 1, "fp32"))
+        self.assertIsNone(streamk_atomic_c_reject_reason("atomic", 0, "bf16"))
+        for strategy in ("linear", "tree"):
+            self.assertIsNone(streamk_atomic_c_reject_reason(strategy, 1, "bf16"))
         self.assertIsNone(_resolve("rrr", (8, 1, 1))[1])
 
     def test_rejects_warp_tile_k_not_multiple(self):
@@ -634,6 +659,57 @@ class TestHeaderLookup(unittest.TestCase):
             native.touch()
             self.assertEqual(ctypes_utils._glob_native(d, "gemm_*.hpp"), [native])
             self.assertIsNotNone(ctypes_utils._parse_gemm_header_metadata(native))
+
+
+class TestStreamKMisalignedShapes(unittest.TestCase):
+    """AICK-2558 shapes Stream-K used to reject for vector alignment."""
+
+    CONFIG = (
+        DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "gemm_streamk" / "configs"
+        / "gfx1250_config.json"
+    )
+
+    def _expand(self, layout, problem, strategies):
+        from gemm_utils import expand_sweep
+
+        vfb = VectorFallback([problem], layout, "bf16", "stream_k")
+        cfgs = expand_sweep(
+            str(self.CONFIG), "gfx1250", dtype="bf16", layout=layout, variant="stream_k",
+            reduction_strategies=strategies, **vfb.expand_kwargs,
+        )
+        return [c for c in cfgs if any(c.vector_sizes)], vfb.rejects
+
+    def test_misaligned_shapes_get_fixed_width_kernels(self):
+        # (layout, problem, widest legal fixed A/B/C widths; the sweep also builds
+        # every narrower power-of-two combination below them)
+        cases = [
+            ("ccr", dict(M=1280, N=2048, K=1562), (8, 2, 8)),
+            ("rcr", dict(M=245760, N=352, K=3595), (1, 1, 8)),
+            ("crr", dict(M=125, N=320, K=1024), (1, 8, 8)),
+            ("crr", dict(M=118, N=102, K=368640), (2, 2, 2)),
+        ]
+        for layout, problem, vec in cases:
+            for strategy in ("atomic", "linear", "tree"):
+                fixed, _ = self._expand(layout, problem, [strategy])
+                with self.subTest(layout=layout, problem=problem, strategy=strategy):
+                    self.assertTrue(fixed)
+                    self.assertIn(vec, {c.effective_vector_sizes for c in fixed})
+                    self.assertTrue(all(c.reduction_strategy == strategy for c in fixed))
+
+    def test_two_byte_c_needs_linear_or_tree(self):
+        # N odd (I) or N = 1 (L): the C store is one bf16 element.
+        for layout, problem in (
+            ("rcr", dict(M=491520, N=121, K=105)),
+            ("rrr", dict(M=3072, N=1, K=1024)),
+        ):
+            fixed, rejects = self._expand(layout, problem, ["atomic"])
+            self.assertFalse(fixed, problem)
+            self.assertTrue(any("atomic C store" in r for r in rejects), rejects)
+            for strategy in ("linear", "tree"):
+                fixed, _ = self._expand(layout, problem, [strategy])
+                with self.subTest(problem=problem, strategy=strategy):
+                    self.assertTrue(fixed)
+                    self.assertTrue(all(c.effective_vector_sizes[2] == 1 for c in fixed))
 
 
 class TestExpandSweep(unittest.TestCase):
