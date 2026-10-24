@@ -620,7 +620,7 @@ TEST(TestFlydslSdpaBwdMergedGraph, DeclinesAForwardGraphWithoutAnalysingIt)
     EXPECT_FALSE(graphMatch(spec).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, EN1_DeclinesAHeadSizeNoMergedObjectCovers)
+TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesAHeadSizeNoMergedObjectCovers)
 {
     const auto atDim = [](int64_t qk, int64_t v) {
         Shape shape;
@@ -640,7 +640,7 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN1_DeclinesAHeadSizeNoMergedObjectCovers)
     EXPECT_TRUE(graphMatch(atDim(24, 24)).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, EN2_DeclinesPaddedVarlenThatTheMatcherAccepts)
+TEST(TestFlydslSdpaBwdMergedGraph, EN2DeclinesPaddedVarlenThatTheMatcherAccepts)
 {
     const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
     // PV-1: the shared matcher serves it; the merged engine does not.
@@ -649,7 +649,7 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN2_DeclinesPaddedVarlenThatTheMatcherAccepts
     EXPECT_TRUE(graphMatch(baseSpec()).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, EN2_DeclinesPaddedVarlenWithAMask)
+TEST(TestFlydslSdpaBwdMergedGraph, EN2DeclinesPaddedVarlenWithAMask)
 {
     const auto padded = withCausal(baseSpec()).withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
     ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(padded)));
@@ -705,7 +705,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, ServesDropoutOnlyWithADropoutObject)
     EXPECT_FALSE(serves(baseSpec(), dropoutRow()));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesAnExactObjectOnlyAtItsTile)
+TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesAnExactObjectOnlyAtItsTile)
 {
     Shape wide;
     wide.headDimQk = 96;
@@ -714,7 +714,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesAnExactObjectOnlyAtItsTile)
     EXPECT_TRUE(serves(specOf(wide), plainRow(96)));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN1_DoesNotServeAValueDimThatDiffersFromTheKeyDim)
+TEST(TestFlydslSdpaBwdMergedKernel, EN1DoesNotServeAValueDimThatDiffersFromTheKeyDim)
 {
     Shape mla;
     mla.headDimQk = 64;
@@ -724,7 +724,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_DoesNotServeAValueDimThatDiffersFromTheK
     EXPECT_TRUE(serves(specOf(equal), plainRow(64)));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesAPaddedObjectAtOrBelowItsTile)
+TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesAPaddedObjectAtOrBelowItsTile)
 {
     RowSpec padded = plainRow(32);
     padded.padded = 1;
@@ -745,7 +745,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesAPaddedObjectAtOrBelowItsTile)
     }
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesTheSmallestTilePaddedBelowIt)
+TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesTheSmallestTilePaddedBelowIt)
 {
     RowSpec padded = plainRow(32);
     padded.padded = 1;
@@ -756,7 +756,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesTheSmallestTilePaddedBelowIt)
     EXPECT_FALSE(serves(specOf(small), plainRow(32)));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesNoHeadDimTheCatalogDoesNotCover)
+TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesNoHeadDimTheCatalogDoesNotCover)
 {
     const auto rows = catalog();
     for(const int64_t headDim : {24, 32, 64, 96, 128, 160, 192})
@@ -781,7 +781,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesNoHeadDimTheCatalogDoesNotCover)
     EXPECT_FALSE(anyServes(specOf(unequal), rows));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAGqaPackedObjectOnlyAGroupedQueryGraph)
+TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAGqaPackedObjectOnlyAGroupedQueryGraph)
 {
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
@@ -793,7 +793,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAGqaPackedObjectOnlyAGroupedQueryG
     EXPECT_TRUE(serves(specOf(grouped), plainRow()));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenEveryPackedSpanFits32Bits)
+TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
 {
     RowSpec packed = plainRow(128);
     packed.dtype = "bf16";
@@ -811,15 +811,100 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenEveryPackedSp
         shape.headDimV = 128;
         return specOf(shape, DataType::BFLOAT16);
     };
-    // Each head's slab is 128 MiB, which fits; the 32 heads of the group span 4 GiB, which
-    // does not, so only an object that rebases per head serves the graph.
+    // Each head's slab is 128 MiB, which fits, and the 32 heads of the group span 4 GiB. The
+    // packed row count already passes the pack_split bound, so the object declines on that
+    // before any span; the unpacked object, which rebases per head, serves the graph.
     ASSERT_TRUE(graphMatch(multiQuery(524288)).has_value());
     EXPECT_FALSE(serves(multiQuery(524288), packed));
     EXPECT_TRUE(serves(multiQuery(524288), unpacked));
     EXPECT_TRUE(serves(multiQuery(4096), packed));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenThePackSplitIsExact)
+/// Eight query heads over one key head at a small Sq, so the pack_split bound holds and only a
+/// packed span can decline. Each case sets the head stride of one tensor and serves the same
+/// graph with a smaller stride as the accepting control.
+SdpaBwdSpec packedSpanSpec(const std::string& tensor, int64_t headStride, bool withBiasTensor)
+{
+    constexpr int64_t SEQ = 4096;
+    constexpr int64_t HEADS = 8;
+    Shape shape;
+    shape.batch = 1;
+    shape.heads = HEADS;
+    shape.kvHeads = 1;
+    shape.seqQ = SEQ;
+    shape.seqKv = 64;
+    auto spec = specOf(shape);
+    if(withBiasTensor)
+    {
+        spec = withBias(spec, false);
+    }
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        auto& edited = g.tensor(tensor);
+        edited.strides[0] = HEADS * headStride;
+        edited.strides[1] = headStride;
+    });
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseHeadStrideSpansMoreThan32Bits)
+{
+    RowSpec packed = plainRow();
+    packed.gqaPack = 1;
+    RowSpec packedBias = biasRow();
+    packedBias.gqaPack = 1;
+    // (G - 1) head strides of 2^28 elements span 3.5 GiB; at 2^26 they span 0.9 GiB. The
+    // accepting control for each tensor differs in that stride only.
+    constexpr int64_t WIDE = int64_t{1} << 28;
+    constexpr int64_t NARROW = int64_t{1} << 26;
+    for(const char* tensor : {"q", "do", "o"})
+    {
+        SCOPED_TRACE(tensor);
+        const auto wide = packedSpanSpec(tensor, WIDE, false);
+        ASSERT_TRUE(graphMatch(wide).has_value());
+        EXPECT_FALSE(serves(wide, packed));
+        EXPECT_TRUE(serves(wide, plainRow()));
+        EXPECT_TRUE(serves(packedSpanSpec(tensor, NARROW, false), packed));
+    }
+    const auto wideBias = packedSpanSpec("bias", WIDE, true);
+    ASSERT_TRUE(graphMatch(wideBias).has_value());
+    EXPECT_FALSE(serves(wideBias, packedBias));
+    EXPECT_TRUE(serves(wideBias, biasRow()));
+    EXPECT_TRUE(serves(packedSpanSpec("bias", NARROW, true), packedBias));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseStatsSpanMoreThan32Bits)
+{
+    // Q, dO and O share one head (stride 0), so their spans fit; two rows per head keep the
+    // pack_split bound at 2^30. The stats of one batch span 536870910 rows, which fits 32 bits
+    // as 4-byte elements. A token-major layout adds the group's 268435454 interleaved heads
+    // and passes the bound; a head-major layout does not.
+    constexpr int64_t HEADS = 268435455;
+    constexpr int64_t SEQ = 2;
+    RowSpec packed = plainRow();
+    packed.gqaPack = 1;
+    const auto stats = [&](bool tokenMajor) {
+        Shape shape;
+        shape.batch = 1;
+        shape.heads = HEADS;
+        shape.kvHeads = 1;
+        shape.seqQ = SEQ;
+        shape.seqKv = 16;
+        return specOf(shape).withEdit([=](SdpaBwdGraph& g) {
+            for(const char* tensor : {"q", "do", "o"})
+            {
+                g.tensor(tensor).strides[1] = 0;
+            }
+            g.tensor("stats").strides = tokenMajor ? std::vector<int64_t>{HEADS * SEQ, 1, HEADS, 1}
+                                                   : std::vector<int64_t>{HEADS * SEQ, SEQ, 1, 1};
+        });
+    };
+    ASSERT_TRUE(graphMatch(stats(true)).has_value());
+    ASSERT_TRUE(graphMatch(stats(false)).has_value());
+    EXPECT_FALSE(serves(stats(true), packed));
+    EXPECT_TRUE(serves(stats(false), packed));
+    EXPECT_TRUE(serves(stats(true), plainRow()));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenThePackSplitIsExact)
 {
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
@@ -832,14 +917,21 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenThePackSplitI
         shape.seqKv = seq;
         return specOf(shape);
     };
-    // Every packed span fits at 50000 rows, but (Sq * G + 2 * block_q) * Sq passes 2^31.
-    ASSERT_TRUE(graphMatch(multiQuery(50000)).has_value());
-    EXPECT_FALSE(serves(multiQuery(50000), packed));
-    EXPECT_TRUE(serves(multiQuery(50000), plainRow()));
+    // The bound is (Sq * G + 2 * block_q) * Sq < 2^31 with block_q 64: 2,050,048,000 at 16000
+    // rows serves; 2,148,531,840 at 16380 declines, and 2,146,435,200 without the pad term
+    // would have served it. 50000 rows is far past it.
+    for(const int64_t seq : {16000, 16380, 50000})
+    {
+        ASSERT_TRUE(graphMatch(multiQuery(seq)).has_value());
+        EXPECT_TRUE(serves(multiQuery(seq), plainRow()));
+    }
     EXPECT_TRUE(serves(multiQuery(4096), packed));
+    EXPECT_TRUE(serves(multiQuery(16000), packed));
+    EXPECT_FALSE(serves(multiQuery(16380), packed));
+    EXPECT_FALSE(serves(multiQuery(50000), packed));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAMultiQueryGraphWithAPackedObject)
+TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAMultiQueryGraphWithAPackedObject)
 {
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
@@ -848,7 +940,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAMultiQueryGraphWithAPackedObject)
     EXPECT_TRUE(serves(specOf(multiQuery), packed));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseRowStrideIsNotAMultipleOfEight)
+TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseRowStrideIsNotAMultipleOfEight)
 {
     Shape ragged;
     ragged.seqKv = 12;
@@ -861,7 +953,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseRowStrideIsNotAMultipl
     EXPECT_TRUE(serves(withBias(baseSpec(), false), noStore));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseHeadStrideIsNotAMultipleOfEight)
+TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseHeadStrideIsNotAMultipleOfEight)
 {
     const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) {
         auto& bias = addBias(g);
@@ -872,7 +964,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseHeadStrideIsNotAMultip
     EXPECT_TRUE(serves(withBias(baseSpec(), false), biasRow()));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseRowStrideIsBelowThePaddedKeyLength)
+TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseRowStrideIsBelowThePaddedKeyLength)
 {
     // Row strides are multiples of 8, but the bias chunk contract needs a row to span
     // ceil8(Skv) elements.
@@ -886,13 +978,24 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseRowStrideIsBelowThePad
     EXPECT_TRUE(serves(withRowStride(16), biasRow()));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8_ServesABroadcastBiasWhoseBroadcastAxesHaveNoStride)
+TEST(TestFlydslSdpaBwdMergedKernel, BI8ServesABroadcastBiasWhoseBroadcastAxesHaveNoStride)
 {
     const auto spec = withBias(baseSpec(), false, {1, 1, 16, 16});
     EXPECT_TRUE(serves(spec, biasRow()));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8_AppliesToABiasObjectNotAPlainOne)
+TEST(TestFlydslSdpaBwdMergedKernel, BI8ServesARowBroadcastBiasAndLaunchesItWithAZeroRowStride)
+{
+    const auto spec = withBias(baseSpec(), false, {2, 8, 1, 16});
+    EXPECT_TRUE(serves(spec, biasRow()));
+    // The matcher records a zero stride on the single-row axis; the kernel reads one row for
+    // every query row.
+    const auto dump = dumpOf(spec, biasRow());
+    expectKernarg(dump.kernarg,
+                  Golden().set("B", ptrOf(sdpa_bwd_uid::BIAS)).strides("b", 128, 16, 0));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, BI8AppliesToABiasObjectNotAPlainOne)
 {
     // The same 12-wide bias rows: only a bias object stages them.
     Shape ragged;
