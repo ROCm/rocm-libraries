@@ -202,3 +202,26 @@ These gradients are not pinned-reference replay. Their buffers, auxiliary
 tables, and workspaces have explicit initialization and integrity checks.
 See the [coverage inventory](../../docs/conv-coverage-roadmap.md) for explicit
 versus production-selected configurations.
+
+## Installed SDK compiler smoke
+
+An optional Linux `rocm-sdk-core` wheel supplies COMGR without system ROCm or
+Torch. NumPy remains the only hard rocKE runtime dependency. Use a non-editable
+rocKE wheel and preserve the SDK wheel's complete dependency payload when
+relocating an installation. From installed CMake assets:
+
+```bash
+python bin/rocke_installed_smoke.py --check-comgr
+```
+
+Run with `ROCKE_COMGR_LIB`, `ROCKE_LLVM_FLAVOR`, ROCm roots, source `PYTHONPATH`,
+and injected library search paths unset. The script reports actual compiler
+provenance and compiles a minimal kernel to ELF HSACO without loading HIP or
+requiring a GPU. Ordinary smoke uses explicit offline emission. `--check-pybind`
+also compares the matching installed Python/native engines. Native Windows
+compiler execution is separately tracked; Linux ELF fixtures do not cover it.
+
+Fresh-process loader coverage lives in `tests/runtime/test_comgr_sdk_discovery.py`;
+matching production archive/binding coverage lives in the compiler detection and
+binding selection tests. SDK paths are explicitly forwarded to standalone native
+AUTO through `ROCKE_COMGR_LIB`, without native Python package discovery.

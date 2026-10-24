@@ -202,49 +202,52 @@ with neither torch nor a GPU installed.
 
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
-The runtime resolves the ROCm shared libs WITHOUT importing torch
-(`runtime/runtime_coexistence._candidate_lib_paths` / `_rocm_root_libdirs`), in
-priority order:
+Default Linux COMGR discovery uses a non-empty `ROCKE_COMGR_LIB`, then the
+installed `rocm-sdk-core` payload (including suffixed binary packages),
+`ROCM_PATH/lib`, `ROCM_HOME/lib`, system `/opt/rocm*/core-*/lib` and
+`/opt/rocm*/lib` in numeric order, then bare `libamd_comgr.so`. Empty overrides
+are unset. Missing, non-ELF or unloadable candidates fall back in that order;
+a successfully loaded but unqueryable compiler stays retained and AUTO fails.
 
-1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
-2. the lib torch uses, an opportunistic fast-path **only if torch is already
-   imported** (never imports torch to get it): an unambiguous mapped copy,
-   else `<torch>/lib/lib*.so`, else TheRock's
-   `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
-   torch is TheRock's). Exception for comgr only: a stale torch comgr moves
-   below every step 3 candidate (see below);
-3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
-   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
-   newest version first;
-4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+SDK discovery reads active distribution records without importing torch,
+private SDK modules, or calling `rocm_sdk.initialize_process()`. Numeric ELF
+SONAME/full-version names are supported, with unversioned names first and
+shorter numeric names before longer ones. File aliases are attempted once.
+The complete wheel payload must preserve relative RPATH dependency directories,
+including `lib/rocm_sysdeps/lib`; discovery does not modify `LD_LIBRARY_PATH`
+or preload HIP/LLVM globally.
 
-With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
-the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
-ambiguous mappings rather than treating address order as load order.
+Already-imported torch does not add a default COMGR tier. Call
+`comgr.prefer_bundled_lib()` before first use to explicitly select its bundle;
+a non-empty library override still wins. An unavailable bundle uses ordinary
+discovery. The selected handle is retained and cannot be replaced by a different
+compiler through a later opt-in.
+If torch is not imported yet and COMGR is already retained, the opt-in fails
+before importing torch, since that import can itself preload another compiler.
+Package release metadata is informational. `loaded_compiler_info()` supplies
+the actual compiler and query-library paths,
+LLVM version, and evidence source. `resolved_lib_path()` before loading is only
+a candidate hint.
 
-Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
-of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
-release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
-elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
-and compared with the release of the first step 3 install whose version is
-readable. If both are known and torch's is older, torch's comgr is tried after
-every step 3 candidate (still before step 4), because an older comgr rejects
-ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
-process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
-`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
-ERROR: support is already registered for analysis`. It stays first; if it
-cannot handle the target ISA, the compile fails at `set_isa`.
+On Linux, every candidate is checked against all known COMGR mappings before
+opening it. Same-file aliases are allowed; a distinct ELF candidate or multiple
+distinct mapped compilers produce a hard error. Deleted mappings are recognized
+by device/inode identity. A bare name is accepted beside mapped COMGR only when
+`RTLD_NOLOAD` and symbol provenance identify an already-loaded matching library;
+otherwise use an explicit mapped path or a separate compilation process.
+Unreadable `/proc/self/maps` limits detection, and the check cannot serialize
+external loaders racing with discovery. Native Windows execution and DLL
+dependencies require a separate Windows validation lane.
 
-On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
-names another existing file with an ELF header, the Python loader raises
-`ComgrError` before `dlopen` can load a second LLVM. An alias of the same file
-still works. Missing or non-ELF overrides keep the existing load-failure
-fallback. With multiple mapped paths or unreadable maps, this check does not
-change override precedence or mapped-library selection. To use a different
-COMGR, compile in a separate process before importing torch.
+Python-owned native lowering delegates AUTO to Python and passes a concrete
+flavor. Standalone native AUTO has no Python package context: resolve the wheel
+path in the package owner and pass `ROCKE_COMGR_LIB` before native startup.
+Native AUTO retains its own handle; a caller that owns compilation must pass
+its compiler's flavor explicitly.
 
-If you hit `cannot load libamd_comgr.so` in a torch-less process, set
-`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
+HIP discovery keeps its separate ownership order: `ROCKE_HIP_LIB`, the
+already-imported torch runtime, SDK DLLs on Windows, ROCm roots, then the bare
+name. It never imports torch merely to discover a library.
 
 ## Hardware requirements for numeric tests
 

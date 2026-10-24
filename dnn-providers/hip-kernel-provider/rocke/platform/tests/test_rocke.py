@@ -7653,6 +7653,15 @@ class TestLibDiscoveryOrder(unittest.TestCase):
     resolution contract across the module boundary.
     """
 
+    def setUp(self):
+        from unittest import mock
+
+        # These legacy fixtures exercise spec lookup with a synthetic package
+        # on sys.path. Real installed distribution records must not override it.
+        patch = mock.patch("importlib.metadata.distributions", return_value=[])
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_version_key_orders_rocm_newest_first(self):
         from rocke.runtime.runtime_coexistence import _version_key
 
@@ -7878,7 +7887,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             mapped(foreign, foreign)
             self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
 
-    def test_comgr_override_rejects_only_a_different_unique_mapped_file(self):
+    def test_comgr_override_rejects_any_distinct_mapped_file(self):
         import contextlib
         import os
         import tempfile
@@ -7902,7 +7911,9 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             with open(maps, "w") as fh:
                 # Multiple map segments for one file are still one copy.
                 for address in ("7f00-7f01", "7f01-7f02"):
-                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
+                    fh.write(
+                        f"{address} r-xp 00000000 {os.major(os.stat(wheel).st_dev):x}:{os.minor(os.stat(wheel).st_dev):x} {os.stat(wheel).st_ino} {wheel}\n"
+                    )
             sdk_stub = types.ModuleType("rocm_sdk")
             sdk_stub.__version__ = "10.1.0a20260822"
             self._enter_fake_process(
@@ -7934,12 +7945,14 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 self.assertIs(comgr_mod._load_lib(), load.return_value)
                 load.assert_called_once_with(same_file)
 
-            # An invalid override retains the existing fallback to torch's
-            # mapped library rather than becoming a new hard error.
+            # An invalid override falls back to the installed SDK candidate,
+            # which aliases the mapped compiler.
             missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
             os.environ["ROCKE_COMGR_LIB"] = missing
             with mock.patch.object(
-                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+                comgr_mod.ctypes,
+                "CDLL",
+                side_effect=[OSError("missing"), types.SimpleNamespace()],
             ) as load:
                 comgr_mod._load_lib()
                 self.assertEqual(
@@ -7953,7 +7966,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             with open(invalid, "w") as fh:
                 fh.write("not a shared library")
             os.environ["ROCKE_COMGR_LIB"] = invalid
-            loaded = object()
+            loaded = types.SimpleNamespace()
             with mock.patch.object(
                 comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
             ) as load:
@@ -7962,8 +7975,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     [call.args[0] for call in load.call_args_list], [invalid, wheel]
                 )
 
-            # No mapped copy, or multiple distinct mapped copies, leaves the
-            # existing override and mapped-tier policy unchanged.
+            # Unreadable maps limit detection; multiple copies reject the load.
             os.environ["ROCKE_COMGR_LIB"] = host
             with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
                 self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
@@ -7971,21 +7983,22 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     comgr_mod._load_lib()
                     load.assert_called_once_with(host)
             with open(maps, "a") as fh:
-                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
+                fh.write(
+                    f"7f02-7f03 r-xp 00000000 {os.major(os.stat(host).st_dev):x}:{os.minor(os.stat(host).st_dev):x} {os.stat(host).st_ino} {host}\n"
+                )
             self.assertEqual(rc._mapped_lib("amd_comgr"), wheel)
             self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
             with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
-                comgr_mod._load_lib()
-                load.assert_called_once_with(host)
+                with self.assertRaises(comgr_mod.ComgrError):
+                    comgr_mod._load_lib()
+                load.assert_not_called()
 
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
         self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
         # core-7.13 is a *component* version living under release 7.2.0. The
-        # result is compared against torch.version.hip, which reports the
-        # release, so the component number must not win: reading (7, 13) here
-        # would make a torch on ROCm 7.10 look older than a 7.2 install.
+        # release metadata must not report the component number.
         self.assertEqual(
             _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
         )
@@ -7998,8 +8011,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
 
         # The distro default is ROCM_PATH=/opt/rocm, an unversioned symlink to
         # /opt/rocm-X.Y.Z. Parsing only the literal path finds no digits in
-        # "rocm" and reports the version unknown, which silently disables the
-        # stale-comgr demotion on the exact layout it exists for.
+        # "rocm" and reports the release metadata as unknown.
         with tempfile.TemporaryDirectory() as tmp:
             real_root = os.path.join(tmp, "rocm-7.2.3")
             os.makedirs(os.path.join(real_root, "lib"))
@@ -8021,8 +8033,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
 
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
-        # Unknown must stay unknown: _torch_comgr_is_stale keeps the historical
-        # resolution order rather than guessing when either side is unreadable.
+        # Unknown package metadata must stay unknown.
         # Built under a tmpdir because a literal /opt/rocm is a symlink to a
         # versioned root on a real ROCm box -- which would make this pass for
         # the wrong reason there and fail everywhere else.
@@ -8031,53 +8042,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             os.makedirs(libdir)
             self.assertIsNone(_rocm_version_from_libdir(libdir))
 
-    def test_component_version_never_outranks_the_release(self):
-        import sys
-        import types
-        from unittest import mock
-
-        from rocke.runtime import runtime_coexistence as rc
-
-        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
-        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
-        # comparing against the component version would invert that.
-        torch_stub = types.ModuleType("torch")
-        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
-
-        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            with mock.patch.object(
-                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
-            ):
-                self.assertEqual(rc._torch_rocm_version(), (7, 10))
-                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
-                self.assertFalse(rc._torch_comgr_is_stale())
-
-    def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
-        import os
-        import sys
-        import types
-        from unittest import mock
-
-        from rocke.runtime import runtime_coexistence as rc
-
-        torch_stub = types.ModuleType("torch")
-        torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
-
-        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            with mock.patch.object(
-                rc,
-                "_rocm_root_libdirs",
-                return_value=[os.path.normpath("/opt/rocm/lib")],
-            ):
-                with mock.patch.object(
-                    rc.os.path,
-                    "realpath",
-                    return_value=os.path.normpath("/opt/rocm-7.2.3/lib"),
-                ):
-                    self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
-                    self.assertTrue(rc._torch_comgr_is_stale())
-
-    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
+    def test_therock_torch_metadata_reports_rocm_release_not_hip_version(self):
         import contextlib
         import os
         import tempfile
@@ -8103,12 +8068,11 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             )
             sdk_stub.__version__ = "10.2.0a20261001"
             self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
-            self.assertFalse(rc._torch_comgr_is_stale(bundled))
-            # An older release beside it is still stale: the check compares.
+            # Metadata still reports an older wheel's actual release.
             sdk_stub.__version__ = "10.1.0a20260822"
-            self.assertTrue(rc._torch_comgr_is_stale(bundled))
+            self.assertEqual(rc._torch_rocm_version(bundled), (10, 1))
 
-    def test_mapped_rocm_sdk_core_comgr_is_never_demoted(self):
+    def test_sdk_comgr_precedence_is_independent_of_mapping(self):
         import contextlib
         import os
         import tempfile
@@ -8142,17 +8106,14 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
             self.assertEqual(paths[0], comgr)
             self.assertEqual(paths.count(comgr), 1)
-            # The staleness check itself still fires; only the demotion is skipped.
-            self.assertTrue(rc._torch_comgr_is_stale(comgr))
-            # Control: the same wheel comgr, not loaded yet, is still demoted.
             stack.enter_context(
                 mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
             )
-            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
-            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            self.assertEqual(
+                rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]), paths
+            )
 
-    def test_mapped_torch_lib_comgr_is_still_demoted_when_stale(self):
+    def test_mapped_torch_comgr_does_not_enter_default_candidates(self):
         import contextlib
         import os
         import tempfile
@@ -8160,8 +8121,8 @@ class TestLibDiscoveryOrder(unittest.TestCase):
 
         from rocke.runtime import runtime_coexistence as rc
 
-        # Older wheels keep comgr in torch/lib; the demotion they were written
-        # for is unchanged, mapped or not.
+        # Older wheels keep COMGR in torch/lib; default discovery excludes
+        # that bundle whether or not it is mapped.
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             site, _, torch_stub = self._fake_torch_site(tmp)
             torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
@@ -8181,8 +8142,8 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 root_libdirs=[root],
             )
             paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
-            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            self.assertNotIn(comgr, paths)
+            self.assertEqual(paths[-1], "libamd_comgr.so")
 
     def test_torch_lib_comgr_version_ignores_an_unrelated_rocm_sdk(self):
         import contextlib
@@ -8213,9 +8174,10 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 root_libdirs=[root],
             )
             paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
-            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
-            # Both version readers agree on the lib that will load.
+            self.assertNotIn(comgr, paths)
+            self.assertEqual(paths[-1], "libamd_comgr.so")
+            # Explicit opt-in keeps torch package metadata informational.
+            os.environ["ROCKE_COMGR_LIB"] = comgr
             self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
             self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
             self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (7, 0))

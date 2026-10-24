@@ -47,7 +47,6 @@ from rocke.instances.common.manifest_runner.gemm import (
     run_gemm_manifest_problem,
 )
 
-
 # ---------------------------------------------------------------------------
 # Minimal fake Runtime that backs the check() callback with numpy arrays
 # ---------------------------------------------------------------------------
@@ -246,3 +245,54 @@ class TestGemmIsBf16(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_manifest_launcher_initializes_hip_without_selecting_comgr(
+    monkeypatch, tmp_path
+):
+    import builtins
+    import importlib
+    from types import SimpleNamespace
+    from rocke.runtime import comgr
+
+    runner = importlib.import_module("rocke.run_manifest")
+    imports = []
+    original = builtins.__import__
+
+    def capture(name, *args, **kwargs):
+        if name == "torch":
+            imports.append(name)
+            return SimpleNamespace()
+        return original(name, *args, **kwargs)
+
+    def unexpected():
+        raise AssertionError("manifest selected a compiler")
+
+    seen = {}
+
+    def launch(manifest, hsaco, *, shape, verify):
+        seen.update(manifest=manifest, hsaco=hsaco, shape=shape, verify=verify)
+        return SimpleNamespace(
+            ms=1, tflops=0, gbps=0, max_abs_diff=0, bad_count=0, total=0
+        )
+
+    monkeypatch.setattr(builtins, "__import__", capture)
+    monkeypatch.setattr(comgr, "prefer_bundled_lib", unexpected)
+    monkeypatch.setattr(runner, "run_manifest", launch)
+    assert (
+        runner.main(
+            [
+                str(tmp_path / "kernel.hsaco"),
+                str(tmp_path / "manifest.json"),
+                "--verify",
+            ]
+        )
+        == 0
+    )
+    assert imports == ["torch"]
+    assert seen == dict(
+        manifest=tmp_path / "manifest.json",
+        hsaco=tmp_path / "kernel.hsaco",
+        shape=None,
+        verify=True,
+    )
