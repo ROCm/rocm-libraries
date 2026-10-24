@@ -392,12 +392,16 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     specs = [_spec(_req(**kw), persistent=persistent) for kw in shapes]
                     self.assertTrue(all(s.persistent == persistent for s in specs))
                     self.assertTrue(all(s.runtime_shape for s in specs))
-                    self.assertEqual(len({s.kernel_name() for s in specs}), 1)
+                    # One binary per query tile: the default tile is a function of
+                    # the work count (_default_block_m), the rest of the shape is not.
+                    n_tiles = len({s.block_m for s in specs})
+                    self.assertEqual(n_tiles, 2)
+                    self.assertEqual(len({s.kernel_name() for s in specs}), n_tiles)
                     self.assertEqual(
                         len(
                             {attention_dense_cache_key(s, arch="gfx942") for s in specs}
                         ),
-                        1,
+                        n_tiles,
                     )
                     name = specs[0].kernel_name()
                     self.assertNotRegex(name, r"_b\d+")

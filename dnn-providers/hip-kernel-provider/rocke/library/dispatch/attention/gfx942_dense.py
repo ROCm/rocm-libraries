@@ -40,6 +40,29 @@ _DENSE_BLOCK_N = 64
 _GFX942_NUM_PERSISTENT = 304
 
 
+def _default_block_m(req: AttentionRequest) -> int:
+    """Query tile of the default spec.
+
+    The shared 256-row tile unless it leaves CUs idle: when the full-tile work
+    count (query blocks x query heads x batch) is below the CU count, a
+    128-row tile doubles the work items, and each causal item's KV loop is
+    half as long. Measured on the 304-CU part at D128, both dtypes, causal
+    without window or sinks: the 128-row tile wins every shape below that
+    threshold and loses every shape at or above it. A 64-row tile loses almost
+    everywhere. Window and sink requests keep the shared tile.
+    """
+    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+
+    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
+    if int(req.hdim_q) != 128 or int(req.sliding_window) or bool(req.use_sinks):
+        return bm
+    num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
+    work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
+    if work < num_cus:
+        return bm // 2
+    return bm
+
+
 def _base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
@@ -52,7 +75,6 @@ def _base_spec(req: AttentionRequest):
     the compiled binary can disagree. Every gfx942-private codegen knob stays at
     the concrete spec's default; the knob space varies them.
     """
-    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         _tuned_waves_per_eu,
@@ -67,7 +89,7 @@ def _base_spec(req: AttentionRequest):
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     mask_type = _parse_attention_mask_type(req.mask_type)
-    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
+    bm = _default_block_m(req)
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
@@ -135,8 +157,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # LSE output; no moving bottom-right diagonal. Head size stays out:
         # D64/D128 coverage is ``supports_attention_dense``'s call.
         features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
-        # _base_spec picks these from the dtype and head size.
-        recorded=frozenset({"persistent", "waves_per_eu"}),
+        # _base_spec picks these from the dtype, head size and work count.
+        recorded=frozenset({"block_m", "persistent", "waves_per_eu"}),
     )
 
 
