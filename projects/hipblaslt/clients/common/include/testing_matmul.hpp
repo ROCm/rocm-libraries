@@ -1456,33 +1456,25 @@ void check(hipStream_t                   stream,
 
         if(arg.norm_check)
         {
-            double norm_error = 0.0;
-            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            // norm_error, the reported value, sums the per-batch errors. The limit applies to
+            // each batch, so a large batch count of accurate results does not add up to a failure.
+            double  norm_error  = 0.0;
+            double  worst_error = 0.0;
+            int64_t worst_batch = 0;
+            for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
             {
-                norm_error = std::abs(norm_check_general('F',
-                                                         M[gemmIdx],
-                                                         N[gemmIdx],
-                                                         ldd[gemmIdx],
-                                                         stride_d[gemmIdx],
-                                                         hD_gold[gemmIdx].buf(),
-                                                         hD_1[gemmIdx].buf(),
-                                                         num_batches[gemmIdx],
-                                                         To));
-            }
-            else
-            {
-                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                const bool strided = batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+                const auto offset  = strided ? batch * stride_d[gemmIdx] * realDataTypeSize(To) : 0;
+                void* gold   = (char*)(strided ? hD_gold[gemmIdx] : hD_gold[batch]).buf() + offset;
+                void* result = (char*)(strided ? hD_1[gemmIdx] : hD_1[batch]).buf() + offset;
+                const double batch_error = std::abs(norm_check_general(
+                    'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], 0, gold, result, 1, To));
+                norm_error += batch_error;
+                if(!std::isnan(worst_error)
+                   && (std::isnan(batch_error) || batch_error > worst_error))
                 {
-                    norm_error = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             ldd[gemmIdx],
-                                                             0,
-                                                             hD_gold[batch].buf(),
-                                                             hD_1[batch].buf(),
-                                                             1,
-                                                             To));
-                    hipblaslt_error += norm_error;
+                    worst_error = batch_error;
+                    worst_batch = batch;
                 }
             }
             hipblaslt_error += norm_error;
@@ -1490,6 +1482,15 @@ void check(hipStream_t                   stream,
             {
                 CHECK_SUCCESS(
                     norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+            }
+            const double limit = norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type);
+            if(limit > 0.0 && !(worst_error < limit))
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
+                               << worst_batch << " has norm_error " << worst_error
+                               << ", at or above the " << hip_datatype_to_string(To) << " limit of "
+                               << limit << std::endl;
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
@@ -1593,8 +1594,11 @@ void check(hipStream_t                   stream,
             }
             allclose_merge_pair(hipblaslt_atol, hipblaslt_rtol, gemm_atol, gemm_rtol);
             if(failure.bad_count)
+            {
+                hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
+            }
         }
 
         if(arg.ulp_check)

@@ -25,6 +25,10 @@
 //
 // uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
 // as {0=off, 1=on} and follows the same convention.
+//
+// verification_failures counts the -v checks of D that failed: one per gemm, per solution,
+// for each of the norm and allclose checks. With verify_strict set, verification_exit_code
+// turns a run that would exit 0 into exit code 2 when any check failed.
 namespace hipblaslt_bench_options
 {
     int32_t&     cotenant_cus();
@@ -37,4 +41,7 @@ namespace hipblaslt_bench_options
                                             std::string legacy);
     int32_t&     uniform_summation_order();
     std::string& uniform_summation_order_str();
+    bool&        verify_strict();
+    int64_t&     verification_failures();
+    int          verification_exit_code(int ret);
 }
