@@ -18,13 +18,14 @@ Graph (logical dims are always [B, H, S, D], cuDNN convention):
   - page_table_k (uid 12) / page_table_v (uid 13): INT32 [B, 1, M, 1], strides
     [M, M, 1, 1] (vLLM block_table zero copy), M = ceil(max_seq_len_kv /
     block_size). --shared-page-table binds uid 12 to both.
-  - seq_len_kv (uid 6) always; seq_len_q (uid 5) with ragged Q.
+  - seq_len_q (uid 5) and seq_len_kv (uid 6) always, with padding_mask set: cuDNN
+    pages K/V only with both (dense Q gets seq_len_q = Sq for every batch).
   - max_seq_len_kv attribute; diagonal band mask (left/right bound + alignment).
   - Optional LSE (uid 4) [B, Hq, Sq, 1] float: dense for dense Q, packed with
     the Q offsets (multiplier Hq) for ragged Q.
-  - Optional attention sink (uid 14, --sinks) [1, Hq, 1, 1], strides [Hq, 1, 1, 1]
-    (vLLM layer.sinks [Hq] viewed zero copy): one raw logit per query head, drawn
-    N(0, 1), in the io dtype (--sink-dtype io, what the engines take) or FLOAT.
+  - Optional attention sink (uid 14, --sinks) FLOAT [1, Hq, 1, 1], strides
+    [Hq, 1, 1, 1]: one raw logit per query head, drawn N(0, 1). cuDNN takes FLOAT
+    sinks only; adapters convert vLLM's model-dtype layer.sinks.
 
 Data: Q/K/V uniform(min, max) from a seeded torch.Generator. Physical blocks are
 a random permutation of distinct block ids; unused page-table entries are -1.
@@ -88,15 +89,14 @@ from generate_sdpa_fwd_golden import (
 # 1.0.0 - Initial paged-KV generator (dense or ragged Q, gather-then-dense golden)
 # 1.1.0 - Added --sinks / --sink-dtype (attention sink_token, uid 14); bundles
 #         without sinks are unchanged
-GENERATOR_VERSION = "1.1.0"
+# 1.2.0 - cuDNN's paged contract: seq_len_q always emitted (dense Q too) with
+#         padding_mask set, FLOAT sinks only (--sink-dtype removed); window bounds
+#         follow SdpaSemanticsRegister SEM-001 (left_bound = L keeps L keys)
+GENERATOR_VERSION = "1.2.0"
 
 UID_PAGE_TABLE_K = 12
 UID_PAGE_TABLE_V = 13
 UID_SINK = 14
-
-# Sink dtypes: the io dtype (vLLM keeps layer.sinks in the model dtype; what the
-# rocKE-backed engines accept) or FLOAT (cuDNN's sample dtype).
-SINK_DTYPES = ("io", "float")
 
 # Fill for every container slot no live token maps to (spare blocks and the tail
 # of a partial last block). Large but finite: a kernel that reads one of them
@@ -291,10 +291,10 @@ def build_paged_graph_json(
     max_seq_len_kv,
     max_blocks,
     shared_page_table,
-    sink_dtype_str=None,
+    sinks=False,
 ):
-    """Paged SDPA graph in the build_graph_json schema. sink_dtype_str (a json
-    dtype name) adds the sink_token tensor (uid 14)."""
+    """Paged SDPA graph in the build_graph_json schema; sinks adds the FLOAT
+    sink_token tensor (uid 14)."""
     graph = build_graph_json(
         q_dims,
         k_dims,
@@ -334,10 +334,7 @@ def build_paged_graph_json(
             "virtual": False,
         }
 
-    if ragged_q:
-        graph["tensors"].append(
-            aux(UID_SEQ_LEN_Q, "SeqLenQ", [B, 1, 1, 1], [1, 1, 1, 1])
-        )
+    graph["tensors"].append(aux(UID_SEQ_LEN_Q, "SeqLenQ", [B, 1, 1, 1], [1, 1, 1, 1]))
     graph["tensors"].append(aux(UID_SEQ_LEN_KV, "SeqLenKv", [B, 1, 1, 1], [1, 1, 1, 1]))
     if ragged_q:
         graph["tensors"].append(
@@ -357,29 +354,29 @@ def build_paged_graph_json(
         graph["tensors"].append(
             aux(UID_PAGE_TABLE_V, "PageTableV", table_dims, table_strides)
         )
-    if sink_dtype_str is not None:
+    if sinks:
         graph["tensors"].append(
             {
                 "uid": UID_SINK,
                 "name": "SinkToken",
                 "dims": [1, H_q, 1, 1],
                 "strides": [H_q, 1, 1, 1],
-                "data_type": sink_dtype_str,
+                "data_type": "float",
                 "virtual": False,
             }
         )
 
     node = graph["nodes"][0]
     inputs = node["inputs"]
-    inputs["seq_len_q_tensor_uid"] = UID_SEQ_LEN_Q if ragged_q else None
+    inputs["seq_len_q_tensor_uid"] = UID_SEQ_LEN_Q
     inputs["seq_len_kv_tensor_uid"] = UID_SEQ_LEN_KV
     inputs["page_table_k_tensor_uid"] = UID_PAGE_TABLE_K
     inputs["page_table_v_tensor_uid"] = (
         UID_PAGE_TABLE_K if shared_page_table else UID_PAGE_TABLE_V
     )
-    inputs["sink_token_tensor_uid"] = UID_SINK if sink_dtype_str is not None else None
+    inputs["sink_token_tensor_uid"] = UID_SINK if sinks else None
     attributes = node["attributes"]
-    attributes["padding_mask"] = False
+    attributes["padding_mask"] = True
     attributes["max_seq_len_kv"] = max_seq_len_kv
     return graph
 
@@ -547,7 +544,6 @@ def generate_paged_bundle(
     max_val=1.0,
     attn_scale=None,
     sinks=False,
-    sink_dtype="io",
 ):
     H_q, H_kv, D_qk = num_heads_q, num_heads_kv, head_dim
     D_v = head_dim if head_dim_v is None else head_dim_v
@@ -571,8 +567,6 @@ def generate_paged_bundle(
     if not errors:
         S_q = max(max(seq_lens_q), 1) if ragged_q else seq_q
         live_q = list(seq_lens_q) if ragged_q else [S_q] * B
-        if sink_dtype not in SINK_DTYPES:
-            errors.append(f"--sink-dtype must be one of {list(SINK_DTYPES)}")
         # With sinks a keyless row has LSE = sink (finite), so only sink-free bundles
         # must avoid fully masked live rows.
         if stats and not sinks:
@@ -630,7 +624,7 @@ def generate_paged_bundle(
     )
     print(f"  Scale: {attn_scale:.10f}, Seed: {seed}")
     if sinks:
-        print(f"  sinks: N(0, 1) per query head, dtype {sink_dtype}")
+        print("  sinks: N(0, 1) per query head, FLOAT")
 
     rng = torch.Generator().manual_seed(seed)
     Q = torch.empty(q_dims, dtype=io_torch).uniform_(min_val, max_val, generator=rng)
@@ -651,17 +645,11 @@ def generate_paged_bundle(
     # Drawn last so bundles without sinks keep their exact data.
     sink_store = None
     sink_values = None
-    sink_json = None
     if sinks:
-        sink_torch = io_torch if sink_dtype == "io" else torch.float32
-        sink_json = io_json if sink_dtype == "io" else "float"
-        sink_store = (
-            torch.randn([H_q], dtype=torch.float32, generator=rng)
-            .to(sink_torch)
-            .reshape(1, H_q, 1, 1)
+        sink_store = torch.randn([H_q], dtype=torch.float32, generator=rng).reshape(
+            1, H_q, 1, 1
         )
-        # The golden uses exactly the stored (possibly rounded) sink.
-        sink_values = sink_store.float().reshape(H_q)
+        sink_values = sink_store.reshape(H_q)
 
     k_logical = torch.full(k_dims, SPARE_FILL, dtype=io_torch)
     v_logical = torch.full(v_dims, SPARE_FILL, dtype=io_torch)
@@ -714,8 +702,7 @@ def generate_paged_bundle(
     ]
     if lse_store is not None:
         tensor_list.append(("LSE", lse_store, UID_LSE))
-    if ragged_q:
-        tensor_list.append(("SeqLenQ", int32_bshape(live_q), UID_SEQ_LEN_Q))
+    tensor_list.append(("SeqLenQ", int32_bshape(live_q), UID_SEQ_LEN_Q))
     tensor_list.append(("SeqLenKv", int32_bshape(list(seq_lens_kv)), UID_SEQ_LEN_KV))
     if ragged_q:
         tensor_list.append(
@@ -767,7 +754,7 @@ def generate_paged_bundle(
         max_seq_len_kv,
         max_blocks,
         shared_page_table,
-        sink_dtype_str=sink_json,
+        sinks=sinks,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w", newline="\n") as f:
@@ -794,7 +781,7 @@ def generate_paged_bundle(
         "gqa_ratio": H_q // H_kv,
         "layout": "bshd",
         "ragged_q": ragged_q,
-        "seq_lens_q": list(seq_lens_q) if ragged_q else None,
+        "seq_lens_q": live_q,
         "seq_lens_kv": list(seq_lens_kv),
         "max_seq_len_kv": max_seq_len_kv,
         "block_size": block_size,
@@ -812,7 +799,6 @@ def generate_paged_bundle(
         "page_table_k": table_rows(page_table_k),
         "page_table_v": table_rows(page_table_v),
         "sinks": sink_values.tolist() if sink_values is not None else None,
-        "sink_dtype": sink_dtype if sinks else None,
     }
     config = {
         "dtype": dtype,
@@ -898,7 +884,8 @@ def main():
         "--window-left",
         type=int,
         default=-1,
-        help="Sliding window left bound, -1 = open",
+        help="Sliding window left bound (cuDNN left_bound: keeps this many keys "
+        "including the diagonal), -1 = open",
     )
     parser.add_argument(
         "--window-right",
@@ -939,12 +926,6 @@ def main():
         action="store_true",
         help="Add an attention sink_token (uid 14) [1, Hq, 1, 1], N(0, 1) per head",
     )
-    parser.add_argument(
-        "--sink-dtype",
-        default="io",
-        choices=list(SINK_DTYPES),
-        help="Sink data type: the io dtype (default) or float",
-    )
     args = parser.parse_args()
 
     generate_paged_bundle(
@@ -972,7 +953,6 @@ def main():
         max_val=args.max_val,
         attn_scale=args.attn_scale,
         sinks=args.sinks,
-        sink_dtype=args.sink_dtype,
     )
     print("\nDone.")
 
