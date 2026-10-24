@@ -1155,18 +1155,30 @@ def _localize_expected_positive(
     }
 
 
-def _needs_serial_retry(status: str, expected_status: str | None) -> bool:
+def _needs_serial_retry(
+    status: str,
+    expected_status: str | None,
+    *,
+    evidence: str = "",
+    expected_evidence: str = "",
+) -> bool:
     """Whether a result needs a contention-free confirmation attempt.
 
-    Any changed committed verdict is unexpected and gets confirmed. Without a
-    committed expectation (generation and target preflight), only a non-answer
-    is plausibly transient. ``probe_error`` always retries because it is the
-    generator admitting it did not classify the result.
+    Any changed committed verdict is unexpected and gets confirmed. Matching
+    crash and timeout statuses are deterministic only when their normalized
+    evidence also matches. Without a committed expectation (generation and
+    target preflight), only a non-answer is plausibly transient. ``probe_error``
+    always retries because it is the generator admitting it did not classify
+    the result.
     """
     if status == STATUS_PROBE_ERROR:
         return True
     if expected_status is not None:
-        return status != expected_status
+        if status != expected_status:
+            return True
+        if status in (STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT):
+            return evidence != expected_evidence
+        return False
     return status in (STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT)
 
 
@@ -1234,14 +1246,18 @@ def _serial_retry_items(
     expected_cells: dict[str, dict[str, dict[str, str]]],
 ) -> list[tuple[str, str]]:
     """Select every transient or expectation-mismatched cell for confirmation."""
-    return [
-        (key, arch)
-        for key, arch in work
+    retry: list[tuple[str, str]] = []
+    for key, arch in work:
+        result = results[key][arch]
+        expected = expected_cells.get(key, {}).get(arch, {})
         if _needs_serial_retry(
-            str(results[key][arch]["status"]),
-            expected_cells.get(key, {}).get(arch, {}).get("status"),
-        )
-    ]
+            str(result["status"]),
+            expected.get("status"),
+            evidence=str(result.get("evidence", "")),
+            expected_evidence=str(expected.get("evidence", "")),
+        ):
+            retry.append((key, arch))
+    return retry
 
 
 def _unvalidated_exit(requested: int | None, legacy: int) -> int:

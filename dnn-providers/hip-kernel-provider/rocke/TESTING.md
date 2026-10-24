@@ -429,8 +429,9 @@ must survive compile, link, and target assembly, and a failed batch is bisected
 to individual verdicts. Expected-negative cells remain individual and use
 explicit operand witnesses. Independent work shares a quota-aware bounded
 worker pool, with `--jobs` available for an explicit site override.
-Deterministic expected crashes are not retried; unexpected or unclassified
-outcomes still receive a contention-free retry.
+Expected crashes and timeouts whose normalized evidence still matches are not
+retried; changed evidence, unexpected verdicts, and unclassified outcomes still
+receive a contention-free retry.
 
 The fast structure and generator units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the

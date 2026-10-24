@@ -114,8 +114,9 @@ integer and `immarg` operands come from explicit `ProbeSpec` witnesses rather
 than speculative value sweeps. Target preflights, positive batches, and
 negative singletons share a quota-aware worker pool capped at 32 by default;
 `--jobs` is the explicit override for constrained or dedicated hosts. An
-expected deterministic crash or timeout is not rerun serially; changed,
-unclassified, and otherwise transient-looking results are.
+expected crash or timeout whose normalized evidence still matches is not rerun
+serially; changed evidence, changed verdicts, unclassified results, and otherwise
+transient-looking results are.
 
 The migration preserves the former pytest item's result mapping:
 

@@ -596,11 +596,37 @@ class PositiveBatchTest(unittest.TestCase):
 class RetryPolicyTest(unittest.TestCase):
     def test_expected_deterministic_failures_are_not_retried(self):
         self.assertFalse(
-            G._needs_serial_retry(G.STATUS_TOOLCHAIN_CRASH, G.STATUS_TOOLCHAIN_CRASH)
+            G._needs_serial_retry(
+                G.STATUS_TOOLCHAIN_CRASH,
+                G.STATUS_TOOLCHAIN_CRASH,
+                evidence="Segmentation fault",
+                expected_evidence="Segmentation fault",
+            )
         )
         self.assertFalse(
             G._needs_serial_retry(
-                G.STATUS_TOOLCHAIN_TIMEOUT, G.STATUS_TOOLCHAIN_TIMEOUT
+                G.STATUS_TOOLCHAIN_TIMEOUT,
+                G.STATUS_TOOLCHAIN_TIMEOUT,
+                evidence="clang did not terminate within 60s",
+                expected_evidence="clang did not terminate within 60s",
+            )
+        )
+
+    def test_expected_failures_with_changed_evidence_are_retried(self):
+        self.assertTrue(
+            G._needs_serial_retry(
+                G.STATUS_TOOLCHAIN_CRASH,
+                G.STATUS_TOOLCHAIN_CRASH,
+                evidence="Aborted",
+                expected_evidence="Segmentation fault",
+            )
+        )
+        self.assertTrue(
+            G._needs_serial_retry(
+                G.STATUS_TOOLCHAIN_TIMEOUT,
+                G.STATUS_TOOLCHAIN_TIMEOUT,
+                evidence="clang did not terminate within 30s",
+                expected_evidence="clang did not terminate within 60s",
             )
         )
 
@@ -614,20 +640,50 @@ class RetryPolicyTest(unittest.TestCase):
         self.assertTrue(G._needs_serial_retry(G.STATUS_OK, G.STATUS_ARCH_ABSENT))
 
     def test_retry_scheduler_selects_every_changed_verdict(self):
-        work = [("positive", "gfx"), ("negative", "gfx"), ("stable", "gfx")]
+        work = [
+            ("positive", "gfx"),
+            ("negative", "gfx"),
+            ("stable", "gfx"),
+            ("changed_crash", "gfx"),
+            ("stable_crash", "gfx"),
+        ]
         results = {
             "positive": {"gfx": {"status": G.STATUS_ARCH_ABSENT}},
             "negative": {"gfx": {"status": G.STATUS_OK}},
             "stable": {"gfx": {"status": G.STATUS_OK}},
+            "changed_crash": {
+                "gfx": {
+                    "status": G.STATUS_TOOLCHAIN_CRASH,
+                    "evidence": "Aborted",
+                }
+            },
+            "stable_crash": {
+                "gfx": {
+                    "status": G.STATUS_TOOLCHAIN_CRASH,
+                    "evidence": "Segmentation fault",
+                }
+            },
         }
         expected = {
             "positive": {"gfx": {"status": G.STATUS_OK}},
             "negative": {"gfx": {"status": G.STATUS_ARCH_ABSENT}},
             "stable": {"gfx": {"status": G.STATUS_OK}},
+            "changed_crash": {
+                "gfx": {
+                    "status": G.STATUS_TOOLCHAIN_CRASH,
+                    "evidence": "Segmentation fault",
+                }
+            },
+            "stable_crash": {
+                "gfx": {
+                    "status": G.STATUS_TOOLCHAIN_CRASH,
+                    "evidence": "Segmentation fault",
+                }
+            },
         }
         self.assertEqual(
             G._serial_retry_items(work, results, expected),
-            [("positive", "gfx"), ("negative", "gfx")],
+            [("positive", "gfx"), ("negative", "gfx"), ("changed_crash", "gfx")],
         )
 
 
