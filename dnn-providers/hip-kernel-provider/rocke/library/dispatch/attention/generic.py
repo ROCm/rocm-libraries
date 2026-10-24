@@ -77,9 +77,9 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != path:
+        if problem.select_path(req.arch) != path:
             return False, (
-                f"problem routes to {problem.select_path()!r} path, not {path!r}"
+                f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
         return True, "ok"
 
@@ -150,9 +150,9 @@ def _make_d256_decode_candidate() -> KernelCandidate:
             return False, why
         if not _d256_decode_cohort(problem):
             return False, "problem is not in the D256 bf16 decode cohort"
-        if problem.select_path() != "3d":
+        if problem.select_path(req.arch) != "3d":
             return False, (
-                f"problem routes to {problem.select_path()!r} path, not '3d'"
+                f"problem routes to {problem.select_path(req.arch)!r} path, not '3d'"
             )
         return True, "ok"
 

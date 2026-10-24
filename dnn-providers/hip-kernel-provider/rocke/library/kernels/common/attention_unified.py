@@ -198,7 +198,12 @@ class UnifiedAttentionProblem:
         as ``num_cus * 4`` (4 CTAs/CU)."""
         return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
-    def select_path(self) -> str:
+    def select_path(self, arch: str | None = None) -> str:
+        """2D or 3D route. ``arch`` adds per-arch decode routing on top of the
+        shared selector (``_gfx942_decode_prefers_3d``); None keeps the shared
+        selector alone."""
+        if arch is not None and _gfx942_decode_prefers_3d(self, arch):
+            return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
@@ -3677,6 +3682,40 @@ def _gfx942_3d_decode_ctas_per_segment(
     return None
 
 
+def _gfx942_decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """gfx942 decode routes to the split-KV 3D kernel even past the 2D grid target.
+
+    The gfx942 tiled 2D decode body holds one single-wave workgroup per CU (its
+    LDS footprint): a large-batch grid leaves most SIMDs idle, and a small-batch
+    short-KV grid of a few workgroups walks its tiles serially. The 3D segment
+    kernel keeps several waves per CU in both cases. Scope: the decode split
+    rule's measured cohort (fp16/bf16, head size 64/128, 16-token pages, no
+    sliding window) and a cache the 3D kernel's K/V loader can address (it has
+    no i64 path).
+    """
+    if _canonical_arch_for_selection(arch) != "gfx942":
+        return False
+    if not (
+        problem.all_decode
+        and problem.head_size in (64, 128)
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and not problem.use_fp8
+        and _kv_storage_dtype(problem) is None
+    ):
+        return False
+    if problem.num_kv_blocks <= 0:
+        problem = replace(
+            problem,
+            num_kv_blocks=problem.num_seqs
+            * -(-problem.max_seqlen_k // problem.block_size),
+        )
+    if _enable_i64_kv_addr_3d(problem, "gfx942"):
+        return False
+    return supports_native_unified_attention_3d_tiled(problem, arch)[0]
+
+
 def _gfx950_3d_tile_size_override(
     problem: UnifiedAttentionProblem, arch: str
 ) -> int | None:
@@ -6047,7 +6086,7 @@ def run_unified_attention_torch(
     # 150× the right path's cost) while keeping the decode-shape 3D
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
-    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    prefer_2d = backend == "auto" and problem.select_path(_launch_arch) == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch
