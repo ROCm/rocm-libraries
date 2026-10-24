@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,50 @@
 
 #include "utility.hpp"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdlib>
 #include <gtest/gtest.h>
+#include <mpi.h>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
+
+// rocalution-test does not initialize MPI in main, so that death tests can re-execute the binary.
+// Tests that need MPI initialize it on first use, and only when an MPI launcher started the
+// process: singleton MPI_Init can abort, e.g. when hwloc picks up the zlib that ships with ROCm.
+// Tests that need more than one rank must be started through mpirun with a --gtest_filter, so
+// that all ranks run the same tests in the same order.
+inline bool testing_mpi_launched()
+{
+    return std::getenv("OMPI_COMM_WORLD_SIZE") != nullptr || std::getenv("PMIX_RANK") != nullptr
+           || std::getenv("PMI_RANK") != nullptr;
+}
+
+inline const MPI_Comm* testing_mpi_comm()
+{
+    static MPI_Comm comm = MPI_COMM_WORLD;
+
+    int initialized = 0;
+    MPI_Initialized(&initialized);
+
+    if(!initialized)
+    {
+        assert(testing_mpi_launched());
+        MPI_Init(NULL, NULL);
+        std::atexit([] {
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+
+            if(!finalized)
+            {
+                MPI_Finalize();
+            }
+        });
+    }
+
+    return &comm;
+}
 
 template <typename T>
 void testing_global_matrix_bad_args(void)
@@ -368,6 +408,127 @@ void testing_global_matrix_bad_args(void)
     free_host(&data);
 
     // Stop rocALUTION
+    stop_rocalution();
+}
+
+// Each rank owns a tridiagonal block without neighbors and sets only its local data.
+// The ghost part must still have one empty row per local row.
+template <typename T>
+void testing_global_matrix_local_data_only(bool coo, bool use_acc)
+{
+    if(!testing_mpi_launched())
+    {
+        GTEST_SKIP() << "needs an MPI launcher (mpirun)";
+    }
+
+    const MPI_Comm* comm = testing_mpi_comm();
+
+    int num_procs;
+    MPI_Comm_size(*comm, &num_procs);
+
+    // GlobalMatrix::Apply() synchronizes the accelerator even when it is disabled, so the host
+    // runs keep it enabled and leave the objects on the host.
+    disable_accelerator_rocalution(false);
+    set_device_rocalution(device);
+    init_rocalution();
+
+    int n   = 100;
+    int nnz = 3 * n - 2;
+
+    int* row = nullptr;
+    int* col = nullptr;
+    T*   val = nullptr;
+
+    allocate_host(coo ? nnz : n + 1, &row);
+    allocate_host(nnz, &col);
+    allocate_host(nnz, &val);
+
+    int k = 0;
+    for(int i = 0; i < n; ++i)
+    {
+        if(!coo)
+        {
+            row[i] = k;
+        }
+
+        for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
+        {
+            if(coo)
+            {
+                row[k] = i;
+            }
+
+            col[k] = j;
+            val[k] = (i == j) ? static_cast<T>(3) : static_cast<T>(-1);
+            ++k;
+        }
+    }
+
+    if(!coo)
+    {
+        row[n] = k;
+    }
+
+    int zero_offset[1] = {0};
+
+    ParallelManager pm;
+    pm.SetMPICommunicator(comm);
+    pm.SetGlobalNrow(static_cast<int64_t>(n) * num_procs);
+    pm.SetGlobalNcol(static_cast<int64_t>(n) * num_procs);
+    pm.SetLocalNrow(n);
+    pm.SetLocalNcol(n);
+    pm.SetBoundaryIndex(0, nullptr);
+    pm.SetReceivers(0, nullptr, zero_offset);
+    pm.SetSenders(0, nullptr, zero_offset);
+
+    GlobalMatrix<T> mat;
+    mat.SetParallelManager(pm);
+
+    if(coo)
+    {
+        mat.SetLocalDataPtrCOO(&row, &col, &val, "mat", nnz);
+    }
+    else
+    {
+        mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+    }
+
+    EXPECT_EQ(mat.GetGhost().GetM(), n);
+    EXPECT_EQ(mat.GetGhost().GetN(), 0);
+    EXPECT_EQ(mat.GetGhost().GetNnz(), 0);
+
+    GlobalVector<T> x(pm);
+    GlobalVector<T> y(pm);
+
+    if(use_acc)
+    {
+        mat.MoveToAccelerator();
+        x.MoveToAccelerator();
+        y.MoveToAccelerator();
+
+        EXPECT_EQ(mat.GetGhost().GetM(), n);
+    }
+
+    x.Allocate("x", mat.GetN());
+    y.Allocate("y", mat.GetM());
+    x.Ones();
+    mat.Apply(x, &y);
+
+    T* hy = nullptr;
+    allocate_host(n, &hy);
+    y.GetInterior().CopyToHostData(hy);
+
+    for(int i = 0; i < n; ++i)
+    {
+        EXPECT_EQ(hy[i], (i == 0 || i == n - 1) ? static_cast<T>(2) : static_cast<T>(1));
+    }
+
+    free_host(&hy);
+
+    mat.Clear();
+    x.Clear();
+    y.Clear();
+
     stop_rocalution();
 }
 

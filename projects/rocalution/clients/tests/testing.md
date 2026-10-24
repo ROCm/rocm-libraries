@@ -141,7 +141,7 @@ transfers and multi-node communication behave as expected.
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
 | Structures (GPU) | `local_matrix` ops / conversions / multicoloring / itsolve / solve, `local_vector`, `local_stencil` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
-| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager` |
+| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup) |
 
 **Tiers (environment-variable driven, mapped to CTest categories when built inside the monorepo with
 `shared/ctest/`):**
@@ -166,6 +166,15 @@ suites.
 
 **What requires MPI:** the
 `global_*` and `parallel_manager` suites (`SUPPORT_MPI`).
+
+**What requires an MPI launcher:** the `global_matrix/*` and `global_amg/*` parameterized cases call
+MPI and skip themselves unless `mpirun` started the process; `global_amg/*` also skips unless it runs
+on exactly 2 ranks. All ranks must run the same tests in the same order, so start them with a filter.
+CTest registers this run as `rocalution-test-mpi-np2`:
+
+```bash
+mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
+```
 
 **Managed-memory (HMM) cases:** on gfx90a, run with `HSA_XNACK=0` and `HSA_XNACK=1`.
 
