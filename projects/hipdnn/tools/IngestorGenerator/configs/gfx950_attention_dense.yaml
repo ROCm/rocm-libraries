@@ -5,17 +5,27 @@
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
 # and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
-# are generated from this file. Generation mints fresh UUIDs on every run, so never
-# copy a regenerated descriptor directory over the live one: that replaces every
-# retained id, which extend.md forbids. After editing this file, render into an empty
-# scratch directory from the IngestorGenerator root and splice only the additions
-# (tools/splice_additions.py refuses, writing nothing, if a retained entry changed):
+# are generated from this file. Ids are reused by default: the installed bundle (the
+# descriptors directory above) is the previous version, so every descriptor id that is
+# still produced is kept (a kernel is matched by its completed metadata plus arch, not by
+# name; a metadata change, or a retune that changes or drops a value its kernel_source
+# stated, gives that kernel a new id) and only added descriptors
+# get new ones. `--new-ids` starts every id over; `--ids-from <dir>` names a different
+# previous version. Even so, never copy a regenerated descriptor directory over the live
+# one, and never generate in place (that is refused: the KDP is a DVC output). After
+# editing this file, render into an empty scratch directory from the IngestorGenerator
+# root:
 #     PROVIDER=../../../../dnn-providers/hip-kernel-provider
 #     LIVE=$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense
 #     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
 #         --output-dir <scratch>
+# The live KDP sits in $LIVE/artifacts/, where tools/splice_additions.py does not look, so
+# splice only the additions into it by hand, or with that tool on the KDP alone (it
+# refuses, writing nothing, if a retained entry changed): copy the scratch KDP into an
+# otherwise empty directory <kdp-only>, then
 #     .venv/bin/python tools/splice_additions.py \
-#         --scratch <scratch>/descriptors/rocKE/gfx950_attention_dense --live "$LIVE"
+#         --scratch <kdp-only> --live "$LIVE/artifacts"
+# and run `dvc add artifacts` there.
 # The generated tests/TestGfx950AttentionDensePacks.cpp carries no UUIDs and is
 # already in the provider's clang-format form; copy it over the live census test.
 # tests/test_registry_regeneration.py gates this file against
@@ -26,9 +36,13 @@
 # hand-maintained and must not be overwritten. See
 # projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/extend.md.
 #
-# The generated gfx950_attention_dense.kdp.json is a DVC output: copy it to
-# descriptors/rocKE/gfx950_attention_dense/artifacts/ and run `dvc add artifacts`, not
-# `git add`. See the descriptors README ("Large rocKE files live in DVC").
+# The generated gfx950_attention_dense.kdp.json is a DVC output. The shipped one must be
+# present in descriptors/rocKE/gfx950_attention_dense/artifacts/ before running the
+# command above (`dvc pull -r ingestor artifacts.dvc` there); otherwise the run refuses
+# rather than remint every kernel id. Record the spliced KDP with
+# `dvc add artifacts`, not `git add`; an artifact that no longer hashes to the recorded
+# md5 draws a stale-artifact warning on the next run until `dvc add` records it. See the
+# descriptors README ("Large rocKE files live in DVC").
 #
 # The kernel is the dense flash-attention prefill from
 # rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
