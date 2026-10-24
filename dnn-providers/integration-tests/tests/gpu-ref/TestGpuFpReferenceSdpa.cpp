@@ -2005,6 +2005,8 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
 
     // Max / Sum_exp: equal where infinite (dead rows: -inf / 0), close elsewhere, and for a live
     // row with no live key the sink alone (Max = sink, Sum_exp = 1).
+    maxGpu.memory().hostData(); // sync the device results to the host before const reads
+    sumExpGpu.memory().hostData();
     for(int64_t b = 0; b < BATCH; ++b)
     {
         for(int64_t h = 0; h < H; ++h)
