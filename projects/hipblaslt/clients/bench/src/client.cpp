@@ -740,7 +740,7 @@ try
          "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
 
         ("help,h", "produces this help message")
 

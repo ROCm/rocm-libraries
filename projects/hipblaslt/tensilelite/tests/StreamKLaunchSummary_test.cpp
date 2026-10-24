@@ -204,18 +204,18 @@ TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapabili
         bool                   perTile;
         bool                   runtimeStagger;
         size_t                 mapping;
-        bool                   uniformOrder;
+        int                    uniformOrder;
         size_t                 expectedStagger;
     };
     const Case cases[] = {
-        {TileProcessingStrategy::None, false, true, 1, true, 16},
-        {TileProcessingStrategy::DataParallel, false, true, 1, true, 0},
-        {TileProcessingStrategy::StreamK, false, true, 1, true, 0},
-        {TileProcessingStrategy::DataParallel, true, true, 1, true, 16},
-        {TileProcessingStrategy::StreamK, true, true, 1, true, 16},
-        {TileProcessingStrategy::StreamK, true, true, 0, true, 0},
-        {TileProcessingStrategy::None, false, false, 1, true, 0},
-        {TileProcessingStrategy::StreamK, false, true, 1, false, 16},
+        {TileProcessingStrategy::None, false, true, 1, 1, 16},
+        {TileProcessingStrategy::DataParallel, false, true, 1, 1, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, 1, 0},
+        {TileProcessingStrategy::DataParallel, true, true, 1, 1, 16},
+        {TileProcessingStrategy::StreamK, true, true, 1, 1, 16},
+        {TileProcessingStrategy::StreamK, true, true, 0, 1, 0},
+        {TileProcessingStrategy::None, false, false, 1, 1, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, 0, 16},
     };
     AnalyticalEnv env;
     for(const auto& test : cases)
@@ -1590,9 +1590,10 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
 
     auto problem = makeGemmProblem(256, 4096, 4096);
     problem.setWorkspaceSize(0); // no workspace at all
+    problem.setParams().setUniformSummationOrder(0);
 
     // Anti-vacuity: the mode must be off.
-    ASSERT_FALSE(problem.getParams().uniformSummationOrder())
+    ASSERT_EQ(problem.getParams().uniformSummationOrder(), 0)
         << "uniform summation order must default to off, otherwise this test is "
            "a duplicate of the variant below";
 
@@ -1665,7 +1666,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
 
     auto problem = makeGemmProblem(256, 4096, 4096);
     problem.setWorkspaceSize(0); // no workspace at all
-    problem.setParams().setUniformSummationOrder(true);
+    problem.setParams().setUniformSummationOrder(1);
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
