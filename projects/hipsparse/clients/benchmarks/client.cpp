@@ -26,6 +26,7 @@
 #include "hipsparse_bench_app.hpp"
 #include "hipsparse_routine.hpp"
 #include "utility.hpp"
+#include <exception>
 #include <hipsparse.h>
 #include <iostream>
 
@@ -114,6 +115,11 @@ int main(int argc, char* argv[])
         {
             return status;
         }
+        catch(const std::exception& exception)
+        {
+            std::cerr << exception.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
     }
     else
     {
@@ -143,6 +149,11 @@ int main(int argc, char* argv[])
         catch(const hipsparseStatus_t& status)
         {
             return status;
+        }
+        catch(const std::exception& exception)
+        {
+            std::cerr << exception.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
     }
 }

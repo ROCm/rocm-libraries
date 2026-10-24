@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,5 +54,7 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU);
 template <typename T>
 void unit_check_near(
     int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU, double rtol = -1.0, double atol = -1.0);
+
+void unit_check_condition(bool cond);
 
 #endif // UNIT_HPP
