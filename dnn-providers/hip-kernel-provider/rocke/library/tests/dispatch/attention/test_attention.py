@@ -61,6 +61,7 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
