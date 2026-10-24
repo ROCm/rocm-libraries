@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
@@ -167,6 +168,10 @@ struct GpuSdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
     bool alibi = false;
+    // fp8 Q/K/V descales, FLOAT scalar or [B, H_kv, 1, 1]; all three or none.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
 };
 
 template <typename QDataType,
@@ -271,6 +276,19 @@ public:
                 *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
         }
 
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleQ;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleK;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleV;
+        for(auto [attr, bound] : {std::pair{&_params.descaleQTensor, &descaleQ},
+                                  std::pair{&_params.descaleKTensor, &descaleK},
+                                  std::pair{&_params.descaleVTensor, &descaleV}})
+        {
+            if(attr->has_value())
+            {
+                bound->emplace(variantPack.at((*attr)->uid), (*attr)->dims, (*attr)->strides);
+            }
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -299,7 +317,10 @@ public:
                     .setLse(lseTensor.has_value() ? &lseTensor.value() : nullptr)
                     .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
                                  sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
-                    .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE));
+                    .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
+                    .setDescales(descaleQ.has_value() ? &descaleQ.value() : nullptr,
+                                 descaleK.has_value() ? &descaleK.value() : nullptr,
+                                 descaleV.has_value() ? &descaleV.value() : nullptr));
     }
 
 private:
@@ -421,11 +442,49 @@ public:
             return false;
         }
 
-        // Unsupported: FP8 quantization / descaling
-        if(nodeAttributes->descale_q_tensor_uid().has_value()
-           || nodeAttributes->descale_k_tensor_uid().has_value()
-           || nodeAttributes->descale_v_tensor_uid().has_value()
-           || nodeAttributes->descale_s_tensor_uid().has_value()
+        // FP8 quantization, as on the CPU: fp8 inputs need all three Q/K/V descales, other
+        // inputs none.
+        constexpr bool IS_FP8_INPUT
+            = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
+        const std::array descaleUids = {nodeAttributes->descale_q_tensor_uid(),
+                                        nodeAttributes->descale_k_tensor_uid(),
+                                        nodeAttributes->descale_v_tensor_uid()};
+        int numQkvDescales = 0;
+        for(const auto& uid : descaleUids)
+        {
+            if(uid.has_value())
+            {
+                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+                CHECK_TENSOR_TYPE(
+                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+                ++numQkvDescales;
+            }
+        }
+        if((IS_FP8_INPUT && numQkvDescales != 3) || (!IS_FP8_INPUT && numQkvDescales != 0))
+        {
+            return false;
+        }
+        // A paged container's blocks are not batches, so a paged side needs a scalar descale.
+        // (The CPU gathers pages before dequantizing; the GPU kernel reads them in place.)
+        for(const auto& [tableUid, descaleUid] :
+            {std::pair{nodeAttributes->page_table_k_tensor_uid(), descaleUids[1]},
+             std::pair{nodeAttributes->page_table_v_tensor_uid(), descaleUids[2]}})
+        {
+            if(tableUid.has_value() && descaleUid.has_value()
+               && hipdnn_test_sdk::detail::elementCount(
+                      hipdnn_test_sdk::detail::unpackTensorAttributes(
+                          *tensorMap.at(descaleUid.value())))
+                      != 1)
+            {
+                return false;
+            }
+        }
+
+        // Unsupported: softmax / output (de)quantization.
+        if(nodeAttributes->descale_s_tensor_uid().has_value()
            || nodeAttributes->scale_s_tensor_uid().has_value()
            || nodeAttributes->scale_o_tensor_uid().has_value()
            || nodeAttributes->amax_s_tensor_uid().has_value()
@@ -522,6 +581,17 @@ public:
                 ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                 : nullptr);
         params.alibi = nodeAttributes->alibi_mask();
+        for(auto [uid, bound] :
+            {std::pair{nodeAttributes->descale_q_tensor_uid(), &params.descaleQTensor},
+             std::pair{nodeAttributes->descale_k_tensor_uid(), &params.descaleKTensor},
+             std::pair{nodeAttributes->descale_v_tensor_uid(), &params.descaleVTensor}})
+        {
+            if(uid.has_value())
+            {
+                *bound
+                    = hipdnn_test_sdk::detail::unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
         if(nodeAttributes->max_tensor_uid().has_value())
         {
             params.maxTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(

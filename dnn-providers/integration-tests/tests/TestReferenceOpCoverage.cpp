@@ -27,6 +27,7 @@ using hipdnn_integration_tests::bundle::findKnownReferenceGap;
 using hipdnn_integration_tests::bundle::formatUncoveredOps;
 using hipdnn_integration_tests::bundle::graphNodeTypes;
 using hipdnn_integration_tests::bundle::K_UNREADABLE_GRAPH;
+using hipdnn_integration_tests::bundle::KnownReferenceGap;
 using hipdnn_integration_tests::bundle::knownReferenceGaps;
 using hipdnn_integration_tests::bundle::NodeAttributes;
 using hipdnn_integration_tests::bundle::referenceCoversGraph;
@@ -158,17 +159,16 @@ TEST(TestReferenceOpCoverage, KnownGapLookupIsScopedToTheReferenceAsked)
     }
 }
 
-// The fp8 batch bundles are a GPU-only gap: the CPU reference implements fp8, so
-// listing them for CPU would wrongly assert it cannot run them. Pins the asymmetry
-// rather than leaving it to a comment.
-TEST(TestReferenceOpCoverage, Fp8BatchGapsAreNotListedForCpu)
+// Both references run the fp8 forward bundles (the GPU plan dequantizes first, as the CPU one
+// does), so neither may list them: a gap entry would stop validating them against golden data.
+TEST(TestReferenceOpCoverage, Fp8BundlesAreNotListedAsGaps)
 {
-    for(const char* bundleId : {"quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+    for(const char* bundleId : {"quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
+                                "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
                                 "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small"})
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
-        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr)
-            << bundleId << " is listed as a CPU gap, but the CPU reference implements fp8";
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
     }
 }
 
@@ -206,6 +206,23 @@ TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
         EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
         EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
     }
+}
+
+// The live table may be empty, so the scoping is also pinned on a table of our own with one id
+// under both references.
+TEST(TestReferenceOpCoverage, KnownGapTableLookupIsScopedToTheReferenceAsked)
+{
+    const std::vector<KnownReferenceGap> gaps = {
+        {ReferenceExecutorType::CPU, "a.Small", "cpu reason"},
+        {ReferenceExecutorType::GPU, "a.Small", "gpu reason"},
+    };
+    for(const auto type : {ReferenceExecutorType::CPU, ReferenceExecutorType::GPU})
+    {
+        const auto* found = findKnownReferenceGap(gaps, type, "a.Small");
+        ASSERT_NE(found, nullptr);
+        EXPECT_EQ(found->reference, type);
+    }
+    EXPECT_EQ(findKnownReferenceGap(gaps, ReferenceExecutorType::GPU, "b.Small"), nullptr);
 }
 
 TEST(TestReferenceOpCoverage, KnownGapLookupMissesAreNull)

@@ -2119,3 +2119,187 @@ TEST(TestGpuSdpaFwdDropoutFp32, MatchesCpuReference)
                                   .setDropout(&keepMask, 1.0f / 0.6f));
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
+
+// ============================================================================
+// fp8 Q/K/V with descales: GPU reference (device dequantize, then the float pipeline) vs the CPU
+// reference, for OCP E4M3 and the gfx942 FNUZ encoding.
+// ============================================================================
+
+namespace
+{
+
+// fp8 bit patterns that decode to NaN: OCP E4M3 has 0x7F / 0xFF, FNUZ the single 0x80.
+template <typename Fp8>
+bool isFp8NanBits(unsigned bits)
+{
+    if constexpr(std::is_same_v<Fp8, fp8_e4m3_fnuz>)
+    {
+        return bits == 0x80u;
+    }
+    else
+    {
+        return (bits & 0x7Fu) == 0x7Fu;
+    }
+}
+
+template <typename Fp8>
+void fillFp8(Tensor<Fp8>& t, unsigned int seed)
+{
+    Tensor<float> values(t.dims());
+    values.fillWithRandomValues(-2.0f, 2.0f, seed);
+    const auto& d = t.dims();
+    for(int64_t b = 0; b < d[0]; ++b)
+    {
+        for(int64_t h = 0; h < d[1]; ++h)
+        {
+            for(int64_t s = 0; s < d[2]; ++s)
+            {
+                for(int64_t e = 0; e < d[3]; ++e)
+                {
+                    t.setHostValue(Fp8(values.getHostValue(b, h, s, e)), b, h, s, e);
+                }
+            }
+        }
+    }
+}
+
+// GQA, causal, per-(batch, KV head) Q/K descales and a scalar V descale.
+template <typename Fp8>
+void expectFp8ForwardMatchesCpu()
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 5;
+    constexpr int64_t SKV = 7;
+    constexpr int64_t D = 16;
+    Tensor<Fp8> q({BATCH, H, SQ, D});
+    Tensor<Fp8> k({BATCH, HKV, SKV, D});
+    Tensor<Fp8> v({BATCH, HKV, SKV, D});
+    fillFp8(q, SEED_Q);
+    fillFp8(k, SEED_K);
+    fillFp8(v, SEED_V);
+    Tensor<float> descaleQ({BATCH, HKV, 1, 1});
+    Tensor<float> descaleK({BATCH, HKV, 1, 1});
+    Tensor<float> descaleV({1});
+    descaleQ.fillWithRandomValues(0.25f, 2.0f, SEED_MASK);
+    descaleK.fillWithRandomValues(0.25f, 2.0f, SEED_MASK + 1);
+    descaleV.fillWithValue(0.75f);
+
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    Tensor<float> lseCpu({BATCH, H, SQ});
+    Tensor<float> lseGpu({BATCH, H, SQ});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward<Fp8, Fp8, Fp8, float>(
+        q,
+        k,
+        v,
+        oCpu,
+        SdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setBand(-1, 0, true)
+            .setLse(&lseCpu)
+            .setDescales(&descaleQ, &descaleK, &descaleV));
+    GpuFpReferenceSdpa::fprop<Fp8, Fp8, Fp8, float>(
+        q,
+        k,
+        v,
+        oGpu,
+        GpuSdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setBand(-1, 0, true)
+            .setLse(&lseGpu)
+            .setDescales(&descaleQ, &descaleK, &descaleV));
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+    assertAllClose(lseCpu, lseGpu, gpuRefFwdTolerance<float>());
+}
+
+// Every non-NaN bit pattern decodes on the device exactly as on the host: with one key the
+// softmax weight is exactly 1, so O = V * descaleV elementwise.
+template <typename Fp8>
+void expectFp8DeviceDecodeMatchesHost()
+{
+    constexpr int64_t D = 256;
+    Tensor<Fp8> q({1, 1, 1, D});
+    Tensor<Fp8> k({1, 1, 1, D});
+    Tensor<Fp8> v({1, 1, 1, D});
+    for(int64_t e = 0; e < D; ++e)
+    {
+        Fp8 bits{};
+        bits.data = static_cast<uint8_t>(isFp8NanBits<Fp8>(static_cast<unsigned>(e)) ? 0 : e);
+        q.setHostValue(Fp8(0.0f), 0, 0, 0, e);
+        k.setHostValue(Fp8(0.0f), 0, 0, 0, e);
+        v.setHostValue(bits, 0, 0, 0, e);
+    }
+    Tensor<float> one({1});
+    one.fillWithValue(1.0f);
+    Tensor<float> o({1, 1, 1, D});
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    GpuFpReferenceSdpa::fprop<Fp8, Fp8, Fp8, float>(
+        q, k, v, o, GpuSdpaFwdOptions<float>{}.setDescales(&one, &one, &one));
+    o.memory().hostData();
+    for(int64_t e = 0; e < D; ++e)
+    {
+        EXPECT_EQ(o.getHostValue(0, 0, 0, e), static_cast<float>(v.getHostValue(0, 0, 0, e)))
+            << "bits 0x" << std::hex << e;
+    }
+}
+
+} // namespace
+
+TEST(TestGpuSdpaFwdFp8, OcpE4m3MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ForwardMatchesCpu<fp8_e4m3>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE4m3MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ForwardMatchesCpu<fp8_e4m3_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE4m3DeviceDecodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceDecodeMatchesHost<fp8_e4m3>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE4m3DeviceDecodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceDecodeMatchesHost<fp8_e4m3_fnuz>();
+}
+
+// A per-head descale on a paged K or V is ill-defined (container blocks are not batches).
+TEST(TestGpuSdpaFwdFp8, PerHeadDescaleOnPagedKvThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<fp8_e4m3> q({1, 2, 2, 8});
+    Tensor<fp8_e4m3> kCache({2, 2, 4, 8});
+    Tensor<fp8_e4m3> vCache({2, 2, 4, 8});
+    Tensor<int32_t> table({1, 1, 2, 1});
+    Tensor<int32_t> lenQ({1, 1, 1, 1});
+    Tensor<int32_t> lenKv({1, 1, 1, 1});
+    table.setHostValue(1, 0, 0, 0, 0);
+    table.setHostValue(0, 0, 0, 1, 0);
+    lenQ.setHostValue(2, 0, 0, 0, 0);
+    lenKv.setHostValue(6, 0, 0, 0, 0);
+    Tensor<float> scalar({1});
+    scalar.fillWithValue(1.0f);
+    Tensor<float> perHead({1, 2, 1, 1});
+    perHead.fillWithValue(1.0f);
+    Tensor<float> o({1, 2, 2, 8});
+    EXPECT_THROW((GpuFpReferenceSdpa::fprop<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+                     q,
+                     kCache,
+                     vCache,
+                     o,
+                     GpuSdpaFwdOptions<float>{}
+                         .setSeqLens(&lenQ, &lenKv)
+                         .setPaged(&table, &table, 6)
+                         .setDescales(&scalar, &perHead, &scalar))),
+                 std::invalid_argument);
+}

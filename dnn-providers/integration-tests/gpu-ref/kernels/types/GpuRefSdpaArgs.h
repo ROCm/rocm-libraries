@@ -190,3 +190,23 @@ struct SdpaRaggedFwdArgs
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
+
+// --- fp8 dequantize (the SDPA forward's dequantize-first fp8 wrapper) ---
+// out (packed float, x's dims) = float(x) * descale(b, h / headsPerKv). The descale is a scalar
+// (both strides zero) or [B, H_kv, 1, 1]; nullptr means 1.
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
+struct SdpaDequantArgs
+{
+    const void* in;
+    float* out;
+    SdpaStrides inStr;
+    long long dims[4];
+    const float* descale;
+    long long descaleBatchStride, descaleHeadStride;
+    long long headsPerKv;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)

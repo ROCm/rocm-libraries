@@ -397,6 +397,18 @@ public:
         {
             return false;
         }
+        // Descales are read as float.
+        for(const auto uid : {nodeAttributes->descale_q_tensor_uid(),
+                              nodeAttributes->descale_k_tensor_uid(),
+                              nodeAttributes->descale_v_tensor_uid()})
+        {
+            if(uid.has_value())
+            {
+                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+                CHECK_TENSOR_TYPE(
+                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+            }
+        }
 
         // Unsupported regardless of dtype: softmax/output (de)quantization. The
         // forward reference models only q/k/v descales.

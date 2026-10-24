@@ -248,4 +248,38 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
 }
 
+// --- fp8 dequantize launcher ---
+
+void GpuFpReferenceSdpa::launchSdpaDequant(const void* in,
+                                           const std::vector<int64_t>& dims,
+                                           const std::vector<int64_t>& strides,
+                                           float* out,
+                                           const float* descale,
+                                           int64_t descaleBatchStride,
+                                           int64_t descaleHeadStride,
+                                           int64_t headsPerKv,
+                                           const char* inType)
+{
+    const std::vector<std::string> defines
+        = {std::string("-DIN_TYPE=") + inType, std::string("-DCOMPUTE_TYPE=float")};
+    auto& kernel = detail::GpuRefKernelCompiler::instance().getOrCompile(
+        "GpuRefSdpaDequant.cpp", defines, "sdpaDequantRef");
+
+    SdpaDequantArgs args{};
+    args.in = in;
+    args.out = out;
+    args.inStr = toSdpaStrides(strides);
+    int64_t elements = 1;
+    for(size_t i = 0; i < 4; ++i)
+    {
+        args.dims[i] = static_cast<long long>(dims[i]);
+        elements *= dims[i];
+    }
+    args.descale = descale;
+    args.descaleBatchStride = static_cast<long long>(descaleBatchStride);
+    args.descaleHeadStride = static_cast<long long>(descaleHeadStride);
+    args.headsPerKv = static_cast<long long>(headsPerKv);
+    detail::launchKernelForElements(kernel.function(), elements, &args, sizeof(args));
+}
+
 } // namespace hipdnn_gpu_ref

@@ -73,6 +73,36 @@ struct GpuRefFp8E4M3
     }
 };
 
+// --- FP8 E4M3 FNUZ device decode ---
+// Bit-exact with hipdnn_data_sdk::types::fp8_e4m3_fnuz: bias 8, no infinity, no negative zero,
+// the single NaN at 0x80. Normals are (8 + m) * 2^(e - 11), subnormals m * 2^-10.
+__device__ inline float fp8FnuzE4m3ToFloat(unsigned char bits)
+{
+    if(bits == 0x80u)
+    {
+        return __builtin_nanf("");
+    }
+    const unsigned exponent = (bits >> 3) & 0xFu;
+    const unsigned mantissa = bits & 0x7u;
+    // 2^(e - 11) built from its float bits (biased exponent e - 11 + 127).
+    const float mag = exponent == 0 ? static_cast<float>(mantissa) * 0.0009765625f
+                                    : static_cast<float>(8u + mantissa)
+                                          * __builtin_bit_cast(float, (exponent + 116u) << 23);
+    return ((bits & 0x80u) != 0) ? -mag : mag;
+}
+
+// One-byte fp8 E4M3 FNUZ storage that decodes to float on read (HipRtcTypeName maps
+// fp8_e4m3_fnuz to it).
+// NOLINTNEXTLINE(readability-identifier-naming)
+struct GpuRefFp8E4M3Fnuz
+{
+    unsigned char data;
+    __device__ operator float() const // NOLINT(google-explicit-constructor)
+    {
+        return fp8FnuzE4m3ToFloat(data);
+    }
+};
+
 // --- safeConvert ---
 
 template <typename TargetType, typename SourceType>
