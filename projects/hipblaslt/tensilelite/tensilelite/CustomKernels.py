@@ -407,7 +407,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         headerArgs.sort(key=lambda a: _HEADER_SEMANTIC_ORDER[a["semantic"]])
         args = headerArgs + dataArgs
 
-    mi = kernelConfig.get("MatrixInstruction", kernelConfig.get("MIBlock", [0,0,0,0])) or [0,0,0,0]
+    mi = kernelConfig.get("MatrixInstruction", kernelConfig.get("MIBlock", [0,0,0,0]))
     if len(mi) >= 9 and "MIWaveTile" not in kernelConfig:
         wt = [mi[5], mi[6]]
         wg = [mi[7], mi[8]]
@@ -416,10 +416,6 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         wg = kernelConfig.get("MIWaveGroup", [1, 1])
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
-    if kernelConfig.get("W4A16Decode"):
-        workgroup = kernelConfig["WorkGroup"]
-        tile = kernelConfig["ThreadTile"]
-        macrotile = [workgroup[0] * tile[0], workgroup[1] * tile[1], depthU]
 
     # Fallback: parse macrotile from kernel name if computed values are zero
     if macrotile[0] == 0 or macrotile[1] == 0:

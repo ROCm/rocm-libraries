@@ -38,6 +38,11 @@ def dot2DtvADoubleBuffered(kernel):
     return kernel.get("DirectToVgprDot2A", False) and kernel["PrefetchGlobalRead"] >= 1
 
 
+def dot2NoLdsAB(kernel):
+    """Neither A nor B is staged through LDS, so no LDS addresses are needed."""
+    return kernel.get("DirectToVgprDot2A", False) and kernel.get("DirectToVgprDot2B", False)
+
+
 def validateDirectToVgprDot2A(state, printRejectionReason):
     """Return ``True`` when the mode is off or supported, ``False`` after a reject.
 

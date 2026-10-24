@@ -567,3 +567,122 @@ BenchmarkProblems:
         - Exact: [256, 1, 1, 1024]
         - Exact: [37, 3, 1, 3072]
         - Exact: [512, 4, 1, 2048]
+  ########################################
+  # DirectToVgprDot2A+B with B vectors wider than one load (split into b128
+  # loads), non-temporal (slc dlc) A; fp16, UnsignedBias8, symmetric, G128
+  ########################################
+  - - OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: true
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+      UseScaleAB: Block
+      ScaleBlockSizesA: [128]
+      Int4EncodingA: UnsignedBias8
+    - InitialSolutionParameters: null
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - WaveSplitK: [true]
+      - WavefrontSize: [32]
+      - InnerUnroll: [1]
+      - PrefetchLocalRead: [1]
+      - VectorWidthA: [1]
+      - VectorWidthB: [1]
+      - LocalReadVectorWidth: [-1]
+      - StoreVectorWidth: [1]
+      - TransposeLDS: [2]
+      - StaggerU: [0]
+      - GlobalSplitU: [1]
+      - ScheduleIterAlg: [1]
+      - ScheduleLocalWrite: [1]
+      - DirectToVgprDot2A: [true]
+      - DirectToVgprDot2B: [true]
+      - NonTemporalA: [6]
+      - WorkGroupMapping: [1]
+      - ThreadTile:
+        - [1, 1]
+        - [2, 1]
+        - [1, 4]
+      - PrefetchGlobalRead: [0]
+      - Groups:
+        - - WorkGroup:
+            - [1, 1, 32]
+            DepthU: [2048]
+            GlobalReadVectorWidthA: [32]
+            GlobalReadVectorWidthB: [32]
+            AssertSummationElementMultiple: [2048]
+          - WorkGroup:
+            - [1, 1, 32]
+            DepthU: [2048]
+            GlobalReadVectorWidthA: [16]
+            GlobalReadVectorWidthB: [16]
+            AssertSummationElementMultiple: [2048]
+      BenchmarkJoinParameters: null
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [256, 1, 1, 2048]
+        - Exact: [37, 3, 1, 6144]
+        - Exact: [512, 4, 1, 4096]
+  ########################################
+  # DirectToVgprDot2A+B, zero point with tiles of fewer than eight rows;
+  # fp16, UnsignedBias8, G32
+  ########################################
+  - - OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: true
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+      UseScaleAB: Block
+      ScaleBlockSizesA: [32]
+      Int4EncodingA: UnsignedBias8
+      ScaleZeroPointA: true
+    - InitialSolutionParameters: null
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - WaveSplitK: [true]
+      - WavefrontSize: [32]
+      - InnerUnroll: [1]
+      - PrefetchLocalRead: [1]
+      - VectorWidthA: [1]
+      - VectorWidthB: [1]
+      - LocalReadVectorWidth: [-1]
+      - StoreVectorWidth: [1]
+      - TransposeLDS: [2]
+      - StaggerU: [0]
+      - GlobalSplitU: [1]
+      - ScheduleIterAlg: [1]
+      - ScheduleLocalWrite: [1]
+      - DirectToVgprDot2A: [true]
+      - DirectToVgprDot2B: [true]
+      - NonTemporalA: [6]
+      - ThreadTile:
+        - [1, 1]
+        - [3, 1]
+      - PrefetchGlobalRead: [0]
+      - Groups:
+        - - WorkGroup:
+            - [1, 1, 32]
+            DepthU: [1024]
+            GlobalReadVectorWidthA: [32]
+            GlobalReadVectorWidthB: [32]
+            AssertSummationElementMultiple: [1024]
+      BenchmarkJoinParameters: null
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [256, 1, 1, 1024]
+        - Exact: [37, 3, 1, 3072]
+        - Exact: [61, 1, 1, 2048]

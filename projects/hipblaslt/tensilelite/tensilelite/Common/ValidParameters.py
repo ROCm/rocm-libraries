@@ -655,7 +655,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Tail loop can be unrolled up to InnerUnroll amount if AssertSummationElementMultiple%InnerUnroll==0
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024],
+    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128] + list(range(256, 4096 + 1, 256)),
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"
@@ -1049,7 +1049,7 @@ validParameters = { # we need to make sure this matches develop
     # -1 : Only allow GLVW=1
     # -2 : Only allow max(GLVWA,GLVWB) < VW ?
     # -3 : Only allow min(GLVWA,GLVWB) < VW ?
-    "DepthU": [-1] + list(range(2, 1024 + 1, 1)),
+    "DepthU": [-1] + list(range(2, 4096 + 1, 1)),
     # integer amount of padding to put into LDS, in 2016 this didn't seem to help performance, profilers were showing that channel conflicts weren't really hurting
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
@@ -1145,9 +1145,6 @@ validParameters = { # we need to make sure this matches develop
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
     "CustomKernel": -1,
-    # Direct dot2 decode: width, unroll, accumulators, threads, maxN, linearK, nativePermute.
-    "W4A16Decode": -1,
-    "W4A16DecodePrefetch": [1, 4],
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],

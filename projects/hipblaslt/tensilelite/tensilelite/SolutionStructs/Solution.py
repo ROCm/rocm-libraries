@@ -810,12 +810,7 @@ class Solution(collections.abc.Mapping):
     isHandwrittenCustomKernel = ("CustomKernel" in self._state
         and self._state["CustomKernel"].get("name", "")
         and not self._state["CustomKernel"].get("generated", False))
-    if self._state.get("W4A16Decode"):
-      from ..KernelWriterW4A16Decode import configureSolution
-      configureSolution(self._state)
-      Solution._assignCustomKernelParameters(self._state)
-      self._name = self._state["CustomKernel"]["name"]
-    elif isHandwrittenCustomKernel:
+    if isHandwrittenCustomKernel:
       Solution._assignCustomKernelParameters(self._state)
       self._name = self._state["CustomKernel"]["name"]
     else:
@@ -2515,7 +2510,10 @@ class Solution(collections.abc.Mapping):
       print2("in assignDerivedParameters, state['Valid'] = False")
       return
 
-    if not isaInfoMap[isa].asmCaps["HasNTModifier"] and not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
+    # gfx10/gfx11 express the nt bit of a global read through dlc.
+    asmCaps = isaInfoMap[isa].asmCaps
+    if not asmCaps["HasNTModifier"] and not asmCaps.get("HasTHModifier", False) \
+       and not asmCaps["HasDLCModifier"]:
       for ch in ["", "A", "B", "C", "D", "E", "WS", "Metadata"]:
         if state["NonTemporal%s"%ch] >= 4:
           state["NonTemporal%s"%ch] -= 4
@@ -4884,8 +4882,10 @@ class Solution(collections.abc.Mapping):
       # reject - GRVW too big
       if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 24:
         reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 24")
-      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 24:
-        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 24")
+      # DirectToVgprDot2B splits one wide B vector into several loads.
+      maxGRBytesB = 64 if state["DirectToVgprDot2B"] else 24
+      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > maxGRBytesB:
+        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > %u" % maxGRBytesB)
 
       disableGNLC = False # Set to true to disable GNLC if needed
       if state["UseSgprForGRO"] == 1:
@@ -7243,6 +7243,10 @@ class Solution(collections.abc.Mapping):
     # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
     if not validateBlockDequantCombination(state, printRejectionReason):
       return
+    if state["ProblemType"]["UseScaleAB"] == "Block":
+      # The block-scale pointer follows neither a staggered K start nor a split K.
+      _disableRuntimeStaggerU(state)
+      state["InternalSupportParams"]["SupportUserGSU"] = False
     if not validateDirectToVgprDot2A(state, printRejectionReason):
       return
 
