@@ -74,6 +74,8 @@ def runtime(monkeypatch):
         public_calls=[],
         requests=[],
         callback=None,
+        capturing_streams=set(),
+        fences=[],
     )
 
     @contextmanager
@@ -116,7 +118,9 @@ def runtime(monkeypatch):
             current_stream=lambda device=None: SimpleNamespace(
                 cuda_stream=state.stream
             ),
-            is_current_stream_capturing=lambda: state.capturing,
+            is_current_stream_capturing=lambda: (
+                state.capturing or state.stream in state.capturing_streams
+            ),
         ),
     )
     monkeypatch.setitem(sys.modules, "torch", torch)
@@ -125,6 +129,9 @@ def runtime(monkeypatch):
     monkeypatch.setattr(au, "release_retained_for_stream", lambda stream: None)
 
     def pipeline(values, configs, *, stream):
+        from rocke.runtime.launcher import _resolved_fence
+
+        state.fences.append(_resolved_fence(configs[-1].fence))
         state.calls.append((values, stream, state.stream))
         if state.callback is not None:
             state.callback(values)
@@ -316,6 +323,22 @@ def test_graph_mode_changes_keep_general_runner(runtime, monkeypatch):
     runtime.graph = False
     binding.launch()
     assert len(runtime.public_calls) == 2
+
+
+@pytest.mark.parametrize("warmed", [False, True])
+def test_explicit_noncurrent_capture_gets_private_scratch(runtime, warmed):
+    binding, _ = _binding(stream=29)
+    if warmed:
+        binding.launch()
+    owned = runtime.calls[-1][0][0]["segm_output_ptr"] if warmed else None
+    runtime.capturing_streams.add(29)
+    assert runtime.stream == 17
+    binding.launch()
+    assert runtime.calls[-1][1:] == (29, 29)
+    assert runtime.calls[-1][0][0]["segm_output_ptr"] is not owned
+    assert runtime.public_calls[-1].get("execution") is None
+    assert runtime.fences[-1] is False
+    assert runtime.stream == 17
 
 
 def test_enqueue_failure_retries_without_hiding_errors(runtime):

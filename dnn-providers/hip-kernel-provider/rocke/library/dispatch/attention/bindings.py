@@ -414,7 +414,16 @@ def _bind_paged_decode_launch(problem, spec, run):
             execution = au.Attention3DExecution()
             owner = execution
             try:
-                result = run(**call, execution=execution)
+                stream_object = torch.cuda.ExternalStream(
+                    call["stream"], device=call["q"].device
+                )
+                # Capture may belong to an explicit non-current stream.
+                # Check on that stream before giving the public runner an owner.
+                with torch.cuda.stream(stream_object):
+                    if au._torch_stream_capturing():
+                        owner = None
+                        return run(**call)
+                    result = run(**call, execution=execution)
                 prepared = au._get_3d_pipeline(
                     problem,
                     spec.cache_key(),
@@ -423,9 +432,6 @@ def _bind_paged_decode_launch(problem, spec, run):
                     tuning_spec=spec,
                 )
                 device = call["q"].device
-                stream_object = torch.cuda.ExternalStream(
-                    execution._stream, device=device
-                )
                 layouts = live_layouts
                 output, maximum, expsum = execution._workspace
                 segment_defaults = {
@@ -496,6 +502,8 @@ def _bind_paged_decode_launch(problem, spec, run):
                     prepared, segment, reduce, call["stream"], capturing=False
                 )
             with torch.cuda.stream(stream_object):
+                if au._torch_stream_capturing():
+                    return run(**call)
                 return au._launch_3d_pipeline(
                     prepared, segment, reduce, call["stream"], capturing=False
                 )
