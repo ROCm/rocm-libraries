@@ -205,13 +205,13 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
-        // max_tensor_uid (running max softmax stat) is not produced by the reference.
+        // A max_tensor_uid naming no tensor is not applicable (Max itself is supported).
         SdpaAttributesT attrs;
         attrs.max_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
-        // sum_exp_tensor_uid (running sum-exp softmax stat) is not produced by the reference.
+        // A sum_exp_tensor_uid naming no tensor is not applicable (Sum_exp itself is supported).
         SdpaAttributesT attrs;
         attrs.sum_exp_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));

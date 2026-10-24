@@ -69,6 +69,11 @@ struct SdpaFwdArgs
     // Optional logit softcap c (> 0 enables): scores become c * tanh(s / c) after the attention
     // scale and before bias and masks. Reference-only extension (SEM-020).
     float softcap;
+    // Optional cuDNN Max / Sum_exp row statistics, float [B, H, Sq]; nullptr disables each.
+    void* rowMax;
+    void* rowSumExp;
+    SdpaStrides rowMaxStr;
+    SdpaStrides rowSumExpStr;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

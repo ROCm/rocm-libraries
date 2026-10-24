@@ -146,6 +146,12 @@ public:
     /// @param dropoutMask      Optional explicit dropout mask (cuDNN custom dropout), FP32
     ///                         [B or 1, H or 1, Sq, Skv]. O uses P * dropoutScale * mask.
     /// @param dropoutScale     Dropout scale (usually 1 / (1 - p)); 1 when unset.
+    /// @param rowMax           Optional cuDNN Max output [B, H, Sq, 1] (float): the row max of the
+    ///                         masked scores, raised to the sink logit when there is one. -inf for
+    ///                         a row with no live key and no sink, and for rows past seqLenQ.
+    /// @param rowSumExp        Optional cuDNN Sum_exp output [B, H, Sq, 1] (float): sum of
+    ///                         exp(s - rowMax) over the live keys plus exp(sink - rowMax). 0 where
+    ///                         rowMax is -inf. LSE = rowMax + log(rowSumExp).
     /// @param softcap          Optional logit softcap c: scores become c * tanh(s / c) after the
     ///                         attention scale and before bias and masks. A hipDNN extension the
     ///                         graph API cannot express yet (register SEM-020).
@@ -175,7 +181,9 @@ public:
                         const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
                         std::optional<float> dropoutScale = std::nullopt,
-                        std::optional<float> softcap = std::nullopt)
+                        std::optional<float> softcap = std::nullopt,
+                        hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr,
+                        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -236,23 +244,34 @@ public:
                 "CpuFpReferenceSdpa: numHeads must be divisible by numHeadsK");
         }
 
-        // Validate LSE tensor if provided
-        if(lse != nullptr)
-        {
-            if(lse->dims().size() != 4)
-            {
-                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-4 [B, H, Sq, 1]");
-            }
-            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ
-               || lse->dims()[3] != 1)
-            {
-                throw std::invalid_argument(
-                    "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
-                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + ", 1] but got ["
-                    + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
-                    + std::to_string(lse->dims()[2]) + ", " + std::to_string(lse->dims()[3]) + "]");
-            }
-        }
+        // Validate the per-row statistics (LSE, Max, Sum_exp) if provided: [B, H, Sq, 1].
+        const auto validateRowStats
+            = [&](const hipdnn_data_sdk::utilities::TensorBase<float>* stats, const char* name) {
+                  if(stats == nullptr)
+                  {
+                      return;
+                  }
+                  if(stats->dims().size() != 4)
+                  {
+                      throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
+                                                  + " must be rank-4 [B, H, Sq, 1]");
+                  }
+                  if(stats->dims()[0] != batch || stats->dims()[1] != numHeads
+                     || stats->dims()[2] != seqQ || stats->dims()[3] != 1)
+                  {
+                      throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
+                                                  + " shape must be [" + std::to_string(batch)
+                                                  + ", " + std::to_string(numHeads) + ", "
+                                                  + std::to_string(seqQ) + ", 1] but got ["
+                                                  + std::to_string(stats->dims()[0]) + ", "
+                                                  + std::to_string(stats->dims()[1]) + ", "
+                                                  + std::to_string(stats->dims()[2]) + ", "
+                                                  + std::to_string(stats->dims()[3]) + "]");
+                  }
+              };
+        validateRowStats(lse, "lse");
+        validateRowStats(rowMax, "rowMax");
+        validateRowStats(rowSumExp, "rowSumExp");
 
         // Validate FP8 descale tensor shapes on the calling thread so a bad shape
         // surfaces as a catchable exception rather than terminating a worker thread
@@ -315,6 +334,15 @@ public:
                 {
                     lse->setHostValue(-std::numeric_limits<float>::infinity(),
                                       std::vector<int64_t>{b, h, sq, 0});
+                }
+                if(rowMax != nullptr)
+                {
+                    rowMax->setHostValue(-std::numeric_limits<float>::infinity(),
+                                         std::vector<int64_t>{b, h, sq, 0});
+                }
+                if(rowSumExp != nullptr)
+                {
+                    rowSumExp->setHostValue(0.0F, std::vector<int64_t>{b, h, sq, 0});
                 }
                 return;
             }
@@ -401,6 +429,15 @@ public:
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
                 lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq, 0});
             }
+            if(rowMax != nullptr)
+            {
+                rowMax->setHostValue(static_cast<float>(maxVal), std::vector<int64_t>{b, h, sq, 0});
+            }
+            if(rowSumExp != nullptr)
+            {
+                rowSumExp->setHostValue(static_cast<float>(sumExp),
+                                        std::vector<int64_t>{b, h, sq, 0});
+            }
 
             // Step 5: Weighted sum over V to produce O
             for(int64_t dv = 0; dv < headDimV; ++dv)
@@ -424,9 +461,12 @@ public:
         parallelFunc(std::thread::hardware_concurrency());
 
         o.memory().markHostModified();
-        if(lse != nullptr)
+        for(auto* stats : {lse, rowMax, rowSumExp})
         {
-            lse->memory().markHostModified();
+            if(stats != nullptr)
+            {
+                stats->memory().markHostModified();
+            }
         }
     }
 

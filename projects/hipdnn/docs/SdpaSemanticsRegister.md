@@ -235,6 +235,18 @@ batch when `seq_len_q/kv` are set).
 
 ## Score modifiers (extensions and conventions)
 
+### SEM-023: Max and Sum_exp row statistics
+
+- **Status:** Matches cuDNN.
+- **cuDNN:** `Max` = row max of the masked scores, raised to the sink logit when there is a sink;
+  `Sum_exp` = sum of exp(s - Max) over the live keys plus exp(sink - Max). Stats (LSE) = Max + log(Sum_exp).
+  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (score_max_ref, score_sum_exp_ref).
+- **hipDNN:** the same, FLOAT [B, H, Sq, 1] (the GPU reference takes rank 3 like the LSE). A row with no live key
+  and no sink has Max = -inf and Sum_exp = 0, so LSE = -inf (SEM-010); with a sink, Max = sink and Sum_exp = 1.
+  Rows past seq_len_q have Max = -inf and Sum_exp = 0.
+- **Other use cases:** cuDNN added these for Muon-clip style score monitoring; FlashAttention and vLLM expose only
+  the LSE.
+
 ### SEM-020: Softcap
 
 - **Status:** Extension, implemented in the references only; not expressible in the graph.

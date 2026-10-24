@@ -2021,8 +2021,15 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
     Tensor<float> oGpu({BATCH, H, SQ, D});
     Tensor<float> lseCpu({BATCH, H, SQ, 1});
     Tensor<float> lseGpu({BATCH, H, SQ});
+    // cuDNN Max / Sum_exp: GPU rank-3 like the LSE.
+    Tensor<float> maxCpu({BATCH, H, SQ, 1});
+    Tensor<float> sumExpCpu({BATCH, H, SQ, 1});
+    Tensor<float> maxGpu({BATCH, H, SQ});
+    Tensor<float> sumExpGpu({BATCH, H, SQ});
     oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
     lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    maxGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    sumExpGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
     CpuFpReferenceSdpa::forward(q,
                                 k,
                                 v,
@@ -2038,7 +2045,12 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
                                 nullptr,
                                 &seqLenQ,
                                 &seqLenKv,
-                                &sink);
+                                &sink,
+                                nullptr,
+                                std::nullopt,
+                                std::nullopt,
+                                &maxCpu,
+                                &sumExpCpu);
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
@@ -2055,7 +2067,43 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
                               nullptr,
                               nullptr,
                               0,
-                              &sink);
+                              &sink,
+                              nullptr,
+                              std::nullopt,
+                              std::nullopt,
+                              &maxGpu,
+                              &sumExpGpu);
+
+    // Max / Sum_exp: equal where infinite (dead rows: -inf / 0), close elsewhere, and for a live
+    // row with no live key the sink alone (Max = sink, Sum_exp = 1).
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                const float mCpu = maxCpu.getHostValue(b, h, s, 0);
+                const float mGpu = maxGpu.getHostValue(b, h, s);
+                const float eCpu = sumExpCpu.getHostValue(b, h, s, 0);
+                const float eGpu = sumExpGpu.getHostValue(b, h, s);
+                if(std::isinf(mCpu))
+                {
+                    EXPECT_EQ(mGpu, mCpu) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                else
+                {
+                    EXPECT_NEAR(mGpu, mCpu, 1e-5F) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                EXPECT_NEAR(eGpu, eCpu, 1e-4F * std::max(1.0F, eCpu))
+                    << "b=" << b << " h=" << h << " s=" << s;
+                if(s == 1 && s < (b == 0 ? 6 : 4))
+                {
+                    EXPECT_EQ(mCpu, sink.getHostValue(0, h, 0, 0));
+                    EXPECT_EQ(eCpu, 1.0F);
+                }
+            }
+        }
+    }
 
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
     TensorView<float> lseCpuView(lseCpu);

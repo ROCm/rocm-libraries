@@ -57,6 +57,34 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 #endif
 }
 
+// cuDNN Max / Sum_exp outputs (CpuFpReferenceSdpa rowMax / rowSumExp), written by the dv == 0
+// thread of each row like the LSE.
+__device__ inline void writeRowStats(const SdpaFwdArgs& args,
+                                     long long b,
+                                     long long h,
+                                     long long sq,
+                                     long long dv,
+                                     COMPUTE_TYPE maxVal,
+                                     COMPUTE_TYPE sumExp)
+{
+    if(dv != 0)
+    {
+        return;
+    }
+    if(args.rowMax != nullptr)
+    {
+        static_cast<float*>(args.rowMax)[b * args.rowMaxStr.s[0] + h * args.rowMaxStr.s[1]
+                                         + sq * args.rowMaxStr.s[2]]
+            = static_cast<float>(maxVal);
+    }
+    if(args.rowSumExp != nullptr)
+    {
+        static_cast<float*>(args.rowSumExp)[b * args.rowSumExpStr.s[0] + h * args.rowSumExpStr.s[1]
+                                            + sq * args.rowSumExpStr.s[2]]
+            = static_cast<float>(sumExp);
+    }
+}
+
 } // namespace
 
 extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
@@ -221,6 +249,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         {
             lse[lseIdx] = negInf;
         }
+        writeRowStats(args, b, h, sq, dv, negInf, static_cast<COMPUTE_TYPE>(0));
         return;
     }
 
@@ -271,4 +300,5 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     {
         lse[lseIdx] = static_cast<float>(maxVal) + logf(sumExp);
     }
+    writeRowStats(args, b, h, sq, dv, maxVal, sumExp);
 }
