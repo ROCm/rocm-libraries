@@ -17,6 +17,8 @@ Supported, fully composable operation axes:
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
+  - fp8 scaling:  --fp8-scaling (cuDNN sdpa_fp8: scale_s/descale_s/scale_o, amax_s/amax_o,
+                  FP8_E4M3 output; dense, S_kv <= 128; requires --dtype fp8)
 
 Any combination of the above may be applied in a single invocation (e.g. fp8 +
 bottom_right causal + group + stats), matching the 12 unique AITER forward tuples.
@@ -36,6 +38,7 @@ Usage:
 import argparse
 import datetime
 import json
+import math
 import os
 import subprocess
 import sys
@@ -93,7 +96,10 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 # 1.5.0 — --window-left is cuDNN's left_bound: it keeps that many keys including the
 #         diagonal (SdpaSemanticsRegister SEM-001); 0 is rejected. Windowed bundles from
 #         earlier versions keep one more key and must be regenerated
-GENERATOR_VERSION = "1.5.0"
+# 1.6.0 — Added --fp8-scaling: cuDNN sdpa_fp8's softmax and output scaling
+#         (cudnn-frontend test/python/sdpa/fp8_ref.py) with FP8_E4M3 output and amax
+#         outputs. Every other bundle is unchanged.
+GENERATOR_VERSION = "1.6.0"
 
 # FP8 operation: FP8_E4M3 inputs (Q/K/V), BF16 output. AITER's fmha fp8 path uses
 # the OCP e4m3 encoding (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -117,6 +123,15 @@ UID_DESCALE_K = 8
 UID_DESCALE_V = 9
 UID_RAGGED_OFFSET_QO = 10
 UID_RAGGED_OFFSET_KV = 11
+UID_SCALE_S = 12
+UID_DESCALE_S = 13
+UID_SCALE_O = 14
+UID_AMAX_S = 15
+UID_AMAX_O = 16
+
+# cuDNN sdpa_fp8 quantizes P per 128-key tile against the running row max; with one tile that
+# is the final row max, which is what the references implement (SdpaSemanticsRegister SEM-024).
+FP8_SCALING_MAX_SEQ_KV = 128
 
 # Sequence axis of the logical [B, H, S, D] dims (cuDNN convention).
 SDPA_SEQ_AXIS = 2
@@ -177,6 +192,38 @@ def quantize_fp8_per_tensor(t):
     return fp8, scale.reshape(1), dequant
 
 
+def fp8_scale_factor(amax):
+    """cudnn-frontend's get_fp8_scale_factor for float8_e4m3fn: 128 / next_po2(amax) * 0.25."""
+    po2 = 2.0 ** math.ceil(math.log2(max(amax, 0.0625)))
+    return 128.0 / po2 * 0.25
+
+
+def compute_fp8_scaled_forward(
+    Q_fp8, K_fp8, V_fp8, descales, scale, H_q, H_kv, keep_mask, scale_s, descale_s
+):
+    """cuDNN sdpa_fp8 forward (cudnn-frontend fp8_ref.py compute_ref) for one key tile.
+
+    S = (Q K^T) * dq * dk * scale, masked; e = exp(S - rowmax); P stored as
+    fp8(e * scale_s) * descale_s; O_f = (P @ V * dv) / sum(e). Returns
+    (O_f, lse, amax_s, amax_o); amax_s = max e, amax_o = max |O_f|.
+    """
+    dq, dk, dv = (d.item() for d in descales)
+    rep = H_q // H_kv
+    q = Q_fp8.float()
+    k = K_fp8.float().repeat_interleave(rep, dim=1)
+    v = V_fp8.float().repeat_interleave(rep, dim=1)
+    s = torch.einsum("bhqd,bhkd->bhqk", q, k) * dq * dk * scale
+    if keep_mask is not None:
+        s = s.masked_fill(~keep_mask, float("-inf"))
+    m = s.amax(dim=-1, keepdim=True)
+    e = torch.exp(s - m).nan_to_num()
+    l = e.sum(dim=-1, keepdim=True)
+    p = (e * scale_s).to(FP8_TORCH_DTYPE).float() * descale_s
+    o = torch.einsum("bhqk,bhkd->bhqd", p, v) * dv / l.clamp(min=1.0)
+    lse = (m + torch.log(l)).float()
+    return o, lse, e.max().item(), o.abs().max().item()
+
+
 def build_graph_json(
     q_dims,
     k_dims,
@@ -194,6 +241,7 @@ def build_graph_json(
     o_dtype_str=None,
     layout="bhsd",
     ragged=False,
+    fp8_scaling=False,
 ):
     B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
     qkv_dtype = FP8_JSON_DTYPE if fp8 else dtype_str
@@ -266,6 +314,25 @@ def build_graph_json(
                 }
             )
 
+    if fp8_scaling:
+        for uid, name in [
+            (UID_SCALE_S, "ScaleS"),
+            (UID_DESCALE_S, "DescaleS"),
+            (UID_SCALE_O, "ScaleO"),
+            (UID_AMAX_S, "AmaxS"),
+            (UID_AMAX_O, "AmaxO"),
+        ]:
+            tensors.append(
+                {
+                    "uid": uid,
+                    "name": name,
+                    "dims": [1, 1, 1, 1],
+                    "strides": [1, 1, 1, 1],
+                    "data_type": "float",
+                    "virtual": False,
+                }
+            )
+
     if ragged:
         for uid, name in [
             (UID_RAGGED_OFFSET_QO, "RaggedOffsetQ"),
@@ -319,9 +386,9 @@ def build_graph_json(
                     "descale_q_tensor_uid": UID_DESCALE_Q if fp8 else None,
                     "descale_k_tensor_uid": UID_DESCALE_K if fp8 else None,
                     "descale_v_tensor_uid": UID_DESCALE_V if fp8 else None,
-                    "descale_s_tensor_uid": None,
-                    "scale_s_tensor_uid": None,
-                    "scale_o_tensor_uid": None,
+                    "descale_s_tensor_uid": UID_DESCALE_S if fp8_scaling else None,
+                    "scale_s_tensor_uid": UID_SCALE_S if fp8_scaling else None,
+                    "scale_o_tensor_uid": UID_SCALE_O if fp8_scaling else None,
                 },
                 "outputs": {
                     "o_tensor_uid": UID_O,
@@ -329,8 +396,8 @@ def build_graph_json(
                     "max_tensor_uid": None,
                     "sum_exp_tensor_uid": None,
                     "rng_dump_tensor_uid": None,
-                    "amax_s_tensor_uid": None,
-                    "amax_o_tensor_uid": None,
+                    "amax_s_tensor_uid": UID_AMAX_S if fp8_scaling else None,
+                    "amax_o_tensor_uid": UID_AMAX_O if fp8_scaling else None,
                 },
                 "attributes": {
                     "generate_stats": True if stats else None,
@@ -412,6 +479,7 @@ def build_meta_json(config, pytorch_version):
             "layout": config["layout"],
             "ragged": config["ragged"],
             "ragged_physical_lens": config["ragged_physical_lens"],
+            "fp8_scaling": config["fp8_scaling"],
         },
     }
 
@@ -626,6 +694,7 @@ def generate_forward_bundle(
     validate=False,
     layout="bhsd",
     ragged=False,
+    fp8_scaling=False,
 ):
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
@@ -645,7 +714,12 @@ def generate_forward_bundle(
         )
         sys.exit(1)
 
-    if is_fp8:
+    if is_fp8 and fp8_scaling:
+        gen_torch_dtype = torch.float32  # quantize FP8 from FP32
+        o_torch_dtype = FP8_TORCH_DTYPE  # cuDNN sdpa_fp8 writes O = fp8(O_f * scale_o)
+        io_json = FP8_JSON_DTYPE
+        o_json = FP8_JSON_DTYPE
+    elif is_fp8:
         gen_torch_dtype = torch.float32  # quantize FP8 from FP32
         o_torch_dtype = FP8_OUTPUT_TORCH
         io_json = FP8_OUTPUT_JSON  # io_data_type describes the float O dtype
@@ -687,6 +761,15 @@ def generate_forward_bundle(
                 "seq_lens and a length-from-offsets regression could not be caught "
                 "(use a max seq_len < S_max)"
             )
+    if fp8_scaling and (not is_fp8 or has_seq_lens or ragged):
+        errors.append(
+            "--fp8-scaling needs --dtype fp8 and a dense BATCH bundle (no seq-lens, no ragged)"
+        )
+    if fp8_scaling and S_kv > FP8_SCALING_MAX_SEQ_KV:
+        errors.append(
+            f"--fp8-scaling needs S_kv <= {FP8_SCALING_MAX_SEQ_KV} (one cuDNN key tile; "
+            "see SEM-024)"
+        )
     if ragged and layout != "bshd":
         errors.append(
             "--ragged-offsets requires --layout bshd (RFC 0014 packed memory is "
@@ -738,8 +821,29 @@ def generate_forward_bundle(
 
     keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
 
+    scale_s = descale_s = scale_o = amax_s = amax_o = None
     try:
-        if has_seq_lens:
+        if fp8_scaling:
+            # cudnn-frontend's fp8.py scales S for amax 1 (P <= 1), and O from the reference amax.
+            scale_s = fp8_scale_factor(1.0)
+            descale_s = 1.0 / scale_s
+            o_float, lse, amax_s, amax_o = compute_fp8_scaled_forward(
+                Q_fp8,
+                K_fp8,
+                V_fp8,
+                (descale_q, descale_k, descale_v),
+                attn_scale,
+                H_q,
+                H_kv,
+                keep_mask,
+                scale_s,
+                descale_s,
+            )
+            scale_o = fp8_scale_factor(amax_o)
+            O = (o_float * scale_o).to(FP8_TORCH_DTYPE)
+            if not stats:
+                lse = None
+        elif has_seq_lens:
             O, lse = _compute_group_forward(
                 Q_compute,
                 K_compute,
@@ -768,8 +872,8 @@ def generate_forward_bundle(
         print(f"ERROR: PyTorch SDPA failed: {e}", file=sys.stderr)
         sys.exit(1)
 
-    assert not torch.isnan(O).any(), "NaN in O"
-    assert not torch.isinf(O).any(), "Inf in O"
+    assert not torch.isnan(O.float()).any(), "NaN in O"
+    assert not torch.isinf(O.float()).any(), "Inf in O"
 
     # Physical (packed) block rows per batch drive both pack_ragged and the
     # ragged_offset aux tensors so ragged_offset[B] matches the packed buffer
@@ -825,6 +929,16 @@ def generate_forward_bundle(
         tensor_list.append(
             ("DescaleV", descale_v, UID_DESCALE_V, list(descale_v.shape))
         )
+    if fp8_scaling:
+        for name, uid, value in [
+            ("ScaleS", UID_SCALE_S, scale_s),
+            ("DescaleS", UID_DESCALE_S, descale_s),
+            ("ScaleO", UID_SCALE_O, scale_o),
+            ("AmaxS", UID_AMAX_S, amax_s),
+            ("AmaxO", UID_AMAX_O, amax_o),
+        ]:
+            scalar = torch.tensor([value], dtype=torch.float32).reshape(1, 1, 1, 1)
+            tensor_list.append((name, scalar, uid, list(scalar.shape)))
     if ragged:
         for name, uid, physical_lens in [
             ("RaggedOffsetQ", UID_RAGGED_OFFSET_QO, physical_q),
@@ -858,6 +972,7 @@ def generate_forward_bundle(
         o_dtype_str=o_json,
         layout=layout,
         ragged=ragged,
+        fp8_scaling=fp8_scaling,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -865,11 +980,17 @@ def generate_forward_bundle(
         f.write("\n")
     print(f"  Graph JSON: {json_path}")
 
-    precision_note = (
-        "fp8: FP8_E4M3 inputs (per-tensor descale), FP32 intermediates, BF16 output"
-        if is_fp8
-        else f"like-for-like: {dtype.upper()} inputs, FP32 intermediates"
-    )
+    if fp8_scaling:
+        precision_note = (
+            "fp8 scaled (cuDNN sdpa_fp8): FP8_E4M3 inputs, P stored as fp8(e * scale_s), "
+            "FP32 intermediates, FP8_E4M3 output O_f * scale_o"
+        )
+    elif is_fp8:
+        precision_note = (
+            "fp8: FP8_E4M3 inputs (per-tensor descale), FP32 intermediates, BF16 output"
+        )
+    else:
+        precision_note = f"like-for-like: {dtype.upper()} inputs, FP32 intermediates"
     config = {
         "q_dims": q_dims,
         "v_dims": v_dims,
@@ -891,6 +1012,7 @@ def generate_forward_bundle(
         "ragged_physical_lens": (
             {"q": physical_q, "kv": physical_kv} if ragged else None
         ),
+        "fp8_scaling": fp8_scaling,
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"
@@ -1010,6 +1132,13 @@ def main():
         "--seq-lens-kv add compact per-batch padding (needs max seq_len < S_max); "
         "without them blocks are full uniform S_max.",
     )
+    parser.add_argument(
+        "--fp8-scaling",
+        action="store_true",
+        help="cuDNN sdpa_fp8 softmax and output scaling: scale_s/descale_s/scale_o inputs, "
+        "amax_s/amax_o outputs, FP8_E4M3 O. Requires --dtype fp8, dense BATCH mode and "
+        f"S_kv <= {FP8_SCALING_MAX_SEQ_KV}",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min", type=float, default=-1.0, dest="min_val")
     parser.add_argument("--max", type=float, default=1.0, dest="max_val")
@@ -1054,6 +1183,7 @@ def main():
         validate=args.validate,
         layout=args.layout,
         ragged=args.ragged,
+        fp8_scaling=args.fp8_scaling,
     )
     print("\nDone.")
 

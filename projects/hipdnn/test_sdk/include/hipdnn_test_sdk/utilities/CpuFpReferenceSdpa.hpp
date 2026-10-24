@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -26,6 +27,15 @@ template <class T>
 struct NonDeduced
 {
     using type = T;
+};
+
+/// The fp8 format the softmax probabilities are stored in before P @ V (cuDNN sdpa_fp8 quantizes
+/// P to the input fp8 type).
+enum class SdpaFp8Format
+{
+    NONE,
+    E4M3,
+    E4M3_FNUZ,
 };
 
 /// Named options for CpuFpReferenceSdpa::forward. Every field defaults to "feature off".
@@ -67,6 +77,18 @@ struct SdpaFwdOptions
     const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr;
     const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr;
     const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr;
+    /// fp8 softmax scaling (cuDNN sdpa_fp8, SEM-024): P @ V uses
+    /// fp8(exp(s - Max) * scaleS) * descaleS / Sum_exp in place of P, in pFormat. forward() sets
+    /// pFormat from Q's fp8 dtype; both scales are needed and default to 1 when the other is set.
+    std::optional<float> scaleS;
+    std::optional<float> descaleS;
+    SdpaFp8Format pFormat = SdpaFp8Format::NONE;
+    /// fp8 output scaling: O = O_f * scaleO, stored in O's dtype.
+    std::optional<float> scaleO;
+    /// Outputs, FP32 single element: amaxS = max exp(s - Max) over live keys (before scaleS),
+    /// amaxO = max |O_f| (before scaleO).
+    hipdnn_data_sdk::utilities::TensorBase<float>* amaxS = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* amaxO = nullptr;
 
     // Chainable setters, so a call can name its options inline:
     //   forward(q, k, v, o, SdpaFwdOptions<float>{}.setScale(0.5F).setLse(&lse))
@@ -135,6 +157,24 @@ struct SdpaFwdOptions
         descaleQ = q;
         descaleK = k;
         descaleV = v;
+        return *this;
+    }
+    SdpaFwdOptions& setSoftmaxScales(std::optional<float> scale, std::optional<float> descale)
+    {
+        scaleS = scale;
+        descaleS = descale;
+        return *this;
+    }
+    SdpaFwdOptions& setOutputScale(std::optional<float> value)
+    {
+        scaleO = value;
+        return *this;
+    }
+    SdpaFwdOptions& setAmax(hipdnn_data_sdk::utilities::TensorBase<float>* s,
+                            hipdnn_data_sdk::utilities::TensorBase<float>* out)
+    {
+        amaxS = s;
+        amaxO = out;
         return *this;
     }
 };
@@ -322,6 +362,61 @@ public:
         requireRank4(k, "k");
         requireRank4(v, "v");
         requireRank4(o, "o");
+        // fp8 output scaling (cuDNN sdpa_fp8): the pipeline writes a float O_f, then
+        // amaxO = max |O_f| and O = O_f * scaleO in O's dtype.
+        if(options.scaleO.has_value() || options.amaxO != nullptr)
+        {
+            requireSingleElement(options.amaxO, "amaxO");
+            hipdnn_data_sdk::utilities::Tensor<float> oFloat(o.dims());
+            auto inner = options;
+            inner.scaleO.reset();
+            inner.amaxO = nullptr;
+            forward<QDataType, KDataType, VDataType, float, ComputeDataType, MaskDataType>(
+                q, k, v, oFloat, inner);
+            const auto scaleO = options.scaleO.value_or(1.0F);
+            float amax = 0.0F;
+            const auto& d = o.dims();
+            for(int64_t b = 0; b < d[0]; ++b)
+            {
+                for(int64_t h = 0; h < d[1]; ++h)
+                {
+                    for(int64_t sq = 0; sq < d[2]; ++sq)
+                    {
+                        for(int64_t dv = 0; dv < d[3]; ++dv)
+                        {
+                            const std::vector<int64_t> idx = {b, h, sq, dv};
+                            const float value = oFloat.getHostValue(idx);
+                            amax = std::max(amax, std::fabs(value));
+                            o.setHostValue(
+                                hipdnn_test_sdk::detail::safeConvert<ODataType>(value * scaleO),
+                                idx);
+                        }
+                    }
+                }
+            }
+            o.memory().markHostModified();
+            writeAmax(options.amaxO, amax);
+            return;
+        }
+        // fp8 softmax scaling stores P in Q's fp8 format.
+        if((options.scaleS.has_value() || options.descaleS.has_value())
+           && options.pFormat == SdpaFp8Format::NONE)
+        {
+            constexpr auto FORMAT = fp8FormatOf<QDataType>();
+            if constexpr(FORMAT == SdpaFp8Format::NONE)
+            {
+                throw std::invalid_argument(
+                    "CpuFpReferenceSdpa: scaleS / descaleS need fp8 Q (P is stored in Q's format)");
+            }
+            else
+            {
+                auto inner = options;
+                inner.pFormat = FORMAT;
+                forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
+                    q, k, v, o, inner);
+                return;
+            }
+        }
         // fp8 (AITER contract): Q/K/V descales dequantize the inputs, then the float pipeline runs.
         if(options.descaleQ != nullptr || options.descaleK != nullptr
            || options.descaleV != nullptr)
@@ -397,6 +492,7 @@ public:
         validateRowStats(options.lse, "lse", batch, numHeads, seqQ);
         validateRowStats(options.rowMax, "rowMax", batch, numHeads, seqQ);
         validateRowStats(options.rowSumExp, "rowSumExp", batch, numHeads, seqQ);
+        requireSingleElement(options.amaxS, "amaxS");
 
         // Validated on the calling thread so a bad input is a catchable exception rather than a
         // failure inside the parallel region.
@@ -422,6 +518,12 @@ public:
         const auto dropoutFactor
             = static_cast<ComputeDataType>(options.dropoutScale.value_or(1.0F));
         const auto negInf = -std::numeric_limits<ComputeDataType>::infinity();
+        const bool quantizeP = options.pFormat != SdpaFp8Format::NONE;
+        const auto scaleS = static_cast<ComputeDataType>(options.scaleS.value_or(1.0F));
+        const auto descaleS = static_cast<ComputeDataType>(options.descaleS.value_or(1.0F));
+        // max exp(s - Max) per row, reduced after the parallel loop (amaxS).
+        std::vector<ComputeDataType> rowAmaxS(static_cast<size_t>(batch * numHeads * seqQ),
+                                              static_cast<ComputeDataType>(0.0));
 
         auto rowFunc = [&](const std::vector<int64_t>& indices) {
             const auto b = indices[0];
@@ -457,8 +559,23 @@ public:
                                         std::vector<int64_t>{0, h, 0, 0}))
                                   : negInf;
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
-            const auto [maxVal, sumExp] = softmaxRow(scores, sink, probs);
+            const auto [maxVal, sumExp] = softmaxRow(scores, sink, probs, /*normalize=*/false);
             writeRowStats(options, statIndex, maxVal, sumExp);
+            // probs holds exp(s - Max). cuDNN sdpa_fp8 stores it as fp8(e * scaleS) * descaleS;
+            // either way P is then divided by Sum_exp. A row with no live key keeps P = 0.
+            auto& rowAmax = rowAmaxS[static_cast<size_t>((b * numHeads + h) * seqQ + sq)];
+            if(maxVal != negInf)
+            {
+                for(auto& p : probs)
+                {
+                    rowAmax = std::max(rowAmax, p);
+                    if(quantizeP)
+                    {
+                        p = roundToFp8(p * scaleS, options.pFormat) * descaleS;
+                    }
+                    p /= sumExp;
+                }
+            }
 
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
@@ -481,6 +598,11 @@ public:
         parallelFunc(std::thread::hardware_concurrency());
 
         o.memory().markHostModified();
+        if(options.amaxS != nullptr)
+        {
+            writeAmax(options.amaxS,
+                      static_cast<float>(*std::max_element(rowAmaxS.begin(), rowAmaxS.end())));
+        }
         for(auto* stats : {options.lse, options.rowMax, options.rowSumExp})
         {
             if(stats != nullptr)
@@ -915,13 +1037,15 @@ private:
     }
 
     /// Numerically stable softmax of one score row with an optional sink logit (-inf for none):
-    /// the sink joins the max and the denominator but has no value row. Writes P into probs
-    /// (left untouched for a row with no live key and no sink) and returns {max, sum of exp}.
+    /// the sink joins the max and the denominator but has no value row. Writes P (or exp(s - max)
+    /// when !normalize) into probs (left untouched for a row with no live key and no sink) and
+    /// returns {max, sum of exp}.
     template <class ComputeDataType>
     static std::pair<ComputeDataType, ComputeDataType>
         softmaxRow(const std::vector<ComputeDataType>& scores,
                    ComputeDataType sink,
-                   std::vector<ComputeDataType>& probs)
+                   std::vector<ComputeDataType>& probs,
+                   bool normalize = true)
     {
         const auto negInf = -std::numeric_limits<ComputeDataType>::infinity();
         const auto maxVal = std::max(*std::max_element(scores.begin(), scores.end()), sink);
@@ -935,10 +1059,58 @@ private:
             }
             for(auto& p : probs)
             {
-                p /= sumExp;
+                p = normalize ? p / sumExp : p;
             }
         }
         return {maxVal, sumExp};
+    }
+
+    /// The fp8 format of an fp8 element type, NONE for any other type.
+    template <class T>
+    static constexpr SdpaFp8Format fp8FormatOf()
+    {
+        if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e4m3>)
+        {
+            return SdpaFp8Format::E4M3;
+        }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e4m3_fnuz>)
+        {
+            return SdpaFp8Format::E4M3_FNUZ;
+        }
+        else
+        {
+            return SdpaFp8Format::NONE;
+        }
+    }
+
+    /// x rounded to the nearest value of an fp8 format (RNE, saturating) and back to float.
+    template <class ComputeDataType>
+    static ComputeDataType roundToFp8(ComputeDataType x, SdpaFp8Format format)
+    {
+        const auto f = static_cast<float>(x);
+        return static_cast<ComputeDataType>(
+            format == SdpaFp8Format::E4M3_FNUZ
+                ? static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3_fnuz(f))
+                : static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3(f)));
+    }
+
+    static void requireSingleElement(const hipdnn_data_sdk::utilities::TensorBase<float>* t,
+                                     const char* name)
+    {
+        if(t != nullptr && t->elementCount() != 1)
+        {
+            throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
+                                        + " must have one element");
+        }
+    }
+
+    static void writeAmax(hipdnn_data_sdk::utilities::TensorBase<float>* amax, float value)
+    {
+        if(amax != nullptr)
+        {
+            amax->setHostValue(value, std::vector<int64_t>(amax->dims().size(), 0));
+            amax->memory().markHostModified();
+        }
     }
 
     /// LSE = max + log(sum of exp) (-inf for a row with no live key), Max and Sum_exp (cuDNN).

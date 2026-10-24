@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace hipdnn_gpu_ref
@@ -55,6 +56,24 @@ struct NonDeduced
 };
 
 } // namespace detail
+
+/// The fp8 format softmax probabilities are stored in before P @ V (cuDNN sdpa_fp8 quantizes P
+/// to the input fp8 type). The values are the kernel's SdpaFwdArgs::pFp8Format.
+enum class SdpaFp8Format : int
+{
+    NONE = 0,
+    E4M3 = 1,
+    E4M3_FNUZ = 2,
+};
+
+// cuDNN sdpa_fp8 softmax scaling for one forward launch (SdpaFwdArgs::pFp8Format and friends).
+struct SdpaFp8Softmax
+{
+    SdpaFp8Format format = SdpaFp8Format::NONE;
+    float scaleS = 1.0F;
+    float descaleS = 1.0F;
+    float* amaxS = nullptr;
+};
 
 // One paged K or V side for the SDPA forward kernel: page-table pointer, its batch and
 // table-index strides, and the container's block size. table == nullptr means the side is dense.
@@ -100,6 +119,14 @@ struct GpuSdpaFwdOptions
     hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr;
+    /// fp8 softmax and output scaling and amax outputs, as CpuFpReferenceSdpa's SdpaFwdOptions
+    /// (SEM-024). fprop() sets pFormat from Q's fp8 dtype.
+    std::optional<float> scaleS;
+    std::optional<float> descaleS;
+    SdpaFp8Format pFormat = SdpaFp8Format::NONE;
+    std::optional<float> scaleO;
+    hipdnn_data_sdk::utilities::TensorBase<float>* amaxS = nullptr;
+    hipdnn_data_sdk::utilities::TensorBase<float>* amaxO = nullptr;
 
     GpuSdpaFwdOptions& setScale(std::optional<float> value)
     {
@@ -180,6 +207,24 @@ struct GpuSdpaFwdOptions
         descaleQ = q;
         descaleK = k;
         descaleV = v;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setSoftmaxScales(std::optional<float> scale, std::optional<float> descale)
+    {
+        scaleS = scale;
+        descaleS = descale;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setOutputScale(std::optional<float> value)
+    {
+        scaleO = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setAmax(hipdnn_data_sdk::utilities::TensorBase<float>* s,
+                               hipdnn_data_sdk::utilities::TensorBase<float>* out)
+    {
+        amaxS = s;
+        amaxO = out;
         return *this;
     }
 };
@@ -302,6 +347,57 @@ public:
         }
         validateInput(
             q.dims(), k.dims(), v.dims(), o.dims(), pagedK, pagedV, options.pagedMaxSeqKv);
+
+        // fp8 output scaling (cuDNN sdpa_fp8): the pipeline writes a float O_f, then
+        // amaxO = max |O_f| and O = O_f * scaleO in O's dtype.
+        if(options.scaleO.has_value() || options.amaxO != nullptr)
+        {
+            auto* amaxO = singleElement(options.amaxO, "amaxO");
+            hipdnn_data_sdk::utilities::Tensor<float> oFloat(o.dims());
+            auto inner = options;
+            inner.scaleO.reset();
+            inner.amaxO = nullptr;
+            fprop<QDataType, KDataType, VDataType, float, ComputeDataType, MaskDataType>(
+                q, k, v, oFloat, inner);
+            launchSdpaScaleOut(static_cast<const float*>(oFloat.memory().deviceData()),
+                               o.dims(),
+                               o.strides(),
+                               o.memory().deviceData(),
+                               options.scaleO.value_or(1.0F),
+                               amaxO,
+                               detail::HipRtcTypeName<ODataType>::VALUE);
+            o.memory().markDeviceModified();
+            if(options.amaxO != nullptr)
+            {
+                options.amaxO->memory().markDeviceModified();
+            }
+            return;
+        }
+        // fp8 softmax scaling stores P in Q's fp8 format.
+        if((options.scaleS.has_value() || options.descaleS.has_value())
+           && options.pFormat == SdpaFp8Format::NONE)
+        {
+            constexpr auto FORMAT = fp8FormatOf<QDataType>();
+            if constexpr(FORMAT == SdpaFp8Format::NONE)
+            {
+                throw std::invalid_argument(
+                    "GpuFpReferenceSdpa: scaleS / descaleS need fp8 Q (P is stored in Q's format)");
+            }
+            else
+            {
+                auto inner = options;
+                inner.pFormat = FORMAT;
+                fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
+                    q, k, v, o, inner);
+                return;
+            }
+        }
+        if(options.pFormat != SdpaFp8Format::NONE
+           && options.probabilityMode != SdpaSoftmaxProbabilityMode::FLOAT)
+        {
+            throw std::invalid_argument(
+                "GpuFpReferenceSdpa: fp8 softmax scaling replaces the probability mode");
+        }
 
         // fp8 (AITER contract): dequantize Q/K/V on the device, then run the float pipeline
         // (CpuFpReferenceSdpa::forward does the same on the host).
@@ -476,10 +572,14 @@ public:
             options.rowMax != nullptr ? options.rowMax->strides() : std::vector<int64_t>{},
             options.rowSumExp != nullptr ? options.rowSumExp->memory().deviceData() : nullptr,
             options.rowSumExp != nullptr ? options.rowSumExp->strides() : std::vector<int64_t>{},
-            options.alibi);
+            options.alibi,
+            SdpaFp8Softmax{options.pFormat,
+                           options.scaleS.value_or(1.0F),
+                           options.descaleS.value_or(1.0F),
+                           singleElement(options.amaxS, "amaxS")});
 
         o.memory().markDeviceModified();
-        for(auto* stats : {options.lse, options.rowMax, options.rowSumExp})
+        for(auto* stats : {options.lse, options.rowMax, options.rowSumExp, options.amaxS})
         {
             if(stats != nullptr)
             {
@@ -863,7 +963,49 @@ private:
                               const std::vector<int64_t>& rowMaxStrides = {},
                               void* rowSumExpPtr = nullptr,
                               const std::vector<int64_t>& rowSumExpStrides = {},
-                              bool alibi = false);
+                              bool alibi = false,
+                              const SdpaFp8Softmax& fp8 = {});
+
+    static void launchSdpaScaleOut(const float* in,
+                                   const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& outStrides,
+                                   void* out,
+                                   float scale,
+                                   float* amax,
+                                   const char* outType);
+
+    /// The fp8 format of an fp8 element type, NONE for any other type.
+    template <class T>
+    static constexpr SdpaFp8Format fp8FormatOf()
+    {
+        if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e4m3>)
+        {
+            return SdpaFp8Format::E4M3;
+        }
+        else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::fp8_e4m3_fnuz>)
+        {
+            return SdpaFp8Format::E4M3_FNUZ;
+        }
+        else
+        {
+            return SdpaFp8Format::NONE;
+        }
+    }
+
+    // The device pointer of a one-element FLOAT output (amax), or nullptr when absent.
+    static float* singleElement(hipdnn_data_sdk::utilities::TensorBase<float>* t, const char* name)
+    {
+        if(t == nullptr)
+        {
+            return nullptr;
+        }
+        if(t->elementCount() != 1)
+        {
+            throw std::invalid_argument(std::string("GpuFpReferenceSdpa: ") + name
+                                        + " must have one element");
+        }
+        return static_cast<float*>(t->memory().deviceData());
+    }
 
     // Logit softcap (reference-only extension, SEM-020): finite and > 0 when given.
     static void validateSoftcap(std::optional<float> softcap)

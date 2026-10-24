@@ -1,0 +1,41 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_golden.py",
+    "generator_sha256": "a6320c907b3c3bdce696daee192bc33b586c71c1a18f8cbde11a97de2d155f5a",
+    "generated_at": "2026-10-24T05:20:50Z",
+    "reference_source": "PyTorch 2.10.0+rocm7.13.0a20260513",
+    "reference_backend": "pytorch_math_backend",
+    "rocm_version": "7.13.0a20260513",
+    "generator_version": "1.6.0",
+    "generation_precision": "fp8 scaled (cuDNN sdpa_fp8): FP8_E4M3 inputs, P stored as fp8(e * scale_s), FP32 intermediates, FP8_E4M3 output O_f * scale_o",
+    "direction": "forward",
+    "seed": 61,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 2,
+        "num_heads_q": 4,
+        "num_heads_kv": 2,
+        "seq_q": 64,
+        "seq_kv": 128,
+        "head_dim_qk": 128,
+        "head_dim_v": 128,
+        "dtype": "fp8",
+        "causal": "none",
+        "window_left": -1,
+        "window_right": -1,
+        "group_mode": false,
+        "seq_lens_q": null,
+        "seq_lens_kv": null,
+        "stats": true,
+        "scale": 0.08838834764831845,
+        "gqa_ratio": 2,
+        "layout": "bhsd",
+        "ragged": false,
+        "ragged_physical_lens": null,
+        "fp8_scaling": true
+    }
+}

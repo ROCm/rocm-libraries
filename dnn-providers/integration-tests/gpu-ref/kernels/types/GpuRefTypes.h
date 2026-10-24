@@ -61,18 +61,6 @@ __device__ inline float fp8OcpE4m3ToFloat(unsigned char bits)
     return ((bits & 0x80u) != 0) ? -mag : mag;
 }
 
-// One-byte fp8 E4M3 (OCP) storage that decodes to float on read. HipRtcTypeName maps
-// fp8_e4m3 to this type so the SDPA kernel can load fp8 Q/K/V.
-// NOLINTNEXTLINE(readability-identifier-naming)
-struct GpuRefFp8E4M3
-{
-    unsigned char data;
-    __device__ operator float() const // NOLINT(google-explicit-constructor)
-    {
-        return fp8OcpE4m3ToFloat(data);
-    }
-};
-
 // --- FP8 E4M3 FNUZ device decode ---
 // Bit-exact with hipdnn_data_sdk::types::fp8_e4m3_fnuz: bias 8, no infinity, no negative zero,
 // the single NaN at 0x80. Normals are (8 + m) * 2^(e - 11), subnormals m * 2^-10.
@@ -91,17 +79,97 @@ __device__ inline float fp8FnuzE4m3ToFloat(unsigned char bits)
     return ((bits & 0x80u) != 0) ? -mag : mag;
 }
 
-// One-byte fp8 E4M3 FNUZ storage that decodes to float on read (HipRtcTypeName maps
-// fp8_e4m3_fnuz to it).
-// NOLINTNEXTLINE(readability-identifier-naming)
+// --- FP8 E4M3 device encode ---
+// Bit-exact with hipdnn_data_sdk's encoders: round to nearest, ties to even, saturating, and for
+// FNUZ no negative zero and NaN at 0x80. Magnitudes increase with the code, so this searches the
+// decoded values; a tie goes to the even code, which is round-half-to-even.
+template <bool FNUZ>
+__device__ inline unsigned char fp8E4m3FromFloat(float x)
+{
+    const auto decode = [](unsigned code) {
+        return FNUZ ? fp8FnuzE4m3ToFloat(static_cast<unsigned char>(code))
+                    : fp8OcpE4m3ToFloat(static_cast<unsigned char>(code));
+    };
+    const bool negative = __builtin_signbit(x) != 0;
+    if(__builtin_isnan(x))
+    {
+        return FNUZ ? 0x80u : (negative ? 0xFFu : 0x7Fu);
+    }
+    const float a = __builtin_fabsf(x);
+    const unsigned maxCode = FNUZ ? 0x7Fu : 0x7Eu;
+    unsigned code = maxCode;
+    if(a < decode(maxCode))
+    {
+        unsigned lo = 0;
+        unsigned hi = maxCode; // decode(lo) <= a < decode(hi)
+        while(hi - lo > 1)
+        {
+            const unsigned mid = (lo + hi) / 2;
+            if(decode(mid) <= a)
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        const float below = a - decode(lo);
+        const float above = decode(hi) - a;
+        code = below < above ? lo : (above < below ? hi : ((lo & 1u) == 0 ? lo : hi));
+    }
+    if(FNUZ && code == 0)
+    {
+        return 0;
+    }
+    return static_cast<unsigned char>(code | (negative ? 0x80u : 0u));
+}
+
+// One-byte fp8 storage that decodes to float on read and encodes on construction. HipRtcTypeName
+// maps fp8_e4m3 / fp8_e4m3_fnuz to these, so SDPA kernels load and store fp8 tensors.
+// NOLINTBEGIN(readability-identifier-naming, google-explicit-constructor)
+struct GpuRefFp8E4M3
+{
+    unsigned char data;
+    GpuRefFp8E4M3() = default;
+    __device__ explicit GpuRefFp8E4M3(float f)
+        : data(fp8E4m3FromFloat<false>(f))
+    {
+    }
+    __device__ operator float() const
+    {
+        return fp8OcpE4m3ToFloat(data);
+    }
+};
+
 struct GpuRefFp8E4M3Fnuz
 {
     unsigned char data;
-    __device__ operator float() const // NOLINT(google-explicit-constructor)
+    GpuRefFp8E4M3Fnuz() = default;
+    __device__ explicit GpuRefFp8E4M3Fnuz(float f)
+        : data(fp8E4m3FromFloat<true>(f))
+    {
+    }
+    __device__ operator float() const
     {
         return fp8FnuzE4m3ToFloat(data);
     }
 };
+// NOLINTEND(readability-identifier-naming, google-explicit-constructor)
+
+// x rounded to an fp8 E4M3 format and back (format 1 = OCP, 2 = FNUZ; anything else leaves x).
+__device__ inline float roundToFp8E4m3(float x, int format)
+{
+    if(format == 1)
+    {
+        return fp8OcpE4m3ToFloat(fp8E4m3FromFloat<false>(x));
+    }
+    if(format == 2)
+    {
+        return fp8FnuzE4m3ToFloat(fp8E4m3FromFloat<true>(x));
+    }
+    return x;
+}
 
 // --- safeConvert ---
 

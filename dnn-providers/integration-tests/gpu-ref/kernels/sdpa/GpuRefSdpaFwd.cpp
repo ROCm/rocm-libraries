@@ -218,12 +218,20 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // PASS 3: weighted sum over V. Provider-attuned modes round the normalized
     // softmax probability before P@V, matching matrix-core SDPA kernels that
-    // materialize P in bf16 before the second matmul.
+    // materialize P in bf16 before the second matmul. cuDNN sdpa_fp8 instead stores
+    // exp(s - Max) * scaleS in fp8 and rescales by descaleS (CpuFpReferenceSdpa::forward).
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
+    COMPUTE_TYPE rowAmax = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
-        COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
+        COMPUTE_TYPE e = expf(s - maxVal);
+        rowAmax = e > rowAmax ? e : rowAmax;
+        if(args.pFp8Format != 0)
+        {
+            e = roundToFp8E4m3(e * args.scaleS, args.pFp8Format) * args.descaleS;
+        }
+        COMPUTE_TYPE probability = e / sumExp;
         probability = storeSoftmaxProbability(probability);
         if(args.dropoutMask != nullptr)
         {
@@ -243,6 +251,12 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     }
 
     o[oIdx] = fromAccum(weighted, tag);
+    // amaxS: e >= 0, so its float bits order like unsigned integers.
+    if(args.amaxS != nullptr && dv == 0)
+    {
+        atomicMax(reinterpret_cast<unsigned int*>(args.amaxS),
+                  __builtin_bit_cast(unsigned int, static_cast<float>(rowAmax)));
+    }
 
     // LSE = maxVal + log(sumExp), matching CpuFpReferenceSdpa. sumExp is the
     // pre-normalization softmax denominator (>= 1, since exp(maxVal-maxVal)=1).

@@ -315,6 +315,53 @@ bool isSupportedSdpaDropout(const SdpaAttributesType& attrs, const TensorMap& te
            && m->Get(3) == k->Get(2);
 }
 
+/// The cuDNN sdpa_fp8 softmax / output scaling the references implement (SEM-024): with fp8
+/// inputs, scale_s and descale_s together, scale_o, and the amax_s / amax_o outputs, each a
+/// one-element FLOAT tensor; none of them for other inputs. Dropout does not combine with them.
+template <typename TensorMap>
+bool isSupportedSdpaFp8Scaling(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                               const TensorMap& tensorMap,
+                               bool fp8Input)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    bool any = false;
+    for(const auto uid : {attrs.scale_s_tensor_uid(),
+                          attrs.descale_s_tensor_uid(),
+                          attrs.scale_o_tensor_uid(),
+                          attrs.amax_s_tensor_uid(),
+                          attrs.amax_o_tensor_uid()})
+    {
+        if(!uid.has_value())
+        {
+            continue;
+        }
+        any = true;
+        const auto it = tensorMap.find(uid.value());
+        if(it == tensorMap.end() || it->second->data_type() != DataType::FLOAT
+           || it->second->dims() == nullptr)
+        {
+            return false;
+        }
+        int64_t count = 1;
+        for(const auto dim : *it->second->dims())
+        {
+            count *= dim;
+        }
+        if(count != 1)
+        {
+            return false;
+        }
+    }
+    if(!any)
+    {
+        return true;
+    }
+    const bool dropout
+        = attrs.dropout_mask_tensor_uid().has_value() || attrs.dropout_probability().has_value();
+    return fp8Input && !dropout
+           && attrs.scale_s_tensor_uid().has_value() == attrs.descale_s_tensor_uid().has_value();
+}
+
 /// A one-element FLOAT operand of a CPU plan: a pass-by-value or baked scalar, or an ordinary
 /// tensor whose host pointer is in the variant pack (the CPU executor binds host memory).
 inline float
