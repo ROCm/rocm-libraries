@@ -3641,19 +3641,35 @@ def _use_decode_grid(problem: UnifiedAttentionProblem, arch: str) -> bool:
     return problem.all_decode and arch in ("gfx942", "gfx950")
 
 
+# Last-level (Infinity Cache) capacity of gfx942/gfx950 parts, in bytes.
+_DECODE_KV_LLC_BYTES = 256 << 20
+
+
 def _kv_cache_policy_3d(problem: UnifiedAttentionProblem, arch: str) -> str:
     """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
 
-    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
-    so keeping it in the caches only evicts other data. Otherwise "all". fp8
-    K/V loads synchronously and keeps "all".
+    "stream" (NT) when every sequence decodes and the K/V the call reads is
+    larger than the last-level cache: each K/V byte is read once per call, so
+    keeping it cached only evicts other data. A decode whose K/V fits keeps
+    "all", so the next call over the same cache (the next decode step of a
+    model whose K/V fits) can hit in the last-level cache. Otherwise "all".
+    fp8 K/V loads synchronously and keeps "all".
     """
     if (
         arch in ("gfx942", "gfx950")
         and problem.all_decode
         and _kv_storage_dtype(problem) is None
     ):
-        return "stream"
+        kv_bytes = (
+            2
+            * problem.num_seqs
+            * problem.max_seqlen_k
+            * problem.num_kv_heads
+            * problem.head_size
+            * (1 if problem.use_fp8 else 2)
+        )
+        if kv_bytes > _DECODE_KV_LLC_BYTES:
+            return "stream"
     return "all"
 
 
