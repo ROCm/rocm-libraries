@@ -34,16 +34,24 @@ using ::testing::ValuesIn;
 using namespace std;
 
 template <typename I>
-using lange_tuple = std::tuple<vector<I>, char>;
+using lange_tuple = std::tuple<vector<I>, string>;
 
 // each size_range vector is a {M, N, lda}
 
-// each norm_type is one of: '1', 'F', 'I', 'M'
+// each norm_case is a {norm_type, magnitude} pair, where norm_type is one of '1', 'I', 'F', 'M'
+// and magnitude is one of:
+// 'N' = random matrix with entries of moderate size,
+// 'B' = entries scaled close to the overflow threshold,
+// 'S' = entries scaled close to the underflow threshold
+// 'Q' = one entry is NaN (the norm must be NaN, as in LAPACK)
+// 'T' = all entries are +-tbig, the largest magnitude that is not scaled in the Frobenius norm
+// (the scaled matrices are only used with the Frobenius and max norms)
 
 // case when M == 0 also executes the bad arguments test
 // (null handle, null pointers and invalid values)
 
-const vector<char> norm_range = {'1', 'F', 'I', 'M'};
+const vector<string> norm_range
+    = {"1N", "IN", "FN", "MN", "FB", "FS", "MB", "MS", "1Q", "IQ", "FQ", "MQ", "FT"};
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
@@ -55,9 +63,16 @@ const vector<vector<int>> matrix_size_range = {
     {10, -1, 10},
     {10, 10, 5},
     // normal (valid) samples
+    {1, 1, 1},
     {12, 20, 12},
     {20, 15, 20},
-    {35, 35, 50}};
+    {35, 35, 50},
+    {60, 300, 64},
+    {1500, 40, 1500},
+    // few rows or few columns
+    {2, 5000, 2},
+    {700, 1, 700},
+    {3000, 3, 3010}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
@@ -68,22 +83,33 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {10, -1, 10},
     {10, 10, 5},
     // normal (valid) samples
+    {1, 1, 1},
     {12, 20, 12},
     {20, 15, 20},
-    {35, 35, 50}};
+    {35, 35, 50},
+    {60, 300, 64},
+    {1500, 40, 1500},
+    // few rows or few columns
+    {2, 5000, 2},
+    {700, 1, 700},
+    {3000, 3, 3010}};
 
 // for daily_lapack tests
+// (the 1 x 2^24 matrix has enough entries for the sum of squares of the 'T' case to overflow in
+// single precision)
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
+       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
 
 const vector<vector<int64_t>> large_matrix_size_range_64
-    = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
+       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
 
 template <typename I>
 Arguments lange_setup_arguments(lange_tuple<I> tup)
 {
     vector<I> matrix_size = std::get<0>(tup);
-    char norm_type = std::get<1>(tup);
+    string norm_case = std::get<1>(tup);
 
     Arguments arg;
 
@@ -91,7 +117,8 @@ Arguments lange_setup_arguments(lange_tuple<I> tup)
     arg.set<I>("n", matrix_size[1]);
     arg.set<I>("lda", matrix_size[2]);
 
-    arg.set<char>("norm_type", norm_type);
+    arg.set<char>("norm_type", norm_case[0]);
+    arg.set<char>("magnitude", norm_case[1]);
 
     arg.timing = 0;
 
