@@ -67,6 +67,7 @@ class StinkyAsmModuleWithAdapterSignature:
         if self._signature is not None:
             self._refreshTotalInstructionBytes()
             self._refreshSgprCount()
+            self._refreshVgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
         set_dirs = getattr(self._inner, "getSetDirectives", None)
@@ -116,6 +117,53 @@ class StinkyAsmModuleWithAdapterSignature:
         if required == 0 or required >= kd.totalSgprs:
             return
         self._signature.setGprs(kd.totalVgprs, kd.totalAgprs, required)
+
+    def _refreshVgprCount(self) -> None:
+        """Take the declared VGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshVgprCount``. The
+        producer's pool still counts registers that were checked back in, so
+        ``.amdhsa_next_free_vgpr`` arrives too high. A colouring can also need
+        more than was reserved, so this moves in both directions. Goes through
+        ``setDeclaredVgprs``, which leaves the ``Num VGPR`` comment on the
+        producer's figure and does nothing when AGPRs share the register file.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredVgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.vgprWorkItem))
+        if required == 0:
+            return
+        setter = getattr(self._signature, "setDeclaredVgprs", None)
+        if setter is None:
+            return
+        setter(required)
+
+    def getDeclaredSgprCount(self) -> int:
+        """SGPRs the descriptor declares, as ``.amdhsa_next_free_sgpr``.
+
+        Ask after ``emitAssembly()``: the refresh has then replaced the
+        producer's estimate with the count the emitted code uses. Matches
+        ``StinkyAsmModuleWithSignature::getDeclaredSgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalSgprs)
+
+    def getDeclaredVgprCount(self) -> int:
+        """VGPRs the descriptor declares, as ``.amdhsa_next_free_vgpr``.
+
+        Ask after ``emitAssembly()``. Where AGPRs share the register file the
+        refresh leaves the producer's number, so this returns that number.
+        Matches ``StinkyAsmModuleWithSignature::getDeclaredVgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalVgprs)
 
     def getName(self) -> str:
         return self._inner.getName()

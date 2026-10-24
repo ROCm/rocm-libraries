@@ -621,11 +621,9 @@ class RegisterContainer(Container):
             )
         reg = helper(physical_idx, self.regNum)
 
-        # VGPR MSB offset: for idx >= 256, the asm emitter needs
-        # reg.offset = -(idx//256)*256 to produce "v[516-512]" format.
-        # Mirrors native C++ ToStinkyTofuUtils.cpp getMsbOffsetFromStinkyVgpr().
-        if self.regType == "v" and physical_idx >= 256:
-            reg.set_offset(-(physical_idx // 256) * 256)
+        # Bank bias stays 0 until InsertVgprMsbPass, as native toStinkyRegister
+        # does. Writing it here prints v[idx-256] in the pre-pipeline asm dump
+        # while rocisa still prints v[idx].
 
         if self.isMinus:
             reg.set_minus(True)
