@@ -31,7 +31,7 @@ if(TARGET GTest::gtest)
     return()
 endif()
 
-find_package(GTest QUIET)
+find_package(GTest 1.12 QUIET)
 
 if(GTest_FOUND)
     if(GTest_DIR)

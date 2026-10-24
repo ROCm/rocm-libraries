@@ -77,3 +77,24 @@ if(RPP_TEST_CTEST_PER_CASE)
 else()
     rpp_discover_grouped_tests(rpp_tests)
 endif()
+
+# Installed next to the ROCm libraries, so librpp and the HIP runtime resolve from ../lib.
+include(GNUInstallDirs)
+set_target_properties(rpp_tests PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS rpp_tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT test)
+
+# Tier labels (quick/standard/...) for TheRock.
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+
+    set(RPP_TEST_INSTALL_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+    file(WRITE "${RPP_TEST_INSTALL_CTEST_FILE}" "")
+    apply_test_category_labels(rpp_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${RPP_TEST_INSTALL_CTEST_FILE}")
+    install(FILES "${RPP_TEST_INSTALL_CTEST_FILE}"
+        DESTINATION ${CMAKE_INSTALL_BINDIR}/rpp
+        COMPONENT test
+        RENAME CTestTestfile.cmake)
+endif()

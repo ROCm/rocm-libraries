@@ -445,8 +445,9 @@ endif()
 # Test suite
 enable_testing()
 include(CTest)
-add_subdirectory(test)
-add_subdirectory(utilities/test_suite)
+if(BUILD_TESTING)
+    add_subdirectory(utilities/test)
+endif()
 
 # Installation
 # install RPP libs -- {ROCM_PATH}/lib
