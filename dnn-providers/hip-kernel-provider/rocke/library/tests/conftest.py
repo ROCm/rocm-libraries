@@ -150,6 +150,92 @@ def _restore_attention_arch_state():
             au._2D_KV_ADDR_LIMITS.clear()
 
 
+_TEST_CACHE_MAX = int(os.environ.get("ROCKE_TEST_CACHE_MAX", "8"))
+# The attention backward test modules (#13575) memoize every kernel they
+# build; only they are bounded and regrouped below (AICK-2764).
+_BWD_TEST_PREFIXES = ("test_attention_bwd", "test_attention_dense_bwd")
+_test_caches: list = []
+_test_caches_seen = 0
+
+
+def _is_bwd_test_module(mod) -> bool:
+    path = getattr(mod, "__file__", None) or ""
+    return os.path.dirname(path) == str(_TESTROOT) and os.path.basename(
+        path
+    ).startswith(_BWD_TEST_PREFIXES)
+
+
+def _module_caches(mod) -> list:
+    """The ``functools.cache`` / ``lru_cache`` helpers defined in ``mod``."""
+    return [
+        obj
+        for obj in vars(mod).values()
+        if getattr(obj, "__module__", None) == mod.__name__
+        and callable(getattr(obj, "cache_info", None))
+    ]
+
+
+def _bwd_test_caches() -> list:
+    """The memos of the backward test modules (rescanned only when
+    ``sys.modules`` grows)."""
+    global _test_caches_seen
+    if len(sys.modules) != _test_caches_seen:
+        _test_caches_seen = len(sys.modules)
+        found = {}
+        for mod in list(sys.modules.values()):
+            if _is_bwd_test_module(mod):
+                for fn in _module_caches(mod):
+                    found[id(fn)] = fn
+        _test_caches[:] = found.values()
+    return _test_caches
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Bound the backward test modules' kernel memos.
+
+    Those modules wrap kernel build and lowering in an unbounded ``@cache``
+    (``kernel_of``, ``ir_of``, ``_kernel``, ...). Every built kernel and its
+    ``.ll`` text then stays alive for the life of the process, about 1-5 MB
+    per test, so ``pytest -n N`` workers grow by gigabytes and get OOM-killed
+    (AICK-2764). A memo holding more than ``ROCKE_TEST_CACHE_MAX`` entries
+    (default 8; 0 = never bound) is cleared once the last test of a parameter
+    set is done, never in the middle of one. :func:`_group_by_parameter_set`
+    runs the tests of one kernel back to back, so the bound costs few
+    rebuilds. Other test modules are not touched."""
+    if _TEST_CACHE_MAX <= 0 or not _is_bwd_test_module(getattr(item, "module", None)):
+        return
+    from tests.run_device_shards import shard_key
+
+    if nextitem is not None and shard_key(nextitem) == shard_key(item):
+        return
+    for fn in _bwd_test_caches():
+        if fn.cache_info().currsize > _TEST_CACHE_MAX:
+            fn.cache_clear()
+
+
+def _group_by_parameter_set(items: list) -> None:
+    """In a backward test module with a kernel memo, run every test of one
+    parameter set back to back (the ``ROCKE_TEST_SHARD`` key: module plus
+    parameter id), in first-seen order. Each test function otherwise walks
+    every kernel in turn, so a bounded memo would rebuild them all for the
+    next function. Every other module keeps its order."""
+    from tests.run_device_shards import shard_key
+
+    if _TEST_CACHE_MAX <= 0:
+        return
+    memo, first = {}, {}
+    keys = []
+    for i, item in enumerate(items):
+        mod = getattr(item, "module", None)
+        if mod is not None and mod not in memo:
+            memo[mod] = _is_bwd_test_module(mod) and bool(_module_caches(mod))
+        key = shard_key(item) if mod is not None and memo[mod] else item.nodeid
+        first.setdefault(key, i)
+        keys.append(first[key])
+    order = {id(item): k for item, k in zip(items, keys)}
+    items.sort(key=lambda item: order[id(item)])
+
+
 def pytest_sessionstart(session):
     from reference_common.pytest_support import start_reference_session
 
@@ -159,7 +245,8 @@ def pytest_sessionstart(session):
 def pytest_collection_modifyitems(config, items):
     """``--rocke-reference-arch``: keep that arch's reference cases; then
     ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
-    ``tests/run_device_shards.py``; unset: every item)."""
+    ``tests/run_device_shards.py``; unset: every item); then group the tests
+    of one kernel (:func:`_group_by_parameter_set`)."""
     from reference_common.pytest_support import select_reference_items
 
     select_reference_items(config, items)
@@ -167,3 +254,4 @@ def pytest_collection_modifyitems(config, items):
         from tests.run_device_shards import select_items
 
         select_items(config, items)
+    _group_by_parameter_set(items)
