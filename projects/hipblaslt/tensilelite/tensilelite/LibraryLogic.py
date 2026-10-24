@@ -653,7 +653,9 @@ class LogicAnalyzer:
 
           if winnerIdx != -1:
             if problemSize in self.exactWinners:
-              if winnerGFlops > self.exactWinners[problemSize][1]:
+              # The stored score is performance_metric (effLike when UseEffLike),
+              # so compare in the same unit rather than raw GFlops.
+              if performance_metric > self.exactWinners[problemSize][1]:
                 #print "update exact", problemSize, "CSV index=", winnerIdx, self.exactWinners[problemSize], "->", solutionMap[winnerIdx], winnerGFlops
                 self.exactWinners[problemSize] = [solutionMap[winnerIdx], performance_metric]
             else:

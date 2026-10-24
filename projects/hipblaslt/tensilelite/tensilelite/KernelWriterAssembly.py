@@ -5443,16 +5443,18 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
+    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # contiguous dimension and the unroll stride when it is not (TLU=1), where
+    # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
         return module
       strideF = self.strideRef(tc, tP['tileIdx'])
-      if self.isConstUnitStride(strideF):
-        return module
       isMx = tc in ("MXSA", "MXSB")
+      kRowStride = None
       if isMx:
         tcab = "A" if tc == "MXSA" else "B"
         mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
@@ -5464,6 +5466,10 @@ class KernelWriterAssembly(KernelWriter):
           return module
         mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
         isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+        # A swizzled scale is block-linear in K whatever the operand layout, as
+        # computeLoadSrd assumes; only an unswizzled TLU=1 scale lacks a K-linear limit.
+        if self.isConstUnitStride(strideF) and not isMxSwizzledScale:
+          return module
         swizzleSize0 = 32 if isMxSwizzledScale else 1
         if swizzleSize0 % mxBlock != 0:
           return module
@@ -5473,22 +5479,25 @@ class KernelWriterAssembly(KernelWriter):
       else:
         kPad = 1
         bpeForLimit = float(tP["bpeGR"])
-      tcKpadBpeList.append((tc, kPad, bpeForLimit))
+        if self.isConstUnitStride(strideF):
+          kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
+      tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
     # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
     # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
+    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
       return module
-    tcs = [t for t, _, _ in tcKpadBpeList]
+    tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
 
-    with self.allocTmpSgpr(1, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
+    with self.allocTmpSgpr(2, tag="computeTailLoopSrdLimit_tmpSgprInfo") as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
+      sbytes = stmp + 1
       module.addComment1(
-        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s"
+        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s (* K-row stride when TLU=1)"
         % (",".join(tcs), kPad,
            "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
 
@@ -5507,12 +5516,18 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
-      module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
-                                   comment="delta_bytes"))
-      for tc in tcs:
+      for tc, _, _, kRowStride in tcKpadBpeList:
+        # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
+        if kRowStride is None:
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+                                       comment="delta_bytes"))
+        else:
+          module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
+                             comment="delta_K rows * %s K-row stride" % tc))
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+                                       comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
-                           src1=sgpr(stmp),
+                           src1=sgpr(sbytes),
                            comment="Srd%s+2 -= delta_bytes (tail-loop tight)" % tc))
 
     return module

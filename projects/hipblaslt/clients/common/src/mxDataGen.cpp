@@ -446,8 +446,21 @@ std::vector<float> generateData(T                           dgen,
                   ? scaleBytes.size() / kBlocks
                   : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
 
+        // The swizzle reads its input as [MN][K block]. A K-contiguous operand's
+        // natural scales are already in that order; a free-dim contiguous one's
+        // are [K block][MN] and must be transposed first.
+        std::vector<uint8_t> mnMajorScaleBytes;
+        if(!kIsRows)
+        {
+            mnMajorScaleBytes.resize(scaleBytes.size());
+            for(size_t kb = 0; kb < kBlocks; ++kb)
+                for(size_t mn = 0; mn < mnExtent; ++mn)
+                    mnMajorScaleBytes[mn * kBlocks + kb] = scaleBytes[kb * mnExtent + mn];
+        }
+        std::vector<uint8_t> const& swizzleInput = kIsRows ? scaleBytes : mnMajorScaleBytes;
+
         swizzledScaleBytes = DGen::preSwizzleScalesGFX950(
-            scaleBytes, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
+            swizzleInput, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
         break;
     }
     case MXScaleLayout::GFX1250:

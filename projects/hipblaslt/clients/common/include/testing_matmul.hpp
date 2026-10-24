@@ -2005,12 +2005,18 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
     hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 
-    // The preswizzled kernels and scale allocation require K along the stored rows.
+    // Only the FP4 x FP4 preswizzled kernels accept K along the stored columns.
     // Reject other orientations before allocation or MX input generation, also in Release builds.
-    if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transA != HIPBLAS_OP_T)
-        throw std::invalid_argument("scaleA=1001 requires transA=T");
-    if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transB != HIPBLAS_OP_N)
-        throw std::invalid_argument("scaleB=1001 requires transB=N");
+    bool const preswizzledAnyLayout = TiA == HIP_R_4F_E2M1 && TiB == HIP_R_4F_E2M1;
+    if(!preswizzledAnyLayout)
+    {
+        if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+           && transA != HIPBLAS_OP_T)
+            throw std::invalid_argument("scaleA=1001 requires transA=T");
+        if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+           && transB != HIPBLAS_OP_N)
+            throw std::invalid_argument("scaleB=1001 requires transB=N");
+    }
 
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
