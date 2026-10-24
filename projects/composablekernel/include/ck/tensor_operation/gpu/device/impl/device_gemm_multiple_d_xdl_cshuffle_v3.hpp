@@ -219,9 +219,18 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
             const bool is_A_descriptor_smaller_than_2GB =
                 (static_cast<long_index_t>(m) * static_cast<long_index_t>(StrideA) *
                  sizeof(ADataType)) <= TwoGB;
+            // The kernel stores whole MPerBlock x NPerBlock tiles. Stores to the padded rows and
+            // columns are masked by adding 0x80000000 to their 32-bit offset, which wraps back
+            // into C if the padded offset is already past 2GB. So the padded tile grid, not just
+            // C itself, has to fit in 2GB.
+            const long_index_t m_padded =
+                math::integer_least_multiple(static_cast<long_index_t>(m), MPerBlock);
+            const long_index_t n_padded =
+                math::integer_least_multiple(static_cast<long_index_t>(N), NPerBlock);
             const bool is_C_descriptor_smaller_than_2GB =
-                (static_cast<long_index_t>(m) * static_cast<long_index_t>(StrideC) *
-                 sizeof(CDataType)) <= TwoGB;
+                ((m_padded - 1) * static_cast<long_index_t>(StrideC) + n_padded) *
+                    sizeof(CDataType) <=
+                TwoGB;
             bool are_Ds_descriptors_smaller_than_2GB = true;
             static_for<0, NumDTensor, 1>{}([&](auto i) {
                 using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
