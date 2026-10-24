@@ -10,7 +10,8 @@ Reuses the note-field regexes proven in rocke's `probe_occupancy`. The occupancy
 number is conservative (relative ranking, not an absolute prediction) - for exact
 occupancy use rocprofv3 at runtime.
 
-Returns a dict for the record's `resources` section. Stdlib only.
+Returns a dict for the record's `resources` section. Uses the standard library
+plus rocke's own target-name parsing.
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from rocke.core.arch import target_id_from_isa
 
 # AMDGPU code-object metadata note fields (same patterns as probe_occupancy).
 _NOTE_FIELDS = {
@@ -35,11 +38,15 @@ _NOTE_FIELDS = {
 }
 
 # The code object records the ISA it was built for
-# (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`). That beats any caller-supplied
-# arch: the occupancy model must follow the binary, not a stale CLI flag. The
+# (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`; newer compilers write the empty
+# environment field as `unknown`, `amdgcn-amd-amdhsa-unknown-gfx1201`). That beats
+# any caller-supplied arch: the occupancy model must follow the binary, not a stale
+# CLI flag. ``target_id_from_isa`` reads the target ID out of either form. The
 # processor name may be a generic target (`gfx11-generic`); feature suffixes
-# (`:xnack-`) are not part of it.
-_TARGET_FIELD = r"amdhsa\.target:\s*\S*?--(gfx[0-9a-z-]+)"
+# (`:xnack-`) are not part of it. An empty value is captured too, so it is refused
+# like any other target without a processor.
+_TARGET_FIELD = r"amdhsa\.target:[ \t]*['\"]?([^\s'\"]*)"
+_PROCESSOR = r"gfx[0-9a-z]+(?:-[0-9a-z]+)*"
 
 
 @dataclass(frozen=True)
@@ -99,8 +106,25 @@ def _readelf() -> Optional[str]:
     return None
 
 
+def _processor_from_target(isa: str) -> str:
+    """The processor named by an ``amdhsa.target`` value.
+
+    Raises ``ValueError`` when no processor can be read from it, so a target
+    the parser does not understand is reported instead of being replaced by
+    the caller's arch.
+    """
+    processor = target_id_from_isa(isa).split(":", 1)[0]
+    if not re.fullmatch(_PROCESSOR, processor):
+        raise ValueError(f"cannot read a processor from amdhsa.target {isa!r}")
+    return processor
+
+
 def parse_notes(hsaco_bytes: bytes) -> dict:
-    """Extract raw resource fields from an HSACO's ELF notes ({} on failure)."""
+    """Extract raw resource fields from an HSACO's ELF notes ({} on failure).
+
+    Raises ``ValueError`` when the notes record an ``amdhsa.target`` that names
+    no processor.
+    """
     readelf = _readelf()
     if not readelf:
         return {}
@@ -126,7 +150,7 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
             fields[name] = int(m.group(1))
     m = re.search(_TARGET_FIELD, notes)
     if m:
-        fields["target"] = m.group(1)
+        fields["target"] = _processor_from_target(m.group(1))
     return fields
 
 
@@ -162,24 +186,34 @@ def _align_up(n: int, gran: int) -> int:
 
 # Full per-arch caps for the CDNA multi-limiter model below (adds the AGPR, LDS and
 # workgroup limiters to the VGPR file). Values lifted from the ``probe_occupancy`` tool and the arch
-# docs. ``combined_reg_pool`` = arch VGPRs and accumulator VGPRs share one register
-# file, so occupancy is set by their SUM (CDNA4/gfx950), not the tighter of two
-# separate pools (CDNA3/gfx942, CDNA2/gfx90a).
+# docs. ``combined_reg_pool`` selects how the multi-limiter model counts AGPRs: True
+# adds them to the VGPRs against one file (gfx950); False gives them a separate pool
+# of ``agpr_per_simd`` and the tighter pool binds (gfx942, gfx90a). The compiler
+# treats all three as one shared file (see ``_VGPR_FILES``); the multi-limiter AGPR
+# counting has not been reconciled with that.
 #
-# gfx950 combined-pool is CALIBRATED against gfx950 hardware ``MeanOccupancyPerCU``: an
-# AGPR-heavy kernel (44 VGPR + 132 AGPR) measured ~7 waves/CU, which the separate
+# gfx950 combined-pool was calibrated against gfx950 hardware ``MeanOccupancyPerCU``:
+# an AGPR-heavy kernel (44 VGPR + 132 AGPR) measured ~7 waves/CU, which the separate
 # 256-AGPR pool mispredicted as 4 and the combined model gets as 8 (measured is a
-# time-average; peak ~7.2). gfx942/gfx90a remain PROVISIONAL: their waves_per_simd
-# (8) and granularity are conservative CDNA2-era figures (CDNA3 may be 10 / 8) and
-# await their own rocprofv3 calibration. Once validated these belong in
-# ``core/arch/data/arch_specs.json`` (the hardware SSOT), read via ArchTarget.
+# time-average; peak ~7.2). That calibration fed the model the architectural VGPR
+# count (44). A real code object records ``.vgpr_count`` 176, which already includes
+# the AGPRs, so the combined model adds the AGPRs twice and gives 4 waves/CU where
+# the compiler reports 8; this is not fixed yet.
+#
+# The VGPR file fields (``vgpr_per_simd``, ``granularity``, ``waves_per_simd``) are
+# the compiler's: VGPRs are allocated in steps of 8 from 512 per SIMD, at most 8
+# waves, on all three processors, identically at clang 20, 22, 23 and 24.
+# test_occupancy.py pins them and re-checks them against the local llc. The AGPR,
+# combined-pool, LDS and workgroup fields are not checked against the compiler.
+# Once validated these belong in ``core/arch/data/arch_specs.json`` (the hardware
+# SSOT), read via ArchTarget.
 _ARCH_CAPS = {
     "gfx950": dict(
         lds_per_cu=163840,
         max_waves_per_cu=32,
         vgpr_per_simd=512,
         agpr_per_simd=256,
-        granularity=16,
+        granularity=8,
         waves_per_simd=8,
         simds_per_cu=4,
         combined_reg_pool=True,
@@ -189,7 +223,7 @@ _ARCH_CAPS = {
         max_waves_per_cu=32,
         vgpr_per_simd=512,
         agpr_per_simd=256,
-        granularity=16,
+        granularity=8,
         waves_per_simd=8,
         simds_per_cu=4,
         combined_reg_pool=False,
@@ -208,7 +242,10 @@ _ARCH_CAPS = {
 
 
 # Every processor the VGPR-limited estimate covers: the RDNA files above, and each
-# CDNA processor's VGPR file as recorded in ``_ARCH_CAPS``.
+# CDNA processor's VGPR file as recorded in ``_ARCH_CAPS``. On these CDNA processors
+# the AGPRs live in the same file as the VGPRs, and the code object's
+# ``.vgpr_count`` already counts both (the VGPRs rounded up to 4, plus the AGPRs),
+# so the VGPR file alone gives the compiler's wave count with AGPRs in use too.
 _VGPR_FILES = {
     **{
         processor: _VgprFile(
@@ -275,7 +312,7 @@ def estimate_occupancy_detail(
         )
         reg_label = "VGPR+AGPR" if agpr else "VGPR"
     else:
-        # CDNA2/3: separate VGPR and AGPR pools; the tighter one binds.
+        # Separate VGPR and AGPR pools (see ``combined_reg_pool``); the tighter binds.
         waves_vgpr = min(
             caps["vgpr_per_simd"] // _align_up(vgpr, caps["granularity"]),
             caps["waves_per_simd"],
@@ -305,8 +342,8 @@ def estimate_occupancy_detail(
     else:
         # Unreachable while waves_per_simd * simds_per_cu == max_waves_per_cu for
         # every arch (32 == 32): per_cu_from_regs can never exceed the cap, so the
-        # regs branch always claims it first. Kept for a future CDNA3 recalibration
-        # to 10 waves/SIMD (see the caps note above), which would break that tie.
+        # regs branch always claims it first. Kept so that caps which ever break
+        # that equality still report the hardware wave cap as the limiter.
         limited_by = "WAVES_PER_CU"
 
     return {
@@ -329,8 +366,8 @@ def resources(hsaco_bytes: bytes, arch: str) -> dict:
     the disagreement.
 
     Raises ``ValueError`` when the occupancy model has no data for that processor
-    or for the code object's wave size, or when the notes do not record the wave
-    size.
+    or for the code object's wave size, when the notes do not record the wave
+    size, or when they record a target that names no processor.
     """
     f = parse_notes(hsaco_bytes)
     if not f:
