@@ -701,6 +701,20 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx115X"
 
+  exclude_gpu_gfx94X:
+    test_patterns:
+      # Flaky on gfx942 (ALMIOPEN-1926): same bias-only CPU/GPU mismatch at rnn_seq_api.hpp:272 as gfx110X/gfx115X. Jenkins
+      # gfx942, 2026-08-24..10-23: 39 failures at 36 different indices in ~304k executions (1 in 5 builds with >= 1 failure),
+      # including 11 of 37 develop builds after the per-index filters /1026 and /1095 landed; gfx90a: 0 in ~284k.
+      # Mirrors the Jenkins family filter under MIOPEN_TEST_GFX94X.
+      - "Full/GPU_LstmMSRnn_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
+
   exclude_gpu_gfx950:
     test_patterns:
       - "*DBSync*"
