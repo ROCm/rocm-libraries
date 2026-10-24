@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3.hpp>
+#include <hipdnn_data_sdk/types/Fp8E4M3Fnuz.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
 
 #include <cstdint>
@@ -63,6 +64,13 @@ template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3>
 {
     static constexpr const char* VALUE = "GpuRefFp8E4M3";
+};
+
+// fp8 E4M3 FNUZ (gfx942) maps to gpu_ref::GpuRefFp8E4M3Fnuz, as above.
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3_fnuz>
+{
+    static constexpr const char* VALUE = "GpuRefFp8E4M3Fnuz";
 };
 
 } // namespace hipdnn_gpu_ref::detail

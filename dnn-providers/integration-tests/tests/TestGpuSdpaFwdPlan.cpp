@@ -100,6 +100,98 @@ void fillExactlyRepresentableMask(hipdnn_data_sdk::utilities::Tensor<MaskT>& mas
     }
 }
 
+// fp8 Q/K/V (bf16 O) graph for the fp8 applicability rules. Descale tensors get uids 20..22
+// (`descales` of them, dtype `descaleType`, K's with dims `descaleKDims`); `descaleS` adds a
+// softmax descale. `pagedK` pages K through a [1, 1, 2, 1] table over [2, 2, 4, 8] blocks
+// with seq_len tensors (V dense at the 8-key extent).
+struct Fp8GraphSpec
+{
+    DataType fp8Type = DataType::FP8_E4M3;
+    int descales = 3;
+    DataType descaleType = DataType::FLOAT;
+    std::vector<int64_t> descaleKDims = {1};
+    bool descaleS = false;
+    bool pagedK = false;
+};
+
+flatbuffers::FlatBufferBuilder makeFp8Graph(const Fp8GraphSpec& spec)
+{
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const auto kDims = spec.pagedK ? std::vector<int64_t>{2, 2, 4, 8} : qDims;
+    const auto vDims = spec.pagedK ? std::vector<int64_t>{1, 2, 8, 8} : qDims;
+    const std::vector<int64_t> scalarDims = {1};
+    const std::vector<int64_t> lenDims = {1, 1, 1, 1};
+    const std::vector<int64_t> tableDims = {1, 1, 2, 1};
+
+    SdpaAttributesT attrs;
+    attrs.q_tensor_uid = Q_UID;
+    attrs.k_tensor_uid = K_UID;
+    attrs.v_tensor_uid = V_UID;
+    attrs.o_tensor_uid = O_UID;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    std::vector<std::vector<int64_t>> strides; // kept alive until Finish
+    strides.reserve(16);
+    const auto add
+        = [&](int64_t uid, const char* name, DataType type, const std::vector<int64_t>& dims) {
+              strides.push_back(generateStrides(dims));
+              tensors.push_back(
+                  CreateTensorAttributesDirect(builder, uid, name, type, &strides.back(), &dims));
+          };
+    add(Q_UID, "Q", spec.fp8Type, qDims);
+    add(K_UID, "K", spec.fp8Type, kDims);
+    add(V_UID, "V", spec.fp8Type, vDims);
+    add(O_UID, "O", DataType::BFLOAT16, qDims);
+    for(int i = 0; i < spec.descales; ++i)
+    {
+        add(20 + i, "Descale", spec.descaleType, i == 1 ? spec.descaleKDims : scalarDims);
+    }
+    if(spec.descales > 0)
+    {
+        attrs.descale_q_tensor_uid = 20;
+    }
+    if(spec.descales > 1)
+    {
+        attrs.descale_k_tensor_uid = 21;
+    }
+    if(spec.descales > 2)
+    {
+        attrs.descale_v_tensor_uid = 22;
+    }
+    if(spec.descaleS)
+    {
+        add(23, "DescaleS", DataType::FLOAT, scalarDims);
+        attrs.descale_s_tensor_uid = 23;
+    }
+    if(spec.pagedK)
+    {
+        add(30, "SeqLenQ", DataType::INT32, lenDims);
+        add(31, "SeqLenKv", DataType::INT32, lenDims);
+        add(32, "PageTableK", DataType::INT32, tableDims);
+        attrs.seq_len_q_tensor_uid = 30;
+        attrs.seq_len_kv_tensor_uid = 31;
+        attrs.page_table_k_tensor_uid = 32;
+    }
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+    auto graph = CreateGraphDirect(builder,
+                                   "Fp8SdpaFwdTestGraph",
+                                   spec.fp8Type,
+                                   DataType::BFLOAT16,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+    return builder;
+}
+
 } // namespace
 
 TEST(TestGpuSdpaFwdPlanBuilder, PlanConstruction)
@@ -782,4 +874,66 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithHalfMask)
 TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
 {
     expectMaskedPlanMatchesReferences<DataType::BFLOAT16>();
+}
+
+// fp8, as on the CPU: all three FLOAT Q/K/V descales are required, softmax / output scaling is
+// declined, and a paged K needs a scalar descale. Each case changes one field of the accepted
+// graph.
+TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryDescaleField)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::FP8_E4M3,
+                                DataType::BFLOAT16>
+        ocpBuilder;
+    const GpuSdpaFwdPlanBuilder<DataType::FP8_E4M3_FNUZ,
+                                DataType::FP8_E4M3_FNUZ,
+                                DataType::FP8_E4M3_FNUZ,
+                                DataType::BFLOAT16>
+        fnuzBuilder;
+    const auto applicable = [](const auto& builder, const Fp8GraphSpec& spec) {
+        auto graphBuilder = makeFp8Graph(spec);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+
+    EXPECT_TRUE(applicable(ocpBuilder, {}));
+    Fp8GraphSpec fnuz;
+    fnuz.fp8Type = DataType::FP8_E4M3_FNUZ;
+    EXPECT_TRUE(applicable(fnuzBuilder, fnuz));
+    EXPECT_FALSE(applicable(ocpBuilder, fnuz)) << "dtype keys the builder";
+
+    Fp8GraphSpec missing;
+    missing.descales = 2;
+    EXPECT_FALSE(applicable(ocpBuilder, missing)) << "descale_v missing";
+    missing.descales = 0;
+    EXPECT_FALSE(applicable(ocpBuilder, missing)) << "no descales";
+
+    Fp8GraphSpec halfDescale;
+    halfDescale.descaleType = DataType::HALF;
+    EXPECT_FALSE(applicable(ocpBuilder, halfDescale)) << "descales are read as float";
+
+    Fp8GraphSpec softmax;
+    softmax.descaleS = true;
+    EXPECT_FALSE(applicable(ocpBuilder, softmax)) << "descale_s is not modeled";
+
+    Fp8GraphSpec paged;
+    paged.pagedK = true;
+    EXPECT_TRUE(applicable(ocpBuilder, paged)) << "paged K with a scalar descale";
+    paged.descaleKDims = {1, 2, 1, 1};
+    EXPECT_FALSE(applicable(ocpBuilder, paged)) << "paged K with a per-head descale";
+
+    // Descales on non-fp8 inputs are declined (IsNotApplicableForUnsupportedModes covers a
+    // dangling uid; this one names a real FLOAT tensor).
+    const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16>
+        bf16Builder;
+    Fp8GraphSpec bf16;
+    bf16.fp8Type = DataType::BFLOAT16;
+    EXPECT_FALSE(applicable(bf16Builder, bf16));
+    bf16.descales = 0;
+    EXPECT_TRUE(applicable(bf16Builder, bf16)) << "the same graph without descales";
 }

@@ -12,6 +12,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaCommon.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaDequant.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction/GpuRefReduction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resample/GpuRefResampleBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resample/GpuRefResampleFwd.cpp
