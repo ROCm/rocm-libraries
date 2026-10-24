@@ -249,6 +249,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
 
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
 
     const int64_t batch = DIMS[0];
     const int64_t numHeads = DIMS[1];
@@ -289,16 +290,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     // Reference: the same kernel via a direct fprop() with a rank-3 lse and identical inputs.
     Tensor<float> oRef(DIMS);
     Tensor<float> lseRef(lseDims);
-    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
-                                                                 k,
-                                                                 v,
-                                                                 oRef,
-                                                                 std::nullopt,
-                                                                 /*attnMask=*/nullptr,
-                                                                 /*leftBound=*/-1,
-                                                                 /*rightBound=*/-1,
-                                                                 /*topLeftAlignment=*/true,
-                                                                 &lseRef);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+        q, k, v, oRef, GpuSdpaFwdOptions<float>{}.setLse(&lseRef));
 
     // Same kernel + identical inputs, so plan and direct outputs match within a tight bound.
     const float tolerance = 1e-5f;
@@ -318,6 +311,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
     using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
 
     const std::vector<int64_t> qDims = {1, 1, 1, 1};
@@ -363,21 +357,12 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
         k,
         v,
         oProviderMode,
-        /*attnScaleValue=*/1.0f,
-        /*attnMask=*/nullptr,
-        /*leftBound=*/-1,
-        /*rightBound=*/-1,
-        /*topLeftAlignment=*/true,
-        /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
+        GpuSdpaFwdOptions<float>{}.setScale(1.0f).setProbabilityMode(
+            SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE));
 
     Tensor<bfloat16> oFloatMode(oDims);
     GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, bfloat16, float>(
-        q,
-        k,
-        v,
-        oFloatMode,
-        /*attnScaleValue=*/1.0f);
+        q, k, v, oFloatMode, GpuSdpaFwdOptions<float>{}.setScale(1.0f));
 
     ASSERT_NE(static_cast<float>(oProviderMode.memory().hostData()[0]),
               static_cast<float>(oFloatMode.memory().hostData()[0]));
@@ -394,6 +379,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
 
     using hipdnn_data_sdk::utilities::Tensor;
     using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::GpuSdpaFwdOptions;
 
     constexpr int64_t SCALE_UID = 15;
     constexpr float SCALE_VALUE = 2.0f;
@@ -442,16 +428,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
     oPlan.markDeviceModified();
 
     Tensor<float> oRef(DIMS);
-    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
-                                                                 k,
-                                                                 v,
-                                                                 oRef,
-                                                                 SCALE_VALUE,
-                                                                 /*attnMask=*/nullptr,
-                                                                 /*leftBound=*/-1,
-                                                                 /*rightBound=*/-1,
-                                                                 /*topLeftAlignment=*/true,
-                                                                 /*lse=*/nullptr);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+        q, k, v, oRef, GpuSdpaFwdOptions<float>{}.setScale(SCALE_VALUE));
 
     const float tolerance = 1e-5f;
     const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
@@ -755,7 +733,8 @@ void expectMaskedPlanMatchesReferences()
     // The CPU oracle reads host data, so it runs before any device upload.
     Tensor<float> oCpu(DIMS);
     hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::
-        forward<float, float, float, float, float, MaskT>(q, k, v, oCpu, std::nullopt, &mask);
+        forward<float, float, float, float, float, MaskT>(
+            q, k, v, oCpu, hipdnn_test_sdk::utilities::SdpaFwdOptions<MaskT>{}.setMask(&mask));
 
     Tensor<float> oPlan(DIMS);
     Tensor<float> oFloatPlan(DIMS);

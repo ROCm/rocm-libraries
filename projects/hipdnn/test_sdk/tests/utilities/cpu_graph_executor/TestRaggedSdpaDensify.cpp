@@ -26,6 +26,8 @@ using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
 using hipdnn_test_sdk::utilities::CpuFpReferenceValidation;
 using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
+using hipdnn_test_sdk::utilities::SdpaBwdOptions;
+using hipdnn_test_sdk::utilities::SdpaFwdOptions;
 using namespace hipdnn_test_sdk::utilities::ragged_densify_test;
 
 TEST(TestRaggedSdpaDensify, RewritesRaggedPrimariesToDensePadding)
@@ -165,29 +167,33 @@ TEST(TestRaggedSdpaDensify, RaggedBackwardEqualsDensePaddedBackward)
     Tensor<float> od({B, H, SQ, D});
     Tensor<float> lse({B, H, SQ, 1});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(
-        qd, kd, vd, od, 0.5F, noMask, -1, 0, false, &lse, nullptr, nullptr, nullptr, &seqQ, &seqKv);
+    CpuFpReferenceSdpa::forward(qd,
+                                kd,
+                                vd,
+                                od,
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.5F)
+                                    .setMask(noMask)
+                                    .setBand(-1, 0, false)
+                                    .setSeqLens(&seqQ, &seqKv)
+                                    .setLse(&lse));
     Tensor<float> dQd({B, H, SQ, D});
     Tensor<float> dKd({B, H, SKV, D});
     Tensor<float> dVd({B, H, SKV, D});
-    CpuFpReferenceSdpa::backward(
-        qd,
-        kd,
-        vd,
-        od,
-        dOd,
-        dQd,
-        dKd,
-        dVd,
-        0.5F,
-        &lse,
-        noMask,
-        -1,
-        0,
-        false,
-        static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
-        &seqQ,
-        &seqKv);
+    CpuFpReferenceSdpa::backward(qd,
+                                 kd,
+                                 vd,
+                                 od,
+                                 dOd,
+                                 dQd,
+                                 dKd,
+                                 dVd,
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(0.5F)
+                                     .setLse(&lse)
+                                     .setMask(noMask)
+                                     .setBand(-1, 0, false)
+                                     .setSeqLens(&seqQ, &seqKv));
 
     // Pack O and the LSE the way the ragged graph expects them.
     std::vector<float> o(10 * H * D);

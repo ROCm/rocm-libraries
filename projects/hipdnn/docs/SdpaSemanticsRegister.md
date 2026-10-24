@@ -183,7 +183,7 @@ batch when `seq_len_q/kv` are set).
 - **cuDNN Python reference:** fp32 P.
 - **hipDNN today:** the CPU reference and the GPU graph plans (dense and ragged) compute P in fp32, so the GPU
   reference is an independent oracle for bf16 as well. Rounding P to bf16 before P@V (what the AITER kernel does) is
-  available only as an explicit opt-in emulation mode (`GpuFpReferenceSdpa::fprop`'s `probabilityMode`,
+  available only as an explicit opt-in emulation mode (`GpuSdpaFwdOptions::probabilityMode` for `GpuFpReferenceSdpa::fprop`,
   `providerSdpaProbabilityMode`). Decided 2026-10-23 (decision C2).
 - **Contract:** fp32 P in every reference by default.
 - **Watch:** provider engines checked against the GPU reference in bf16 lose the matching P rounding; the difference

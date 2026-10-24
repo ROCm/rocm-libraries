@@ -95,7 +95,15 @@ struct SdpaRun
              bool topLeft = true,
              bool backwardUsesLse = true)
     {
-        CpuFpReferenceSdpa::forward(q, k, v, o, scale, mask, leftBound, rightBound, topLeft, &lse);
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(scale)
+                                        .setMask(mask)
+                                        .setBand(leftBound, rightBound, topLeft)
+                                        .setLse(&lse));
         CpuFpReferenceSdpa::backward(q,
                                      k,
                                      v,
@@ -104,12 +112,11 @@ struct SdpaRun
                                      dQ,
                                      dK,
                                      dV,
-                                     scale,
-                                     backwardUsesLse ? &lse : nullptr,
-                                     mask,
-                                     leftBound,
-                                     rightBound,
-                                     topLeft);
+                                     SdpaBwdOptions<float>{}
+                                         .setScale(scale)
+                                         .setLse(backwardUsesLse ? &lse : nullptr)
+                                         .setMask(mask)
+                                         .setBand(leftBound, rightBound, topLeft));
     }
 
     Tensor<float> q;
@@ -560,17 +567,11 @@ TEST_P(TestCpuFpReferenceSdpaPropertyPadding, EqualsTruncatedBatches)
                                 padded.k,
                                 padded.v,
                                 padded.o,
-                                SCALE,
-                                nullptr,
-                                -1,
-                                p.rightBound,
-                                p.topLeft,
-                                &padded.lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(SCALE)
+                                    .setBand(-1, p.rightBound, p.topLeft)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setLse(&padded.lse));
     CpuFpReferenceSdpa::backward(padded.q,
                                  padded.k,
                                  padded.v,
@@ -579,15 +580,11 @@ TEST_P(TestCpuFpReferenceSdpaPropertyPadding, EqualsTruncatedBatches)
                                  padded.dQ,
                                  padded.dK,
                                  padded.dV,
-                                 SCALE,
-                                 &padded.lse,
-                                 nullptr,
-                                 -1,
-                                 p.rightBound,
-                                 p.topLeft,
-                                 nullptr,
-                                 &seqLenQ,
-                                 &seqLenKv);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setLse(&padded.lse)
+                                     .setBand(-1, p.rightBound, p.topLeft)
+                                     .setSeqLens(&seqLenQ, &seqLenKv));
 
     for(int64_t b = 0; b < BATCH; ++b)
     {
@@ -667,38 +664,18 @@ TEST(TestCpuFpReferenceSdpaClosedForm, EmptyKeySequence)
     seqLenQ.fillWithValue(2);
     seqLenKv.fillWithValue(0);
 
-    CpuFpReferenceSdpa::forward(r.q,
-                                r.k,
-                                r.v,
-                                r.o,
-                                std::nullopt,
-                                nullptr,
-                                -1,
-                                -1,
-                                true,
-                                &r.lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
-    CpuFpReferenceSdpa::backward(r.q,
-                                 r.k,
-                                 r.v,
-                                 r.o,
-                                 r.dO,
-                                 r.dQ,
-                                 r.dK,
-                                 r.dV,
-                                 std::nullopt,
-                                 &r.lse,
-                                 nullptr,
-                                 -1,
-                                 -1,
-                                 true,
-                                 nullptr,
-                                 &seqLenQ,
-                                 &seqLenKv);
+    CpuFpReferenceSdpa::forward(
+        r.q, r.k, r.v, r.o, SdpaFwdOptions<float>{}.setSeqLens(&seqLenQ, &seqLenKv).setLse(&r.lse));
+    CpuFpReferenceSdpa::backward(
+        r.q,
+        r.k,
+        r.v,
+        r.o,
+        r.dO,
+        r.dQ,
+        r.dK,
+        r.dV,
+        SdpaBwdOptions<float>{}.setLse(&r.lse).setSeqLens(&seqLenQ, &seqLenKv));
 
     for(int64_t sq = 0; sq < 2; ++sq)
     {
@@ -727,21 +704,8 @@ TEST(TestCpuFpReferenceSdpaClosedForm, SeqLenValidation)
     lenTooLong.fillWithValue(4);
     const TensorBase<int32_t>* none = nullptr;
     const auto fwd = [&](const TensorBase<int32_t>* lq, const TensorBase<int32_t>* lkv) {
-        CpuFpReferenceSdpa::forward(r.q,
-                                    r.k,
-                                    r.v,
-                                    r.o,
-                                    std::nullopt,
-                                    nullptr,
-                                    -1,
-                                    -1,
-                                    true,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    lq,
-                                    lkv);
+        CpuFpReferenceSdpa::forward(
+            r.q, r.k, r.v, r.o, SdpaFwdOptions<float>{}.setSeqLens(lq, lkv));
     };
     EXPECT_THROW(fwd(&lenOk, none), std::invalid_argument);
     EXPECT_THROW(fwd(none, &lenOk), std::invalid_argument);
@@ -834,17 +798,11 @@ TEST_P(TestCpuFpReferenceSdpaPropertyPaged, EqualsDensePadded)
                                     paged ? static_cast<const TensorBase<float>&>(kPaged) : dense.k,
                                     paged ? static_cast<const TensorBase<float>&>(vPaged) : dense.v,
                                     paged ? oPaged : dense.o,
-                                    0.5F,
-                                    nullptr,
-                                    -1,
-                                    0,
-                                    false,
-                                    paged ? &lsePaged : &dense.lse,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    &seqLenQ,
-                                    &seqLenKv);
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(0.5F)
+                                        .setBand(-1, 0, false)
+                                        .setSeqLens(&seqLenQ, &seqLenKv)
+                                        .setLse(paged ? &lsePaged : &dense.lse));
     }
     expectAllNear(oPaged, dense.o, 0.0F, "O");
     forEachIndex(lsePaged.dims(), [&](const std::vector<int64_t>& i) {
@@ -889,22 +847,12 @@ namespace
 {
 void runWithSink(SdpaRun& r, const Tensor<float>& sink, const TensorBase<float>* bias = nullptr)
 {
-    CpuFpReferenceSdpa::forward(r.q,
-                                r.k,
-                                r.v,
-                                r.o,
-                                0.5F,
-                                bias,
-                                -1,
-                                -1,
-                                true,
-                                &r.lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &sink);
+    CpuFpReferenceSdpa::forward(
+        r.q,
+        r.k,
+        r.v,
+        r.o,
+        SdpaFwdOptions<float>{}.setScale(0.5F).setMask(bias).setSink(&sink).setLse(&r.lse));
 }
 } // namespace
 

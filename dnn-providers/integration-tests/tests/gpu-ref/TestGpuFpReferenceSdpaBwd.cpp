@@ -152,17 +152,12 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                                 k,
                                 v,
                                 o,
-                                0.4f,
-                                static_cast<const TensorBase<float>*>(biasPtr),
-                                c.leftBound,
-                                c.rightBound,
-                                c.topLeft,
-                                &lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                seqQPtr,
-                                seqKvPtr);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.4f)
+                                    .setMask(static_cast<const TensorBase<float>*>(biasPtr))
+                                    .setBand(c.leftBound, c.rightBound, c.topLeft)
+                                    .setSeqLens(seqQPtr, seqKvPtr)
+                                    .setLse(&lse));
 
     Tensor<float> dQCpu(qDims);
     Tensor<float> dKCpu(kDims);
@@ -194,15 +189,13 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                                  dQCpu,
                                  dKCpu,
                                  dVCpu,
-                                 0.4f,
-                                 c.useLse ? &lse : nullptr,
-                                 static_cast<const TensorBase<float>*>(biasPtr),
-                                 c.leftBound,
-                                 c.rightBound,
-                                 c.topLeft,
-                                 dBiasCpu.has_value() ? &dBiasCpu.value() : nullptr,
-                                 seqQPtr,
-                                 seqKvPtr);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(0.4f)
+                                     .setLse(c.useLse ? &lse : nullptr)
+                                     .setMask(static_cast<const TensorBase<float>*>(biasPtr))
+                                     .setDBias(dBiasCpu.has_value() ? &dBiasCpu.value() : nullptr)
+                                     .setBand(c.leftBound, c.rightBound, c.topLeft)
+                                     .setSeqLens(seqQPtr, seqKvPtr));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -211,15 +204,13 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                               dQGpu,
                               dKGpu,
                               dVGpu,
-                              0.4f,
-                              c.useLse ? &lse : nullptr,
-                              static_cast<TensorBase<float>*>(biasPtr),
-                              c.leftBound,
-                              c.rightBound,
-                              c.topLeft,
-                              dBiasGpu.has_value() ? &dBiasGpu.value() : nullptr,
-                              seqQPtr,
-                              seqKvPtr);
+                              GpuSdpaBwdOptions<float>{}
+                                  .setScale(0.4f)
+                                  .setLse(c.useLse ? &lse : nullptr)
+                                  .setMask(static_cast<TensorBase<float>*>(biasPtr))
+                                  .setDBias(dBiasGpu.has_value() ? &dBiasGpu.value() : nullptr)
+                                  .setBand(c.leftBound, c.rightBound, c.topLeft)
+                                  .setSeqLens(seqQPtr, seqKvPtr));
 
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
@@ -628,20 +619,12 @@ TEST_P(TestGpuSdpaBwdDropoutFp32, MatchesCpuReference)
                                 k,
                                 v,
                                 o,
-                                0.4f,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                0,
-                                false,
-                                &lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &keepMask,
-                                scale);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.4f)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setBand(-1, 0, false)
+                                    .setDropout(&keepMask, scale)
+                                    .setLse(&lse));
 
     Tensor<float> dQCpu(qDims);
     Tensor<float> dKCpu(kDims);
@@ -667,18 +650,13 @@ TEST_P(TestGpuSdpaBwdDropoutFp32, MatchesCpuReference)
                                  dQCpu,
                                  dKCpu,
                                  dVCpu,
-                                 0.4f,
-                                 c.useLse ? &lse : nullptr,
-                                 static_cast<const TensorBase<float>*>(&bias),
-                                 -1,
-                                 0,
-                                 false,
-                                 &dBiasCpu,
-                                 nullptr,
-                                 nullptr,
-                                 &keepMask,
-                                 scale,
-                                 scaleInv);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(0.4f)
+                                     .setLse(c.useLse ? &lse : nullptr)
+                                     .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                     .setDBias(&dBiasCpu)
+                                     .setBand(-1, 0, false)
+                                     .setDropout(&keepMask, scale, scaleInv));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -687,18 +665,13 @@ TEST_P(TestGpuSdpaBwdDropoutFp32, MatchesCpuReference)
                               dQGpu,
                               dKGpu,
                               dVGpu,
-                              0.4f,
-                              c.useLse ? &lse : nullptr,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              false,
-                              &dBiasGpu,
-                              nullptr,
-                              nullptr,
-                              &keepMask,
-                              scale,
-                              scaleInv);
+                              GpuSdpaBwdOptions<float>{}
+                                  .setScale(0.4f)
+                                  .setLse(c.useLse ? &lse : nullptr)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setDBias(&dBiasGpu)
+                                  .setBand(-1, 0, false)
+                                  .setDropout(&keepMask, scale, scaleInv));
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
     assertAllClose(dVCpu, dVGpu, TOL_FP32);
@@ -755,41 +728,23 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                                 k,
                                 v,
                                 oCpu,
-                                SCALE,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                0,
-                                false,
-                                &lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv,
-                                nullptr,
-                                nullptr,
-                                std::nullopt,
-                                SOFTCAP);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(SCALE)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setBand(-1, 0, false)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setSoftcap(SOFTCAP)
+                                    .setLse(&lse));
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
                               oGpu,
-                              SCALE,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              false,
-                              nullptr,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              &seqLenQ,
-                              &seqLenKv,
-                              nullptr,
-                              nullptr,
-                              0,
-                              nullptr,
-                              nullptr,
-                              std::nullopt,
-                              SOFTCAP);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(SCALE)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setBand(-1, 0, false)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setSoftcap(SOFTCAP));
     assertAllClose(oCpu, oGpu, TOL_FP32);
 
     Tensor<float> dQCpu(qDims);
@@ -814,19 +769,14 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                                  dQCpu,
                                  dKCpu,
                                  dVCpu,
-                                 SCALE,
-                                 &lse,
-                                 static_cast<const TensorBase<float>*>(&bias),
-                                 -1,
-                                 0,
-                                 false,
-                                 &dBiasCpu,
-                                 &seqLenQ,
-                                 &seqLenKv,
-                                 nullptr,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 SOFTCAP);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setLse(&lse)
+                                     .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                     .setDBias(&dBiasCpu)
+                                     .setBand(-1, 0, false)
+                                     .setSeqLens(&seqLenQ, &seqLenKv)
+                                     .setSoftcap(SOFTCAP));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -835,19 +785,14 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                               dQGpu,
                               dKGpu,
                               dVGpu,
-                              SCALE,
-                              &lse,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              false,
-                              &dBiasGpu,
-                              &seqLenQ,
-                              &seqLenKv,
-                              nullptr,
-                              std::nullopt,
-                              std::nullopt,
-                              SOFTCAP);
+                              GpuSdpaBwdOptions<float>{}
+                                  .setScale(SCALE)
+                                  .setLse(&lse)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setDBias(&dBiasGpu)
+                                  .setBand(-1, 0, false)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setSoftcap(SOFTCAP));
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
     assertAllClose(dVCpu, dVGpu, TOL_FP32);
@@ -893,47 +838,23 @@ TEST(TestGpuSdpaAlibiFp32, ForwardAndBackwardMatchCpuReference)
                                 k,
                                 v,
                                 oCpu,
-                                SCALE,
-                                static_cast<const TensorBase<float>*>(&bias),
-                                -1,
-                                0,
-                                true,
-                                &lse,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv,
-                                nullptr,
-                                nullptr,
-                                std::nullopt,
-                                std::nullopt,
-                                nullptr,
-                                nullptr,
-                                true);
+                                SdpaFwdOptions<float>{}
+                                    .setScale(SCALE)
+                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                    .setBand(-1, 0, true)
+                                    .setSeqLens(&seqLenQ, &seqLenKv)
+                                    .setAlibi(true)
+                                    .setLse(&lse));
     GpuFpReferenceSdpa::fprop(q,
                               k,
                               v,
                               oGpu,
-                              SCALE,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              true,
-                              nullptr,
-                              SdpaSoftmaxProbabilityMode::FLOAT,
-                              &seqLenQ,
-                              &seqLenKv,
-                              nullptr,
-                              nullptr,
-                              0,
-                              nullptr,
-                              nullptr,
-                              std::nullopt,
-                              std::nullopt,
-                              nullptr,
-                              nullptr,
-                              true);
+                              GpuSdpaFwdOptions<float>{}
+                                  .setScale(SCALE)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setBand(-1, 0, true)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setAlibi(true));
     assertAllClose(oCpu, oGpu, TOL_FP32);
 
     Tensor<float> dQCpu(qDims);
@@ -958,20 +879,14 @@ TEST(TestGpuSdpaAlibiFp32, ForwardAndBackwardMatchCpuReference)
                                  dQCpu,
                                  dKCpu,
                                  dVCpu,
-                                 SCALE,
-                                 &lse,
-                                 static_cast<const TensorBase<float>*>(&bias),
-                                 -1,
-                                 0,
-                                 true,
-                                 &dBiasCpu,
-                                 &seqLenQ,
-                                 &seqLenKv,
-                                 nullptr,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 std::nullopt,
-                                 true);
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setLse(&lse)
+                                     .setMask(static_cast<const TensorBase<float>*>(&bias))
+                                     .setDBias(&dBiasCpu)
+                                     .setBand(-1, 0, true)
+                                     .setSeqLens(&seqLenQ, &seqLenKv)
+                                     .setAlibi(true));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -980,20 +895,14 @@ TEST(TestGpuSdpaAlibiFp32, ForwardAndBackwardMatchCpuReference)
                               dQGpu,
                               dKGpu,
                               dVGpu,
-                              SCALE,
-                              &lse,
-                              static_cast<TensorBase<float>*>(&bias),
-                              -1,
-                              0,
-                              true,
-                              &dBiasGpu,
-                              &seqLenQ,
-                              &seqLenKv,
-                              nullptr,
-                              std::nullopt,
-                              std::nullopt,
-                              std::nullopt,
-                              true);
+                              GpuSdpaBwdOptions<float>{}
+                                  .setScale(SCALE)
+                                  .setLse(&lse)
+                                  .setMask(static_cast<TensorBase<float>*>(&bias))
+                                  .setDBias(&dBiasGpu)
+                                  .setBand(-1, 0, true)
+                                  .setSeqLens(&seqLenQ, &seqLenKv)
+                                  .setAlibi(true));
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
     assertAllClose(dVCpu, dVGpu, TOL_FP32);

@@ -283,25 +283,23 @@ public:
                 kTensor,
                 vTensor,
                 oTensor,
-                attnScale,
-                attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                REFERENCE_SDPA_PROBABILITY_MODE,
-                seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
-                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr,
-                pageTableK.has_value() ? &pageTableK.value() : nullptr,
-                pageTableV.has_value() ? &pageTableV.value() : nullptr,
-                _params.pagedMaxSeqKv,
-                sinkTensor.has_value() ? &sinkTensor.value() : nullptr,
-                dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
-                dropoutScale,
-                std::nullopt,
-                maxTensor.has_value() ? &maxTensor.value() : nullptr,
-                sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr,
-                _params.alibi);
+                hipdnn_gpu_ref::GpuSdpaFwdOptions<MaskDataType>{}
+                    .setScale(attnScale)
+                    .setMask(attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr)
+                    .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                    .setSeqLens(seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
+                                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr)
+                    .setPaged(pageTableK.has_value() ? &pageTableK.value() : nullptr,
+                              pageTableV.has_value() ? &pageTableV.value() : nullptr,
+                              _params.pagedMaxSeqKv)
+                    .setSink(sinkTensor.has_value() ? &sinkTensor.value() : nullptr)
+                    .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+                                dropoutScale)
+                    .setAlibi(_params.alibi)
+                    .setLse(lseTensor.has_value() ? &lseTensor.value() : nullptr)
+                    .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
+                                 sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
+                    .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE));
     }
 
 private:

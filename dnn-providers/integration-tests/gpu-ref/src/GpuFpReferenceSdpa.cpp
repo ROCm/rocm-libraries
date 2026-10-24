@@ -106,14 +106,14 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.q = qPtr;
     args.k = kPtr;
     args.v = vPtr;
-    args.mask = maskPtr;
+    args.score.mask = maskPtr;
     args.o = oPtr;
     args.lse = lsePtr;
     args.qStr = toSdpaStrides(qTensorStrides);
     args.kStr = toSdpaStrides(kTensorStrides);
     args.vStr = toSdpaStrides(vTensorStrides);
     args.oStr = toSdpaStrides(oTensorStrides);
-    args.maskStr = toSdpaStrides(maskTensorStrides);
+    args.score.maskStr = toSdpaStrides(maskTensorStrides);
     args.lseStr = toSdpaStrides(lseTensorStrides);
     args.batch = static_cast<long long>(batch);
     args.numHeads = static_cast<long long>(numHeads);
@@ -123,15 +123,15 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.seqKv = static_cast<long long>(seqKv);
     args.headDim = static_cast<long long>(headDim);
     args.headDimV = static_cast<long long>(headDimV);
-    args.maskRank = static_cast<int>(maskDims.size());
+    args.score.maskRank = static_cast<int>(maskDims.size());
     for(size_t i = 0; i < 4 && i < maskDims.size(); ++i)
     {
-        args.maskDims[i] = static_cast<long long>(maskDims[i]);
+        args.score.maskDims[i] = static_cast<long long>(maskDims[i]);
     }
-    args.scale = scale;
-    args.leftBound = static_cast<long long>(leftBound);
-    args.rightBound = static_cast<long long>(rightBound);
-    args.topLeftAlignment = topLeftAlignment ? 1 : 0;
+    args.score.scale = scale;
+    args.score.leftBound = static_cast<long long>(leftBound);
+    args.score.rightBound = static_cast<long long>(rightBound);
+    args.score.topLeftAlignment = topLeftAlignment ? 1 : 0;
     args.seqLenQ = seqLenQPtr;
     args.seqLenKv = seqLenKvPtr;
     args.seqLenQStride = static_cast<long long>(seqLenQStride);
@@ -149,12 +149,12 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.dropoutMask = dropoutMaskPtr;
     args.dropoutMaskStr = toSdpaStrides(dropoutMaskStrides);
     args.dropoutScale = dropoutScale;
-    args.softcap = softcap;
+    args.score.softcap = softcap;
     args.rowMax = rowMaxPtr;
     args.rowSumExp = rowSumExpPtr;
     args.rowMaxStr = toSdpaStrides(rowMaxStrides);
     args.rowSumExpStr = toSdpaStrides(rowSumExpStrides);
-    args.alibi = alibi ? 1 : 0;
+    args.score.alibi = alibi ? 1 : 0;
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
@@ -178,7 +178,7 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.v = launch.v;
     args.o = launch.o;
     args.dO = launch.dO;
-    args.mask = launch.mask;
+    args.score.mask = launch.mask;
     args.lse = launch.lse;
     args.dQ = launch.dQ;
     args.dK = launch.dK;
@@ -196,7 +196,7 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.dQStr = toSdpaStrides(st[5]);
     args.dKStr = toSdpaStrides(st[6]);
     args.dVStr = toSdpaStrides(st[7]);
-    args.maskStr = toSdpaStrides(st[8]);
+    args.score.maskStr = toSdpaStrides(st[8]);
     args.dBiasStr = toSdpaStrides(st[9]);
     args.lseStr = toSdpaStrides(st[10]);
     args.batch = static_cast<long long>(launch.batch);
@@ -207,15 +207,15 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.seqKv = static_cast<long long>(launch.seqKv);
     args.headDim = static_cast<long long>(launch.headDim);
     args.headDimV = static_cast<long long>(launch.headDimV);
-    args.maskRank = static_cast<int>(launch.maskDims.size());
+    args.score.maskRank = static_cast<int>(launch.maskDims.size());
     for(size_t i = 0; i < launch.maskDims.size() && i < 4; ++i)
     {
-        args.maskDims[i] = static_cast<long long>(launch.maskDims[i]);
+        args.score.maskDims[i] = static_cast<long long>(launch.maskDims[i]);
     }
-    args.scale = launch.scale;
-    args.leftBound = static_cast<long long>(launch.leftBound);
-    args.rightBound = static_cast<long long>(launch.rightBound);
-    args.topLeftAlignment = launch.topLeftAlignment ? 1 : 0;
+    args.score.scale = launch.scale;
+    args.score.leftBound = static_cast<long long>(launch.leftBound);
+    args.score.rightBound = static_cast<long long>(launch.rightBound);
+    args.score.topLeftAlignment = launch.topLeftAlignment ? 1 : 0;
     args.seqLenQ = launch.seqLenQ;
     args.seqLenKv = launch.seqLenKv;
     args.seqLenQStride = static_cast<long long>(launch.seqLenQStride);
@@ -224,8 +224,8 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.dropoutMaskStr = toSdpaStrides(launch.dropoutMaskStrides);
     args.dropoutScale = launch.dropoutScale;
     args.dropoutScaleInv = launch.dropoutScaleInv;
-    args.softcap = launch.softcap;
-    args.alibi = launch.alibi ? 1 : 0;
+    args.score.softcap = launch.softcap;
+    args.score.alibi = launch.alibi ? 1 : 0;
 
     const auto run = [&](const char* name, int64_t elements) {
         auto& kernel = compiler.getOrCompile("GpuRefSdpaBwd.cpp", defines, name);

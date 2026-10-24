@@ -14,6 +14,7 @@
 // both FMA-vs-separate-multiply/add noise and host-libm-vs-device-math differences.
 
 #include "GpuRefSdpaArgs.h"
+#include "GpuRefSdpaCommon.hpp"
 #include "GpuRefTypes.h"
 
 using namespace gpu_ref;
@@ -57,22 +58,6 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 #endif
 }
 
-// cuDNN's ALiBi slope for query head h (CpuFpReferenceSdpa::alibiSlope): 2^(-8 (h + 1) / n) for
-// the closest power of two n <= numHeads, then 2^(-4 (2 j + 1) / n) for the remaining heads.
-__device__ inline float alibiSlope(long long h, long long numHeads)
-{
-    long long n = 1;
-    while(n * 2 <= numHeads)
-    {
-        n *= 2;
-    }
-    if(h < n)
-    {
-        return exp2f(-8.0f * static_cast<float>(h + 1) / static_cast<float>(n));
-    }
-    return exp2f(-4.0f * static_cast<float>(2 * (h - n) + 1) / static_cast<float>(n));
-}
-
 // cuDNN Max / Sum_exp outputs (CpuFpReferenceSdpa rowMax / rowSumExp), written by the dv == 0
 // thread of each row like the LSE.
 __device__ inline void writeRowStats(const SdpaFwdArgs& args,
@@ -109,7 +94,6 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     auto* k = static_cast<const K_TYPE*>(args.k);
     auto* v = static_cast<const V_TYPE*>(args.v);
     auto* o = static_cast<O_TYPE*>(args.o);
-    auto* mask = static_cast<const MASK_TYPE*>(args.mask);
     // LSE is always float [B, H, Sq]; nullptr disables it. Written once per
     // (b, h, sq) by the dv == 0 thread (see below).
     auto* lse = static_cast<float*>(args.lse);
@@ -134,18 +118,10 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     long long kvHeadK = h / (args.numHeads / args.numHeadsK);
     long long kvHeadV = h / (args.numHeads / args.numHeadsV);
 
-    // Padding (cuDNN): this batch's valid lengths. Lengths outside [0, padded length] are an
-    // invalid graph that the CPU reference rejects; the kernel cannot throw, so it clamps.
-    auto liveLength = [](const int* lens, long long stride, long long batchIdx, long long full) {
-        if(lens == nullptr)
-        {
-            return full;
-        }
-        long long len = static_cast<long long>(lens[batchIdx * stride]);
-        return len < 0 ? 0 : (len > full ? full : len);
-    };
-    const long long liveQ = liveLength(args.seqLenQ, args.seqLenQStride, b, args.seqQ);
-    const long long liveKv = liveLength(args.seqLenKv, args.seqLenKvStride, b, args.seqKv);
+    // Padding (cuDNN): this batch's valid lengths.
+    const long long liveQ = sdpa_common::liveLength(args.seqLenQ, args.seqLenQStride, b, args.seqQ);
+    const long long liveKv
+        = sdpa_common::liveLength(args.seqLenKv, args.seqLenKvStride, b, args.seqKv);
 
     // Element offset of logical key `skv` (row base, without head and dim terms) in a dense or
     // paged K / V. Only called for skv < liveKv, so unused table entries are never read.
@@ -162,10 +138,6 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         long long block = static_cast<long long>(table[b * strB + (skv / blockSize) * strT]);
         return block * str.s[0] + (skv % blockSize) * str.s[2];
     };
-
-    // Sliding-window offset (matches CpuFpReferenceSdpa Step 3): bottom-right alignment uses the
-    // batch's valid lengths.
-    long long windowOffset = args.topLeftAlignment ? 0 : (liveKv - liveQ);
 
     // Negative infinity sentinel for masked scores. INFINITY (a <math.h> macro)
     // is unavailable under HipRTC's self-contained preinclude, so use the clang
@@ -189,53 +161,12 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
                              + kvHeadK * args.kStr.s[1] + d * args.kStr.s[3];
             dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
         }
-        COMPUTE_TYPE s = dot * static_cast<COMPUTE_TYPE>(args.scale);
-        if(args.softcap > 0.0f)
+        // The shared score pipeline (scale, softcap, bias, ALiBi), then the band.
+        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv))
         {
-            s = args.softcap * tanhf(s / args.softcap);
+            return negInf;
         }
-
-        // (a) Additive attention mask (right-aligned, broadcast on size-1 dims).
-        if(mask != nullptr)
-        {
-            long long ctxIdxs[4] = {b, h, sq, skv};
-            long long maskOffset = 0;
-            for(int i = 0; i < args.maskRank; ++i)
-            {
-                long long ctxIdx = ctxIdxs[4 - args.maskRank + i];
-                long long idxI = (args.maskDims[i] == 1) ? 0 : ctxIdx;
-                maskOffset += idxI * args.maskStr.s[i];
-            }
-            s += toAccum(mask[maskOffset]);
-        }
-        if(args.alibi != 0)
-        {
-            s += static_cast<COMPUTE_TYPE>(skv - sq)
-                 * static_cast<COMPUTE_TYPE>(alibiSlope(h, args.numHeads));
-        }
-
-        // (b) Sliding-window mask (applied after the additive mask).
-        // Asymmetric: +1 on the right bound, none on the left bound.
-        if(args.rightBound >= 0)
-        {
-            long long startKv = sq + 1 + windowOffset + args.rightBound;
-            if(startKv < 0)
-            {
-                startKv = 0;
-            }
-            if(skv >= startKv)
-            {
-                s = negInf;
-            }
-        }
-        if(args.leftBound >= 0)
-        {
-            if(skv <= sq + windowOffset - args.leftBound)
-            {
-                s = negInf;
-            }
-        }
-        return s;
+        return sdpa_common::scoreFromDot(args.score, dot, b, h, sq, skv, args.numHeads);
     };
 
     // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
@@ -298,9 +229,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         {
             probability
                 *= static_cast<COMPUTE_TYPE>(args.dropoutScale)
-                   * args.dropoutMask[b * args.dropoutMaskStr.s[0] + h * args.dropoutMaskStr.s[1]
-                                      + sq * args.dropoutMaskStr.s[2]
-                                      + skv * args.dropoutMaskStr.s[3]];
+                   * sdpa_common::dropoutAt(args.dropoutMask, args.dropoutMaskStr, b, h, sq, skv);
         }
 
         long long vIdx = rowOffset(args.pageTableV,

@@ -334,11 +334,12 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
     builtPlan->execute(variantPack);
 
     // Direct reference with the same explicit scale value.
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
-                                                            directTensorBundle.kTensor,
-                                                            directTensorBundle.vTensor,
-                                                            directTensorBundle.oTensor,
-                                                            scaleHostValue);
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        directTensorBundle.qTensor,
+        directTensorBundle.kTensor,
+        directTensorBundle.vTensor,
+        directTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}.setScale(scaleHostValue));
 
     const float tolerance = 1e-5f;
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -382,13 +383,12 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     variantPack[nodeAttributes->o_tensor_uid()] = planTensorBundle.oTensor.memory().hostData();
 
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
-                                                            directTensorBundle.kTensor,
-                                                            directTensorBundle.vTensor,
-                                                            directTensorBundle.oTensor,
-                                                            std::nullopt,
-                                                            noMask,
-                                                            /*causalMask=*/true);
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        directTensorBundle.qTensor,
+        directTensorBundle.kTensor,
+        directTensorBundle.vTensor,
+        directTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
     SdpaFwdPlan<float, float, float, float> patient(std::move(params));
     patient.execute(variantPack);
@@ -453,15 +453,12 @@ TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
 
     // Direct CPU reference with the same asymmetric window parameters.
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
-                                                            directTensorBundle.kTensor,
-                                                            directTensorBundle.vTensor,
-                                                            directTensorBundle.oTensor,
-                                                            std::nullopt,
-                                                            noMask,
-                                                            LEFT_BOUND,
-                                                            RIGHT_BOUND,
-                                                            /*topLeftAlignment=*/true);
+    CpuFpReferenceSdpa::forward<float, float, float, float>(
+        directTensorBundle.qTensor,
+        directTensorBundle.kTensor,
+        directTensorBundle.vTensor,
+        directTensorBundle.oTensor,
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, true));
 
     const float tolerance = 1e-5f;
     const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -643,21 +640,8 @@ TEST(TestSdpaFwdPlanPadding, ExecuteMatchesDirectReference)
 
     hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                oRef,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, oRef, SdpaFwdOptions<float>{}.setMask(noMask).setSeqLens(&seqLenQ, &seqLenKv));
 
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
@@ -844,21 +828,12 @@ TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
     auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
     hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                kDense,
-                                vDense,
-                                oRef,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+    CpuFpReferenceSdpa::forward(
+        q,
+        kDense,
+        vDense,
+        oRef,
+        SdpaFwdOptions<float>{}.setMask(noMask).setSeqLens(&seqLenQ, &seqLenKv));
 
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
@@ -950,21 +925,12 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
     auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
     hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(qT,
-                                kDense,
-                                vDense,
-                                oRef,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &seqLenQ,
-                                &seqLenKv);
+    CpuFpReferenceSdpa::forward(
+        qT,
+        kDense,
+        vDense,
+        oRef,
+        SdpaFwdOptions<float>{}.setMask(noMask).setSeqLens(&seqLenQ, &seqLenKv));
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(oT, oRef));
 }
@@ -1078,24 +1044,8 @@ TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
 
     hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                oRef,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &keepMask,
-                                1.5F);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, oRef, SdpaFwdOptions<float>{}.setMask(noMask).setDropout(&keepMask, 1.5F));
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
 }
@@ -1179,24 +1129,12 @@ TEST(TestSdpaFwdPlanDropout, PhiloxWithRngDumpUsesDumpedMask)
 
     hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                oRef,
-                                std::nullopt,
-                                noMask,
-                                -1,
-                                -1,
-                                true,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                &dumpedMask,
-                                1.0F / 0.75F);
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        oRef,
+        SdpaFwdOptions<float>{}.setMask(noMask).setDropout(&dumpedMask, 1.0F / 0.75F));
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
 }
@@ -1305,23 +1243,7 @@ TEST(TestSdpaFwdPlanRowStats, ExecuteWritesMaxAndSumExpConsistentWithLse)
         k,
         v,
         oRef,
-        std::nullopt,
-        static_cast<const hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
-        -1,
-        0,
-        true,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        std::nullopt,
-        std::nullopt,
-        &maxRef,
-        &sumExpRef);
+        SdpaFwdOptions<float>{}.setBand(-1, 0, true).setRowStats(&maxRef, &sumExpRef));
     for(int64_t h = 0; h < 2; ++h)
     {
         for(int64_t sq = 0; sq < 4; ++sq)
@@ -1388,16 +1310,12 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
     // Independently compute the expected LSE via the direct reference and compare.
     SdpaFwdTensorBundle<float> directBundle(qDims, kDims, vDims, /*seed=*/1);
     hipdnn_data_sdk::utilities::Tensor<float> directLse({qDims[0], qDims[1], qDims[2], 1});
-    CpuFpReferenceSdpa::forward<float, float, float, float, float>(directBundle.qTensor,
-                                                                   directBundle.kTensor,
-                                                                   directBundle.vTensor,
-                                                                   directBundle.oTensor,
-                                                                   std::nullopt,
-                                                                   /*attnMask=*/nullptr,
-                                                                   /*leftBound=*/-1,
-                                                                   /*rightBound=*/-1,
-                                                                   /*topLeftAlignment=*/true,
-                                                                   &directLse);
+    CpuFpReferenceSdpa::forward<float, float, float, float, float>(
+        directBundle.qTensor,
+        directBundle.kTensor,
+        directBundle.vTensor,
+        directBundle.oTensor,
+        SdpaFwdOptions<float>{}.setLse(&directLse));
 
     const float tolerance = 1e-5f;
     const CpuFpReferenceValidation<float> lseValidation(tolerance, tolerance);
