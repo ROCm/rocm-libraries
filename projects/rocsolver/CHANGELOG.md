@@ -22,6 +22,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
+* Fixed memory access faults for matrices with more than 2^31 elements (for example in GEQLF and ORGQL/UNGQL), caused by 32-bit internal matrix offsets.
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
 * Fixed a race condition in SYEVJ GPU kernel.
