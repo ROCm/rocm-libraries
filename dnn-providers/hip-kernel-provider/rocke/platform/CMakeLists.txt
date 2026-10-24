@@ -14,7 +14,9 @@ cmake_minimum_required(VERSION 3.16)
 project(rocke LANGUAGES CXX)
 
 include(GNUInstallDirs)
-find_package(Python3 COMPONENTS Interpreter QUIET)
+# Required: the engine's copy of the intrinsic arch-domain table is generated
+# at build time from the committed JSON columns (see below).
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -146,12 +148,8 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
-if(Python3_Interpreter_FOUND)
-  set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
-      "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
-else()
-  set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/python/site-packages")
-endif()
+set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
 
@@ -176,6 +174,36 @@ target_include_directories(rocke_core_objects PRIVATE
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# --- Intrinsic arch-domain table ---------------------------------------------
+# Which intrinsic declarations each gfx target can lower is measured by
+# tools/gen_arch_domain.py and committed as one JSON column per LLVM flavor,
+# beside the reviewed waivers in arch_domain_waivers.json. Those files are the
+# one source of truth. The Python engine reads them when it lowers; this engine
+# gets a copy generated here, through the same Python reader, so there is no
+# hand-maintained mirror to drift. Regenerating a column or editing a waiver
+# needs no other step: the next build rewrites this file. It lives in the
+# build tree and is never committed.
+set(_rocke_arch_domain_inc
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/rocke/arch_domain_table.inc")
+file(GLOB _rocke_arch_domain_columns CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
+add_custom_command(
+  OUTPUT "${_rocke_arch_domain_inc}"
+  COMMAND "${Python3_EXECUTABLE}" -I
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain_cpp.py"
+          --out "${_rocke_arch_domain_inc}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain_cpp.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/domain.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/data/arch_domain_waivers.json"
+          ${_rocke_arch_domain_columns}
+  COMMENT "Generating the C++ arch-domain table from the committed columns"
+  VERBATIM)
+# The objects are compiled once in rocke_core_objects and shared by the static
+# and shared libraries, so the table belongs to that target.
+target_sources(rocke_core_objects PRIVATE "${_rocke_arch_domain_inc}")
+target_include_directories(rocke_core_objects PRIVATE
+                           "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine
@@ -398,7 +426,6 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
-              # Configures source CMake modules; not an installed runtime test.
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
