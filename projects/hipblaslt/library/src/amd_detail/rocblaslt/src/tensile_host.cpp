@@ -8160,3 +8160,251 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
                                                           size_t&                       workspaceSizeInBytes);
 // clang-format on
 CREATECOMPATIBILITYFUNCTION(rocblaslt::RocTuningV2)
+
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNELS
+/***********************************************************************************
+ * Local kernel library
+ ***********************************************************************************/
+
+namespace
+{
+    using LocalKernelLibrary = TensileLite::LocalKernelLibrary<TensileLite::ContractionProblemGemm,
+                                                               TensileLite::ContractionSolution>;
+
+    // Makes the handle's device current and restores the caller's on exit.
+    // The adapter is the handle's device's, and hipModuleLoad, including the
+    // adapter's own setup, loads onto the current device.
+    class HandleDeviceScope
+    {
+    public:
+        explicit HandleDeviceScope(int device)
+        {
+            if(hipGetDevice(&m_previous) != hipSuccess)
+                m_previous = -1;
+            if(m_previous == device)
+                m_current = true;
+            else
+                m_current = m_changed = hipSetDevice(device) == hipSuccess;
+        }
+        ~HandleDeviceScope()
+        {
+            if(m_changed && m_previous >= 0)
+                static_cast<void>(hipSetDevice(m_previous));
+        }
+        HandleDeviceScope(HandleDeviceScope const&)            = delete;
+        HandleDeviceScope& operator=(HandleDeviceScope const&) = delete;
+
+        bool current() const
+        {
+            return m_current;
+        }
+
+    private:
+        int  m_previous = -1;
+        bool m_current  = false;
+        bool m_changed  = false;
+    };
+
+    // Initializes the library for the handle's device if needed.
+    rocblaslt_status getLocalKernelLibrary(rocblaslt_handle                     handle,
+                                           std::shared_ptr<LocalKernelLibrary>* localLibrary,
+                                           TensileLite::hip::SolutionAdapter**  adapter)
+    {
+        std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                               library;
+        std::shared_ptr<hipDeviceProp_t>       deviceProp;
+        std::shared_ptr<TensileLite::Hardware> hardware;
+
+        auto* a = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+        if(!library || !a || !library->localLibrary)
+            return rocblaslt_status_internal_error;
+        *localLibrary = library->localLibrary;
+        if(adapter)
+            *adapter = a;
+        return rocblaslt_status_success;
+    }
+} // namespace
+
+rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
+                                                 const char*       libraryPath,
+                                                 const char*       codeObjectPath,
+                                                 std::vector<int>& kernelIndices)
+try
+{
+    kernelIndices.clear();
+
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!libraryPath || !codeObjectPath)
+        return rocblaslt_status_invalid_pointer;
+
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
+
+    std::shared_ptr<LocalKernelLibrary> localLibrary;
+    TensileLite::hip::SolutionAdapter*  adapter = nullptr;
+    if(auto st = getLocalKernelLibrary(handle, &localLibrary, &adapter);
+       st != rocblaslt_status_success)
+        return st;
+    auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(
+        TensileLite::hip::GetDevice(handle->device));
+    if(!gpu)
+        return rocblaslt_status_internal_error;
+
+    // Every device loads the code object by this name the first time it runs
+    // one of the kernels, so it must not depend on the working directory.
+    std::error_code ec;
+    const auto      coPath = std::filesystem::canonical(codeObjectPath, ec).string();
+    if(ec)
+    {
+        log_error(__func__, "cannot resolve code object path", codeObjectPath);
+        return rocblaslt_status_invalid_value;
+    }
+
+    auto loaded = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm,
+                                               TensileLite::ContractionSolution>(libraryPath);
+    auto shard  = std::dynamic_pointer_cast<
+         TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(loaded);
+    if(!shard)
+    {
+        log_error(__func__, "cannot load library", libraryPath);
+        return rocblaslt_status_invalid_value;
+    }
+
+    // An indexed shard parses solutions on demand; parse them all first.
+    shard->materializeAllSolutions();
+    if(shard->solutions.empty())
+    {
+        log_error(__func__, "library holds no solutions", libraryPath);
+        return rocblaslt_status_invalid_value;
+    }
+
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+    solutions.reserve(shard->solutions.size());
+    for(auto const& entry : shard->solutions)
+    {
+        if(!entry.second)
+            continue;
+        if(!(*entry.second->hardwarePredicate)(*gpu))
+        {
+            log_error(__func__, "library was not built for this device", libraryPath);
+            return rocblaslt_status_invalid_value;
+        }
+        if(!TensileLite::pinToProcessor(*entry.second, gpu->processor))
+        {
+            log_error(__func__, "library has an unrecognized hardware predicate", libraryPath);
+            return rocblaslt_status_invalid_value;
+        }
+        // The file's own index; addSolutions takes only unindexed solutions.
+        // This shard was parsed for this call, so nothing else shares them.
+        entry.second->index = -1;
+        solutions.push_back(entry.second);
+    }
+
+    // Loaded at most once per path and without the shipped modules'
+    // out-of-memory recovery, so a bad file cannot unload shipped kernels.
+    if(adapter->loadLocalCodeObject(coPath) != hipSuccess)
+        return rocblaslt_status_invalid_value;
+
+    // Kernels resolve only within their own code object, so every one must be
+    // there; otherwise a launch would fail after selection had returned it.
+    for(auto const& solution : solutions)
+    {
+        hipFunction_t function;
+        if(adapter->getLocalKernel(function, coPath, solution->KernelName()) != hipSuccess)
+        {
+            log_error(__func__, "code object does not define kernel", solution->KernelName());
+            return rocblaslt_status_invalid_value;
+        }
+        solution->codeObjectFilename = coPath;
+    }
+
+    kernelIndices = localLibrary->addSolutions(solutions);
+    if(kernelIndices.size() != solutions.size())
+    {
+        log_error(__func__, "local kernel index range exhausted");
+        kernelIndices.clear();
+        return rocblaslt_status_internal_error;
+    }
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status rocblaslt_local_kernel_set_exact_match(
+    rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k)
+try
+{
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+    if(!TensileLite::isLocalKernelIndex(kernelIndex))
+        return rocblaslt_status_invalid_value;
+
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
+
+    std::shared_ptr<LocalKernelLibrary> localLibrary;
+    if(auto st = getLocalKernelLibrary(handle, &localLibrary, nullptr);
+       st != rocblaslt_status_success)
+        return st;
+
+    if(!localLibrary->setExactMatch(TensileLite::LocalExactShape{m, n, batch, k}, kernelIndex))
+        return rocblaslt_status_invalid_value;
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+rocblaslt_status
+    rocblaslt_local_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable)
+try
+{
+    if(!handle)
+        return rocblaslt_status_invalid_handle;
+
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
+
+    std::shared_ptr<LocalKernelLibrary> localLibrary;
+    if(auto st = getLocalKernelLibrary(handle, &localLibrary, nullptr);
+       st != rocblaslt_status_success)
+        return st;
+
+    if(registered)
+        *registered = localLibrary->registeredCount();
+    if(selectable)
+        *selectable = localLibrary->selectableCount();
+    return rocblaslt_status_success;
+}
+catch(const std::exception& e)
+{
+    log_error(__func__, e.what());
+    return rocblaslt_status_internal_error;
+}
+catch(...)
+{
+    return rocblaslt_status_internal_error;
+}
+
+bool rocblaslt_is_local_kernel_index(int index)
+{
+    return TensileLite::isLocalKernelIndex(index);
+}
+#endif // HIPBLASLT_ENABLE_LOCAL_KERNELS
