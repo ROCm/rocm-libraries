@@ -402,6 +402,375 @@ void case_quad_perm_rejects_out_of_range_ctrl()
     expect_quad_perm_ctrl_rejected(-1);
 }
 
+/* ---- dpp_xor / warp_shuffle_xor_dpp ---- */
+/* The DPP control word each XOR mask lowers to on gfx9 CDNA (no row_xmask):
+ * quad_perm 0xB1/0x4E/0x1B, row_half_mirror 0x141, row_ror:8 0x128,
+ * row_mirror 0x140. Each is exactly lane i -> i ^ mask in a 16-lane row. */
+static const struct
+{
+    int mask;
+    int ctrl;
+} k_dpp_xor_gfx9[] = {{1, 177}, {2, 78}, {3, 27}, {7, 321}, {8, 296}, {15, 320}};
+
+static bool dpp_xor_gfx9_has(int mask)
+{
+    for(const auto& e : k_dpp_xor_gfx9)
+        if(e.mask == mask)
+            return true;
+    return false;
+}
+
+static std::string dpp_call(int ctrl)
+{
+    return "call i32 @llvm.amdgcn.update.dpp.i32(i32 1, i32 1, i32 " + std::to_string(ctrl)
+           + ", i32 15, i32 15, i1 true)";
+}
+
+/* One kernel per (arch, mask): the expected control word and no other
+ * update.dpp call, so a swapped table entry fails here. */
+void case_dpp_xor_gfx9_encodings()
+{
+    for(const char* arch : {"gfx942", "gfx950"})
+        for(const auto& e : k_dpp_xor_gfx9)
+        {
+            const int mask = e.mask;
+            const std::string ir = lower_one(
+                "dppx_gfx9",
+                [mask](rocke_ir_builder_t* b) {
+                    rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), mask);
+                },
+                arch);
+            EXPECT_IR(ir,
+                      "declare i32 @llvm.amdgcn.update.dpp.i32("
+                      "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
+            EXPECT_IR(ir, dpp_call(e.ctrl).c_str());
+            EXPECT_IR_COUNT(ir, "call i32 @llvm.amdgcn.update.dpp.i32(", 1);
+        }
+}
+
+/* Targets with row_xmask keep 0x160 | mask for every mask 1..15. */
+void case_dpp_xor_row_xmask_encodings()
+{
+    for(const char* arch : {"gfx1151", "gfx1201", "gfx1250"})
+        for(int mask = 1; mask <= 15; ++mask)
+        {
+            const std::string ir = lower_one(
+                "dppx_rdna",
+                [mask](rocke_ir_builder_t* b) {
+                    rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), mask);
+                },
+                arch);
+            EXPECT_IR(ir, dpp_call(0x160 | mask).c_str());
+        }
+}
+
+void case_dpp_xor_hip()
+{
+    const std::string gfx9 = lower_one_hip(
+        "dppx_hip_gfx9",
+        [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
+        "gfx942");
+    EXPECT_IR(gfx9, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
+    const std::string rdna = lower_one_hip(
+        "dppx_hip_rdna",
+        [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
+        "gfx1201");
+    EXPECT_IR(rdna, "__builtin_amdgcn_update_dpp(c1, c1, 359, 15, 15, 1)");
+}
+
+/* f32 goes through i32: bitcast, one dpp_xor, bitcast back. */
+void case_warp_shuffle_xor_dpp_f32()
+{
+    const std::string ir = lower_one("dppx_f32", [](rocke_ir_builder_t* b) {
+        rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_f32(b, 1.0), 15);
+    });
+    EXPECT_IR(ir, "bitcast float");
+    EXPECT_IR(ir, "i32 320, i32 15, i32 15, i1 true)");
+    EXPECT_IR(ir, "to float");
+}
+
+/* Both C++ lowerers must return `want` for a builder-made dpp_xor of `mask`. */
+void expect_dpp_xor_status(const char* arch, int mask, rocke_status_t want, int line)
+{
+    char msg[160];
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dppx_status_hip");
+        rocke_b_dpp_xor(&b, rocke_b_const_i32(&b, 1), mask);
+        rocke_b_ret(&b);
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = arch;
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != want)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "HIP %s mask %d: status %d, want %d",
+                     arch,
+                     mask,
+                     (int)st,
+                     (int)want);
+            fail(msg, line);
+        }
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dppx_status_ll");
+        rocke_b_dpp_xor(&b, rocke_b_const_i32(&b, 1), mask);
+        rocke_b_ret(&b);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, arch, &ll, err, sizeof(err));
+        if(st != want)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "LLVM %s mask %d: status %d, want %d",
+                     arch,
+                     mask,
+                     (int)st,
+                     (int)want);
+            fail(msg, line);
+        }
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* gfx9 CDNA has no row_xmask: a mask outside the table fails loudly in both
+ * lowerers instead of emitting a control word the target does not have. The
+ * same masks lower on a row_xmask target. */
+void case_dpp_xor_gfx9_rejects_unencodable_mask()
+{
+    for(int mask = 1; mask <= 15; ++mask)
+    {
+        const rocke_status_t want = dpp_xor_gfx9_has(mask) ? ROCKE_OK : ROCKE_ERR_VALUE;
+        expect_dpp_xor_status("gfx942", mask, want, __LINE__);
+        expect_dpp_xor_status("gfx950", mask, want, __LINE__);
+        expect_dpp_xor_status("gfx1201", mask, ROCKE_OK, __LINE__);
+    }
+}
+
+void expect_builder_rejects(const char* what, rocke_value_t* (*build)(rocke_ir_builder_t*))
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "dppx_builder_bad");
+    bool rejected = false;
+    try
+    {
+        rocke_value_t* r = build(&b);
+        rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+    }
+    catch(...)
+    {
+        rejected = true;
+    }
+    if(!rejected)
+        fail(what, __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+void case_dpp_xor_builders_reject_invalid_input()
+{
+    expect_builder_rejects("dpp_xor must reject f32 data", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_f32(b, 1.0), 1);
+    });
+    expect_builder_rejects("dpp_xor must reject mask 0", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_i32(b, 1), 0);
+    });
+    expect_builder_rejects("dpp_xor must reject mask 16", [](rocke_ir_builder_t* b) {
+        return rocke_b_dpp_xor(b, rocke_b_const_i32(b, 1), 16);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject mask 0", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 0);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject mask 16", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 16);
+    });
+    expect_builder_rejects("warp_shuffle_xor_dpp must reject i64", [](rocke_ir_builder_t* b) {
+        return rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i64(b, 1), 1);
+    });
+}
+
+/* How a raw DPP op carries its int attribute ("ctrl", or "xor_mask" for
+ * tile.dpp_xor). */
+enum class RawCtrl
+{
+    Missing,
+    Int,
+    Float,
+    Bool,
+    Str
+};
+
+/* The operand/result shape of a raw DPP op. Ok is the builder's shape: one
+ * i32 operand, one i32 result. */
+enum class RawShape
+{
+    Ok,
+    F32Data,
+    F32Result,
+    TwoOperands,
+    NoOperands
+};
+
+/* Raw DPP op that skipped the builder (hand-built, deserialized, or rewritten
+ * by a pass): the lowerers must reject it, never coerce it or crash on it. */
+void build_dpp_raw(
+    rocke_ir_builder_t* b, rocke_opcode_t opcode, RawShape shape, RawCtrl kind, int64_t ctrl)
+{
+    const char* key = opcode == ROCKE_OP_TILE_DPP_XOR ? "xor_mask" : "ctrl";
+    rocke_value_t* data
+        = shape == RawShape::F32Data ? rocke_b_const_f32(b, 1.0) : rocke_b_const_i32(b, 1);
+    rocke_value_t* operands[] = {data, rocke_b_const_i32(b, 2)};
+    const int num_operands = shape == RawShape::TwoOperands  ? 2
+                             : shape == RawShape::NoOperands ? 0
+                                                             : 1;
+    const rocke_type_t* result_types[] = {shape == RawShape::F32Result ? rocke_f32() : rocke_i32()};
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    char text[32];
+    snprintf(text, sizeof(text), "%lld", (long long)ctrl);
+    switch(kind)
+    {
+    case RawCtrl::Missing:
+        break;
+    case RawCtrl::Int:
+        rocke_attr_set_int(b, &attrs, key, ctrl);
+        break;
+    case RawCtrl::Float:
+        rocke_attr_set_float(b, &attrs, key, (double)ctrl + 0.9);
+        break;
+    case RawCtrl::Bool:
+        rocke_attr_set_bool(b, &attrs, key, true);
+        break;
+    case RawCtrl::Str:
+        rocke_attr_set_str(b, &attrs, key, text);
+        break;
+    }
+    rocke_b_op(b,
+               opcode,
+               operands,
+               num_operands,
+               result_types,
+               1,
+               kind == RawCtrl::Missing ? nullptr : &attrs,
+               nullptr,
+               0,
+               "dpp",
+               nullptr);
+    rocke_b_ret(b);
+}
+
+/* Both C++ lowerers must return `want` for the raw op. */
+void expect_dpp_raw_rejected(rocke_opcode_t opcode,
+                             RawShape shape,
+                             RawCtrl kind,
+                             int64_t ctrl,
+                             rocke_status_t want,
+                             int line)
+{
+    char msg[160];
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_hip");
+        build_dpp_raw(&b, opcode, shape, kind, ctrl);
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = "gfx950";
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != want)
+        {
+            snprintf(msg, sizeof(msg), "HIP lowering: status %d, want %d", (int)st, (int)want);
+            fail(msg, line);
+        }
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_ll");
+        build_dpp_raw(&b, opcode, shape, kind, ctrl);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+        if(st != want)
+        {
+            snprintf(msg, sizeof(msg), "LLVM lowering: status %d, want %d", (int)st, (int)want);
+            fail(msg, line);
+        }
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* A raw tile.dpp_xor whose xor_mask is out of range (0, 16, -1, or a DPP
+ * control word stuffed into the mask) or has no gfx9 encoding (4) fails in
+ * both lowerers instead of being masked to four bits or emitted. */
+void case_dpp_xor_rejects_bad_mask()
+{
+    const rocke_opcode_t op = ROCKE_OP_TILE_DPP_XOR;
+    const RawShape ok = RawShape::Ok;
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
+    for(int64_t bad : {0, 16, -1, 0x141, 4})
+        expect_dpp_raw_rejected(op, ok, RawCtrl::Int, bad, ROCKE_ERR_VALUE, __LINE__);
+}
+
+/* The shape and the attribute types, for both DPP ops: anything but one
+ * operand and one result is ROCKE_ERR_VALUE (zero operands included: a clean
+ * error, not a NULL dereference), a non-int ctrl/xor_mask is ROCKE_ERR_TYPE
+ * (not read as missing, not coerced), and non-i32 data or a non-i32 result is
+ * ROCKE_ERR_VALUE (HIP would convert between int and float silently). Python
+ * raises ValueError / TypeError for the same raw ops. */
+void case_dpp_ops_reject_untyped_raw_op()
+{
+    const struct
+    {
+        rocke_opcode_t opcode;
+        int64_t ctrl;
+    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177}, {ROCKE_OP_TILE_DPP_XOR, 7}};
+    const RawShape ok = RawShape::Ok;
+    for(const auto& o : ops)
+    {
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Float, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Bool, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Str, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        for(RawShape bad :
+            {RawShape::F32Data, RawShape::F32Result, RawShape::TwoOperands, RawShape::NoOperands})
+            expect_dpp_raw_rejected(o.opcode, bad, RawCtrl::Int, o.ctrl, ROCKE_ERR_VALUE, __LINE__);
+        /* The same raw shape with a legal ctrl and i32 data lowers, so the
+         * rejections above are about the shape and types, not the harness. */
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_ok");
+        build_dpp_raw(&b, o.opcode, ok, RawCtrl::Int, o.ctrl);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        if(rocke_lower_kernel_to_llvm_ex(
+               rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err))
+           != ROCKE_OK)
+            fail(err, __LINE__);
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
@@ -1092,24 +1461,28 @@ void case_gfx1250_data_prefetch_distinct_from_inst()
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.data.p1(");
 }
 
-/* Each op is gfx1250 + llvm23 only; the message names the op that tripped. */
+/* Each op needs its target fact and llvm23; the message names the op and the fact. */
 void case_gfx1250_data_prefetch_gated()
 {
     struct Gate
     {
         const char* name;
+        const char* fact; /* the target fact the refusal names */
         void (*emit)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
     };
     static const Gate gates[] = {
         {"s_setreg",
+         "target_family gfx12_cdna",
          [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
              rocke_b_s_setreg(b, 1537, rocke_b_const_i32(b, 1));
          }},
         {"s_prefetch_data",
+         "memory.has_scalar_data_prefetch",
          [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
              rocke_b_s_prefetch_data(b, s, rocke_b_const_i32(b, 1));
          }},
         {"s_buffer_prefetch_data",
+         "memory.has_scalar_data_prefetch",
          [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
              rocke_b_s_buffer_prefetch_data(b,
                                             rocke_b_buffer_rsrc(b, s, rocke_b_const_i32(b, 64)),
@@ -1117,10 +1490,12 @@ void case_gfx1250_data_prefetch_gated()
                                             0);
          }},
         {"global_prefetch",
+         "memory.has_global_prefetch",
          [](rocke_ir_builder_t* b, rocke_value_t* s, rocke_value_t*) {
              rocke_b_global_prefetch(b, s, 0);
          }},
         {"flat_prefetch",
+         "memory.has_global_prefetch",
          [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t* f) {
              rocke_b_flat_prefetch(b, f, 0);
          }},
@@ -1138,14 +1513,17 @@ void case_gfx1250_data_prefetch_gated()
             rocke_llvm_flavor_t flavor;
             const char* suffix;
         } bad[] = {
-            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
+            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, nullptr},
+            {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, nullptr},
             {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
         };
         for(const auto& t : bad)
         {
             std::string err;
             const rocke_status_t st = lower_expect_error("gate", build, t.arch, t.flavor, &err);
-            const std::string want = std::string(g.name) + t.suffix;
+            const std::string want = t.suffix ? std::string(g.name) + t.suffix
+                                              : std::string(g.name) + " requires a target with "
+                                                    + g.fact + ", got " + t.arch;
             if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
             {
                 char msg[ROCKE_ERR_MSG_CAP + 128];
@@ -1380,40 +1758,47 @@ void case_gfx1250_cluster_size()
     EXPECT_NO_IR(ir, "@llvm.amdgcn.s.cluster.barrier");
 }
 
-/* Each op is gfx1250 + llvm23 only; the message names the op that tripped. */
+/* Each op needs its target fact and llvm23; the message names the op and the fact. */
 void case_gfx1250_cluster_gated()
 {
     struct Gate
     {
         const char* name;
+        const char* fact; /* the target fact the refusal names */
         void (*emit)(rocke_ir_builder_t*, rocke_value_t*);
     };
     static const Gate gates[] = {
         {"cluster_id",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t* o) {
              rocke_b_global_store(b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_id(b, "x"), 4);
          }},
         {"cluster_workgroup_id",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t* o) {
              rocke_b_global_store(
                  b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_id(b, "y"), 4);
          }},
         {"cluster_workgroup_max_id",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t* o) {
              rocke_b_global_store(
                  b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_max_id(b, "z"), 4);
          }},
         {"cluster_workgroup_flat_id",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t* o) {
              rocke_b_global_store(
                  b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_flat_id(b), 4);
          }},
         {"cluster_workgroup_max_flat_id",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t* o) {
              rocke_b_global_store(
                  b, o, rocke_b_const_i32(b, 0), rocke_b_cluster_workgroup_max_flat_id(b), 4);
          }},
         {"cluster_barrier",
+         "memory.has_cluster_launch",
          [](rocke_ir_builder_t* b, rocke_value_t*) { rocke_b_cluster_barrier(b); }},
     };
     for(const Gate& g : gates)
@@ -1426,15 +1811,17 @@ void case_gfx1250_cluster_gated()
             rocke_llvm_flavor_t flavor;
             const char* suffix;
         } bad[] = {
-            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
-            {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, " requires gfx1250"},
+            {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, nullptr},
+            {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, nullptr},
             {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
         };
         for(const auto& t : bad)
         {
             std::string err;
             const rocke_status_t st = lower_expect_error("gate", build, t.arch, t.flavor, &err);
-            const std::string want = std::string(g.name) + t.suffix;
+            const std::string want = t.suffix ? std::string(g.name) + t.suffix
+                                              : std::string(g.name) + " requires a target with "
+                                                    + g.fact + ", got " + t.arch;
             if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
             {
                 char msg[ROCKE_ERR_MSG_CAP + 128];
@@ -1694,10 +2081,12 @@ void case_gfx1250_multicast_gated()
     struct Gate
     {
         const char* name;
+        const char* fact; /* the target fact the refusal names */
         void (*build)(rocke_ir_builder_t*);
     };
     static const Gate gates[] = {
         {"cluster_load",
+         "memory.has_multicast_load",
          [](rocke_ir_builder_t* b) {
              rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
              rocke_b_global_store(b,
@@ -1707,6 +2096,7 @@ void case_gfx1250_multicast_gated()
                                   4);
          }},
         {"cluster_load_async_to_lds",
+         "memory.has_multicast_load",
          [](rocke_ir_builder_t* b) {
              rocke_b_cluster_load_async_to_lds(b,
                                                global_ptr_param(b, "src", rocke_i32()),
@@ -1723,8 +2113,8 @@ void case_gfx1250_multicast_gated()
         rocke_llvm_flavor_t flavor;
         const char* suffix;
     } bad[] = {
-        {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, " requires gfx1250"},
-        {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, " requires gfx1250"},
+        {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, nullptr},
+        {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, nullptr},
         {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, " requires LLVM flavor llvm23"},
     };
     for(const Gate& g : gates)
@@ -1733,7 +2123,9 @@ void case_gfx1250_multicast_gated()
         {
             std::string err;
             const rocke_status_t st = lower_expect_error("gate", g.build, t.arch, t.flavor, &err);
-            const std::string want = std::string(g.name) + t.suffix;
+            const std::string want = t.suffix ? std::string(g.name) + t.suffix
+                                              : std::string(g.name) + " requires a target with "
+                                                    + g.fact + ", got " + t.arch;
             if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
             {
                 char msg[ROCKE_ERR_MSG_CAP + 128];
@@ -2190,8 +2582,12 @@ void case_gfx1250_tdm_gated()
         rocke_llvm_flavor_t flavor;
         const char* want;
     } bad[] = {
-        {"gfx950", ROCKE_LLVM_FLAVOR_LLVM22, "tensor_load_to_lds requires gfx1250"},
-        {"gfx1201", ROCKE_LLVM_FLAVOR_LLVM23, "tensor_load_to_lds requires gfx1250"},
+        {"gfx950",
+         ROCKE_LLVM_FLAVOR_LLVM22,
+         "tensor_load_to_lds requires a target with memory.has_tdm, got gfx950"},
+        {"gfx1201",
+         ROCKE_LLVM_FLAVOR_LLVM23,
+         "tensor_load_to_lds requires a target with memory.has_tdm, got gfx1201"},
         {"gfx1250", ROCKE_LLVM_FLAVOR_LLVM22, "tensor_load_to_lds requires LLVM flavor llvm23"},
     };
     for(const auto& t : bad)
@@ -2429,12 +2825,12 @@ void case_gfx1250_cluster_dims_rejects()
          3,
          "gfx950",
          ROCKE_LLVM_FLAVOR_LLVM22,
-         "cluster_dims requires gfx1250, got gfx950"},
+         "cluster_dims requires a target with memory.has_cluster_launch, got gfx950"},
         {{2, 1, 1},
          3,
          "gfx1201",
          ROCKE_LLVM_FLAVOR_LLVM23,
-         "cluster_dims requires gfx1250, got gfx1201"},
+         "cluster_dims requires a target with memory.has_cluster_launch, got gfx1201"},
         {{2, 1, 1},
          3,
          "gfx1250",
@@ -2508,6 +2904,33 @@ void case_memory_caps()
     }
 }
 
+/* ---- s_waitcnt VMCNT field width ---- */
+
+/* The same table as test_vmcnt_field_width in test_rocke_multiarch.py: the
+ * targets whose VMCNT width was measured with the assembler (how:
+ * "_comment_vmcnt_bits" in arch_specs.json). */
+void case_vmcnt_bits()
+{
+    struct expected_width
+    {
+        const char* gfx;
+        int vmcnt_bits;
+    };
+    static const expected_width table[] = {
+        {"gfx90a", 6},
+        {"gfx942", 6},
+        {"gfx950", 6},
+        {"gfx1151", 6},
+        {"gfx11-generic", 6},
+    };
+    for(const expected_width& row : table)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(row.gfx);
+        if(t == nullptr || t->vmcnt_bits != row.vmcnt_bits)
+            fail(row.gfx, __LINE__);
+    }
+}
+
 /* ---- async buffer / global -> LDS ---- */
 void case_buffer_load_lds_async()
 {
@@ -2533,6 +2956,91 @@ void case_buffer_load_lds_async()
      * "defined with type 'i64' but expected 'ptr addrspace(3)'". */
     EXPECT_IR(ir, " = inttoptr i64 ");
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
+}
+
+/* ---- dtype-generic buffer_load_vN (Python IRBuilder.buffer_load_vN) ---- */
+void case_buffer_load_vN_generic()
+{
+    const std::string ir = lower_one("buf_vn", [](rocke_ir_builder_t* b) {
+        rocke_value_t* X = global_ptr_param(b, "X", rocke_f16());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* i32x4 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i32(), 4);
+        rocke_value_t* bf16x8 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_bf16(), 8);
+        rocke_value_t* f32x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 1);
+        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr)
+        {
+            fail("buffer_load_vN returned NULL", __LINE__);
+            return;
+        }
+        /* Result type <n x dtype>, hint bl{n}, attrs dwords + elem_type. */
+        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1};
+        const int lanes[] = {4, 8, 1};
+        const int64_t dwords[] = {4, 4, 1};
+        const char* elems[] = {"i32", "bf16", "f32"};
+        for(int i = 0; i < 3; ++i)
+        {
+            const rocke_value_t* v = want[i];
+            const rocke_attr_value_t* dw = rocke_attr_get(&v->op->attrs, "dwords");
+            const rocke_attr_value_t* et = rocke_attr_get(&v->op->attrs, "elem_type");
+            char hint[16];
+            snprintf(hint, sizeof(hint), "%%bl%d", lanes[i]);
+            if(v->type->kind != ROCKE_TYPE_VECTOR || v->type->count != lanes[i]
+               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || dw == nullptr
+               || dw->u.i != dwords[i] || et == nullptr || strcmp(et->u.s, elems[i]) != 0
+               || strncmp(v->name, hint, strlen(hint)) != 0)
+                fail(elems[i], __LINE__);
+        }
+    });
+    EXPECT_IR(ir, "call <4 x i32> @llvm.amdgcn.raw.ptr.buffer.load.v4i32(");
+    EXPECT_IR(ir, " to <4 x i32>");
+    EXPECT_IR(ir, " to <8 x bfloat>");
+    EXPECT_IR(ir, "call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32(");
+    EXPECT_IR(ir, "bitcast i32 ");
+
+    struct Reject
+    {
+        const char* want;
+        const rocke_type_t* (*dtype)(void);
+        int n;
+    };
+    static const Reject rejects[] = {
+        {"buffer_load_vN: unsupported dtype 'f64'", rocke_f64, 2},
+        {"buffer_load_vN: n=16 dtype=f16 -> dwords=8 must be 1, 2, or 4", rocke_f16, 16},
+        {"buffer_load_vN: n=3 dtype=f32 -> dwords=3 must be 1, 2, or 4", rocke_f32, 3},
+        {"buffer_load_vN: n=3 dtype=bf16 is not a whole number of dwords", rocke_bf16, 3},
+        {"buffer_load_vN: n=5 dtype=f16 is not a whole number of dwords", rocke_f16, 5},
+        {"buffer_load_vN: n=0 dtype=f32 is not a whole number of dwords", rocke_f32, 0},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "buf_vn_bad");
+        bool rejected = false;
+        std::string err;
+        try
+        {
+            rocke_value_t* X = global_ptr_param(&b, "X", rocke_f16());
+            rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+            rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+            rocke_value_t* v = rocke_b_buffer_load_vN(&b, rsrc, zero, zero, r.dtype(), r.n);
+            rejected = v == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "";
+        }
+        catch(const std::exception& e)
+        {
+            rejected = true;
+            err = e.what();
+        }
+        if(!rejected || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
 }
 
 void case_global_load_async_to_lds_b8()
@@ -2676,6 +3184,7 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, "tile.ds_swizzle_xor"},
         {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
         {ROCKE_OP_TILE_QUAD_PERM, "tile.quad_perm"},
+        {ROCKE_OP_TILE_DPP_XOR, "tile.dpp_xor"},
         {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
         {ROCKE_OP_TILE_READLANE, "tile.readlane"},
         {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
@@ -2736,8 +3245,9 @@ void case_opcode_names_are_aligned()
         }
         if(rocke_opcode_from_name(e.name) != e.opcode)
             fail(e.name, __LINE__);
-        if(e.opcode == ROCKE_OP_TILE_QUAD_PERM && !rocke_opcode_is_pure(e.opcode))
-            fail("tile.quad_perm must be pure", __LINE__);
+        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_XOR)
+           && !rocke_opcode_is_pure(e.opcode))
+            fail(e.name, __LINE__);
     }
 }
 
@@ -2817,6 +3327,38 @@ void case_lowbit_dtype_aliases()
     }
 }
 
+/* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but
+ * 0xffffffff on wave32 (ballot.i64 only sets the low wave_size bits). */
+void case_wave_all_full_wave_mask()
+{
+    struct ArchMask
+    {
+        const char* arch;
+        const char* mask;
+    };
+    const ArchMask archs[] = {{"gfx950", ", -1\n"},
+                              {"gfx942", ", -1\n"},
+                              {"gfx1151", ", 4294967295\n"},
+                              {"gfx11-generic", ", 4294967295\n"},
+                              {"gfx12-generic", ", 4294967295\n"},
+                              {"gfx1201", ", 4294967295\n"}};
+    for(const ArchMask& a : archs)
+    {
+        const std::string ir = lower_one(
+            "wave_all_mask",
+            [](rocke_ir_builder_t* b) { rocke_b_wave_all(b, rocke_b_const_i32(b, 1)); },
+            a.arch);
+        EXPECT_IR(ir, "@llvm.amdgcn.ballot.i64");
+        const size_t at = ir.find("icmp eq i64 ");
+        const size_t eol = ir.find('\n', at);
+        const std::string line = at == std::string::npos ? "" : ir.substr(at, eol - at);
+        const std::string want(a.mask, strlen(a.mask) - 1);
+        if(line.size() < want.size()
+           || line.compare(line.size() - want.size(), want.size(), want) != 0)
+            fail(a.arch, __LINE__);
+    }
+}
+
 struct TestCase
 {
     const char* name;
@@ -2831,6 +3373,14 @@ const TestCase k_cases[] = {
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
     {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
     {"quad_perm_rejects_out_of_range_ctrl", case_quad_perm_rejects_out_of_range_ctrl},
+    {"dpp_xor_gfx9_encodings", case_dpp_xor_gfx9_encodings},
+    {"dpp_xor_row_xmask_encodings", case_dpp_xor_row_xmask_encodings},
+    {"dpp_xor_hip", case_dpp_xor_hip},
+    {"warp_shuffle_xor_dpp_f32", case_warp_shuffle_xor_dpp_f32},
+    {"dpp_xor_gfx9_rejects_unencodable_mask", case_dpp_xor_gfx9_rejects_unencodable_mask},
+    {"dpp_xor_builders_reject_invalid_input", case_dpp_xor_builders_reject_invalid_input},
+    {"dpp_xor_rejects_bad_mask", case_dpp_xor_rejects_bad_mask},
+    {"dpp_ops_reject_untyped_raw_op", case_dpp_ops_reject_untyped_raw_op},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
     {"quad_perm", case_quad_perm},
@@ -2882,7 +3432,9 @@ const TestCase k_cases[] = {
     {"gfx1250_cluster_dims", case_gfx1250_cluster_dims},
     {"gfx1250_cluster_dims_rejects", case_gfx1250_cluster_dims_rejects},
     {"memory_caps", case_memory_caps},
+    {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
+    {"buffer_load_vN_generic", case_buffer_load_vN_generic},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
@@ -2894,6 +3446,7 @@ const TestCase k_cases[] = {
     {"flag_ops_verify_and_llvm_arity", case_flag_ops_verify_and_llvm_arity},
     {"flag_ops_reject_non_i32_ptr", case_flag_ops_reject_non_i32_ptr},
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
+    {"wave_all_full_wave_mask", case_wave_all_full_wave_mask},
 };
 
 } // namespace

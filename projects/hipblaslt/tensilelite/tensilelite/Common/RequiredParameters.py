@@ -81,6 +81,7 @@ def getRequiredParametersMin() -> set:
         'LdsPadMetadata',
         'LdsPadMXSA',
         'LdsPadMXSB',
+        'LDSSegmentBRotate',
         'LDSSegmentInterleave',
         'LDSTrInst',
         'LocalReadVectorWidth',
@@ -148,6 +149,7 @@ def getRequiredParametersMin() -> set:
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',
+        'StinkyTofuRegisterAllocation',
         'HalfPLR',
         'TemporalHint',
         'TemporalHintA',
@@ -179,4 +181,5 @@ def getRequiredParametersMin() -> set:
         'UsePLRPack',
         'UseSubtileImpl',
         'ClusterDim',
+        'ClusterAIDMapping',
     })
