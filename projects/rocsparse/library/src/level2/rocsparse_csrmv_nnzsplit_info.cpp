@@ -30,7 +30,8 @@ _rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
 {
     WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    // starting_block_ids aliases the starting_ids allocation (one past its end unless
+    // use_starting_block_ids), so only starting_ids is freed.
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
 
     this->starting_ids           = nullptr;
@@ -43,7 +44,8 @@ void _rocsparse_nnzsplit_info::clear()
 {
     WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-    // starting_block_ids points into the starting_ids allocation, so only one free is needed.
+    // starting_block_ids aliases the starting_ids allocation (one past its end unless
+    // use_starting_block_ids), so only starting_ids is freed.
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
 
     this->starting_ids           = nullptr;
