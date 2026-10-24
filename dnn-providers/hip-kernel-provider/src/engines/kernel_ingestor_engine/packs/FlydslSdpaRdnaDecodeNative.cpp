@@ -270,6 +270,13 @@ bool flydslSdpaRdnaDecodeKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // Packed (THD) sequences: the main kernel and its merge index every operand by batch
+    // (the prefill objects serve them, RDNA kernel modification 29).
+    const auto raggedOffsetQ = tryGetBoundInt(bound, RAGGED_OFFSET_Q_TOKEN);
+    if(!raggedOffsetQ.has_value() || *raggedOffsetQ != NO_SEQ_LEN)
+    {
+        return false;
+    }
     const auto dvSplit = decodeColumnSplit(kernel);
     const auto headDimMax = integerMetadata(kernel, HEAD_DIM_MAX_FIELD);
     if(!dvSplit.has_value() || !headDimMax.has_value() || *headDimMax % *dvSplit != 0
@@ -322,10 +329,13 @@ double flydslSdpaRdnaDecodeScore(const MatchContext& /*context*/,
  *
  * Q, K, V, O, LSE and the split workspace's O and (max, sum) pairs (pointers);
  * seq_len_q, seq_len_kv, num_heads, kv_group, right_bound, left_bound,
- * align_bottom_right, lse_on, num_splits (i32); scale (f32); the (batch, sequence, head) strides of Q, K, V, O and LSE (i64);
+ * align_bottom_right, flags (bit 0 the LSE output, bit 1 per-batch lengths), num_splits
+ * (i32); scale (f32); the (batch, sequence, head) strides of Q, K, V, O and LSE (i64);
  * the bias (pointer) and its (batch, head, query, key) strides (i64), read only by a
  * has_bias object; the head_dim (i32), read only by a generic object; the sink (pointer)
- * and its head stride (i64), read only by a has_sink object.
+ * and its head stride (i64), read only by a has_sink object; the per-batch query and key
+ * length pointers (null for a dense graph) and the packed-sequence offset pointers (always
+ * null for now).
  */
 const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
 {
@@ -339,17 +349,19 @@ const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
         s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,
         s_f32,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,
         s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,
-        s_pointer, s_i64,     s_i64,     s_i64,     s_i64,     s_i32,     s_pointer, s_i64};
+        s_pointer, s_i64,     s_i64,     s_i64,     s_i64,     s_i32,     s_pointer, s_i64,
+        s_pointer, s_pointer, s_pointer, s_pointer};
     return s_signature;
 }
 
 /**
  * @brief The decode object's merge kernel's argument list.
  *
- * O, LSE and the split workspace's O and (max, sum) pairs (pointers); seq_len_q, num_heads, lse_on,
+ * O, LSE and the split workspace's O and (max, sum) pairs (pointers); seq_len_q, num_heads, flags,
  * num_splits (i32); the (batch, sequence, head) strides of O and LSE (i64); the
  * head_dim (i32), the width of a generic object's workspace and O rows; the sink (pointer)
- * and its head stride (i64), read only by a has_sink object.
+ * and its head stride (i64), read only by a has_sink object; the per-batch query lengths
+ * (pointer, null for a dense graph).
  */
 const std::vector<KernelArgument>& flydslSdpaRdnaMergeSignature()
 {
@@ -373,7 +385,8 @@ const std::vector<KernelArgument>& flydslSdpaRdnaMergeSignature()
                                                          s_i64,
                                                          s_i32,
                                                          s_pointer,
-                                                         s_i64};
+                                                         s_i64,
+                                                         s_pointer};
     return s_signature;
 }
 
@@ -631,7 +644,7 @@ public:
         const auto o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
         // Each optional buffer is read only by the objects kernel_match pairs with a bound
-        // one: the LSE when lse_on is set, the bias by has_bias, the sink by has_sink.
+        // one: the LSE when flags bit 0 is set, the bias by has_bias, the sink by has_sink.
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
@@ -651,7 +664,11 @@ public:
                                                                     * problem.headDimV)
                                                     * sizeof(float))
                          : nullptr;
-        const auto lseOn = static_cast<int32_t>(binding.stats == NO_STATS ? 0 : 1);
+        const auto flags = rdnaLaunchFlags(binding);
+        // Each batch's lengths under padding; null (the launch's lengths) for a dense graph.
+        void* seqLenQ = optionalBuffer(binding.seqLenQ, deviceBuffers, numDeviceBuffers);
+        void* seqLenKv = optionalBuffer(binding.seqLenKv, deviceBuffers, numDeviceBuffers);
+        void* none = nullptr;
         // Changing these argument lists means changing flydslSdpaRdnaDecodeSignature() and
         // flydslSdpaRdnaMergeSignature() with them.
         preparedSdpa.kernelForStream(handle.getStream())
@@ -670,7 +687,7 @@ public:
                     static_cast<int32_t>(binding.rightBound),
                     static_cast<int32_t>(binding.leftBound),
                     static_cast<int32_t>(binding.alignBottomRight),
-                    lseOn,
+                    flags,
                     static_cast<int32_t>(splits),
                     scale,
                     s[0].batch,
@@ -695,7 +712,11 @@ public:
                     b[3],
                     static_cast<int32_t>(problem.headDim),
                     sink,
-                    sinkStride);
+                    sinkStride,
+                    seqLenQ,
+                    seqLenKv,
+                    none, // row_off_q: packed sequences, not served
+                    none);
         if(splits > 1)
         {
             preparedSdpa.mergeForStream(handle.getStream())
@@ -706,7 +727,7 @@ public:
                         wsMaxSum,
                         static_cast<int32_t>(problem.seqLenQ),
                         static_cast<int32_t>(problem.numHeads),
-                        lseOn,
+                        flags,
                         static_cast<int32_t>(splits),
                         s[3].batch,
                         s[3].sequence,
@@ -716,7 +737,8 @@ public:
                         s[4].head,
                         static_cast<int32_t>(problem.headDim),
                         sink,
-                        sinkStride);
+                        sinkStride,
+                        seqLenQ);
         }
     }
 

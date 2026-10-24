@@ -36,7 +36,9 @@
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
 
 /**
  * @file FlydslSdpaRdnaCommon.hpp
@@ -115,6 +117,39 @@ inline constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_rdna.scale_s
 /// The scale's f32 bit pattern when baked (BoundTokens carry int64_t), else the uid of
 /// the pass-by-value scale tensor.
 inline constexpr std::string_view SCALE_TOKEN = "flydsl_sdpa_rdna.scale";
+/// The uids of the per-batch query and key lengths under padding, or NO_SEQ_LEN for a dense
+/// graph (FlydslSdpaVarlen.hpp).
+inline constexpr std::string_view SEQ_LEN_Q_TOKEN = "flydsl_sdpa_rdna.seq_len_q.uid";
+inline constexpr std::string_view SEQ_LEN_KV_TOKEN = "flydsl_sdpa_rdna.seq_len_kv.uid";
+/// The uids of the ragged-offset tables packed Q/O and K/V go through, or NO_SEQ_LEN for
+/// unpacked operands (FlydslSdpaVarlen.hpp servablePackedVarlen).
+inline constexpr std::string_view RAGGED_OFFSET_Q_TOKEN = "flydsl_sdpa_rdna.ragged_offset_q.uid";
+inline constexpr std::string_view RAGGED_OFFSET_KV_TOKEN = "flydsl_sdpa_rdna.ragged_offset_kv.uid";
+/// The dropout probability's f32 bit pattern (0 for none), and the uids of the Philox seed and
+/// offset tensors, or NO_DROPOUT_TENSOR (FlydslSdpaDropout.hpp).
+inline constexpr std::string_view DROPOUT_P_TOKEN = "flydsl_sdpa_rdna.dropout_p";
+inline constexpr std::string_view DROPOUT_SEED_TOKEN = "flydsl_sdpa_rdna.dropout_seed.uid";
+inline constexpr std::string_view DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_rdna.dropout_offset.uid";
+/// 0 or 1: whether the object drops attention probabilities (AOTriton's ENABLE_DROPOUT). Baked,
+/// so a graph that drops and one that does not each select their own object; absent is 0.
+inline constexpr std::string_view HAS_DROPOUT_FIELD = "has_dropout";
+
+/// A float's bits as a bound token (BoundTokens carry int64_t), and back.
+inline int64_t floatToken(float value)
+{
+    int32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit to round-trip");
+    std::memcpy(&bits, &value, sizeof(value));
+    return static_cast<int64_t>(bits);
+}
+
+inline float tokenFloat(int64_t token)
+{
+    const auto bits = static_cast<int32_t>(token);
+    float value = 0.0F;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
 
 /// The bias's (batch, head, query, key) element strides as the kernel takes them.
 using BiasStrides = std::array<int64_t, 4>;
@@ -197,14 +232,7 @@ inline bool isServableOperand(const data_objects::TensorAttributes& tensor)
     {
         return false;
     }
-
-    // A ragged (THD) operand packs variable-length sequences end to end, which the kernel
-    // would read as one dense batch -- wrong values, not an error. Declined until varlen
-    // is implemented.
-    if(tensor.ragged_offset_tensor_uid().has_value())
-    {
-        return false;
-    }
+    // A ragged (THD) operand is servableVarlen's to judge (FlydslSdpaVarlen.hpp).
 
     return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
@@ -244,11 +272,14 @@ inline std::optional<SdpaMask> maskFor(const data_objects::SdpaAttributes& attri
 
 /// The softmax-statistics output the kernel can write: f32 `[B, H, Sq, 1]`, a real device
 /// tensor, with positive strides on its non-unit axes (the kernel takes its batch, sequence
-/// and head strides).
+/// and head strides). Dense, or, under packed operands (@p raggedOffsetQ not NO_SEQ_LEN),
+/// packed through Q's own table like Q (isPackedThrough): one row per query token, where a
+/// dense LSE would need each sequence's batch, which a packed launch does not index.
 inline bool isServableStats(const data_objects::TensorAttributes& stats,
                             int64_t batch,
                             int64_t heads,
-                            int64_t seqLenQ)
+                            int64_t seqLenQ,
+                            int64_t raggedOffsetQ = NO_SEQ_LEN)
 {
     const auto* dims = stats.dims();
     const auto* strides = stats.strides();
@@ -269,9 +300,11 @@ inline bool isServableStats(const data_objects::TensorAttributes& stats,
             return false;
         }
     }
+    const bool layoutServed = raggedOffsetQ == NO_SEQ_LEN
+                                  ? !stats.ragged_offset_tensor_uid().has_value()
+                                  : isPackedThrough(stats, raggedOffsetQ);
     return stats.data_type() == data_objects::DataType::FLOAT && !stats.virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
-           && !stats.ragged_offset_tensor_uid().has_value();
+           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats) && layoutServed;
 }
 
 /// The additive bias, right-aligned to `[B, H, Sq, Skv]` as the reference reads it (rank 1 to
@@ -450,11 +483,12 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
 
     // --- 4. Cross-tensor shape. No broadcasting: K and V share batch and sequence, K has
     // Q's head dim, and O is Q's shape with V's head dim. V's head count may differ from K's,
-    // and its head dim may be narrower than Q/K's (MLA); which head-dim pairs run is the
-    // objects' to say.
+    // and its head dim from Q/K's, narrower (MLA) or wider; which head-dim pairs run is the
+    // objects' to say (the RDNA objects' baked head_dim_v, the aiw padded tiers' two runtime
+    // widths).
     const auto numVHeads = v->dims()->Get(HEAD_AXIS);
     const auto headDimV = v->dims()->Get(HEAD_DIM_AXIS);
-    if(headDimV <= 0 || headDimV > problem.headDim
+    if(headDimV <= 0
        || !hasDims(*k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
        || !hasDims(*v, problem.batch, numVHeads, problem.seqLenKv, headDimV)
        || !hasDims(*o, problem.batch, problem.numHeads, problem.seqLenQ, headDimV))
@@ -523,17 +557,24 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         }
         biasUid = attributes.attn_mask_tensor_uid().value();
     }
-    // varlen, both spellings.
-    if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+    // Variable sequence lengths (padding, or packed THD Q/K/V/O) and dropout (the probability,
+    // seed, offset, mask, scale and RNG dump): each feature's rules live in its own header.
+    const auto varlen = hasRaggedOperand(context, attributes)
+                            ? servablePackedVarlenWithLengths(context, attributes, problem.batch)
+                            : servableVarlenAsReferenceReads(context, attributes, problem.batch);
+    const auto dropout = servableDropout(context, attributes);
+    if(!varlen.has_value() || !dropout.has_value())
     {
         return std::nullopt;
     }
-    // Dropout.
-    if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
-       || attributes.dropout_mask_tensor_uid().has_value()
-       || attributes.dropout_scale_tensor_uid().has_value()
-       || attributes.dropout_probability().has_value())
+    // Dropout over padded or packed sequences: each family serves the two apart first.
+    if((varlen->padded() || varlen->packed()) && dropout->active())
+    {
+        return std::nullopt;
+    }
+    // A bias over packed sequences: the bias is laid out by batch, which a packed launch does
+    // not index.
+    if(varlen->packed() && biasUid != NO_BIAS)
     {
         return std::nullopt;
     }
@@ -574,11 +615,10 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // Softmax statistics: the LSE output is served; the split max / sum-exp outputs and the
-    // RNG dump are not. Asking for stats without naming a tensor to write them to is a graph
-    // the kernel cannot satisfy.
-    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value())
+    // Softmax statistics: the LSE output is served; the split max / sum-exp outputs are not
+    // (the RNG dump is servableDropout's). Asking for stats without naming a tensor to write
+    // them to is a graph the kernel cannot satisfy.
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value())
     {
         return std::nullopt;
     }
@@ -591,7 +631,8 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         if(stats == nullptr || !declaresAlignment(*stats, sizeof(float))
            || !elementsDoNotOverlap(*stats)
            || (attributes.generate_stats().has_value() && !attributes.generate_stats().value())
-           || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLenQ))
+           || !isServableStats(
+               *stats, problem.batch, problem.numHeads, problem.seqLenQ, varlen->raggedOffsetQ))
         {
             return std::nullopt;
         }
@@ -601,8 +642,8 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask() || attributes.padding_mask())
+    // ALiBi slopes (the padding mask is servableVarlen's).
+    if(attributes.alibi_mask())
     {
         return std::nullopt;
     }
@@ -668,6 +709,13 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
+    bound[std::string(SEQ_LEN_Q_TOKEN)] = varlen->seqLenQ;
+    bound[std::string(SEQ_LEN_KV_TOKEN)] = varlen->seqLenKv;
+    bound[std::string(RAGGED_OFFSET_Q_TOKEN)] = varlen->raggedOffsetQ;
+    bound[std::string(RAGGED_OFFSET_KV_TOKEN)] = varlen->raggedOffsetKv;
+    bound[std::string(DROPOUT_P_TOKEN)] = floatToken(dropout->probability);
+    bound[std::string(DROPOUT_SEED_TOKEN)] = dropout->seed;
+    bound[std::string(DROPOUT_OFFSET_TOKEN)] = dropout->offset;
     return bound;
 }
 
@@ -687,6 +735,31 @@ struct FlydslSdpaRdnaBinding
     int64_t sinkStride = 0;
     ScaleSource scaleSource = ScaleSource::BAKED;
     int64_t scale = 0;
+    int64_t seqLenQ = NO_SEQ_LEN;
+    int64_t seqLenKv = NO_SEQ_LEN;
+    int64_t raggedOffsetQ = NO_SEQ_LEN;
+    int64_t raggedOffsetKv = NO_SEQ_LEN;
+    float dropoutProbability = 0.0F;
+    int64_t dropoutSeed = NO_DROPOUT_TENSOR;
+    int64_t dropoutOffset = NO_DROPOUT_TENSOR;
+
+    /// Whether the graph pads its sequences (per-batch lengths under padding_mask).
+    bool padded() const
+    {
+        return seqLenQ != NO_SEQ_LEN;
+    }
+
+    /// Whether the graph packs its sequences (THD, through ragged-offset tables).
+    bool packed() const
+    {
+        return raggedOffsetQ != NO_SEQ_LEN;
+    }
+
+    /// Whether the graph drops attention probabilities (a probability above 0).
+    bool dropsOut() const
+    {
+        return dropoutProbability > 0.0F;
+    }
 };
 
 inline FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
@@ -717,13 +790,21 @@ inline FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
+    binding.seqLenQ = read(SEQ_LEN_Q_TOKEN);
+    binding.seqLenKv = read(SEQ_LEN_KV_TOKEN);
+    binding.raggedOffsetQ = read(RAGGED_OFFSET_Q_TOKEN);
+    binding.raggedOffsetKv = read(RAGGED_OFFSET_KV_TOKEN);
+    binding.dropoutProbability = tokenFloat(read(DROPOUT_P_TOKEN));
+    binding.dropoutSeed = read(DROPOUT_SEED_TOKEN);
+    binding.dropoutOffset = read(DROPOUT_OFFSET_TOKEN);
     return binding;
 }
 
 /**
  * @brief The kernel-scoped checks both families make: dtype; head_dim (exact, or a generic
  *        object's runtime head_dim up to its head_dim_max); V's head_dim; the bias and its
- *        dtype; the sink; and the causal variant. Fills @p problem from the graph for the
+ *        dtype; the sink; dropout; and the causal variant. Per-batch lengths (padding)
+ *        are runtime arguments every object reads (kernel modification 26). Fills @p problem from the graph for the
  *        family's own checks.
  */
 inline bool familyMatches(const MatchContext& context,
@@ -809,6 +890,25 @@ inline bool familyMatches(const MatchContext& context,
         return false;
     }
 
+    // A dropout object for a graph that drops, a plain one for one that does not (a
+    // probability of 0 is the undropped result). Absent is a plain object: no decode object
+    // drops.
+    const auto dropoutProbability = tryGetBoundInt(bound, DROPOUT_P_TOKEN);
+    if(!dropoutProbability.has_value()
+       || integerMetadata(kernel, HAS_DROPOUT_FIELD).value_or(0)
+              != (tokenFloat(*dropoutProbability) > 0.0F ? 1 : 0))
+    {
+        return false;
+    }
+
+    // Packed (THD) sequences: every object of the aiw kernel and of the RDNA prefill kernel
+    // reads them (RDNA kernel modification 29); the decode objects decline them in their own
+    // kernel match.
+    if(!tryGetBoundInt(bound, RAGGED_OFFSET_Q_TOKEN).has_value())
+    {
+        return false;
+    }
+
     const auto causal = tryGetBoundInt(bound, CAUSAL_TOKEN);
     return causal.has_value() && integerMetadata(kernel, CAUSAL_FIELD) == *causal;
 }
@@ -863,6 +963,23 @@ inline float launchScale(const FlydslSdpaRdnaBinding& binding,
     return scale;
 }
 
+/// Padded query rows -- past a batch's `seq_len_q`, inside the graph's sequence extent -- are
+/// written as O = 0 and LSE = -inf, hipDNN's reference contract (cuDNN >= 9.14) and what the
+/// CDNA engines write. The kernels can also leave them as the buffer held them (AOTriton's
+/// behaviour, and free); that policy is this one switch.
+inline constexpr bool FILL_PADDED_ROWS = true;
+
+/// The kernels' flags argument (RDNA kernel modifications 26, 28 and 29): bit 0 writes the
+/// LSE output, bit 1 reads per-batch lengths from the SEQLEN_Q / SEQLEN_KV pointers, bit 2
+/// fills the padded rows (FILL_PADDED_ROWS), bit 3 reads packed sequences' bounds from the
+/// ROW_OFF_Q / ROW_OFF_KV tables (the prefill kernel only; the decode objects decline packed
+/// graphs).
+inline int32_t rdnaLaunchFlags(const FlydslSdpaRdnaBinding& binding)
+{
+    return (binding.stats == NO_STATS ? 0 : 1) | (binding.padded() ? 2 : 0)
+           | (FILL_PADDED_ROWS && binding.padded() ? 4 : 0) | (binding.packed() ? 8 : 0);
+}
+
 /// A bound tensor's device pointer, or nullptr for a token that names none (NO_STATS,
 /// NO_BIAS, NO_SINK are all -1).
 inline void* optionalBuffer(int64_t uid,
@@ -871,6 +988,131 @@ inline void* optionalBuffer(int64_t uid,
 {
     return uid < 0 ? nullptr
                    : hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
+}
+
+/// The dropout arguments every RDNA-family kernel takes (the aiw kernel's philox_seed_ptr ..
+/// dropout_scale; the RDNA prefill kernel's DROPOUT_SEED .. dropout_scale). Read only by an
+/// object built with dropout; a plain object gets no seed or offset, a threshold of 0 and a
+/// scale of 1. The aiw kernel's seed and offset outputs, which report the counter the launch
+/// drew from, have no hipDNN slot and stay null.
+struct PhiloxLaunchArgs
+{
+    void* seed = nullptr;
+    void* offset1 = nullptr;
+    int64_t offset2 = 0;
+    void* seedOutput = nullptr;
+    void* offsetOutput = nullptr;
+    int32_t threshold = 0;
+    float scale = 1.0F;
+};
+
+/// The bytes a launch needs for a seed given by value: the kernel reads the seed through a
+/// pointer, so a host seed is written to the engine's workspace first.
+inline constexpr size_t SEED_WORKSPACE_BYTES = sizeof(uint64_t);
+
+/// A Philox seed or offset given by value, widened to 64 bits: INT64 as is, INT32 sign-extended
+/// (as C++ widens it), read as the bits the kernel takes.
+inline uint64_t philoxScalar(const hipdnn_plugin_sdk::ScalarOperand& operand,
+                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                             uint32_t numDeviceBuffers)
+{
+    const auto value
+        = hipdnn_plugin_sdk::resolveScalarOperand(operand, deviceBuffers, numDeviceBuffers);
+    if(const auto* wide = std::get_if<int64_t>(&value))
+    {
+        return static_cast<uint64_t>(*wide);
+    }
+    if(const auto* narrow = std::get_if<int32_t>(&value))
+    {
+        return static_cast<uint64_t>(static_cast<int64_t>(*narrow));
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "flydsl_sdpa_rdna: a dropout seed or offset given by value must be INT64 or INT32");
+}
+
+/// How a launch reads the Philox seed and offset: through the graph's device tensor, or from a
+/// host value resolved at execute (the seed then via the workspace, the offset as offset2).
+struct PhiloxSources
+{
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> seedValue;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> offsetValue;
+};
+
+inline PhiloxSources philoxSources(const MatchContext& context,
+                                   const FlydslSdpaRdnaBinding& binding)
+{
+    PhiloxSources sources;
+    if(!binding.dropsOut())
+    {
+        return sources;
+    }
+    const auto byValue
+        = [&context](int64_t uid) -> std::optional<hipdnn_plugin_sdk::ScalarOperand> {
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&requireTensor(context, uid)))
+        {
+            return std::nullopt;
+        }
+        return hipdnn_plugin_sdk::makeScalarOperand(
+            context.graph.getTensorMap(), uid, "dropout seed or offset");
+    };
+    sources.seedValue = byValue(binding.dropoutSeed);
+    sources.offsetValue = byValue(binding.dropoutOffset);
+    return sources;
+}
+
+inline PhiloxLaunchArgs philoxLaunchArgs(const FlydslSdpaRdnaBinding& binding,
+                                         const PhiloxSources& sources,
+                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                         uint32_t numDeviceBuffers,
+                                         void* workspace,
+                                         hipStream_t stream)
+{
+    PhiloxLaunchArgs args;
+    if(!binding.dropsOut())
+    {
+        return args;
+    }
+    if(sources.seedValue.has_value())
+    {
+        if(workspace == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_rdna: a dropout seed given by value needs the engine's workspace");
+        }
+        // Two 32-bit memsets on the launch stream, not a host copy: the value travels in the
+        // commands themselves, so the launch stays capturable into a graph.
+        const auto seed = philoxScalar(*sources.seedValue, deviceBuffers, numDeviceBuffers);
+        auto* words = static_cast<uint32_t*>(workspace);
+        if(hipMemsetD32Async(words, static_cast<int>(static_cast<uint32_t>(seed)), 1, stream)
+               != hipSuccess
+           || hipMemsetD32Async(
+                  words + 1, static_cast<int>(static_cast<uint32_t>(seed >> 32)), 1, stream)
+                  != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "flydsl_sdpa_rdna: could not write the dropout seed to the workspace");
+        }
+        args.seed = workspace;
+    }
+    else
+    {
+        args.seed = optionalBuffer(binding.dropoutSeed, deviceBuffers, numDeviceBuffers);
+    }
+    if(sources.offsetValue.has_value())
+    {
+        args.offset2 = static_cast<int64_t>(
+            philoxScalar(*sources.offsetValue, deviceBuffers, numDeviceBuffers));
+    }
+    else
+    {
+        args.offset1 = optionalBuffer(binding.dropoutOffset, deviceBuffers, numDeviceBuffers);
+    }
+    args.threshold = dropoutThreshold(binding.dropoutProbability);
+    args.scale = dropoutScale(binding.dropoutProbability);
+    return args;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_rdna
