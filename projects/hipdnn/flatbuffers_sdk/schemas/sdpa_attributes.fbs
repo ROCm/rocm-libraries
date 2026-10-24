@@ -49,6 +49,9 @@ table SdpaAttributes {
     // Block-sparse attention (cuDNN parity): each entry selects whether a 128x128 score
     // tile is computed or skipped, so the values decide the score count.
     block_mask_tensor_uid:    long = null (cache_uid, work_data_dependent);
+    // Attention sink: one raw logit per query head, dims [1, H_q, 1, 1], FLOAT or the Q dtype
+    // (HALF/BFLOAT16). Joins the softmax max and denominator, not scaled by attn_scale, no value
+    // row; stats include it; a row with no visible key gives O = 0 and stats = sink.
     sink_token_tensor_uid:    long = null (cache_uid);
 
     // FP8-specific input tensor UIDs

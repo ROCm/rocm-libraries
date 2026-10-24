@@ -18,9 +18,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "GpuScalarOperand.hpp"
+#include "GpuSdpaSinkOperand.hpp"
 #include "IGpuGraphNodePlanBuilder.hpp"
 #include "IGpuGraphNodePlanExecutor.hpp"
 
@@ -80,7 +82,8 @@ struct GpuSdpaFwdParams
         int64_t rightBound,
         bool topLeftAlignment,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -97,6 +100,10 @@ struct GpuSdpaFwdParams
                         ? std::make_optional(
                               hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(
+                               hipdnn_test_sdk::detail::unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -112,6 +119,8 @@ struct GpuSdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    // Attention sink [1, H, 1, 1]: FLOAT, or the Q data type when HALF/BFLOAT16.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 template <typename QDataType,
@@ -166,19 +175,29 @@ public:
             attnScale = resolveScalarOperand(*_params.scaleTensor, variantPack, "SDPA scale");
         }
 
-        hipdnn_gpu_ref::GpuFpReferenceSdpa::
-            fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
-                qTensor,
-                kTensor,
-                vTensor,
-                oTensor,
-                attnScale,
-                attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>());
+        withSdpaSinkOperand<QDataType>(
+            _params.sinkTensor, variantPack, [&](auto* sinkTensor, auto sinkTag) {
+                using SinkDataType = typename decltype(sinkTag)::type;
+                hipdnn_gpu_ref::GpuFpReferenceSdpa::fprop<QDataType,
+                                                          KDataType,
+                                                          VDataType,
+                                                          ODataType,
+                                                          ComputeDataType,
+                                                          MaskDataType,
+                                                          SinkDataType>(
+                    qTensor,
+                    kTensor,
+                    vTensor,
+                    oTensor,
+                    attnScale,
+                    attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
+                    _params.leftBound,
+                    _params.rightBound,
+                    _params.topLeftAlignment,
+                    lseTensor.has_value() ? &lseTensor.value() : nullptr,
+                    sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                    sinkTensor);
+            });
     }
 
 private:
@@ -293,8 +312,13 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Supported: an attention sink of the frontend-contract shape and data type.
+        if(!hipdnn_test_sdk::detail::isSdpaSinkSupported(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -365,6 +389,9 @@ public:
         const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
+        const auto* sinkPtr = nodeAttributes->sink_token_tensor_uid().has_value()
+                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                                  : nullptr;
 
         const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaFwdPlan");
 
@@ -379,7 +406,8 @@ public:
                              band.rightBound,
                              band.topLeftAlignment,
                              attnMaskPtr,
-                             lsePtr));
+                             lsePtr,
+                             sinkPtr));
     }
 };
 

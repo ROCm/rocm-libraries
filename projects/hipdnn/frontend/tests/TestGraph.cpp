@@ -6320,6 +6320,107 @@ TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
+
+// The vLLM paged layout end to end through Graph::validate(): ragged Q in token units,
+// K/V as strided views of one interleaved cache, and the block table as a zero-copy
+// [B, 1, M, 1] view.
+TEST_F(TestGraph, SdpaFwdPagedRaggedGraphValidates)
+{
+    constexpr int64_t BATCH = 3;
+    constexpr int64_t HEADS_Q = 8;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t HEAD_DIM = 128;
+    constexpr int64_t BLOCK_SIZE = 16;
+    constexpr int64_t NUM_BLOCKS = 32;
+    constexpr int64_t MAX_BLOCKS = 8;
+    constexpr int64_t MAX_Q = 5;
+
+    Graph graph;
+    graph.set_io_data_type(DataType::BFLOAT16)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const auto int32Tensor
+        = [](const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) {
+              auto t = std::make_shared<TensorAttributes>();
+              t->set_dim(dims).set_stride(strides).set_data_type(DataType::INT32);
+              return t;
+          };
+
+    auto qOffsets = int32Tensor({BATCH + 1, 1, 1, 1}, {1, 1, 1, 1});
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({BATCH, HEADS_Q, MAX_Q, HEAD_DIM})
+        .set_stride({MAX_Q * HEADS_Q * HEAD_DIM, HEAD_DIM, HEADS_Q * HEAD_DIM, 1})
+        .set_data_type(DataType::BFLOAT16)
+        .set_ragged_offset(qOffsets)
+        .set_ragged_offset_multiplier(HEADS_Q * HEAD_DIM);
+
+    // One cache [num_blocks, block_size, 2, H_kv, D] style buffer: K and V share strides.
+    const std::vector<int64_t> kvStrides
+        = {HEADS_KV * BLOCK_SIZE * 2 * HEAD_DIM, BLOCK_SIZE * 2 * HEAD_DIM, 2 * HEAD_DIM, 1};
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({NUM_BLOCKS, HEADS_KV, BLOCK_SIZE, HEAD_DIM})
+        .set_stride(kvStrides)
+        .set_data_type(DataType::BFLOAT16);
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({NUM_BLOCKS, HEADS_KV, BLOCK_SIZE, HEAD_DIM})
+        .set_stride(kvStrides)
+        .set_data_type(DataType::BFLOAT16);
+
+    auto blockTable = int32Tensor({BATCH, 1, MAX_BLOCKS, 1}, {MAX_BLOCKS, MAX_BLOCKS, 1, 1});
+
+    SdpaAttributes attributes;
+    attributes.set_name("PagedSdpa")
+        .set_seq_len_q(int32Tensor({BATCH, 1, 1, 1}, {1, 1, 1, 1}))
+        .set_seq_len_kv(int32Tensor({BATCH, 1, 1, 1}, {1, 1, 1, 1}))
+        .set_paged_attention_k_table(blockTable)
+        .set_paged_attention_v_table(blockTable)
+        .set_paged_attention_max_seq_len_kv(static_cast<int32_t>(MAX_BLOCKS * BLOCK_SIZE))
+        .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
+        .set_diagonal_band_right_bound(0)
+        .set_attn_scale(0.088F);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+    o->set_output(true)
+        .set_stride({MAX_Q * HEADS_Q * HEAD_DIM, HEAD_DIM, HEADS_Q * HEAD_DIM, 1})
+        .set_ragged_offset(qOffsets)
+        .set_ragged_offset_multiplier(HEADS_Q * HEAD_DIM);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(o->get_dim(), (std::vector<int64_t>{BATCH, HEADS_Q, MAX_Q, HEAD_DIM}));
+}
+
+TEST_F(TestGraph, SdpaFwdPagedGraphRejectsMissingMaxSeqLenKv)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::HALF)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 4, 1, 64}).set_stride({256, 64, 256, 1}).set_data_type(DataType::HALF);
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({6, 1, 16, 64}).set_stride({1024, 1024, 64, 1}).set_data_type(DataType::HALF);
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({6, 1, 16, 64}).set_stride({1024, 1024, 64, 1}).set_data_type(DataType::HALF);
+    auto table = std::make_shared<TensorAttributes>();
+    table->set_dim({2, 1, 3, 1}).set_stride({3, 3, 1, 1}).set_data_type(DataType::INT32);
+    auto seqLenKv = std::make_shared<TensorAttributes>();
+    seqLenKv->set_dim({2, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::INT32);
+
+    SdpaAttributes attributes;
+    attributes.set_seq_len_kv(seqLenKv)
+        .set_paged_attention_k_table(table)
+        .set_paged_attention_v_table(table);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+    o->set_output(true);
+
+    auto validationResult = graph.validate();
+    EXPECT_EQ(validationResult.get_code(), ErrorCode::ATTRIBUTE_NOT_SET)
+        << validationResult.get_message();
+}
 #endif // HIPDNN_ENABLE_SDPA
 
 TEST_F(TestGraph, CustomOpNodeCreation)

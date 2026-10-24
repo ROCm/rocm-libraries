@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -796,4 +797,121 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithHalfMask)
 TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
 {
     expectMaskedPlanMatchesReferences<DataType::BFLOAT16>();
+}
+
+namespace
+{
+
+constexpr int64_t SINK_UID = 16;
+
+// makeGraph's float graph with stats and a sink_token tensor of the given type and dims.
+flatbuffers::FlatBufferBuilder makeGraphWithSink(DataType sinkDataType,
+                                                 const std::vector<int64_t>& sinkDims)
+{
+    const auto source = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
+    auto graph = UnPackGraph(source.GetBufferPointer());
+    auto sink = std::make_unique<TensorAttributesT>();
+    sink->uid = SINK_UID;
+    sink->name = "Sink";
+    sink->data_type = sinkDataType;
+    sink->dims = sinkDims;
+    sink->strides = hipdnn_data_sdk::utilities::generateStrides(sinkDims);
+    graph->tensors.push_back(std::move(sink));
+    graph->nodes[0]->attributes.AsSdpaAttributes()->sink_token_tensor_uid = SINK_UID;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    return builder;
+}
+
+bool floatBuilderAcceptsSink(DataType sinkDataType, const std::vector<int64_t>& sinkDims)
+{
+    auto graphBuilder = makeGraphWithSink(sinkDataType, sinkDims);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        builder;
+    return builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+}
+
+} // namespace
+
+TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableWithFloatSink)
+{
+    EXPECT_TRUE(floatBuilderAcceptsSink(DataType::FLOAT, {1, DIMS[1], 1, 1}));
+}
+
+TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableWithInvalidSink)
+{
+    // A float Q takes only a FLOAT sink of one logit per query head.
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::HALF, {1, DIMS[1], 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::INT32, {1, DIMS[1], 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::FLOAT, {1, 1, 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::FLOAT, {DIMS[1]}));
+}
+
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithSinkMatchesDirectFprop)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
+
+    const int64_t numHeads = DIMS[1];
+    const std::vector<int64_t> lseDims = {DIMS[0], numHeads, DIMS[2]};
+    auto graphBuilder = makeGraphWithSink(DataType::FLOAT, {1, numHeads, 1, 1});
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
+    Tensor<float> sink({1, numHeads, 1, 1});
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        sink.setHostValue(2.0f - 1.5f * static_cast<float>(h), 0, h, 0, 0);
+    }
+    sink.memory().markHostModified();
+
+    Tensor<float> oPlan(DIMS);
+    Tensor<float> lsePlan(lseDims);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {STATS_UID, lsePlan.memory().deviceData()},
+        {SINK_UID, sink.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+    lsePlan.markDeviceModified();
+
+    Tensor<float> oRef(DIMS);
+    Tensor<float> lseRef(lseDims);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
+                                                                 k,
+                                                                 v,
+                                                                 oRef,
+                                                                 std::nullopt,
+                                                                 /*attnMask=*/nullptr,
+                                                                 /*leftBound=*/-1,
+                                                                 /*rightBound=*/-1,
+                                                                 /*topLeftAlignment=*/true,
+                                                                 &lseRef,
+                                                                 SdpaSoftmaxProbabilityMode::FLOAT,
+                                                                 &sink);
+
+    const float tolerance = 1e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oRef, oPlan)) << "Plan output differs from direct fprop";
+    EXPECT_TRUE(validation.allClose(lseRef, lsePlan)) << "Plan LSE differs from direct fprop";
 }

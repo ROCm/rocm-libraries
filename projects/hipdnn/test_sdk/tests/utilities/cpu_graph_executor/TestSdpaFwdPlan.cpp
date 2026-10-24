@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -1226,4 +1227,148 @@ TEST(TestSdpaFwdPlanMask, BuilderAcceptsOnlyMatchingMaskDtype)
         noMaskBuilder.isApplicable(halfMaskWrapper.getNode(0), halfMaskWrapper.getTensorMap()));
     EXPECT_FALSE(
         noMaskBuilder.isApplicable(floatMaskWrapper.getNode(0), floatMaskWrapper.getTensorMap()));
+}
+
+namespace
+{
+
+constexpr int64_t SINK_GRAPH_STATS_UID = 6;
+constexpr int64_t SINK_GRAPH_SINK_UID = 7;
+
+// makeRawSdpaFwdGraph's float [1, 2, 4, 8] graph plus a [1, 2, 4, 1] stats output and a
+// sink_token tensor of the given data type and dims.
+flatbuffers::FlatBufferBuilder makeRawSdpaFwdGraphWithSink(DataType sinkType,
+                                                           const std::vector<int64_t>& sinkDims)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> statsDims = {1, 2, 4, 1};
+    const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+    const auto sinkStrides = hipdnn_data_sdk::utilities::generateStrides(sinkDims);
+
+    SdpaAttributesT attrs;
+    attrs.q_tensor_uid = 1;
+    attrs.k_tensor_uid = 2;
+    attrs.v_tensor_uid = 3;
+    attrs.o_tensor_uid = 4;
+    attrs.stats_tensor_uid = SINK_GRAPH_STATS_UID;
+    attrs.sink_token_tensor_uid = SINK_GRAPH_SINK_UID;
+    attrs.attn_scale_value = 0.5f;
+    attrs.right_bound = 0;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "Q", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "K", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 3, "V", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 4, "O", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, SINK_GRAPH_STATS_UID, "Stats", DataType::FLOAT, &statsStrides, &statsDims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, SINK_GRAPH_SINK_UID, "Sink", sinkType, &sinkStrides, &sinkDims));
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+    auto graph = CreateGraphDirect(builder,
+                                   "SdpaFwdSinkGraph",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+    return builder;
+}
+
+bool floatBuilderAcceptsSink(DataType sinkType, const std::vector<int64_t>& sinkDims)
+{
+    auto graphBuilder = makeRawSdpaFwdGraphWithSink(sinkType, sinkDims);
+    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    return planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap());
+}
+
+} // namespace
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableWithFloatSink)
+{
+    EXPECT_TRUE(floatBuilderAcceptsSink(DataType::FLOAT, {1, 2, 1, 1}));
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsInvalidSink)
+{
+    // A float Q only takes a FLOAT sink.
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::HALF, {1, 2, 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::INT32, {1, 2, 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::FLOAT, {1, 1, 1, 1}));
+    EXPECT_FALSE(floatBuilderAcceptsSink(DataType::FLOAT, {2}));
+}
+
+TEST(TestSdpaFwdPlan, ExecuteWithSinkMatchesDirectReference)
+{
+    auto graphBuilder = makeRawSdpaFwdGraphWithSink(DataType::FLOAT, {1, 2, 1, 1});
+    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    ASSERT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    Tensor<float> q(dims);
+    Tensor<float> k(dims);
+    Tensor<float> v(dims);
+    q.fillWithRandomValues(-1.0f, 1.0f, 21);
+    k.fillWithRandomValues(-1.0f, 1.0f, 22);
+    v.fillWithRandomValues(-1.0f, 1.0f, 23);
+    Tensor<float> oPlan(dims);
+    Tensor<float> lsePlan({1, 2, 4, 1});
+    std::vector<float> sink = {1.5f, -0.25f};
+
+    const std::unordered_map<int64_t, void*> variantPack = {
+        {1, q.memory().hostData()},
+        {2, k.memory().hostData()},
+        {3, v.memory().hostData()},
+        {4, oPlan.memory().hostData()},
+        {SINK_GRAPH_STATS_UID, lsePlan.memory().hostData()},
+        {SINK_GRAPH_SINK_UID, sink.data()},
+    };
+    planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0))->execute(variantPack);
+
+    Tensor<float> oDirect(dims);
+    Tensor<float> lseDirect({1, 2, 4, 1});
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<float, float, float, float, float>(q,
+                                                                   k,
+                                                                   v,
+                                                                   oDirect,
+                                                                   0.5f,
+                                                                   noMask,
+                                                                   /*leftBound=*/-1,
+                                                                   /*rightBound=*/0,
+                                                                   /*topLeftAlignment=*/true,
+                                                                   &lseDirect,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   &sink);
+
+    const CpuFpReferenceValidation<float> validation(1e-6f, 1e-6f);
+    EXPECT_TRUE(validation.allClose(oDirect, oPlan));
+    EXPECT_TRUE(validation.allClose(lseDirect, lsePlan));
+
+    // Row 0 of the top-left causal mask sees one key, so its LSE includes the sink:
+    // log(e^s + e^sink) > s and > sink.
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        EXPECT_GT(lsePlan.getHostValue(0, h, 0, 0), sink[static_cast<size_t>(h)]);
+    }
 }

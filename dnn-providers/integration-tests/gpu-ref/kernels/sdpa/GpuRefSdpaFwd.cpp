@@ -3,9 +3,10 @@
 
 // GPU reference scaled-dot-product-attention forward kernel.
 // Compiled via HipRTC with -DQ_TYPE=<type> -DK_TYPE=<type> -DV_TYPE=<type>
-// -DO_TYPE=<type> -DCOMPUTE_TYPE=<type> -DMASK_TYPE=<type>.
+// -DO_TYPE=<type> -DCOMPUTE_TYPE=<type> -DMASK_TYPE=<type> -DSINK_TYPE=<type>.
 // MASK_TYPE is the dtype of the additive attention mask (float, half or bfloat16);
-// it is converted to float on read and is independent of COMPUTE_TYPE.
+// it is converted to float on read and is independent of COMPUTE_TYPE. SINK_TYPE is the
+// dtype of the optional attention sink (float, half or bfloat16), also read as float.
 // One thread per output element (b, h, sq, dv). Uses stride-based indexing.
 // Default mode reproduces the fp32-softmax algorithm of CpuFpReferenceSdpa::forward.
 // Provider-attuned modes can model lower-precision softmax-probability storage before P@V.
@@ -29,6 +30,10 @@ static_assert(__is_same(COMPUTE_TYPE, float), "GpuRefSdpaFwd requires COMPUTE_TY
 
 #ifndef SDPA_SOFTMAX_PROBABILITY_MODE
 #define SDPA_SOFTMAX_PROBABILITY_MODE SDPA_SOFTMAX_PROBABILITY_FLOAT
+#endif
+
+#ifndef SINK_TYPE
+#define SINK_TYPE float
 #endif
 
 namespace
@@ -150,8 +155,15 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         return s;
     };
 
-    // PASS 1: numerically stable softmax maximum.
-    COMPUTE_TYPE maxVal = negInf;
+    // Attention sink of this head (a raw logit, not scaled): joins the max and the denominator,
+    // has no value row. -inf when absent, which is exactly no sink.
+    const COMPUTE_TYPE sink
+        = args.sink != nullptr
+              ? toAccum(static_cast<const SINK_TYPE*>(args.sink)[h * args.sinkHeadStride])
+              : negInf;
+
+    // PASS 1: numerically stable softmax maximum, seeded with the sink.
+    COMPUTE_TYPE maxVal = sink;
     for(long long skv = 0; skv < args.seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
@@ -169,8 +181,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     // row has exactly one writer and there is no contention.
     long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
 
-    // Fully-masked row: probabilities are all zero, so the output is zero.
-    // Matches CpuFpReferenceSdpa (avoids a 0/0 NaN from a sumExp==0 guard).
+    // Fully-masked row without a sink: probabilities are all zero, so the output is zero.
+    // Matches CpuFpReferenceSdpa (avoids a 0/0 NaN from a sumExp==0 guard). With a sink such a
+    // row takes the normal path: maxVal = sink, sumExp = 1, O = 0, LSE = sink.
     if(maxVal == negInf)
     {
         o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
@@ -182,8 +195,8 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         return;
     }
 
-    // PASS 2: softmax denominator.
-    COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
+    // PASS 2: softmax denominator, including the sink.
+    COMPUTE_TYPE sumExp = expf(sink - maxVal);
     for(long long skv = 0; skv < args.seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
@@ -211,7 +224,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     o[oIdx] = fromAccum(weighted, tag);
 
     // LSE = maxVal + log(sumExp), matching CpuFpReferenceSdpa. sumExp is the
-    // pre-normalization softmax denominator (>= 1, since exp(maxVal-maxVal)=1).
+    // pre-normalization softmax denominator (>= 1, since the max term contributes exp(0)).
     if(lse != nullptr && dv == 0)
     {
         lse[lseIdx] = static_cast<float>(maxVal) + logf(sumExp);

@@ -2974,3 +2974,180 @@ TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
                                                                                     nullptr)),
         std::invalid_argument);
 }
+
+namespace
+{
+// Primary-overload call with an attention sink and no mask or descales.
+template <class T>
+void forwardWithSink(const Tensor<T>& q,
+                     const Tensor<T>& k,
+                     const Tensor<T>& v,
+                     Tensor<T>& o,
+                     std::optional<float> scale,
+                     Tensor<float>* lse,
+                     const std::vector<float>* sinks,
+                     int64_t rightBound = -1,
+                     bool topLeftAlignment = true)
+{
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
+                                                   k,
+                                                   v,
+                                                   o,
+                                                   scale,
+                                                   noMask,
+                                                   -1,
+                                                   rightBound,
+                                                   topLeftAlignment,
+                                                   lse,
+                                                   nullptr,
+                                                   nullptr,
+                                                   nullptr,
+                                                   sinks);
+}
+} // namespace
+
+// One key: O = V * e^s / (e^s + e^sink), LSE = log(e^s + e^sink). The sink is not scaled.
+TEST(TestCpuFpReferenceSdpaSinks, SinkOneKeyClosedForm)
+{
+    Tensor<double> q({1, 1, 1, 2});
+    Tensor<double> k({1, 1, 1, 2});
+    Tensor<double> v({1, 1, 1, 2});
+    Tensor<double> o({1, 1, 1, 2});
+    Tensor<float> lse({1, 1, 1, 1});
+    q.setHostValue(1.0, 0, 0, 0, 0);
+    q.setHostValue(2.0, 0, 0, 0, 1);
+    k.setHostValue(0.5, 0, 0, 0, 0);
+    k.setHostValue(0.25, 0, 0, 0, 1);
+    v.setHostValue(3.0, 0, 0, 0, 0);
+    v.setHostValue(-2.0, 0, 0, 0, 1);
+
+    const float scale = 0.5f;
+    const std::vector<float> sinks = {0.75f};
+    forwardWithSink(q, k, v, o, scale, &lse, &sinks);
+
+    const double s = 0.5 * (1.0 * 0.5 + 2.0 * 0.25);
+    const double denom = std::exp(s) + std::exp(0.75);
+    const double p = std::exp(s) / denom;
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 3.0 * p, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 1), -2.0 * p, 1e-5);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(denom), 1e-5);
+}
+
+// Each query head uses its own sink; GQA maps two query heads to one KV head.
+TEST(TestCpuFpReferenceSdpaSinks, SinkPerQueryHeadGqa)
+{
+    Tensor<double> q({1, 2, 1, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 2, 1, 1});
+    Tensor<float> lse({1, 2, 1, 1});
+    q.fillWithValue(1.0);
+    k.setHostValue(1.0, 0, 0, 0, 0);
+    k.setHostValue(-1.0, 0, 0, 1, 0);
+    v.setHostValue(2.0, 0, 0, 0, 0);
+    v.setHostValue(4.0, 0, 0, 1, 0);
+
+    const std::vector<float> sinks = {-1.0f, 2.0f};
+    forwardWithSink(q, k, v, o, std::nullopt, &lse, &sinks);
+
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        const auto sink = static_cast<double>(sinks[static_cast<size_t>(h)]);
+        const double e0 = std::exp(1.0);
+        const double e1 = std::exp(-1.0);
+        const double denom = e0 + e1 + std::exp(sink);
+        EXPECT_NEAR(o.getHostValue(0, h, 0, 0), (2.0 * e0 + 4.0 * e1) / denom, 1e-5) << h;
+        EXPECT_NEAR(lse.getHostValue(0, h, 0, 0), std::log(denom), 1e-5) << h;
+    }
+}
+
+// A row with no visible key gives O = 0 and LSE = sink. Bottom-right causal with Sq > Skv leaves
+// the first rows without a key.
+TEST(TestCpuFpReferenceSdpaSinks, SinkKeylessRowGivesZeroOutputAndSinkLse)
+{
+    Tensor<double> q({1, 1, 3, 2});
+    Tensor<double> k({1, 1, 1, 2});
+    Tensor<double> v({1, 1, 1, 2});
+    Tensor<double> o({1, 1, 3, 2});
+    Tensor<float> lse({1, 1, 3, 1});
+    q.fillWithValue(1.0);
+    k.fillWithValue(1.0);
+    v.fillWithValue(5.0);
+
+    const std::vector<float> sinks = {1.5f};
+    forwardWithSink(
+        q, k, v, o, std::nullopt, &lse, &sinks, /*rightBound=*/0, /*topLeftAlignment=*/false);
+
+    // Bottom-right causal, Sq = 3, Skv = 1: rows 0 and 1 see no key, row 2 sees key 0.
+    for(int64_t sq = 0; sq < 2; ++sq)
+    {
+        EXPECT_EQ(o.getHostValue(0, 0, sq, 0), 0.0);
+        EXPECT_EQ(o.getHostValue(0, 0, sq, 1), 0.0);
+        EXPECT_FLOAT_EQ(lse.getHostValue(0, 0, sq, 0), 1.5f);
+    }
+    const double denom = std::exp(2.0) + std::exp(1.5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 5.0 * std::exp(2.0) / denom, 1e-5);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 2, 0), std::log(denom), 1e-5);
+}
+
+// sink = -inf is exactly no sink, for O and LSE.
+TEST(TestCpuFpReferenceSdpaSinks, NegativeInfinitySinkEqualsNoSink)
+{
+    Tensor<float> q({2, 4, 5, 8});
+    Tensor<float> k({2, 2, 7, 8});
+    Tensor<float> v({2, 2, 7, 8});
+    q.fillWithRandomValues(-1.0f, 1.0f, 11);
+    k.fillWithRandomValues(-1.0f, 1.0f, 12);
+    v.fillWithRandomValues(-1.0f, 1.0f, 13);
+    Tensor<float> oPlain({2, 4, 5, 8});
+    Tensor<float> oSink({2, 4, 5, 8});
+    Tensor<float> lsePlain({2, 4, 5, 1});
+    Tensor<float> lseSink({2, 4, 5, 1});
+
+    const std::vector<float> sinks(4, -std::numeric_limits<float>::infinity());
+    forwardWithSink(q, k, v, oPlain, 0.35f, &lsePlain, nullptr, 0);
+    forwardWithSink(q, k, v, oSink, 0.35f, &lseSink, &sinks, 0);
+
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 4; ++h)
+        {
+            for(int64_t s = 0; s < 5; ++s)
+            {
+                EXPECT_EQ(lsePlain.getHostValue(b, h, s, 0), lseSink.getHostValue(b, h, s, 0));
+                for(int64_t d = 0; d < 8; ++d)
+                {
+                    EXPECT_EQ(oPlain.getHostValue(b, h, s, d), oSink.getHostValue(b, h, s, d));
+                }
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceSdpaSinks, ReadSinkPerHeadWidensBfloat16)
+{
+    Tensor<bfloat16> sink({1, 3, 1, 1});
+    sink.setHostValue(safeTestTypeCast<bfloat16>(0.5f), 0, 0, 0, 0);
+    sink.setHostValue(safeTestTypeCast<bfloat16>(-1.25f), 0, 1, 0, 0);
+    sink.setHostValue(safeTestTypeCast<bfloat16>(2.0f), 0, 2, 0, 0);
+    const auto values = CpuFpReferenceSdpa::readSinkPerHead(sink, 3);
+    EXPECT_EQ(values, (std::vector<float>{0.5f, -1.25f, 2.0f}));
+
+    EXPECT_THROW(CpuFpReferenceSdpa::readSinkPerHead(sink, 4), std::invalid_argument);
+    const Tensor<float> flat({3});
+    EXPECT_THROW(CpuFpReferenceSdpa::readSinkPerHead(flat, 3), std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaSinks, ThrowsOnSinkCountMismatch)
+{
+    Tensor<float> q({1, 2, 1, 4});
+    Tensor<float> k({1, 2, 3, 4});
+    Tensor<float> v({1, 2, 3, 4});
+    Tensor<float> o({1, 2, 1, 4});
+    q.fillWithValue(1.0f);
+    k.fillWithValue(1.0f);
+    v.fillWithValue(1.0f);
+    const std::vector<float> sinks = {0.0f};
+    EXPECT_THROW(forwardWithSink(q, k, v, o, std::nullopt, nullptr, &sinks), std::invalid_argument);
+}

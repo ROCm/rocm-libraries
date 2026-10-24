@@ -46,16 +46,23 @@ struct SdpaFwdArgs
     float scale;
     long long leftBound, rightBound;
     int topLeftAlignment;
+    // Optional attention sink, SINK_TYPE [1, H, 1, 1]: head h at h * sinkHeadStride. nullptr
+    // disables it.
+    const void* sink;
+    long long sinkHeadStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
 
-// --- Ragged SDPA forward args (RFC-0014: packed BSHD + ragged_offset) ---
+// --- Ragged SDPA forward args (RFC-0014: packed BSHD + ragged_offset), also paged KV ---
 // Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
 // q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
 // Only Q and K offsets are passed. o shares Q's token boundaries and v shares K's. The host
 // checks this against the o/v ragged_offset tables before launch.
+// Paged variant: raggedOffsetQ == nullptr means dense Q/O (seqQMax tokens per batch), and
+// pageTableK != nullptr means K/V are block containers [num_blocks, H, block_size, D] addressed
+// through the page tables, with seqLenKv giving each batch's key count.
 // No additive mask: bias is gated off on the ASM v3 path.
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
@@ -101,6 +108,23 @@ struct SdpaRaggedFwdArgs
     float scale;
     long long leftBound, rightBound;
     int topLeftAlignment;
+    // Paged / dense-Q extension. All nullptr for the plain ragged path.
+    // seqLenQ/seqLenKv: int32 [B], element b at b * stride. seqLenQ overrides the Q length.
+    const int* seqLenQ;
+    const int* seqLenKv;
+    long long seqLenQStride, seqLenKvStride;
+    // Page tables, int32 [B, 1, M, 1]: block id of entry (b, j) at b * str0 + j * str2.
+    const int* pageTableK;
+    const int* pageTableV;
+    long long pageTableKStr0, pageTableKStr2;
+    long long pageTableVStr0, pageTableVStr2;
+    long long blockSize;
+    // Dense Q/O (raggedOffsetQ == nullptr): Sq, the per-batch Q extent.
+    long long seqQMax;
+    // Optional attention sink, SINK_TYPE [1, H, 1, 1]: head h at h * sinkHeadStride. nullptr
+    // disables it.
+    const void* sink;
+    long long sinkHeadStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

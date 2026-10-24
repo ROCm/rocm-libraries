@@ -172,7 +172,8 @@ void checkRaggedVsDense(const std::vector<int64_t>& seqQ,
                         int64_t leftBound = -1,
                         int64_t rightBound = -1,
                         bool topLeftAlignment = true,
-                        std::optional<float> attnScale = std::nullopt)
+                        std::optional<float> attnScale = std::nullopt,
+                        const std::vector<float>* sinks = nullptr)
 {
     ASSERT_EQ(seqQ.size(), seqKv.size());
     const auto batch = static_cast<int64_t>(seqQ.size());
@@ -204,8 +205,19 @@ void checkRaggedVsDense(const std::vector<int64_t>& seqQ,
     auto o = wrapRagged(oBack.data(), oDims, numHeads * headDimV, cumQ);
     auto lse = wrapRagged(lseBack.data(), lseDims, numHeads, cumQ);
 
-    CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(
-        q, k, v, o, attnScale, leftBound, rightBound, topLeftAlignment, &lse);
+    CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(q,
+                                                                         k,
+                                                                         v,
+                                                                         o,
+                                                                         attnScale,
+                                                                         leftBound,
+                                                                         rightBound,
+                                                                         topLeftAlignment,
+                                                                         &lse,
+                                                                         nullptr,
+                                                                         nullptr,
+                                                                         nullptr,
+                                                                         sinks);
 
     for(int64_t b = 0; b < batch; ++b)
     {
@@ -230,7 +242,11 @@ void checkRaggedVsDense(const std::vector<int64_t>& seqQ,
                                                                        leftBound,
                                                                        rightBound,
                                                                        topLeftAlignment,
-                                                                       &lseDense);
+                                                                       &lseDense,
+                                                                       nullptr,
+                                                                       nullptr,
+                                                                       nullptr,
+                                                                       sinks);
 
         for(int64_t s = 0; s < sQ; ++s)
         {
@@ -390,6 +406,20 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, RaggedExplicitAttnScale)
 {
     // Explicit attnScale instead of the default 1.0. Both references get the same value.
     checkRaggedVsDense({4, 6}, {4, 6}, 2, 2, 16, 16, -1, -1, true, /*attnScale=*/0.125f);
+}
+
+// Attention sinks per query head with GQA and bottom-right causal; batch 0 has more queries than
+// keys, so its first rows see no key and must give O = 0, LSE = sink (as the dense reference).
+TEST(TestCpuFpReferenceSdpaRaggedSinks, RaggedGqaCausalBottomRightWithSinks)
+{
+    const std::vector<float> sinks = {0.5f, -1.0f, 2.0f, 0.0f};
+    checkRaggedVsDense({5, 3}, {3, 6}, 4, 2, 16, 16, -1, 0, false, 0.25f, &sinks);
+}
+
+TEST(TestCpuFpReferenceSdpaRaggedSinks, RaggedSlidingWindowWithSinks)
+{
+    const std::vector<float> sinks = {-0.5f, 1.25f};
+    checkRaggedVsDense({8, 6}, {8, 6}, 2, 2, 16, 16, 2, 0, false, 0.25f, &sinks);
 }
 
 // An absent scale means 1.0, as in cuDNN and CpuFpReferenceSdpa: the output must equal an

@@ -96,6 +96,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Resample Forward | `ResampleFwdPlanBuilder` | `ResampleFwdSignatureKey` | Pooling-style resampling |
 | Resample Backward | `ResampleBwdPlanBuilder` | `ResampleBwdSignatureKey` | Resampling gradient |
 | SDPA Forward | `SdpaFwdPlanBuilder` | `SdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
+| SDPA Forward (paged K/V) | `SdpaFwdPagedPlanBuilder` | `SdpaFwdSignatureKey` (`paged`) | Forward pass over a paged K/V cache (`CpuFpReferenceSdpaRagged::forwardPaged`) |
 | SDPA Backward | `SdpaBwdPlanBuilder` | `SdpaBwdSignatureKey` | Scaled dot-product attention gradients |
 
 ### Block-Scale Quantization Operations
@@ -126,18 +127,32 @@ dimension must be reduced.
 
 ### SDPA Restrictions
 
-| Feature | SDPA Forward | SDPA Backward |
-|---------|--------------|---------------|
-| Log-sum-exp `stats` output | Supported | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported |
-| Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | - |
-| Paged KV cache, block-sparse attention | Not supported | - |
-| Softmax max / sum-exp stats outputs | Not supported | - |
-| Ragged tensors | - | Rejected |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |
+| Feature | SDPA Forward | SDPA Forward (paged K/V) | SDPA Backward |
+|---------|--------------|--------------------------|---------------|
+| Log-sum-exp `stats` output | Supported | Supported (FLOAT; dense, or ragged like Q) | Required input |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | `seq_len_kv` required; `seq_len_q` optional for dense Q, required for ragged Q | Not supported |
+| Paged KV cache (`page_table_k` / `page_table_v`) | Not supported | Required: both tables, plus `max_seq_len_kv` | - |
+| Dropout | Not supported | Not supported | Not supported |
+| Attention bias (`attn_mask`) | Supported | Not supported | Supported |
+| ALiBi | Not supported | Not supported | - |
+| Padding mask | Not supported | Either value (sequence lengths are always honored) | - |
+| Block-sparse attention | Not supported | Not supported | - |
+| Attention sinks (`sink_token`) | Supported (`[1, H_q, 1, 1]`, FLOAT or the Q data type when HALF/BFP16) | Supported (same rules; dense or ragged Q) | - |
+| Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
+| Ragged tensors | Rejected | Q, O and `stats` only (Q and O together); K, V, page tables and sequence lengths rejected | Rejected |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Not registered; descales rejected | - |
 
-FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output.
+FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output. Paged forward
+is registered for `FP32`, `FP16` and `BFP16` with all four of Q, K, V and O the same type. The signature
+key's `paged` flag (set when either page table is present) selects the paged builder, so the dense
+builder never sees page tables.
+
+Paged K/V containers are `[num_blocks, H_kv, block_size, D]` with any strides; key row `s` of batch `b`
+is row `s % block_size` of block `page_table[b, 0, s / block_size, 0]`. Only the first
+`ceil(seq_len_kv[b] / block_size)` page-table entries are read, and each must be a valid block id.
+Query rows past `seq_len_q[b]` are not written; a live row with no unmasked key (including
+`seq_len_kv[b] = 0`) gets zero output and `-inf` log-sum-exp, or the head's sink when a sink token
+is set. Sinks follow [the attention-sink contract](SdpaPagedAttention.md#attention-sinks).
 
 ### Resample Modes
 

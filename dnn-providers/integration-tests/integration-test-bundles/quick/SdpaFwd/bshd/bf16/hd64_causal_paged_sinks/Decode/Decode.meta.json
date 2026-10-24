@@ -1,0 +1,169 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_paged_golden.py",
+    "generator_sha256": "ca4460e390facb06117edcec7e58ddf4ed48471034468437fa29bf5043c60231",
+    "helpers_sha256": "e6910a0a5b70ff84f17ce1001e4cda1141274a137b6ff2ac3ea362af1b415da0",
+    "generated_at": "2026-10-22T22:49:55Z",
+    "reference_source": "PyTorch 2.13.0+rocm10.0.0",
+    "reference_backend": "pytorch_math_backend (gather-then-dense)",
+    "rocm_version": "10.0.0",
+    "generator_version": "1.1.0",
+    "generation_precision": "like-for-like: BF16 inputs, FP32 intermediates, BF16 output",
+    "direction": "forward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 4,
+        "num_heads_q": 16,
+        "num_heads_kv": 2,
+        "seq_q": 1,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "causal": "bottom_right",
+        "window_left": -1,
+        "window_right": -1,
+        "stats": false,
+        "scale": 0.125,
+        "gqa_ratio": 8,
+        "layout": "bshd",
+        "ragged_q": false,
+        "seq_lens_q": null,
+        "seq_lens_kv": [
+            37,
+            0,
+            128,
+            16
+        ],
+        "max_seq_len_kv": 128,
+        "block_size": 16,
+        "max_blocks_per_seq": 8,
+        "num_blocks": 14,
+        "used_blocks": 12,
+        "spare_blocks": 2,
+        "kv_container_layout": "[num_blocks, block_size, H_kv, D] (vLLM)",
+        "interleaved_kv": false,
+        "k_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "v_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "spare_fill": 100.0,
+        "interleave_fill": null,
+        "shared_page_table": true,
+        "page_table_k": [
+            [
+                13,
+                11,
+                0,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                4,
+                5,
+                3,
+                8,
+                1,
+                10,
+                2,
+                7
+            ],
+            [
+                9,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "page_table_v": [
+            [
+                13,
+                11,
+                0,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                4,
+                5,
+                3,
+                8,
+                1,
+                10,
+                2,
+                7
+            ],
+            [
+                9,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "sinks": [
+            -0.8359375,
+            0.119140625,
+            -1.4609375,
+            0.9609375,
+            0.1435546875,
+            0.322265625,
+            -0.96875,
+            1.3515625,
+            -0.1142578125,
+            0.034912109375,
+            2.15625,
+            0.72265625,
+            -2.0625,
+            0.009521484375,
+            0.490234375,
+            -1.2265625
+        ],
+        "sink_dtype": "io"
+    }
+}

@@ -59,6 +59,7 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        int64_t leftBound,
                                        int64_t rightBound,
                                        bool topLeftAlignment,
+                                       const detail::SdpaSinkBinding& sink,
                                        const std::vector<std::string>& defines)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
@@ -94,6 +95,8 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.leftBound = static_cast<long long>(leftBound);
     args.rightBound = static_cast<long long>(rightBound);
     args.topLeftAlignment = topLeftAlignment ? 1 : 0;
+    args.sink = sink.ptr;
+    args.sinkHeadStride = static_cast<long long>(sink.headStride);
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));

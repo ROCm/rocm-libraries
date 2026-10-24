@@ -1,0 +1,169 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_paged_golden.py",
+    "generator_sha256": "ca4460e390facb06117edcec7e58ddf4ed48471034468437fa29bf5043c60231",
+    "helpers_sha256": "e6910a0a5b70ff84f17ce1001e4cda1141274a137b6ff2ac3ea362af1b415da0",
+    "generated_at": "2026-10-22T22:49:59Z",
+    "reference_source": "PyTorch 2.13.0+rocm10.0.0",
+    "reference_backend": "pytorch_math_backend (gather-then-dense)",
+    "rocm_version": "10.0.0",
+    "generator_version": "1.1.0",
+    "generation_precision": "like-for-like: BF16 inputs, FP32 intermediates, BF16 output",
+    "direction": "forward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 4,
+        "num_heads_q": 16,
+        "num_heads_kv": 2,
+        "seq_q": 1,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "causal": "bottom_right",
+        "window_left": -1,
+        "window_right": -1,
+        "stats": true,
+        "scale": 0.125,
+        "gqa_ratio": 8,
+        "layout": "bshd",
+        "ragged_q": false,
+        "seq_lens_q": null,
+        "seq_lens_kv": [
+            37,
+            0,
+            128,
+            16
+        ],
+        "max_seq_len_kv": 128,
+        "block_size": 16,
+        "max_blocks_per_seq": 8,
+        "num_blocks": 14,
+        "used_blocks": 12,
+        "spare_blocks": 2,
+        "kv_container_layout": "[num_blocks, block_size, H_kv, D] (vLLM)",
+        "interleaved_kv": false,
+        "k_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "v_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "spare_fill": 100.0,
+        "interleave_fill": null,
+        "shared_page_table": false,
+        "page_table_k": [
+            [
+                13,
+                11,
+                0,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                4,
+                5,
+                3,
+                8,
+                1,
+                10,
+                2,
+                7
+            ],
+            [
+                9,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "page_table_v": [
+            [
+                7,
+                5,
+                11,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                6,
+                8,
+                2,
+                9,
+                1,
+                4,
+                12,
+                0
+            ],
+            [
+                3,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "sinks": [
+            0.096859872341156,
+            -0.2944249212741852,
+            1.9397751092910767,
+            -0.5886773467063904,
+            2.0242841243743896,
+            1.6580294370651245,
+            0.24831558763980865,
+            -0.06616748124361038,
+            0.008909584023058414,
+            1.0107994079589844,
+            0.7243960499763489,
+            -0.9641584157943726,
+            1.5228359699249268,
+            0.6024922132492065,
+            -0.0986948236823082,
+            0.030806252732872963
+        ],
+        "sink_dtype": "float"
+    }
+}

@@ -224,6 +224,7 @@ public:
     {
         return getInput(InputNames::Block_mask);
     }
+    /// @brief Attention-sink tensor, or null when unset. See set_sink_token().
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_sink_token() const
     {
@@ -440,11 +441,21 @@ public:
     {
         return setInput(InputNames::Block_mask, std::move(value));
     }
+    /// @brief Set the attention sink (cuDNN `set_sink_token`, gpt-oss style).
+    ///
+    /// One raw logit per query head: dims exactly [1, H_q, 1, 1], data type FLOAT or the Q data
+    /// type when that is HALF or BFLOAT16 (pre_validate_node rejects anything else). Per row,
+    /// with s_j the logits after attn_scale, bias and masking:
+    /// m = max(sink, max_j s_j), l = exp(sink - m) + sum_j exp(s_j - m),
+    /// O = sum_j exp(s_j - m) V_j / l, Stats = m + log(l). The sink is not multiplied by
+    /// attn_scale and has no value row. A row with no visible key gives O = 0 and Stats = sink;
+    /// a sink of -inf is the same as no sink. Applies to dense, ragged and paged layouts.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::SINK_TOKEN, value);
     }
+    /// @copydoc set_sink_token(const std::shared_ptr<TensorAttributes>&)
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sink_token(std::shared_ptr<TensorAttributes>&& value)
     {

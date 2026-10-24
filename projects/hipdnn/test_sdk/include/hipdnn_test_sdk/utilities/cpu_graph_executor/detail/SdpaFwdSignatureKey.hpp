@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPagedPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -24,6 +25,8 @@ struct SdpaFwdSignatureKey
     hipdnn_flatbuffers_sdk::data_objects::DataType oDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType maskDataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    // Set when the node has a page table: the paged builder (SdpaFwdPagedPlanBuilder) serves it.
+    bool paged = false;
 
     SdpaFwdSignatureKey() = default;
     constexpr SdpaFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType q,
@@ -31,12 +34,14 @@ struct SdpaFwdSignatureKey
                                   hipdnn_flatbuffers_sdk::data_objects::DataType v,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType o,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType mask
-                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                                  bool isPaged = false)
         : qDataType(q)
         , kDataType(k)
         , vDataType(v)
         , oDataType(o)
         , maskDataType(mask)
+        , paged(isPaged)
     {
     }
 
@@ -78,6 +83,9 @@ struct SdpaFwdSignatureKey
             }
             maskDataType = maskAttr->data_type();
         }
+
+        paged = nodeAttributes->page_table_k_tensor_uid().has_value()
+                || nodeAttributes->page_table_v_tensor_uid().has_value();
     }
 
     std::size_t operator()(const SdpaFwdSignatureKey& k) const noexcept
@@ -92,14 +100,16 @@ struct SdpaFwdSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(kDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(vDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(oDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(maskDataType)) << 20);
+               ^ (static_cast<std::size_t>(static_cast<int>(maskDataType)) << 20)
+               ^ (static_cast<std::size_t>(paged) << 28);
     }
 
     bool operator==(const SdpaFwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && qDataType == other.qDataType
                && kDataType == other.kDataType && vDataType == other.vDataType
-               && oDataType == other.oDataType && maskDataType == other.maskDataType;
+               && oDataType == other.oDataType && maskDataType == other.maskDataType
+               && paged == other.paged;
     }
 
     static std::unordered_map<SdpaFwdSignatureKey,
@@ -149,6 +159,20 @@ struct SdpaFwdSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+
+        // Paged K/V graphs (no attention bias).
+        addPagedPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPagedPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPagedPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }
@@ -202,12 +226,33 @@ struct SdpaFwdSignatureKey
                        ODataTypeEnum,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
     }
+
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
+    static void addPagedPlanBuilder(std::unordered_map<SdpaFwdSignatureKey,
+                                                       std::unique_ptr<IGraphNodePlanBuilder>,
+                                                       SdpaFwdSignatureKey>& map)
+    {
+        map[SdpaFwdSignatureKey(QDataTypeEnum,
+                                KDataTypeEnum,
+                                VDataTypeEnum,
+                                ODataTypeEnum,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                                /*isPaged=*/true)]
+            = std::make_unique<SdpaFwdPagedPlanBuilder<QDataTypeEnum,
+                                                       KDataTypeEnum,
+                                                       VDataTypeEnum,
+                                                       ODataTypeEnum>>();
+    }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const SdpaFwdSignatureKey& key)
 {
     os << "SdpaFwd(q=" << key.qDataType << ", k=" << key.kDataType << ", v=" << key.vDataType
-       << ", o=" << key.oDataType << ", mask=" << key.maskDataType << ")";
+       << ", o=" << key.oDataType << ", mask=" << key.maskDataType
+       << ", paged=" << (key.paged ? "true" : "false") << ")";
     return os;
 }
 

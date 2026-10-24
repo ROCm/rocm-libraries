@@ -124,3 +124,39 @@ and for template-sweep bundles:
 - `golden.path` validation and per-case tensor file/NaN/size checks (input and output tensors)
 - per-case metadata field validation
 - a directory with only one of `graph.template.json`/`sweep.json`
+
+## `generate_sdpa_fwd_paged_golden.py`
+
+Golden bundles for paged K/V SDPA forward (vLLM paged attention, cuDNN paged
+semantics) with dense or ragged Q. It reuses the helpers of
+`generate_sdpa_fwd_golden.py` and needs PyTorch. The golden O gathers each
+batch's pages into dense K/V and runs the PyTorch math backend in FP32 on the
+BF16/FP16 inputs. Besides the graph, metadata and `.bin` files, it writes the
+complete `{Name}.tensors.dvc` (golden-data remote, md5, size) and an empty
+`{Name}.support.json` when none exists.
+
+`--sinks` adds an attention sink (`sink_token`, uid 14, `[1, Hq, 1, 1]`, one
+N(0, 1) logit per query head) in the io dtype, or FLOAT with `--sink-dtype
+float`. The golden appends the sink as an extra, unscaled logit column, takes
+the softmax and log-sum-exp over all columns and drops the sink column before
+P @ V, so a row with no visible key gives O = 0 and LSE = sink. The sink is drawn
+after every other tensor, so the rest of a bundle matches its sink-free twin.
+
+Regenerate the checked-in paged bundles (`GENERATE_SINKS=1` for the ones with
+sinks), then verify them:
+
+```bash
+cd dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd
+GENERATE_PAGED=1 bash generate_golden_data.sh none
+GENERATE_SINKS=1 bash generate_golden_data.sh none
+cd ../../..
+python reference-data-scripts/verify_golden_bundles.py --require-data \
+  integration-test-bundles/quick/SdpaFwd/bshd
+```
+
+Tests (skipped without PyTorch):
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/tests/test_generate_sdpa_fwd_paged_golden.py
+ctest -R hipdnn_golden_paged_generator_python_tests --output-on-failure
+```

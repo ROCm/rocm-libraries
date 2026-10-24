@@ -211,6 +211,16 @@ if(Python3_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
     )
     set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
+
+    # Exits 77 when every case skipped (no PyTorch, which the generator needs), which ctest
+    # reports as Skipped rather than Passed.
+    add_test(
+        NAME hipdnn_golden_paged_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_paged_golden.py
+    )
+    set_tests_properties(hipdnn_golden_paged_generator_python_tests PROPERTIES SKIP_RETURN_CODE 77)
+    set(HIPDNN_IT_GOLDEN_PAGED_GENERATOR_TEST hipdnn_golden_paged_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -369,6 +379,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_PAGED_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_PAGED_GENERATOR_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

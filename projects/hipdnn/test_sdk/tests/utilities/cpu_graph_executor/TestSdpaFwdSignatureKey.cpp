@@ -229,3 +229,37 @@ TEST(TestSdpaFwdSignatureKey, NodeConstructorWithoutMaskYieldsUnset)
 
     EXPECT_EQ(keyFromNode.maskDataType, DataType::UNSET);
 }
+
+TEST(TestSdpaFwdSignatureKey, PagedParticipatesInEqualityAndHash)
+{
+    const SdpaFwdSignatureKey dense{DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
+    const SdpaFwdSignatureKey paged{
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::UNSET, true};
+    EXPECT_FALSE(dense.paged);
+    EXPECT_FALSE(dense == paged);
+    EXPECT_NE(dense.hashSelf(), paged.hashSelf());
+}
+
+// Paged graphs (no attention bias) resolve for the FLOAT, HALF and BFLOAT16 x4 tuples only.
+TEST(TestSdpaFwdSignatureKey, PlanBuildersCoverPagedTuples)
+{
+    const auto planBuilders = SdpaFwdSignatureKey::getPlanBuilders();
+    for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        EXPECT_NE(planBuilders.find(SdpaFwdSignatureKey{
+                      dataType, dataType, dataType, dataType, DataType::UNSET, true}),
+                  planBuilders.end())
+            << "dtype=" << dataType;
+        EXPECT_EQ(planBuilders.find(SdpaFwdSignatureKey{
+                      dataType, dataType, dataType, dataType, DataType::FLOAT, true}),
+                  planBuilders.end())
+            << "dtype=" << dataType;
+    }
+    EXPECT_EQ(planBuilders.find(SdpaFwdSignatureKey{DataType::FP8_E4M3_FNUZ,
+                                                    DataType::FP8_E4M3_FNUZ,
+                                                    DataType::FP8_E4M3_FNUZ,
+                                                    DataType::BFLOAT16,
+                                                    DataType::UNSET,
+                                                    true}),
+              planBuilders.end());
+}

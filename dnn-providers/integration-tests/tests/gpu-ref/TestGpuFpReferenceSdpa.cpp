@@ -1679,3 +1679,129 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
     compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
+
+// ============================================================================
+// Attention sinks: GPU vs CPU with one sink logit per query head, FLOAT or in the I/O dtype.
+// Bottom-right causal with Sq > Skv leaves the first rows without a visible key, which must give
+// O = 0 and LSE = sink on both references.
+// ============================================================================
+
+namespace
+{
+
+template <typename T, typename SinkT>
+void checkSinkGpuVsCpu()
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ_Q = 6;
+    constexpr int64_t SEQ_KV = 4;
+    constexpr int64_t HEAD_DIM = 16;
+    constexpr float SCALE = 0.25f;
+
+    Tensor<T> q({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<T> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<T> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<T> oCpu({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<T> oGpu({BATCH, HEADS, SEQ_Q, HEAD_DIM});
+    Tensor<float> lseCpu({BATCH, HEADS, SEQ_Q, 1});
+    Tensor<float> lseGpu({BATCH, HEADS, SEQ_Q});
+    fillWithRandomValues(q, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
+    fillWithRandomValues(k, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
+    fillWithRandomValues(v, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
+
+    // The CPU takes the sink values the GPU reads (rounded to SinkT).
+    Tensor<SinkT> sink({1, HEADS, 1, 1});
+    std::vector<float> sinkValues;
+    for(int64_t h = 0; h < HEADS; ++h)
+    {
+        const auto value = static_cast<SinkT>(0.75f * static_cast<float>(h) - 1.0f);
+        sink.setHostValue(value, 0, h, 0, 0);
+        sinkValues.push_back(static_cast<float>(value));
+    }
+    sink.memory().markHostModified();
+
+    const TensorBase<float>* noMaskCpu = nullptr;
+    CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
+                                                   k,
+                                                   v,
+                                                   oCpu,
+                                                   SCALE,
+                                                   noMaskCpu,
+                                                   /*leftBound=*/-1,
+                                                   /*rightBound=*/0,
+                                                   /*topLeftAlignment=*/false,
+                                                   &lseCpu,
+                                                   nullptr,
+                                                   nullptr,
+                                                   nullptr,
+                                                   &sinkValues);
+    GpuFpReferenceSdpa::fprop<T, T, T, T, float, float, SinkT>(q,
+                                                               k,
+                                                               v,
+                                                               oGpu,
+                                                               SCALE,
+                                                               nullptr,
+                                                               /*leftBound=*/-1,
+                                                               /*rightBound=*/0,
+                                                               /*topLeftAlignment=*/false,
+                                                               &lseGpu,
+                                                               SdpaSoftmaxProbabilityMode::FLOAT,
+                                                               &sink);
+
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<T>());
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    TensorView<T> oGpuView(oGpu);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < HEADS; ++h)
+        {
+            for(int64_t sq = 0; sq < SEQ_Q; ++sq)
+            {
+                const float lseGpuValue = lseGpuView.getHostValue(std::vector<int64_t>{b, h, sq});
+                EXPECT_NEAR(lseGpuValue,
+                            lseCpuView.getHostValue(std::vector<int64_t>{b, h, sq, 0}),
+                            gpuRefFwdTolerance<float>())
+                    << "GPU/CPU LSE mismatch at b=" << b << ", h=" << h << ", sq=" << sq;
+            }
+            // Rows 0 and 1 see no key (bottom-right offset Skv - Sq = -2).
+            for(int64_t sq = 0; sq < SEQ_Q - SEQ_KV; ++sq)
+            {
+                EXPECT_EQ(lseGpuView.getHostValue(std::vector<int64_t>{b, h, sq}),
+                          sinkValues[static_cast<size_t>(h)]);
+                for(int64_t d = 0; d < HEAD_DIM; ++d)
+                {
+                    EXPECT_EQ(static_cast<float>(
+                                  oGpuView.getHostValue(std::vector<int64_t>{b, h, sq, d})),
+                              0.0f);
+                }
+            }
+        }
+    }
+}
+
+} // namespace
+
+template <typename T>
+class TestGpuSdpaFwdSinks : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestGpuSdpaFwdSinks, SdpaFwdTypes, );
+
+TYPED_TEST(TestGpuSdpaFwdSinks, FloatSinkMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    checkSinkGpuVsCpu<TypeParam, float>();
+}
+
+TYPED_TEST(TestGpuSdpaFwdSinks, IoTypeSinkMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    checkSinkGpuVsCpu<TypeParam, TypeParam>();
+}

@@ -163,12 +163,18 @@ private:
                 node, tensorMap, node.compute_data_type());
         case NodeAttrs::SdpaAttributes:
         {
-            // A ragged SDPA node (RFC-0014 packed layout) has a ragged_offset on a primary. Any
-            // ragged primary picks the ragged bucket, so a partly ragged node is rejected there
-            // instead of being run as dense.
+            // A paged SDPA node (page_table_k/v) picks the paged bucket first: its Q/O may be
+            // ragged too. Otherwise a ragged SDPA node (RFC-0014 packed layout) has a
+            // ragged_offset on a primary. Any ragged primary picks the ragged bucket, so a partly
+            // ragged node is rejected there instead of being run as dense.
             const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
             if(sdpaAttributes != nullptr)
             {
+                if(sdpaAttributes->page_table_k_tensor_uid().has_value()
+                   || sdpaAttributes->page_table_v_tensor_uid().has_value())
+                {
+                    return detail::GpuSdpaPagedFwdSignatureKey(node, tensorMap);
+                }
                 for(const auto uid : {sdpaAttributes->q_tensor_uid(),
                                       sdpaAttributes->k_tensor_uid(),
                                       sdpaAttributes->v_tensor_uid(),

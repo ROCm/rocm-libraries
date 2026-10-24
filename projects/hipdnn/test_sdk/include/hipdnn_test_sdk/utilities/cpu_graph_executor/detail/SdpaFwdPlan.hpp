@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -35,7 +36,8 @@ struct SdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -59,6 +61,9 @@ struct SdpaFwdParams
         , descaleVTensor(descaleVAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
                              : std::nullopt)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -75,6 +80,7 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 template <typename QDataType,
@@ -153,6 +159,12 @@ public:
             effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
                 _params.scaleTensor.value(), variantPack, "SDPA scale");
         }
+        std::optional<std::vector<float>> sinkPerHead;
+        if(_params.sinkTensor.has_value())
+        {
+            sinkPerHead
+                = readSdpaSinkPerHead(*_params.sinkTensor, variantPack, _params.qTensor.dims.at(1));
+        }
 
         utilities::CpuFpReferenceSdpa::
             forward<QDataType, KDataType, VDataType, ODataType, float, Mask>(
@@ -168,7 +180,8 @@ public:
                 shallowLseTensor.get(),
                 shallowDescaleQ.get(),
                 shallowDescaleK.get(),
-                shallowDescaleV.get());
+                shallowDescaleV.get(),
+                sinkPerHead.has_value() ? &*sinkPerHead : nullptr);
     }
 
 private:
@@ -264,8 +277,13 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Supported: an attention sink of the frontend-contract shape and data type.
+        if(!isSdpaSinkSupported(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -362,6 +380,9 @@ public:
         const auto* descaleVPtr = nodeAttributes->descale_v_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->descale_v_tensor_uid().value())
                                       : nullptr;
+        const auto* sinkPtr = nodeAttributes->sink_token_tensor_uid().has_value()
+                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                                  : nullptr;
 
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
@@ -379,7 +400,8 @@ public:
                           lsePtr,
                           descaleQPtr,
                           descaleKPtr,
-                          descaleVPtr));
+                          descaleVPtr,
+                          sinkPtr));
     }
 };
 

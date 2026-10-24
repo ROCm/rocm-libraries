@@ -88,6 +88,8 @@ void GpuFpReferenceSdpaRagged::launchSdpaRaggedFwd(const void* qPtr,
                                                    int64_t leftBound,
                                                    int64_t rightBound,
                                                    bool topLeftAlignment,
+                                                   const PagedKvLaunch& paged,
+                                                   const detail::SdpaSinkBinding& sink,
                                                    const std::vector<std::string>& defines)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
@@ -132,6 +134,20 @@ void GpuFpReferenceSdpaRagged::launchSdpaRaggedFwd(const void* qPtr,
     args.leftBound = static_cast<long long>(leftBound);
     args.rightBound = static_cast<long long>(rightBound);
     args.topLeftAlignment = topLeftAlignment ? 1 : 0;
+    args.seqLenQ = static_cast<const int*>(paged.seqLenQ);
+    args.seqLenKv = static_cast<const int*>(paged.seqLenKv);
+    args.seqLenQStride = static_cast<long long>(paged.seqLenQStride);
+    args.seqLenKvStride = static_cast<long long>(paged.seqLenKvStride);
+    args.pageTableK = static_cast<const int*>(paged.pageTableK);
+    args.pageTableV = static_cast<const int*>(paged.pageTableV);
+    args.pageTableKStr0 = static_cast<long long>(paged.pageTableKStr0);
+    args.pageTableKStr2 = static_cast<long long>(paged.pageTableKStr2);
+    args.pageTableVStr0 = static_cast<long long>(paged.pageTableVStr0);
+    args.pageTableVStr2 = static_cast<long long>(paged.pageTableVStr2);
+    args.blockSize = static_cast<long long>(paged.blockSize);
+    args.seqQMax = static_cast<long long>(paged.seqQMax);
+    args.sink = sink.ptr;
+    args.sinkHeadStride = static_cast<long long>(sink.headStride);
 
     auto totalElements = totalQ * numHeads * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
