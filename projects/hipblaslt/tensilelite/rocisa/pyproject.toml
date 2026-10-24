@@ -23,15 +23,14 @@ cmake.args = ["-DHIPBLASLT_ENABLE_YAML=ON", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 # No pure-Python packages to scan; the wheel contents come entirely from
 # cmake install() rules (_rocisa.so + __init__.py → rocisa/).
 wheel.packages = []
-# Persistent build tree so repeated editable installs recompile incrementally
-# instead of from scratch. This makes the rocisa rebuild that `invoke
-# build-client` triggers a fast no-op when nothing changed. {wheel_tag} keeps
-# per-interpreter/ABI build trees separate.
+# Persistent build tree so repeated `invoke rocisa` installs recompile
+# incrementally instead of from scratch. {wheel_tag} keeps per-interpreter/ABI
+# build trees separate.
 build-dir = "build/{wheel_tag}"
 
 # Compatibility default. Rebuild-on-import is deprecated because it makes an
 # ordinary import perform a native build; opt out now with
-# SKBUILD_EDITABLE_REBUILD=false (or `invoke rocisa --no-rebuild-on-import`).
+# SKBUILD_EDITABLE_REBUILD=false.
 # A future release will default this to false after users have migrated to the
 # explicit rebuild task.
 editable.rebuild = true

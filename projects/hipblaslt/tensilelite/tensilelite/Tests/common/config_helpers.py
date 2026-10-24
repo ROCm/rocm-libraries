@@ -233,7 +233,7 @@ def findAvailableArchs(gpu_targets=None):
         # stepping-specific mark; left intact it is rejected as unknown instead.
         return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
-    from tensilelite.Tests.gpu_detection import get_available_archs
+    from gpu_detection import get_available_archs
     return get_available_archs()
 
 
