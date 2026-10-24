@@ -12,6 +12,7 @@
 #include "handle.h"
 #include "rocblaslt.h"
 #include "rocblaslt_mat_utils.hpp"
+#include "tensile_host.hpp"
 #include "utility.hpp"
 
 #include <hip/hip_runtime.h>
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -61,14 +63,89 @@ namespace
     };
     static_assert(sizeof(GroupedRecord) == 196, "grouped record layout changed");
 
+    // The record MX kernels read: the scale tensors follow A and B, and the fields from
+    // alpha on match GroupedRecord.
+    struct __attribute__((packed)) GroupedRecordMX
+    {
+        uint32_t m;
+        uint32_t n;
+        uint32_t batch;
+        uint32_t k;
+        void*    d;
+        void*    c;
+        void*    a;
+        void*    mxsa;
+        void*    b;
+        void*    mxsb;
+        uint32_t strideD1;
+        uint32_t strideD2;
+        uint32_t strideC1;
+        uint32_t strideC2;
+        uint32_t strideA1;
+        uint32_t strideA2;
+        uint32_t strideMXSA1;
+        uint32_t strideMXSA2;
+        uint32_t strideB1;
+        uint32_t strideB2;
+        uint32_t strideMXSB1;
+        uint32_t strideMXSB2;
+        int8_t   alpha[16];
+        int8_t   beta[16];
+        void*    scaleA;
+        void*    scaleB;
+        void*    scaleC;
+        void*    scaleD;
+        void*    scaleAlphaVec;
+        void*    bias;
+        int      biasType;
+        uint32_t reserved;
+        void*    e;
+        uint32_t strideE1;
+        uint32_t strideE2;
+        float    act0;
+        float    act1;
+        int      activationType;
+    };
+    static_assert(sizeof(GroupedRecordMX) == 228, "grouped MX record layout changed");
+
     constexpr size_t kRecordAlignment = 256;
     // Used for the reduction dimension when neither a scalar K nor an average hint is set.
     // It only steers selection and split-K; any value gives correct results.
     constexpr int64_t kDefaultK = 512;
+    constexpr int64_t kMXBlock  = 32;
 
-    size_t recordBytes(int groupCount)
+    using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+
+    bool isMXFormat(ScalingFormat f)
     {
-        size_t bytes = sizeof(GroupedRecord) * static_cast<size_t>(groupCount);
+        return f == ScalingFormat::Block_32_UE8M0 || f == ScalingFormat::Block_32_UE8M0_32_8_EXT;
+    }
+
+    bool isMX(rocblaslt_matmul_desc desc)
+    {
+        return isMXFormat(desc->scaleAType);
+    }
+
+    // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is the one the
+    // caller's scale mode provides: pre-swizzled for the _EXT mode, unswizzled otherwise.
+    bool scaleFormatMatches(rocblaslt_handle             handle,
+                            rocblaslt_matmul_desc        desc,
+                            const rocblaslt_matmul_algo& algo)
+    {
+        if(!isMX(desc))
+            return true;
+        constexpr int kHostPreSwizzle = 1;
+        int           format          = getMXScaleFormatFromAlgoIndex(handle, algo);
+        if(format < 0)
+            return false;
+        return (desc->scaleAType == ScalingFormat::Block_32_UE8M0_32_8_EXT)
+               == (format == kHostPreSwizzle);
+    }
+
+    size_t recordBytes(int groupCount, bool mx)
+    {
+        size_t bytes = (mx ? sizeof(GroupedRecordMX) : sizeof(GroupedRecord))
+                       * static_cast<size_t>(groupCount);
         return (bytes + kRecordAlignment - 1) / kRecordAlignment * kRecordAlignment;
     }
 
@@ -92,6 +169,17 @@ namespace
                    && k == o.k;
         }
     };
+
+    // Reduction dimension of A: columns for OP_N, rows otherwise.
+    bool kIsUniform(rocblaslt_matmul_desc desc, rocblaslt_matrix_layout matA)
+    {
+        return (desc->op_A == HIPBLAS_OP_N ? matA->cols_array : matA->rows_array) == nullptr;
+    }
+
+    int64_t uniformK(rocblaslt_matmul_desc desc, rocblaslt_matrix_layout matA)
+    {
+        return static_cast<int64_t>(desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m);
+    }
 
     rocblaslt_status validateGrouped(rocblaslt_matmul_desc   desc,
                                      rocblaslt_matrix_layout matA,
@@ -129,13 +217,29 @@ namespace
             log_error(__func__, "grouped GEMM supports only a 32-bit float scale type");
             return rocblaslt_status_invalid_value;
         }
-        if(desc->epilogue != ROCBLASLT_EPILOGUE_DEFAULT || desc->bias || desc->e
-           || desc->scaleA || desc->scaleB || desc->scaleC || desc->scaleD || desc->scaleE
-           || desc->amaxD
-           || desc->scaleAType != RocblasltContractionProblem::ScalingFormat::None
-           || desc->scaleBType != RocblasltContractionProblem::ScalingFormat::None)
+        const bool mx = isMX(desc);
+        auto       noScaleMode = [](ScalingFormat f) {
+            return f == ScalingFormat::None || f == ScalingFormat::Scalar;
+        };
+        if(mx ? desc->scaleBType != desc->scaleAType
+              : !noScaleMode(desc->scaleAType) || !noScaleMode(desc->scaleBType))
         {
-            log_error(__func__, "grouped GEMM does not support epilogues or scaling yet");
+            log_error(__func__,
+                      "grouped GEMM supports only the HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 "
+                      "and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT scale modes, the "
+                      "same on A and B");
+            return rocblaslt_status_invalid_value;
+        }
+        if(desc->epilogue != ROCBLASLT_EPILOGUE_DEFAULT || desc->bias || desc->e
+           || (!mx && (desc->scaleA || desc->scaleB)) || desc->scaleC || desc->scaleD
+           || desc->scaleE || desc->amaxD)
+        {
+            log_error(__func__, "grouped GEMM does not support epilogues or scaling other than MX");
+            return rocblaslt_status_invalid_value;
+        }
+        if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % kMXBlock != 0)
+        {
+            log_error(__func__, "MX grouped GEMM needs K to be a multiple of 32");
             return rocblaslt_status_invalid_value;
         }
         if(desc->pointermode != rocblaslt_pointer_mode_host
@@ -153,22 +257,13 @@ namespace
         return rocblaslt_status_success;
     }
 
-    // Reduction dimension of A: columns for OP_N, rows otherwise.
-    bool kIsUniform(rocblaslt_matmul_desc desc, rocblaslt_matrix_layout matA)
-    {
-        return (desc->op_A == HIPBLAS_OP_N ? matA->cols_array : matA->rows_array) == nullptr;
-    }
-
-    int64_t uniformK(rocblaslt_matmul_desc desc, rocblaslt_matrix_layout matA)
-    {
-        return static_cast<int64_t>(desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m);
-    }
-
     int64_t placeholderK(rocblaslt_matmul_desc          desc,
                          rocblaslt_matrix_layout        matA,
                          const rocblaslt_grouped_hints& h)
     {
         int64_t k = kIsUniform(desc, matA) ? uniformK(desc, matA) : h.avg_k ? h.avg_k : kDefaultK;
+        if(isMX(desc))
+            k = (k + kMXBlock - 1) / kMXBlock * kMXBlock;
         return std::max<int64_t>(k, 1);
     }
 
@@ -291,6 +386,11 @@ namespace
         _rocblaslt_matmul_desc hostDesc;
         hostDesc.copy(*desc);
         hostDesc.pointermode = rocblaslt_pointer_mode_host;
+        if(isMX(desc))
+        {
+            hostDesc.scaleA = reinterpret_cast<void*>(0x5000);
+            hostDesc.scaleB = reinterpret_cast<void*>(0x6000);
+        }
 
         std::vector<_rocblaslt_matrix_layout> layouts(4 * static_cast<size_t>(groups));
         std::vector<rocblaslt_matrix_layout>  la(groups), lb(groups), lc(groups), ld(groups);
@@ -352,9 +452,9 @@ namespace
     }
 
     // The group shapes are never checked on the host, so an algo must also accept the
-    // smallest ones the layouts allow: 1 in each dimension set by a device array. Kernels
-    // that assume a minimum size or a size multiple reject these; a group below a kernel's
-    // minimum M or N makes it read before the group's A or B.
+    // smallest ones the layouts allow: 1 in each dimension set by a device array, or 32 in
+    // K for MX. Kernels that assume a minimum size or a size multiple reject these; a group
+    // below a kernel's minimum M or N makes it read before the group's A or B.
     rocblaslt_status buildSmallestData(rocblaslt_handle               handle,
                                        rocblaslt_matmul_desc          desc,
                                        rocblaslt_matrix_layout        matA,
@@ -369,7 +469,7 @@ namespace
         Placeholders p;
         p.rows0 = p.rows = matD->rows_array == nullptr ? maxRows : 1;
         p.cols0 = p.cols = matD->cols_array == nullptr ? maxCols : 1;
-        p.k              = kIsUniform(desc, matA) ? placeholderK(desc, matA, h) : 1;
+        p.k = kIsUniform(desc, matA) ? placeholderK(desc, matA, h) : isMX(desc) ? kMXBlock : 1;
         size_t gemmCount = 0;
         return buildGroupedData(handle, desc, matA, matB, matC, matD, p, gemmData, gemmCount);
     }
@@ -428,6 +528,13 @@ namespace
         const void*  betaPtr;
         int32_t      groupCount;
         bool         transA;
+        bool         transB;
+        // MX only: per-group scale tensor pointers, and the multiples the K blocks and the
+        // free dimension of each scale tensor are padded to.
+        const void* const* aScalePtrs;
+        const void* const* bScalePtrs;
+        int32_t            mxKBlockMultiple;
+        int32_t            mxFreeMultiple;
     };
 
     __device__ int64_t loadDim(const void* array, int32_t width, int64_t uniform, int g)
@@ -456,7 +563,24 @@ namespace
         return *static_cast<const float* const*>(ptr)[g];
     }
 
-    __global__ void packGroupedRecords(GroupedRecord templ, PackArgs args, GroupedRecord* records)
+    __device__ int64_t roundUp(int64_t v, int64_t multiple)
+    {
+        return (v + multiple - 1) / multiple * multiple;
+    }
+
+    // Packed strides of an MX scale tensor, which has the sizes of its data tensor with K
+    // replaced by padded K blocks and the free dimension padded.
+    __device__ void mxScaleStrides(
+        const PackArgs& args, int64_t k, int64_t freeDim, bool kIsRows, uint32_t& s1, uint32_t& s2)
+    {
+        int64_t blocks = roundUp((k + kMXBlock - 1) / kMXBlock, args.mxKBlockMultiple);
+        int64_t free   = roundUp(freeDim, args.mxFreeMultiple);
+        s1             = static_cast<uint32_t>(kIsRows ? blocks : free);
+        s2             = static_cast<uint32_t>(blocks * free);
+    }
+
+    template <typename Record>
+    __global__ void packGroupedRecords(Record templ, PackArgs args, Record* records)
     {
         int g = blockIdx.x * blockDim.x + threadIdx.x;
         if(g >= args.groupCount)
@@ -475,8 +599,8 @@ namespace
         if(k == 0)
             alpha = 0.f;
 
-        GroupedRecord r = templ;
-        r.m             = static_cast<uint32_t>(m);
+        Record r = templ;
+        r.m      = static_cast<uint32_t>(m);
         r.n             = static_cast<uint32_t>(n);
         r.batch         = 1;
         r.k             = static_cast<uint32_t>(k);
@@ -496,7 +620,36 @@ namespace
         memset(r.beta, 0, sizeof(r.beta));
         memcpy(r.alpha, &alpha, sizeof(alpha));
         memcpy(r.beta, &beta, sizeof(beta));
+        if constexpr(std::is_same_v<Record, GroupedRecordMX>)
+        {
+            r.mxsa = const_cast<void*>(args.aScalePtrs[g]);
+            r.mxsb = const_cast<void*>(args.bScalePtrs[g]);
+            mxScaleStrides(args, k, m, args.transA, r.strideMXSA1, r.strideMXSA2);
+            mxScaleStrides(args, k, n, !args.transB, r.strideMXSB1, r.strideMXSB2);
+        }
         records[g] = r;
+    }
+
+    // MX record with the fields from alpha on taken from the standard record.
+    GroupedRecordMX mxTemplate(const GroupedRecord& t)
+    {
+        GroupedRecordMX r{};
+        r.batch          = t.batch;
+        r.scaleA         = t.scaleA;
+        r.scaleB         = t.scaleB;
+        r.scaleC         = t.scaleC;
+        r.scaleD         = t.scaleD;
+        r.scaleAlphaVec  = t.scaleAlphaVec;
+        r.bias           = t.bias;
+        r.biasType       = t.biasType;
+        r.reserved       = t.reserved;
+        r.e              = t.e;
+        r.strideE1       = t.strideE1;
+        r.strideE2       = t.strideE2;
+        r.act0           = t.act0;
+        r.act1           = t.act1;
+        r.activationType = t.activationType;
+        return r;
     }
 
     // Launch state built on the first hipblasLtMatmul and reused while nothing it depends
@@ -512,6 +665,7 @@ namespace
         hipblasOperation_t     opB;
         hipDataType            typeA, typeB, typeC, typeD;
         rocblaslt_compute_type computeType;
+        bool                   mx = false;
         Placeholders           placeholders;
 
         std::shared_ptr<void> gemmData;
@@ -554,7 +708,7 @@ rocblaslt_status
         desc->grouped_hints_set = true;
         desc->grouped_launch.reset();
 
-        const size_t recBytes = recordBytes(groups);
+        const size_t recBytes = recordBytes(groups, isMX(desc));
         if(pref->max_workspace_bytes < recBytes)
         {
             log_api(__func__, "workspace too small for grouped records", recBytes);
@@ -576,7 +730,10 @@ rocblaslt_status
         if(status != rocblaslt_status_success)
             return status;
 
-        // Ask for extra candidates: some may not fit the bound problems.
+        // Ask for extra candidates: some may not fit the bound problems, and with MX some
+        // expect the other scale layout.
+        const int candidateCount = isMX(desc) ? std::max(4 * requestedAlgoCount, 32)
+                                              : std::max(requestedAlgoCount, 8);
         std::vector<rocblaslt_matmul_heuristic_result> candidates;
         status = rocblaslt_algo_get_heuristic_cpp(handle,
                                                   rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
@@ -585,7 +742,7 @@ rocblaslt_status
                                                   desc->streamk_tile_scheduling_ext,
                                                   effective_uniform_summation_order(handle, desc)
                                                       != 0,
-                                                  std::max(requestedAlgoCount, 8),
+                                                  candidateCount,
                                                   candidates);
         if(status != rocblaslt_status_success)
             return status;
@@ -605,6 +762,8 @@ rocblaslt_status
             if(*returnAlgoCount >= requestedAlgoCount)
                 break;
             size_t ws = 0;
+            if(!scaleFormatMatches(handle, desc, candidate.algo))
+                continue;
             if(rocblaslt_is_algo_supported_cpp(handle,
                                                rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
                                                boundData,
@@ -667,8 +826,19 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
                   "descriptor");
         return rocblaslt_status_invalid_value;
     }
+    const bool mx = isMX(desc);
+    if(mx && (desc->scaleA == nullptr || desc->scaleB == nullptr))
+    {
+        log_error(__func__, "MX grouped GEMM needs the A and B scale pointer arrays");
+        return rocblaslt_status_invalid_pointer;
+    }
+    if(!scaleFormatMatches(handle, desc, *algo))
+    {
+        log_error(__func__, "the algo expects a different MX scale layout than the scale mode");
+        return rocblaslt_status_invalid_value;
+    }
     workspaceSizeInBytes = clampWorkspaceSize(__func__, workspaceSizeInBytes);
-    const size_t recBytes = recordBytes(groups);
+    const size_t recBytes = recordBytes(groups, mx);
     if(workspace == nullptr || workspaceSizeInBytes < recBytes)
     {
         log_error(__func__, "workspace too small for grouped records", recBytes);
@@ -690,7 +860,7 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
                      && launch->opB == desc->op_B && launch->typeA == matA->type
                      && launch->typeB == matB->type && launch->typeC == matC->type
                      && launch->typeD == matD->type && launch->computeType == desc->compute_type
-                     && launch->placeholders == bound;
+                     && launch->mx == mx && launch->placeholders == bound;
         if(!reuse)
         {
             launch = std::make_shared<GroupedLaunch>();
@@ -761,6 +931,7 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             launch->typeC         = matC->type;
             launch->typeD         = matD->type;
             launch->computeType   = desc->compute_type;
+            launch->mx            = mx;
             launch->placeholders  = bound;
             desc->grouped_launch  = launch;
         }
@@ -776,6 +947,15 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
         args.dPtrs      = static_cast<void* const*>(D);
         args.groupCount = groups;
         args.transA     = desc->op_A != HIPBLAS_OP_N;
+        args.transB     = desc->op_B != HIPBLAS_OP_N;
+        if(mx)
+        {
+            const bool padFree    = mxScaleTensorPadsFreeDim();
+            args.aScalePtrs       = static_cast<const void* const*>(desc->scaleA);
+            args.bScalePtrs       = static_cast<const void* const*>(desc->scaleB);
+            args.mxKBlockMultiple = padFree ? 8 : 128 / kMXBlock;
+            args.mxFreeMultiple   = padFree ? 32 : 1;
+        }
         if(desc->pointermode == rocblaslt_pointer_mode_host)
         {
             args.alphaMode  = 0;
@@ -791,10 +971,26 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             args.betaPtr   = beta;
         }
 
-        auto*    records = static_cast<GroupedRecord*>(workspace);
-        unsigned block   = 256;
-        unsigned grid    = (static_cast<unsigned>(groups) + block - 1) / block;
-        hipLaunchKernelGGL(packGroupedRecords, dim3(grid), dim3(block), 0, stream, launch->templ, args, records);
+        unsigned block = 256;
+        unsigned grid  = (static_cast<unsigned>(groups) + block - 1) / block;
+        if(mx)
+            hipLaunchKernelGGL(packGroupedRecords<GroupedRecordMX>,
+                               dim3(grid),
+                               dim3(block),
+                               0,
+                               stream,
+                               mxTemplate(launch->templ),
+                               args,
+                               static_cast<GroupedRecordMX*>(workspace));
+        else
+            hipLaunchKernelGGL(packGroupedRecords<GroupedRecord>,
+                               dim3(grid),
+                               dim3(block),
+                               0,
+                               stream,
+                               launch->templ,
+                               args,
+                               static_cast<GroupedRecord*>(workspace));
         if(hipGetLastError() != hipSuccess)
         {
             log_error(__func__, "failed to launch the grouped record pack kernel");
@@ -803,7 +999,7 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
 
         log_api(__func__, "groupCount", groups, "algoIndex", algoIndex, "reuse", reuse);
         return rocblaslt_run_user_args_cpp(
-            handle, rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM, launch->gemmData, records, stream);
+            handle, rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM, launch->gemmData, workspace, stream);
     }
     catch(const rocblaslt_status& status)
     {
