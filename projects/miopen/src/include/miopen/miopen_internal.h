@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_INTERNAL_H_
 
 /* Put experimental APIs here. */
-/* If used, should be included after miopen.h. */
+/* Not part of the public C API: miopen.h does not include this header. */
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -35,10 +35,29 @@
 #endif
 
 #include <stddef.h>
+#include <miopen/miopen.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*! @brief Enum for specifying the alpha-beta case for convolution operations.
+ *
+ * Describes how alpha and beta scaling factors are applied in convolution operations.
+ */
+typedef enum
+{
+    /* DEFAULT       alpha = 1.0 and beta = 0.0 */
+    /* SCALE         alpha = 4.2 and beta = 0.0 */
+    /* BILINEAR      alpha = 3.2 and beta = 1.1 */
+    /* ERROR_STATE   alpha = 0.0 and beta = 3.1 */
+
+    DEFAULT     = 0, /* alpha = 1.0 and beta = 0.0.*/
+    SCALE       = 1, /* alpha with some value and beta 0.0*/
+    BILINEAR    = 2, /* both alpha and beta with some value*/
+    ERROR_STATE = 3  /* alpha 0.0 and beta with some value, this should not occur.
+                        But used to check for errors.*/
+} miopenAlphaBetaCase_t;
 
 /*! @brief Get extra workspace for backward weight kernel.
  *
