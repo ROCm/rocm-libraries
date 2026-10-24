@@ -90,6 +90,27 @@ def _base_spec(req: AttentionRequest):
             "gfx942 dense: cross-length NO_MASK requests are not served by the "
             "dense kernel"
         )
+    diag_split = False
+    kv_segments = 1
+    if bottom_right and not ragged:
+        # Chunked prefill: the unmasked body loop skips the mask on every tile
+        # below the shifted diagonal. When the work items fill their last wave
+        # poorly (short chunks, or a head count just past the CU count), the
+        # non-persistent grid splits each work item's KV range across CTAs.
+        from .dense_rules import dense_wave_segments
+
+        diag_split = True
+        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
+        work = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
+        if (
+            sq % bm == 0
+            and not req.use_sinks
+            and not req.emit_lse
+            and not int(req.sliding_window)
+        ):
+            kv_segments = dense_wave_segments(work, cus)
+            if kv_segments > 1:
+                persistent = False
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -110,6 +131,8 @@ def _base_spec(req: AttentionRequest):
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
         causal_bottom_right=bottom_right,
+        causal_diag_split=diag_split,
+        kv_segments=kv_segments,
     )
 
 

@@ -101,15 +101,17 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "interleave": lambda s: bool(s.persistent) and bool(s.causal),
             # A knob only where the variant leaves the order to auto: a variant
             # that sets it (qbminor) keeps it in sweeps and ignores the knob.
-            "nonpersist_decode": lambda s: not s.persistent
-            and s.nonpersist_decode == "auto",
+            "nonpersist_decode": lambda s: (
+                not s.persistent and s.nonpersist_decode == "auto"
+            ),
             # Wide DMA locks the K/V slab pads.
             "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
             # Sliding window keeps its own three-phase band loop.
-            "causal_diag_split": lambda s: bool(s.causal)
-            and int(s.sliding_window) == 0,
+            "causal_diag_split": lambda s: (
+                bool(s.causal) and int(s.sliding_window) == 0
+            ),
             "kv_segments": lambda s: _kv_segments_in_scope(s),
         },
         policy_knobs=(
@@ -136,8 +138,9 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "use_cfvst": lambda s: s.resolved_use_cfvst(),
             "use_v_swizzle": lambda s: s.resolved_use_cfvst(),
             "v_row_pad": lambda s: s.resolved_use_cfvst(),
-            "causal_diag_split": lambda s: bool(s.causal)
-            and int(s.sliding_window) == 0,
+            "causal_diag_split": lambda s: (
+                bool(s.causal) and int(s.sliding_window) == 0
+            ),
             "kv_segments": lambda s: _kv_segments_in_scope(s),
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
@@ -170,6 +173,28 @@ def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> i
         return 1
     ratio = 2.0 * num_cus / work_items
     return max(1, min(max_segments, 1 << max(0, round(math.log2(ratio)))))
+
+
+def dense_wave_segments(
+    work_items: int, num_cus: int, max_segments: int = 8, target: float = 0.8
+) -> int:
+    """KV-segment count by wave quantization: the smallest power of two ``S`` whose
+    ``work_items * S`` CTAs fill their last wave on ``num_cus`` CUs to at least
+    ``target``, else the most efficient ``S`` (smallest on ties). A grid that
+    already fills its waves keeps one segment."""
+    if work_items <= 0 or num_cus <= 0:
+        return 1
+    best, best_eff = 1, 0.0
+    s = 1
+    while s <= max_segments:
+        ctas = work_items * s
+        eff = ctas / (-(-ctas // num_cus) * num_cus)
+        if eff >= target:
+            return s
+        if eff > best_eff + 1e-9:
+            best, best_eff = s, eff
+        s *= 2
+    return best
 
 
 def _dense_arch(arch: str) -> _DenseTuningArch:
@@ -345,13 +370,16 @@ class DenseSpace(WavesPerEuSpace):
         # A moving bottom-right diagonal on the default grid resolves its query
         # tile and KV-segment count per problem (the short-chunk rule), so both
         # are recorded there. Every other base keeps its key unchanged.
-        if (
-            getattr(base, "causal_bottom_right", False)
-            and int(base.seqlen_q) != int(base.seqlen_kv)
-            and not base.persistent
-        ):
-            return self.recorded_fields | {"block_m", "kv_segments"}
-        return self.recorded_fields
+        moving = getattr(base, "causal_bottom_right", False) and int(
+            base.seqlen_q
+        ) != int(base.seqlen_kv)
+        fields = self.recorded_fields
+        if moving and self.arch == "gfx942":
+            # gfx942 also turns the diagonal split on for every moving diagonal.
+            fields = fields | {"causal_diag_split"}
+        if moving and not base.persistent:
+            fields = fields | {"block_m", "kv_segments"}
+        return fields
 
     def axes(self, base):
         return _dense_axes_for(base, self.arch)
