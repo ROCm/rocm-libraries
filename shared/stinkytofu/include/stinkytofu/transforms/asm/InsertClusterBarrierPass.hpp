@@ -69,8 +69,12 @@ class Pass;
 /// ExpandPointerSwap copies still share one handshake. Off handshakes every
 /// loop trigger. The backend passes the resolved knob; this default is the
 /// static fallback.
+/// \p signalAheadOfDsCnt puts a Rule 3 or pre-loop cluster signal that lands
+/// right behind an `s_wait_dscnt` run in front of that run instead, so the drain
+/// stays next to the instruction it was inserted for. Off by default.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false,
+    bool signalAheadOfDsCnt = false);
 
 }  // namespace stinkytofu

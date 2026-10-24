@@ -299,8 +299,34 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
-void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                          GfxArchID archId) {
+/// Lift a cluster-signal insertion point above the `s_wait_dscnt` run right in
+/// front of \p anchor. StinkyWaitCntInsertionPass parked those drains for the
+/// instruction at \p anchor, not for the signal, so the signal goes first and
+/// the drain stays next to its consumer. Only `s_wait_dscnt` is stepped over:
+/// it neither reads nor writes SCC, so the gate's `s_cmp` keeps the SCC state
+/// the anchor was chosen for, and stopping at anything else (a label included)
+/// keeps the signal on the same side of every branch target and barrier.
+IRBase* hoistSignalAboveLeadingDsCntWaits(IRBase* anchor) {
+    if (anchor == nullptr) return anchor;
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    if (anchorInst == nullptr || anchorInst->getParent() == nullptr) return anchor;
+    BasicBlock* parent = anchorInst->getParent();
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchorInst);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr || prev->getUnifiedOpcode() != GFX::s_wait_dscnt) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// \p aheadOfDsCnt lifts the signal above the `s_wait_dscnt` run in front of
+/// \p anchor (ClusterBarrierSignalAheadOfDsCnt).
+void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                          bool aheadOfDsCnt = false) {
+    if (aheadOfDsCnt) anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -333,11 +359,13 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 }
 
 /// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
-/// the loop entrance, so this site must not clobber SCC again.
-void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                          GfxArchID archId) {
+/// the loop entrance, so this site must not clobber SCC again. \p aheadOfDsCnt
+/// as for insertClusterBarrierSignalOnlyBefore.
+void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                          bool aheadOfDsCnt) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     assert(signalDesc && "Cluster-barrier signal opcode is not supported on this architecture");
+    if (aheadOfDsCnt) anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
@@ -401,8 +429,8 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
 /// WaveIdx-gated cluster signal at \p signalAnchor, then wait at \p waitAnchor
 /// (the trigger).
 void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRBuilder& irBuilder,
-                                GfxArchID archId) {
-    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
+                                GfxArchID archId, bool signalAheadOfDsCnt) {
+    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId, signalAheadOfDsCnt);
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
@@ -1335,7 +1363,7 @@ void retargetBranch(StinkyInstruction& branch, const std::string& newLabel) {
 /// them on a token nobody posted, so they are routed past it instead.
 bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string& exitLabelName,
                                  const PreLoopSignalAnchor& pre, BasicBlock& preLoopBlock,
-                                 Function& func, GfxArchID archId) {
+                                 Function& func, GfxArchID archId, bool signalAheadOfDsCnt) {
     if (exitLabelName.empty() || loopHead == nullptr) return false;
 
     // The exit label may be an instruction inside a block or the header of the
@@ -1474,7 +1502,7 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
         if (pre.needsWorkgroupBarrier) {
             insertWorkgroupBarrierSyncBefore(pre.anchor, entryBuilder, archId);
         }
-        insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId);
+        insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId, signalAheadOfDsCnt);
     }
     return true;
 }
@@ -1714,12 +1742,14 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop)
+                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop,
+                                 bool signalAheadOfDsCnt)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
           splitWaveLoop_(splitWaveLoop),
-          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop) {}
+          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop),
+          signalAheadOfDsCnt_(signalAheadOfDsCnt) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -2043,21 +2073,23 @@ class InsertClusterBarrierPassImpl : public Pass {
             AsmIRBuilder irBuilder(bb, archId);
             for (const auto& [trigger, signalAnchor, waitAnchor, kind] : pending) {
                 if (kind == Rule3HandshakeKind::SignalOnly) {
-                    insertBareClusterBarrierSignalBefore(signalAnchor, irBuilder, archId);
+                    insertBareClusterBarrierSignalBefore(signalAnchor, irBuilder, archId,
+                                                         signalAheadOfDsCnt_);
                     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
                                                    archId);
                 } else if (kind == Rule3HandshakeKind::WaitOnly) {
                     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
                                                    archId);
                 } else {
-                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
+                                               signalAheadOfDsCnt_);
                 }
                 (void)trigger;
             }
             // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
             for (const LoopCompensation& comp : hoistedLoops) {
                 emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb, func,
-                                            archId);
+                                            archId, signalAheadOfDsCnt_);
             }
             // Producer-side drain right after each cooperative tensor_load
             // group (retire the async cooperative load before the back-edge so
@@ -2111,6 +2143,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
     const bool reduceClusterBarrierPerLoop_ = false;
+    const bool signalAheadOfDsCnt_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2119,10 +2152,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
                                                      int rule3SignalLeadCycles, bool splitWaveLoop,
-                                                     bool reduceClusterBarrierPerLoop) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop,
-                                                          reduceClusterBarrierPerLoop);
+                                                     bool reduceClusterBarrierPerLoop,
+                                                     bool signalAheadOfDsCnt) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(
+        streamKMulticast, pgrValue, rule3SignalLeadCycles, splitWaveLoop,
+        reduceClusterBarrierPerLoop, signalAheadOfDsCnt);
 }
 
 namespace cluster_barrier {

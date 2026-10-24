@@ -142,9 +142,11 @@
       false)                           /* loop head / barrier wait burst ignores ds windows */     \
     X(QueueStartMinWmmaBurst, int, -1) /* forced burst min WMMAs: 1..depth, -1 = depth */          \
     X(QueueStartCalibratedIssueCycles, int, 0) /* forced burst: cycles per pick; 0 = off */        \
-    X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */     \
+    X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */    \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
+    X(ClusterBarrierSignalAheadOfDsCnt, bool,                                                      \
+      false) /* signal ahead of the dscnt it lands behind */                                       \
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
