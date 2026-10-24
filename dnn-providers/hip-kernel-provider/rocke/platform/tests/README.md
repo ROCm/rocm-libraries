@@ -102,6 +102,21 @@ source tool and committed source column, while the installed entry invokes a
 packaged test-only copy of the tool and the column in the relocated `rocke`
 package. This matches the library-side CI model: CMake stages every input, CTest
 owns execution, and no test reconstructs or reaches back into the source tree.
+
+Reproduction uses the committed column only to schedule work, never as its
+verdict. Declaration recognition is batched through `opt` and recursively split
+on failure. Each compiler/architecture pair receives an intrinsic-free target
+preflight. Calls for expected-positive cells are combined per architecture; a
+failed module is recursively split until ordinary single-cell probes identify
+every changed result. Expected-negative cells remain individual, and every
+positive call still passes through compile, link, and target assembly. Special
+integer and `immarg` operands come from explicit `ProbeSpec` witnesses rather
+than speculative value sweeps. Target preflights, positive batches, and
+negative singletons share a quota-aware worker pool capped at 32 by default;
+`--jobs` is the explicit override for constrained or dedicated hosts. An
+expected deterministic crash or timeout is not rerun serially; changed,
+unclassified, and otherwise transient-looking results are.
+
 The migration preserves the former pytest item's result mapping:
 
 | Condition | CTest result |
