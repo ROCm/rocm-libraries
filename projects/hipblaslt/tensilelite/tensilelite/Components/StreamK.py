@@ -2990,10 +2990,14 @@ class StreamKTwoTileDPFirst(StreamK):
         stmpPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
         tmpVgpr = writer.vgprPool.checkOut(2, "div")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        # SkSplit aliases a reusable SGPR when persistent constants live in VGPRs.
+        # Keep the restored split count live through partition and remainder setup.
+        sSplit = writer.acquirePersistentConstSgpr(kernel, "skTiles")
         sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
         if skConstsInVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(sSplit), src=vgpr(writer.states.persistentConstVgprs["skTiles"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
-        module.add(scalarUInt32DivideAndRemainder(qReg=stmpTileIdx, dReg=sIdx, divReg="SkSplit", rReg=stmpPartialIdx, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileIdx = SKIdx // WGsPerTile, PartialIdx = SKIdx % WGsPerTile"))
+        module.add(scalarUInt32DivideAndRemainder(qReg=stmpTileIdx, dReg=sIdx, divReg=sSplit, rReg=stmpPartialIdx, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileIdx = SKIdx // WGsPerTile, PartialIdx = SKIdx % WGsPerTile"))
         writer.releasePersistentConstSgpr(sIdx)
         tmpVgprRes = None
         writer.vgprPool.checkIn(tmpVgpr)
@@ -3010,7 +3014,8 @@ class StreamKTwoTileDPFirst(StreamK):
         if skConstsInVgprs:
             module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.persistentConstVgprs["SKItersPerWG"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs["ItersPerTile"])))
-        module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("SkSplit"), src1=sgpr(sIpw)))
+        module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr(sSplit), src1=sgpr(sIpw)))
+        writer.releasePersistentConstSgpr(sSplit)
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sIpt), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - SkSplit * skItersPerWG"))
 
         module.add(SMulI32(dst=sgpr("PersistentIteration"), src0=sgpr(stmpPartialIdx), src1=sgpr(sIpw), comment="StreamK starting iteration (case: after extra iters)"))
