@@ -54,6 +54,12 @@ rocsparse_status rocsparse::csrsm_analysis(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis(
             handle, op_A, A, analysis, rocsparse_solve_policy_auto, p_csrsm_info, buffer));
 
+        if(analysis == rocsparse_analysis_policy_reuse
+           && A->info->get_csrsm_info(op_A, A->descr->fill_mode) == nullptr)
+        {
+            A->info->set_csrsm_info(
+                op_A, A->descr->fill_mode, A->info->get_csrsv_info(op_A, A->descr->fill_mode));
+        }
         return rocsparse_status_success;
     }
 
