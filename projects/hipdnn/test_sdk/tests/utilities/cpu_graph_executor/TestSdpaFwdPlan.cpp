@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -1200,37 +1201,113 @@ TEST(TestSdpaFwdPlanDropout, PhiloxWithRngDumpUsesDumpedMask)
     EXPECT_TRUE(exactValidation.allClose(o, oRef));
 }
 
-TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
+// cuDNN's Max and Sum_exp row statistics are FLOAT outputs [B, H, Sq, 1]; a missing or non-FLOAT
+// tensor is not applicable. The raw graph is [1, 2, 4, 8].
+TEST(TestSdpaFwdPlanRowStats, ApplicabilityRequiresFloatOutputs)
 {
-    // The reference produces only the log-sum-exp stats output; the running-max softmax
-    // stat is not produced, so a node requesting max_tensor_uid must be rejected. (The
-    // stats/LSE output, by contrast, is supported — see IsApplicableAndExecutesWithStatsOutput.)
-    SdpaAttributesT attrs;
-    attrs.max_tensor_uid = 50;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
-
-    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-
-    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        planBuilder;
-    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
-        << "SdpaFwdPlanBuilder must reject nodes requesting the max softmax-stats output";
+    const auto applicable = [](bool max, DataType type, bool present) {
+        SdpaAttributesT attrs;
+        std::vector<RawExtraTensor> extras;
+        if(max)
+        {
+            attrs.max_tensor_uid = 50;
+        }
+        else
+        {
+            attrs.sum_exp_tensor_uid = 50;
+        }
+        if(present)
+        {
+            extras.push_back({50, "stat", type, {1, 2, 4, 1}});
+        }
+        auto graphBuilder
+            = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    for(const bool max : {true, false})
+    {
+        EXPECT_TRUE(applicable(max, DataType::FLOAT, true)) << max;
+        EXPECT_FALSE(applicable(max, DataType::HALF, true)) << max;
+        EXPECT_FALSE(applicable(max, DataType::FLOAT, false)) << max;
+    }
 }
 
-TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsSumExpStats)
+// The executor writes Max and Sum_exp from the same row statistics as the LSE:
+// LSE = Max + log(Sum_exp), and both equal the reference called directly.
+TEST(TestSdpaFwdPlanRowStats, ExecuteWritesMaxAndSumExpConsistentWithLse)
 {
-    // The running sum-exp softmax stat is not produced by the reference, so a node
-    // requesting sum_exp_tensor_uid must be rejected (only the LSE stats output is supported).
     SdpaAttributesT attrs;
+    attrs.stats_tensor_uid = 49;
+    attrs.max_tensor_uid = 50;
     attrs.sum_exp_tensor_uid = 51;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+    attrs.right_bound = 0;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            {{49, "lse", DataType::FLOAT, {1, 2, 4, 1}},
+                                             {50, "max", DataType::FLOAT, {1, 2, 4, 1}},
+                                             {51, "sum_exp", DataType::FLOAT, {1, 2, 4, 1}}});
 
-    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> lse({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> rowMax({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> rowSumExp({1, 2, 4, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 61);
+    k.fillWithRandomValues(-1.0F, 1.0F, 62);
+    v.fillWithRandomValues(-1.0F, 1.0F, 63);
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {49, lse.memory().hostData()},
+                                                            {50, rowMax.memory().hostData()},
+                                                            {51, rowSumExp.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
 
-    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
-        planBuilder;
-    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
-        << "SdpaFwdPlanBuilder must reject nodes requesting the sum_exp softmax-stats output";
+    hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> maxRef({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> sumExpRef({1, 2, 4, 1});
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        oRef,
+        std::nullopt,
+        static_cast<const hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
+        -1,
+        0,
+        true,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        std::nullopt,
+        std::nullopt,
+        &maxRef,
+        &sumExpRef);
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        for(int64_t sq = 0; sq < 4; ++sq)
+        {
+            const auto m = rowMax.getHostValue(0, h, sq, 0);
+            const auto se = rowSumExp.getHostValue(0, h, sq, 0);
+            EXPECT_NEAR(m, maxRef.getHostValue(0, h, sq, 0), 1e-6F);
+            EXPECT_NEAR(se, sumExpRef.getHostValue(0, h, sq, 0), 1e-5F);
+            EXPECT_GE(se, 1.0F); // the max term contributes exp(0)
+            EXPECT_NEAR(lse.getHostValue(0, h, sq, 0), m + std::log(se), 1e-5F);
+        }
+    }
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)

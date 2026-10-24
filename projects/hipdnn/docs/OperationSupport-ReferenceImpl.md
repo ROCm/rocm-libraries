@@ -142,8 +142,8 @@ dimension must be reduced.
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | Not supported | - |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported | - |
 | Block-sparse attention | Not supported | Not supported | - |
-| Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
-| Ragged tensors | Rejected | Required on every Q/K/V/O | Rejected |
+| Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
+| Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
 
 "Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
@@ -154,7 +154,13 @@ The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tenso
 `[B, H, S, D]` dims with token-major (BSHD) strides and an `INT32` `ragged_offset` aux on every
 primary. A node is keyed as ragged when any of its Q/K/V/O tensors has a `ragged_offset`. The ragged
 plan needs all four to be ragged, and the dense plan rejects any ragged tensor. So a partly ragged
-node is declined.
+node is declined by both plans, and goes to the dense rewrite.
+
+Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
+rewrite (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
+per-batch lengths as `seq_len_q/kv`, the dense plan runs, and the outputs are packed back. They
+therefore support everything the dense forward and backward columns list. Supplied `seq_len` tensors
+(cuDNN's ragged + padding form) must not exceed the packed lengths.
 
 The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
 FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).

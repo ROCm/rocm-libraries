@@ -163,6 +163,9 @@ struct GpuSdpaFwdParams
     // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor and this is
     // 1 / (1 - p).
     std::optional<float> philoxDropoutScale;
+    // cuDNN Max / Sum_exp row statistics outputs, FLOAT [B, H, Sq, 1].
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
 };
 
 template <typename QDataType,
@@ -201,15 +204,22 @@ public:
         // The graph stats tensor is rank-4 [B, H, Sq, 1], but fprop requires LSE to be
         // rank-3 [B, H, Sq]. Drop the trailing size-1 dim (and its stride) so the shapes
         // line up without relaxing the reference's strict rank check.
+        const auto bindRowStats =
+            [&variantPack](const auto& stats,
+                           std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>>& bound) {
+                if(stats.has_value())
+                {
+                    const auto squeezedDims = squeezeTrailingUnitDim(stats->dims);
+                    const auto squeezedStrides = squeezeToRank(stats->strides, squeezedDims.size());
+                    bound.emplace(variantPack.at(stats->uid), squeezedDims, squeezedStrides);
+                }
+            };
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> lseTensor;
-        if(_params.lseTensor.has_value())
-        {
-            const auto squeezedDims = squeezeTrailingUnitDim(_params.lseTensor->dims);
-            const auto squeezedStrides
-                = squeezeToRank(_params.lseTensor->strides, squeezedDims.size());
-            lseTensor.emplace(
-                variantPack.at(_params.lseTensor->uid), squeezedDims, squeezedStrides);
-        }
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> maxTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sumExpTensor;
+        bindRowStats(_params.lseTensor, lseTensor);
+        bindRowStats(_params.maxTensor, maxTensor);
+        bindRowStats(_params.sumExpTensor, sumExpTensor);
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenQTensor;
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenKvTensor;
@@ -286,7 +296,10 @@ public:
                 _params.pagedMaxSeqKv,
                 sinkTensor.has_value() ? &sinkTensor.value() : nullptr,
                 dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
-                dropoutScale);
+                dropoutScale,
+                std::nullopt,
+                maxTensor.has_value() ? &maxTensor.value() : nullptr,
+                sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr);
     }
 
 private:
@@ -422,12 +435,16 @@ public:
             return false;
         }
 
-        // Unsupported: max / running-sum softmax stats outputs (the reference does not
-        // produce these). The log-sum-exp stats tensor IS supported and handled below.
-        if(nodeAttributes->max_tensor_uid().has_value()
-           || nodeAttributes->sum_exp_tensor_uid().has_value())
+        // cuDNN Max / Sum_exp row statistics: FLOAT outputs (fprop checks [B, H, Sq]).
+        for(const auto uid :
+            {nodeAttributes->max_tensor_uid(), nodeAttributes->sum_exp_tensor_uid()})
         {
-            return false;
+            if(uid.has_value())
+            {
+                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+                CHECK_TENSOR_TYPE(
+                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+            }
         }
 
         // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
@@ -505,6 +522,16 @@ public:
             nodeAttributes->sink_token_tensor_uid().has_value()
                 ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                 : nullptr);
+        if(nodeAttributes->max_tensor_uid().has_value())
+        {
+            params.maxTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->max_tensor_uid().value()));
+        }
+        if(nodeAttributes->sum_exp_tensor_uid().has_value())
+        {
+            params.sumExpTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->sum_exp_tensor_uid().value()));
+        }
         if(nodeAttributes->dropout_mask_tensor_uid().has_value())
         {
             params.dropoutMaskTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(

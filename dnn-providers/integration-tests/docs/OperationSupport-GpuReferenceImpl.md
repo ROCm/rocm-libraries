@@ -160,7 +160,7 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
 | Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference (forward and backward follow the CPU table) | Not supported |
 | Block-sparse attention | Not supported | Not supported |
-| Softmax max / sum-exp stats outputs | Not supported | Not supported |
+| Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Additive attention bias (`attn_mask`) | - | Not supported |
 
 The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
@@ -169,6 +169,13 @@ its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be 
 plan rejects any ragged tensor. So a partly ragged node is declined. The CPU reference keys and gates
 ragged nodes the same way. The harness records the dense-path FP8 gap in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
+
+Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
+rewrite (`RaggedSdpaDensify.hpp`, shared with the CPU reference; the GPU executor stages the packed buffers
+through the host): the packed tensors are unpacked into dense padded ones with the
+per-batch lengths as `seq_len_q/kv`, the dense plan runs, and the outputs are packed back. They
+therefore support everything the dense forward column and the SDPA Backward row list. Supplied `seq_len` tensors
+(cuDNN's ragged + padding form) must not exceed the packed lengths.
 
 ## Validators
 

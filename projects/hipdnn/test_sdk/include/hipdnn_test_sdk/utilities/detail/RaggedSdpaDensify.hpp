@@ -97,9 +97,13 @@ inline std::vector<Role>
                                {attrs.k_tensor_uid, false, false},
                                {attrs.v_tensor_uid, false, false},
                                {attrs.o_tensor_uid, true, true}};
-    if(attrs.stats_tensor_uid.has_value())
+    for(const auto& stats :
+        {attrs.stats_tensor_uid, attrs.max_tensor_uid, attrs.sum_exp_tensor_uid})
     {
-        roles.push_back({attrs.stats_tensor_uid.value(), true, true});
+        if(stats.has_value())
+        {
+            roles.push_back({stats.value(), true, true});
+        }
     }
     return roles;
 }
