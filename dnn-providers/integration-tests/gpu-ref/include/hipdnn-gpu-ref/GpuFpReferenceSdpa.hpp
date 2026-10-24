@@ -275,37 +275,19 @@ public:
                       hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
                       const GpuSdpaFwdOptions<MaskDataType>& options = {})
     {
-        const auto attnScaleValue = options.attnScale;
-        auto* attnMask = options.attnMask;
-        const auto leftBound = options.leftBound;
-        const auto rightBound = options.rightBound;
-        const auto topLeftAlignment = options.topLeftAlignment;
-        auto* lse = options.lse;
-        const auto probabilityMode = options.probabilityMode;
-        auto* seqLenQ = options.seqLenQ;
-        auto* seqLenKv = options.seqLenKv;
-        auto* pageTableK = options.pageTableK;
-        auto* pageTableV = options.pageTableV;
-        const auto pagedMaxSeqKv = options.pagedMaxSeqKv;
-        auto* sinkToken = options.sinkToken;
-        auto* dropoutMask = options.dropoutMask;
-        const auto dropoutScale = options.dropoutScale;
-        const auto softcap = options.softcap;
-        auto* rowMax = options.rowMax;
-        auto* rowSumExp = options.rowSumExp;
-        const auto alibi = options.alibi;
-        validateSoftcap(softcap);
+        validateSoftcap(options.softcap);
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
-        // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
+        // INT32 [B, 1, T, 1] page table; options.pagedMaxSeqKv is the logical key extent. Paging needs
         // padding. Table entries must name existing blocks; the kernel does not check them.
-        const bool pagedK = pageTableK != nullptr;
-        const bool pagedV = pageTableV != nullptr;
-        if((pagedK || pagedV) && (seqLenKv == nullptr || pagedMaxSeqKv <= 0))
+        const bool pagedK = options.pageTableK != nullptr;
+        const bool pagedV = options.pageTableV != nullptr;
+        if((pagedK || pagedV) && (options.seqLenKv == nullptr || options.pagedMaxSeqKv <= 0))
         {
             throw std::invalid_argument("GpuFpReferenceSdpa: paged K/V needs seq_len tensors and a "
                                         "positive max key length");
         }
-        validateInput(q.dims(), k.dims(), v.dims(), o.dims(), pagedK, pagedV, pagedMaxSeqKv);
+        validateInput(
+            q.dims(), k.dims(), v.dims(), o.dims(), pagedK, pagedV, options.pagedMaxSeqKv);
 
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -313,60 +295,60 @@ public:
         const auto headDim = q.dims()[3];
         const auto numHeadsK = k.dims()[1];
         const auto numHeadsV = v.dims()[1];
-        const auto seqKv = (pagedK || pagedV) ? pagedMaxSeqKv : k.dims()[2];
+        const auto seqKv = (pagedK || pagedV) ? options.pagedMaxSeqKv : k.dims()[2];
 
         SdpaPagedSide pagedKSide;
         SdpaPagedSide pagedVSide;
         if(pagedK)
         {
-            pagedKSide = pagedSide(*pageTableK, k.dims(), batch, seqKv);
+            pagedKSide = pagedSide(*options.pageTableK, k.dims(), batch, seqKv);
         }
         if(pagedV)
         {
-            pagedVSide = pagedSide(*pageTableV, v.dims(), batch, seqKv);
+            pagedVSide = pagedSide(*options.pageTableV, v.dims(), batch, seqKv);
         }
         const auto headDimV = v.dims()[3];
 
         // An absent scale is 1.0 (no scaling), as in cuDNN.
-        const float scale = attnScaleValue.value_or(1.0F);
+        const float scale = options.attnScale.value_or(1.0F);
 
         auto defines
             = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
-                probabilityMode);
+                options.probabilityMode);
         defines.emplace_back(std::string("-DMASK_TYPE=")
                              + detail::HipRtcTypeName<MaskDataType>::VALUE);
 
         const void* maskPtr = nullptr;
         std::vector<int64_t> maskDims;
         std::vector<int64_t> maskStrides;
-        if(attnMask != nullptr)
+        if(options.attnMask != nullptr)
         {
             // The kernel right-aligns the mask to [B, H, Sq, Skv] and indexes
             // args.maskDims/maskStr (size 4); a rank>4 mask would read out of bounds.
-            if(attnMask->dims().empty() || attnMask->dims().size() > 4)
+            if(options.attnMask->dims().empty() || options.attnMask->dims().size() > 4)
             {
                 throw std::invalid_argument("GpuFpReferenceSdpa: attention mask must be rank 1..4");
             }
-            maskPtr = attnMask->memory().deviceData();
-            maskDims = attnMask->dims();
-            maskStrides = attnMask->strides();
+            maskPtr = options.attnMask->memory().deviceData();
+            maskDims = options.attnMask->dims();
+            maskStrides = options.attnMask->strides();
         }
 
         void* lsePtr = nullptr;
         std::vector<int64_t> lseStrides;
-        if(lse != nullptr)
+        if(options.lse != nullptr)
         {
             // LSE is one value per query position; mirror the CPU oracle's shape check.
-            if(lse->dims().size() != 3 || lse->dims()[0] != batch || lse->dims()[1] != numHeads
-               || lse->dims()[2] != seqQ)
+            if(options.lse->dims().size() != 3 || options.lse->dims()[0] != batch
+               || options.lse->dims()[1] != numHeads || options.lse->dims()[2] != seqQ)
             {
                 throw std::invalid_argument("GpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
             }
-            lsePtr = lse->memory().deviceData();
-            lseStrides = lse->strides();
+            lsePtr = options.lse->memory().deviceData();
+            lseStrides = options.lse->strides();
         }
         // cuDNN Max / Sum_exp row statistics: rank-3 [B, H, Sq], as the LSE.
-        for(auto* stats : {rowMax, rowSumExp})
+        for(auto* stats : {options.rowMax, options.rowSumExp})
         {
             if(stats != nullptr
                && (stats->dims().size() != 3 || stats->dims()[0] != batch
@@ -378,7 +360,7 @@ public:
         }
 
         // Padding (cuDNN seq_len_q / seq_len_kv): one INT32 per batch, both or neither.
-        if((seqLenQ == nullptr) != (seqLenKv == nullptr))
+        if((options.seqLenQ == nullptr) != (options.seqLenKv == nullptr))
         {
             throw std::invalid_argument(
                 "GpuFpReferenceSdpa: seqLenQ and seqLenKv must be given together");
@@ -387,9 +369,9 @@ public:
         const int32_t* seqLenKvPtr = nullptr;
         int64_t seqLenQStride = 0;
         int64_t seqLenKvStride = 0;
-        if(seqLenQ != nullptr)
+        if(options.seqLenQ != nullptr)
         {
-            for(auto* len : {seqLenQ, seqLenKv})
+            for(auto* len : {options.seqLenQ, options.seqLenKv})
             {
                 if(static_cast<int64_t>(len->elementCount()) != batch || len->dims().empty()
                    || len->dims()[0] != batch)
@@ -398,72 +380,73 @@ public:
                         "GpuFpReferenceSdpa: seq_len tensors must hold one value per batch");
                 }
             }
-            seqLenQPtr = static_cast<const int32_t*>(seqLenQ->memory().deviceData());
-            seqLenKvPtr = static_cast<const int32_t*>(seqLenKv->memory().deviceData());
-            seqLenQStride = seqLenQ->strides()[0];
-            seqLenKvStride = seqLenKv->strides()[0];
+            seqLenQPtr = static_cast<const int32_t*>(options.seqLenQ->memory().deviceData());
+            seqLenKvPtr = static_cast<const int32_t*>(options.seqLenKv->memory().deviceData());
+            seqLenQStride = options.seqLenQ->strides()[0];
+            seqLenKvStride = options.seqLenKv->strides()[0];
         }
 
         // Attention sink (cuDNN): FLOAT [1, H, 1, 1], one logit per query head.
         const float* sinkPtr = nullptr;
         int64_t sinkStride = 0;
-        if(sinkToken != nullptr)
+        if(options.sinkToken != nullptr)
         {
-            if(sinkToken->dims().size() != 4 || sinkToken->dims()[1] != numHeads
-               || static_cast<int64_t>(sinkToken->elementCount()) != numHeads)
+            if(options.sinkToken->dims().size() != 4 || options.sinkToken->dims()[1] != numHeads
+               || static_cast<int64_t>(options.sinkToken->elementCount()) != numHeads)
             {
                 throw std::invalid_argument("GpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
             }
-            sinkPtr = static_cast<const float*>(sinkToken->memory().deviceData());
-            sinkStride = sinkToken->strides()[1];
+            sinkPtr = static_cast<const float*>(options.sinkToken->memory().deviceData());
+            sinkStride = options.sinkToken->strides()[1];
         }
 
-        launchSdpaFwd(q.memory().deviceData(),
-                      k.memory().deviceData(),
-                      v.memory().deviceData(),
-                      maskPtr,
-                      o.memory().deviceData(),
-                      lsePtr,
-                      q.strides(),
-                      k.strides(),
-                      v.strides(),
-                      o.strides(),
-                      maskStrides,
-                      maskDims,
-                      lseStrides,
-                      batch,
-                      numHeads,
-                      numHeadsK,
-                      numHeadsV,
-                      seqQ,
-                      seqKv,
-                      headDim,
-                      headDimV,
-                      scale,
-                      leftBound,
-                      rightBound,
-                      topLeftAlignment,
-                      defines,
-                      seqLenQPtr,
-                      seqLenKvPtr,
-                      seqLenQStride,
-                      seqLenKvStride,
-                      pagedKSide,
-                      pagedVSide,
-                      sinkPtr,
-                      sinkStride,
-                      dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv),
-                      dropoutMaskStrides(dropoutMask),
-                      dropoutScale.value_or(1.0F),
-                      softcap.value_or(0.0F),
-                      rowMax != nullptr ? rowMax->memory().deviceData() : nullptr,
-                      rowMax != nullptr ? rowMax->strides() : std::vector<int64_t>{},
-                      rowSumExp != nullptr ? rowSumExp->memory().deviceData() : nullptr,
-                      rowSumExp != nullptr ? rowSumExp->strides() : std::vector<int64_t>{},
-                      alibi);
+        launchSdpaFwd(
+            q.memory().deviceData(),
+            k.memory().deviceData(),
+            v.memory().deviceData(),
+            maskPtr,
+            o.memory().deviceData(),
+            lsePtr,
+            q.strides(),
+            k.strides(),
+            v.strides(),
+            o.strides(),
+            maskStrides,
+            maskDims,
+            lseStrides,
+            batch,
+            numHeads,
+            numHeadsK,
+            numHeadsV,
+            seqQ,
+            seqKv,
+            headDim,
+            headDimV,
+            scale,
+            options.leftBound,
+            options.rightBound,
+            options.topLeftAlignment,
+            defines,
+            seqLenQPtr,
+            seqLenKvPtr,
+            seqLenQStride,
+            seqLenKvStride,
+            pagedKSide,
+            pagedVSide,
+            sinkPtr,
+            sinkStride,
+            dropoutMaskPointer(options.dropoutMask, batch, numHeads, seqQ, seqKv),
+            dropoutMaskStrides(options.dropoutMask),
+            options.dropoutScale.value_or(1.0F),
+            options.softcap.value_or(0.0F),
+            options.rowMax != nullptr ? options.rowMax->memory().deviceData() : nullptr,
+            options.rowMax != nullptr ? options.rowMax->strides() : std::vector<int64_t>{},
+            options.rowSumExp != nullptr ? options.rowSumExp->memory().deviceData() : nullptr,
+            options.rowSumExp != nullptr ? options.rowSumExp->strides() : std::vector<int64_t>{},
+            options.alibi);
 
         o.memory().markDeviceModified();
-        for(auto* stats : {lse, rowMax, rowSumExp})
+        for(auto* stats : {options.lse, options.rowMax, options.rowSumExp})
         {
             if(stats != nullptr)
             {
@@ -499,21 +482,7 @@ public:
                       hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
                       const GpuSdpaBwdOptions<MaskDataType>& options = {})
     {
-        const auto attnScaleValue = options.attnScale;
-        auto* lse = options.lse;
-        auto* attnMask = options.attnMask;
-        const auto leftBound = options.leftBound;
-        const auto rightBound = options.rightBound;
-        const auto topLeftAlignment = options.topLeftAlignment;
-        auto* dBias = options.dBias;
-        auto* seqLenQ = options.seqLenQ;
-        auto* seqLenKv = options.seqLenKv;
-        auto* dropoutMask = options.dropoutMask;
-        const auto dropoutScale = options.dropoutScale;
-        const auto dropoutScaleInv = options.dropoutScaleInv;
-        const auto softcap = options.softcap;
-        const auto alibi = options.alibi;
-        validateSoftcap(softcap);
+        validateSoftcap(options.softcap);
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
@@ -531,17 +500,17 @@ public:
         expect(dQ.dims() == q.dims(), "dQ must have Q's shape");
         expect(dK.dims() == k.dims(), "dK must have K's shape");
         expect(dV.dims() == v.dims(), "dV must have V's shape");
-        if(lse != nullptr)
+        if(options.lse != nullptr)
         {
-            const auto& ld = lse->dims();
+            const auto& ld = options.lse->dims();
             expect((ld.size() == 3 || (ld.size() == 4 && ld[3] == 1)) && ld[0] == batch
                        && ld[1] == numHeads && ld[2] == seqQ,
                    "lse must be [B, H, Sq] or [B, H, Sq, 1]");
         }
         std::vector<int64_t> maskDims;
-        if(attnMask != nullptr)
+        if(options.attnMask != nullptr)
         {
-            maskDims = attnMask->dims();
+            maskDims = options.attnMask->dims();
             expect(!maskDims.empty() && maskDims.size() <= 4, "attention mask must be rank 1..4");
             const std::array<int64_t, 4> full = {batch, numHeads, seqQ, seqKv};
             for(size_t i = 0; i < maskDims.size(); ++i)
@@ -551,11 +520,12 @@ public:
                        "each attention mask dim must be 1 or the full size");
             }
         }
-        expect(dBias == nullptr || (attnMask != nullptr && dBias->dims() == maskDims),
+        expect(options.dBias == nullptr
+                   || (options.attnMask != nullptr && options.dBias->dims() == maskDims),
                "dBias requires an attention mask of the same shape");
-        expect((seqLenQ == nullptr) == (seqLenKv == nullptr),
+        expect((options.seqLenQ == nullptr) == (options.seqLenKv == nullptr),
                "seqLenQ and seqLenKv must be given together");
-        for(auto* len : {seqLenQ, seqLenKv})
+        for(auto* len : {options.seqLenQ, options.seqLenKv})
         {
             expect(len == nullptr
                        || (static_cast<int64_t>(len->elementCount()) == batch
@@ -584,29 +554,32 @@ public:
         launch.dQ = dQ.memory().deviceData();
         launch.dK = dK.memory().deviceData();
         launch.dV = dV.memory().deviceData();
-        launch.mask = attnMask != nullptr ? attnMask->memory().deviceData() : nullptr;
-        launch.dBias = dBias != nullptr ? dBias->memory().deviceData() : nullptr;
-        launch.lse
-            = lse != nullptr ? static_cast<const float*>(lse->memory().deviceData()) : nullptr;
-        launch.seqLenQ = seqLenQ != nullptr
-                             ? static_cast<const int32_t*>(seqLenQ->memory().deviceData())
+        launch.mask
+            = options.attnMask != nullptr ? options.attnMask->memory().deviceData() : nullptr;
+        launch.dBias = options.dBias != nullptr ? options.dBias->memory().deviceData() : nullptr;
+        launch.lse = options.lse != nullptr
+                         ? static_cast<const float*>(options.lse->memory().deviceData())
+                         : nullptr;
+        launch.seqLenQ = options.seqLenQ != nullptr
+                             ? static_cast<const int32_t*>(options.seqLenQ->memory().deviceData())
                              : nullptr;
-        launch.seqLenKv = seqLenKv != nullptr
-                              ? static_cast<const int32_t*>(seqLenKv->memory().deviceData())
+        launch.seqLenKv = options.seqLenKv != nullptr
+                              ? static_cast<const int32_t*>(options.seqLenKv->memory().deviceData())
                               : nullptr;
-        launch.strides = {q.strides(),
-                          k.strides(),
-                          v.strides(),
-                          o.strides(),
-                          dO.strides(),
-                          dQ.strides(),
-                          dK.strides(),
-                          dV.strides(),
-                          attnMask != nullptr ? attnMask->strides() : std::vector<int64_t>{},
-                          dBias != nullptr ? dBias->strides() : std::vector<int64_t>{},
-                          lse != nullptr ? lse->strides() : std::vector<int64_t>{}};
-        launch.seqLenQStride = seqLenQ != nullptr ? seqLenQ->strides()[0] : 0;
-        launch.seqLenKvStride = seqLenKv != nullptr ? seqLenKv->strides()[0] : 0;
+        launch.strides
+            = {q.strides(),
+               k.strides(),
+               v.strides(),
+               o.strides(),
+               dO.strides(),
+               dQ.strides(),
+               dK.strides(),
+               dV.strides(),
+               options.attnMask != nullptr ? options.attnMask->strides() : std::vector<int64_t>{},
+               options.dBias != nullptr ? options.dBias->strides() : std::vector<int64_t>{},
+               options.lse != nullptr ? options.lse->strides() : std::vector<int64_t>{}};
+        launch.seqLenQStride = options.seqLenQ != nullptr ? options.seqLenQ->strides()[0] : 0;
+        launch.seqLenKvStride = options.seqLenKv != nullptr ? options.seqLenKv->strides()[0] : 0;
         launch.maskDims = maskDims;
         launch.batch = batch;
         launch.numHeads = numHeads;
@@ -616,24 +589,24 @@ public:
         launch.seqKv = seqKv;
         launch.headDim = headDim;
         launch.headDimV = headDimV;
-        launch.scale = attnScaleValue.value_or(1.0F);
-        launch.leftBound = leftBound;
-        launch.rightBound = rightBound;
-        launch.topLeftAlignment = topLeftAlignment;
-        launch.dropoutMask = dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv);
-        launch.dropoutMaskStrides = dropoutMaskStrides(dropoutMask);
-        launch.dropoutScale = dropoutScale.value_or(1.0F);
-        launch.dropoutScaleInv = dropoutScaleInv.value_or(1.0F);
-        launch.softcap = softcap.value_or(0.0F);
-        launch.alibi = alibi;
+        launch.scale = options.attnScale.value_or(1.0F);
+        launch.leftBound = options.leftBound;
+        launch.rightBound = options.rightBound;
+        launch.topLeftAlignment = options.topLeftAlignment;
+        launch.dropoutMask = dropoutMaskPointer(options.dropoutMask, batch, numHeads, seqQ, seqKv);
+        launch.dropoutMaskStrides = dropoutMaskStrides(options.dropoutMask);
+        launch.dropoutScale = options.dropoutScale.value_or(1.0F);
+        launch.dropoutScaleInv = options.dropoutScaleInv.value_or(1.0F);
+        launch.softcap = options.softcap.value_or(0.0F);
+        launch.alibi = options.alibi;
         launchSdpaBwd(launch, defines);
 
         dQ.memory().markDeviceModified();
         dK.memory().markDeviceModified();
         dV.memory().markDeviceModified();
-        if(dBias != nullptr)
+        if(options.dBias != nullptr)
         {
-            dBias->memory().markDeviceModified();
+            options.dBias->memory().markDeviceModified();
         }
     }
 
