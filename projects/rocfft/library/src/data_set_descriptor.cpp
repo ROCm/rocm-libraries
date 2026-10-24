@@ -44,6 +44,171 @@ namespace
         ret.push_back(b);
         return ret;
     }
+
+    // smallest (resp. largest) integer x such that x * b >= a (resp. x * b <= a), for b > 0
+    ptrdiff_t div_up(ptrdiff_t a, ptrdiff_t b)
+    {
+        return a / b + (a % b > 0 ? 1 : 0);
+    }
+    ptrdiff_t div_down(ptrdiff_t a, ptrdiff_t b)
+    {
+        return a / b - (a % b < 0 ? 1 : 0);
+    }
+
+    // Extended Euclid algorithm: returns gcd(a, b) and sets p, q such that
+    // p * a + q * b == gcd(a, b) (requires a > 0 and b > 0).
+    size_t ext_euclid_gcd(size_t a, size_t b, ptrdiff_t& p, ptrdiff_t& q)
+    {
+        p                 = 1;
+        q                 = 0;
+        ptrdiff_t  p_next = 0, q_next = 1;
+        const bool swapped = a < b;
+        if(swapped)
+            std::swap(a, b);
+        while(b != 0)
+        {
+            const ptrdiff_t ratio  = static_cast<ptrdiff_t>(a / b);
+            const size_t    next_b = a % b;
+            const ptrdiff_t p_tmp  = p - ratio * p_next;
+            const ptrdiff_t q_tmp  = q - ratio * q_next;
+            a                      = b;
+            b                      = next_b;
+            p                      = p_next;
+            q                      = q_next;
+            p_next                 = p_tmp;
+            q_next                 = q_tmp;
+        }
+        if(swapped)
+            std::swap(p, q);
+        return a;
+    }
+
+    // Self-aliasing detection for strided index ranges, ported from the O(1)-storage
+    // implementation of array_valid in shared/array_validator.cpp (branch
+    // users/regan-amd/array_validation_alt_impl, commit d644cffc0c), minus its
+    // diagnostics (equation counters, collision examples).
+    // `axes` holds non-trivial axes only (span > 1, stride > 0), sorted by increasing stride.
+    struct strided_axes_t
+    {
+        struct axis
+        {
+            size_t span;
+            size_t stride;
+        };
+        std::vector<axis> axes;
+
+        size_t strides_gcd() const
+        {
+            return std::accumulate(
+                axes.begin() + 1, axes.end(), axes[0].stride, [](size_t acc, const axis& a) {
+                    return std::gcd(acc, a.stride);
+                });
+        }
+        // position of multi-index (1, 1, ..., 1)
+        size_t first_nondegenerate_entry() const
+        {
+            return std::accumulate(axes.begin(),
+                                   axes.end(),
+                                   size_t(0),
+                                   [](size_t acc, const axis& a) { return acc + a.stride; });
+        }
+        // position of multi-index (span_0 - 1, span_1 - 1, ...)
+        size_t last_entry() const
+        {
+            return std::accumulate(
+                axes.begin(), axes.end(), size_t(0), [](size_t acc, const axis& a) {
+                    return acc + a.stride * (a.span - 1);
+                });
+        }
+
+        // true iff sum_i x_i * axes[i].stride == address for some 0 <= x_i < axes[i].span
+        bool reaches(size_t address) const
+        {
+            if(address == 0)
+                return true;
+            if(address > last_entry() || address % strides_gcd() != 0)
+                return false;
+            if(axes.size() == 1)
+                return true;
+            if(axes.size() == 2)
+            {
+                // particular solution p * s0 + q * s1 == address from Bezout's coefficients,
+                // then look for k such that 0 <= p + k * s1 / g < l0 and 0 <= q - k * s0 / g < l1
+                ptrdiff_t       p, q;
+                const size_t    g     = ext_euclid_gcd(axes[0].stride, axes[1].stride, p, q);
+                const ptrdiff_t scale = static_cast<ptrdiff_t>(address / g);
+                p *= scale;
+                q *= scale;
+                const ptrdiff_t l0    = static_cast<ptrdiff_t>(axes[0].span);
+                const ptrdiff_t l1    = static_cast<ptrdiff_t>(axes[1].span);
+                const ptrdiff_t s0_g  = static_cast<ptrdiff_t>(axes[0].stride / g);
+                const ptrdiff_t s1_g  = static_cast<ptrdiff_t>(axes[1].stride / g);
+                const ptrdiff_t min_k = std::max(div_up(-p, s1_g), div_up(q - l1 + 1, s0_g));
+                const ptrdiff_t max_k = std::min(div_down(l0 - 1 - p, s1_g), div_down(q, s0_g));
+                return min_k <= max_k;
+            }
+            // more than 2 unknowns: enumerate the one of largest stride (smallest range)
+            // and recurse on the others
+            const strided_axes_t sub{{axes.begin(), axes.end() - 1}};
+            const axis&          last  = axes.back();
+            const size_t         max_k = std::min(last.span - 1, address / last.stride);
+            for(size_t k = 0; k <= max_k; k++)
+            {
+                if(sub.reaches(address - k * last.stride))
+                    return true;
+            }
+            return false;
+        }
+
+        // Two distinct multi-indices x, y collide iff the axes split into disjoint, non-empty
+        // sets A and B with sum_{A} u_i * s_i == sum_{B} u_i * s_i, u_i = |x_i - y_i| < span_i.
+        // `seed_call` is false only for the sub-arrays checked herein: their own sub-arrays
+        // are sub-arrays of this one, already covered by other splits of the seed call.
+        bool is_self_aliasing(bool seed_call) const
+        {
+            if(axes.size() < 2)
+                return false;
+            bool nested = true;
+            for(size_t i = 0; i + 1 < axes.size(); i++)
+                nested &= axes[i + 1].stride >= axes[i].span * axes[i].stride;
+            if(nested)
+                return false;
+
+            std::vector<size_t> mask(axes.size());
+            for(size_t lhs_size = axes.size() / 2; lhs_size > 0; lhs_size--)
+            {
+                std::fill(mask.begin(), mask.begin() + lhs_size, 0);
+                std::fill(mask.begin() + lhs_size, mask.end(), 1);
+                do
+                {
+                    // skip swapped copies of other splits
+                    if(2 * lhs_size == axes.size() && mask[0] == 1)
+                        continue;
+                    strided_axes_t lhs, rhs;
+                    for(size_t i = 0; i < axes.size(); i++)
+                        (mask[i] ? rhs : lhs).axes.push_back(axes[i]);
+                    if(seed_call && (lhs.is_self_aliasing(false) || rhs.is_self_aliasing(false)))
+                        return true;
+                    // solutions with any u_i == 0 are collisions of smaller sub-arrays (checked
+                    // above), so a match is a non-zero common multiple of both sides' strides gcd,
+                    // reached by both sides with all u_i >= 1
+                    const size_t lcm = std::lcm(lhs.strides_gcd(), rhs.strides_gcd());
+                    const size_t match_min
+                        = lcm
+                          * DivRoundingUp(std::max(lhs.first_nondegenerate_entry(),
+                                                   rhs.first_nondegenerate_entry()),
+                                          lcm);
+                    const size_t match_max = std::min(lhs.last_entry(), rhs.last_entry());
+                    for(size_t match = match_min; match <= match_max; match += lcm)
+                    {
+                        if(lhs.reaches(match) && rhs.reaches(match))
+                            return true;
+                    }
+                } while(std::next_permutation(mask.begin(), mask.end()));
+            }
+            return false;
+        }
+    };
 }
 
 io_data_label other(io_data_label io)
@@ -290,6 +455,27 @@ size_t data_descriptor_t::buffer_element_count() const
 bool data_descriptor_t::is_contiguous() const
 {
     return buffer_element_count() == logical_count();
+}
+
+bool data_descriptor_t::is_self_aliasing() const
+{
+    // an empty range has no two distinct indices
+    if(is_empty())
+        return false;
+    strided_axes_t nontrivial;
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+    {
+        const auto& axis = (*this)[dim];
+        if(axis.logical_span() < 2)
+            continue;
+        if(axis.inbuffer_stride == 0)
+            return true;
+        nontrivial.axes.push_back({axis.logical_span(), axis.inbuffer_stride});
+    }
+    std::sort(nontrivial.axes.begin(), nontrivial.axes.end(), [](const auto& a, const auto& b) {
+        return a.stride < b.stride;
+    });
+    return nontrivial.is_self_aliasing(true);
 }
 
 bool data_descriptor_t::operator==(const data_descriptor_t& other) const
