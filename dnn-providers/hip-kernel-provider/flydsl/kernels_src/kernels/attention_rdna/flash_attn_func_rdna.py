@@ -61,7 +61,8 @@
 #      its tensor_shim import. This copy is imported by an AOT generator and a
 #      validation script, which drive the jit launcher directly.
 #  10. Softmax statistics: an optional LSE output (natural log of the scaled
-#      scores, f32, [B, H, Sq, 1] with runtime strides), written when lse_on.
+#      scores, f32, [B, H, Sq, 1] with runtime strides), written when lse_on
+#      (bit 0 of the flags argument, modification 26).
 #      A row no key reaches gets O = 0 and LSE = -inf, as the reference
 #      defines it, rather than 0 * inf.
 #  11. Waves whose 16 query rows all lie past seq_len_q -- 7 of 8 in a decode
@@ -137,6 +138,62 @@
 #      the keyless LSE of -inf. A row no key reaches still has l = 0 exactly. The
 #      decode kernel beside this one (flash_attn_decode_rdna.py) does the same,
 #      in its main kernel and in its split merge.
+#  25. Decode kernel only (flash_attn_decode_rdna.py, not this file's code): its
+#      bias objects issue the tile's bias loads before the QK product rather than
+#      after it, where the scores waited on them with nothing left to overlap.
+#      This was already so at head_dim 128 and up; it now holds at 64 and on the
+#      generic tiers too (up to 20% faster with a bias on long caches), and only
+#      the specialized head_dim 96 objects keep the late loads, which measured a
+#      fraction of a percent faster there on short caches. Objects without a
+#      bias, and every bias object that already loaded early, build as before.
+#  26. Per-batch sequence lengths (padding), in this kernel and the decode kernel
+#      (with its split merge). Two appended pointers, SEQLEN_Q and SEQLEN_KV, each
+#      an int32 per batch; read once per workgroup after the batch index under a
+#      uniform branch on bit 1 of the flags argument (formerly lse_on, still its
+#      bit 0), so a dense launch loads nothing, they replace seq_len_q /
+#      seq_len_kv for everything past the
+#      grid: the K/V slice extent (so no neighbouring batch is read), the
+#      diagonal's offset (bottom-right per batch, as modification 5 foresaw), the
+#      key span and the KV loop's end, the query bounds and the stores. A query
+#      tile wholly past its batch's length runs no KV iteration and writes
+#      nothing; rows past it are not written. Also appended, for later changes so
+#      the argument list moves once: ROW_OFF_Q / ROW_OFF_KV (packed sequences),
+#      and the prefill kernel's dropout arguments (SEED, OFFSET1 pointers, offset2
+#      i64, idropout_p i32, dropout_scale f32) -- read by no object yet.
+#  27. Dropout (has_dropout), AOTriton's scheme bit for bit (philox.py, imported
+#      from the aiw kernel's directory): each score of row i, key j of a (batch,
+#      query head) plane keeps or drops on word j % 4 of the Philox4x32-10 draw at
+#      counter offset1 + offset2 + ((b * Hq + h) * Sq + i) * cdiv(Skv, 4) + j / 4,
+#      with Sq and Skv the launch's lengths, against the f32 threshold the host
+#      passes (idropout_p). Applied to P after the row sum is formed, so l and the
+#      LSE stay undropped; 1 / (1 - p) folds into 1 / l. On gfx11 a lane holds the
+#      even or the odd keys of 16, so each lane draws the 8 consecutive keys of its
+#      half (two calls) and trades the packed keep bits with its xor-16 peer: one
+#      shuffle per 16 keys rather than four calls per lane. Objects without it
+#      build as before.
+#  28. Padded rows filled, and lengths clamped, in this kernel and the decode kernel
+#      (with its split merge). With bit 2 of the flags argument, a row past its
+#      batch's query length but inside the launch's is written as O = 0 and LSE =
+#      -inf, hipDNN's reference contract (cuDNN >= 9.14), on sink objects too (a
+#      padded row is not a keyless row): a store of constants beside the live rows'
+#      store, so the live path is unchanged. Without the bit such rows keep what the
+#      buffer held (AOTriton's behaviour). The per-batch lengths are clamped to
+#      [0, the launch's length] where they are read, as hipDNN's GPU reference clamps
+#      them, so a dense launch pays neither.
+#  29. Packed (THD) sequences, in this kernel only (the decode kernel and its merge
+#      decline them). With bit 3 of the flags argument, batch b's tokens are rows
+#      ROW_OFF_Q[b] .. ROW_OFF_Q[b + 1] (and ROW_OFF_KV for K and V) of tensors
+#      whose batch stride the native passes as their sequence stride: the operands'
+#      batch bases, and the LSE's, are the first token's row times that stride. The
+#      batch's query and key counts are the tables' differences, clamped to [0, the
+#      launch's lengths]; with bit 1 as well, the per-batch lengths are read too and
+#      clamped within them (cuDNN's packed form, each table entry a slot whose rows
+#      past the length are padded rows). Q's loads are bounded by the rows the batch
+#      owns (its slot packed, the launch's length otherwise), so no load reaches the
+#      next sequence or past the last; the K/V slices already stop at the batch's key
+#      count. The lengths read moves into one branch on the flags word (load_sequence;
+#      load_lengths stays the decode kernel's), which yields the batch index as the row
+#      for a dense launch, so a dense launch still loads nothing.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -168,6 +225,7 @@ from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 
 from flydsl.runtime.device import get_rocm_arch
+from kernels.attention_rdna4.philox import Philox
 from kernels.common.kernels_common import LOG2E as _LOG2E
 
 KERNEL_NAME = "flash_attn_func_rdna_kernel"
@@ -176,6 +234,168 @@ KERNEL_NAME = "flash_attn_func_rdna_kernel"
 # q + _NO_WINDOW never reaches a real kv column, yet small enough that
 # kv - (q + _NO_WINDOW) cannot overflow int32.
 _NO_WINDOW = -(1 << 30)
+
+
+def load_lengths(flags, pointers, index, defaults):
+    """``ptr[index]`` as an i32 for each of ``pointers`` when bit 1 of ``flags`` says the
+    launch passes per-batch lengths, else ``defaults`` (modification 26).
+
+    A real branch, on a flag the kernel reads with its first arguments (bit 1 of the
+    ``flags`` word whose bit 0 is ``lse_on``), so a dense launch loads nothing and waits on
+    nothing. Two forms measured slower on short launches: a branch on the pointers
+    themselves made the kernel wait for them before issuing its other argument loads, and a
+    branchless form (an address that falls back to a pointer the launch always passes) read
+    a cold cache line on every dense launch. Built as an explicit ``scf.if`` because the
+    ``if`` rewrite is lexical per kernel function and the decode kernel shares this helper.
+    """
+    from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
+
+    on = (fx.Int32(flags) & fx.Int32(2)) != fx.Int32(0)
+    if_op = _scf.IfOp(
+        fx.as_ir_value(on), results_=[T.i32] * len(pointers), has_else=True
+    )
+    with ir.InsertionPoint(if_op.then_block):
+        values = []
+        for ptr, default in zip(pointers, defaults):
+            i32_ptr = fx.recast_iter(
+                fx.PointerType.get(
+                    elem_ty=fx.Int32.ir_type,
+                    address_space=fx.AddressSpace.Global,
+                    alignment=4,
+                ),
+                ptr,
+            )
+            # Clamped to [0, the launch's length] (modification 28), as hipDNN's GPU
+            # reference clamps them: a length past it would read past the batch's slice.
+            length = fx.Int32(fx.ptr_load(i32_ptr + fx.Int64(index), fx.Int32))
+            length = (length < fx.Int32(0)).select(fx.Int32(0), length)
+            length = (length > fx.Int32(default)).select(fx.Int32(default), length)
+            values.append(fx.as_ir_value(length))
+        _scf.YieldOp(values)
+    with ir.InsertionPoint(if_op.else_block):
+        _scf.YieldOp([fx.as_ir_value(fx.Int32(d)) for d in defaults])
+    return [fx.Int32(r) for r in if_op.results]
+
+
+def _i32_at(ptr, index):
+    """``ptr[index]`` as an i32 (an int32 table in global memory)."""
+    i32_ptr = fx.recast_iter(
+        fx.PointerType.get(
+            elem_ty=fx.Int32.ir_type,
+            address_space=fx.AddressSpace.Global,
+            alignment=4,
+        ),
+        ptr,
+    )
+    return fx.Int32(fx.ptr_load(i32_ptr + fx.Int64(index), fx.Int32))
+
+
+def _clamp_i32(value, high):
+    """``value`` clamped to [0, ``high``]."""
+    value = (value < fx.Int32(0)).select(fx.Int32(0), value)
+    return fx.Int32((value > fx.Int32(high)).select(fx.Int32(high), value))
+
+
+def load_sequence(flags, batch, lengths, seq_len_pointers, row_off_pointers):
+    """This batch's sequence (modification 29): ``(len_q, len_kv, slot_q, row_q, row_kv)``.
+
+    ``len_*`` are the rows and keys the batch computes with, ``slot_q`` the query rows it
+    owns in Q and O (rows in [len_q, slot_q) are padded rows), and ``row_*`` the first
+    token's index: each operand's batch base is ``row * batch_stride``. A dense launch
+    gets the launch's lengths, slot ``len_q`` and row ``batch``. Bit 1 of ``flags``: the
+    lengths come from the per-batch arrays (padding, modification 26). Bit 3: the
+    sequences are packed (THD): batch b's tokens are rows ``off[b] .. off[b + 1]`` of
+    the ragged-offset tables, the native passes each batch stride as the operand's sequence
+    stride, and the slot is the table's length. With both, the length is the array's within
+    the slot (cuDNN's packed form with per-batch lengths). Every length is clamped to [0,
+    the launch's] (modification 28) and to the slot. One branch on the flags word, so a
+    dense launch loads nothing.
+    """
+    from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
+
+    seq_len_q, seq_len_kv = lengths
+    batch_i64 = fx.Int64(batch)
+    results = [T.i32, T.i32, T.i32, T.i64, T.i64]
+    on = (fx.Int32(flags) & fx.Int32(10)) != fx.Int32(0)
+    if_op = _scf.IfOp(fx.as_ir_value(on), results_=results, has_else=True)
+    with ir.InsertionPoint(if_op.then_block):
+        packed = (fx.Int32(flags) & fx.Int32(8)) != fx.Int32(0)
+        slot_op = _scf.IfOp(fx.as_ir_value(packed), results_=results[1:], has_else=True)
+        with ir.InsertionPoint(slot_op.then_block):
+            slot = []
+            rows = []
+            for ptr, high in zip(row_off_pointers, lengths):
+                first = _i32_at(ptr, batch_i64)
+                last = _i32_at(ptr, batch_i64 + fx.Int64(1))
+                slot.append(fx.as_ir_value(_clamp_i32(last - first, high)))
+                rows.append(fx.as_ir_value(fx.Int64(first)))
+            _scf.YieldOp(slot + rows)
+        with ir.InsertionPoint(slot_op.else_block):
+            _scf.YieldOp(
+                [
+                    fx.as_ir_value(fx.Int32(seq_len_q)),
+                    fx.as_ir_value(fx.Int32(seq_len_kv)),
+                ]
+                + [fx.as_ir_value(batch_i64)] * 2
+            )
+        slot_q, slot_kv = (fx.Int32(r) for r in slot_op.results[:2])
+        row_q, row_kv = (fx.Int64(r) for r in slot_op.results[2:])
+        padded = (fx.Int32(flags) & fx.Int32(2)) != fx.Int32(0)
+        len_op = _scf.IfOp(fx.as_ir_value(padded), results_=[T.i32] * 2, has_else=True)
+        with ir.InsertionPoint(len_op.then_block):
+            _scf.YieldOp(
+                [
+                    fx.as_ir_value(_clamp_i32(_i32_at(ptr, batch_i64), high))
+                    for ptr, high in zip(seq_len_pointers, (slot_q, slot_kv))
+                ]
+            )
+        with ir.InsertionPoint(len_op.else_block):
+            _scf.YieldOp([fx.as_ir_value(slot_q), fx.as_ir_value(slot_kv)])
+        len_q, len_kv = (fx.Int32(r) for r in len_op.results)
+        _scf.YieldOp(
+            [fx.as_ir_value(v) for v in (len_q, len_kv, slot_q, row_q, row_kv)]
+        )
+    with ir.InsertionPoint(if_op.else_block):
+        _scf.YieldOp(
+            [
+                fx.as_ir_value(fx.Int32(seq_len_q)),
+                fx.as_ir_value(fx.Int32(seq_len_kv)),
+                fx.as_ir_value(fx.Int32(seq_len_q)),
+                fx.as_ir_value(batch_i64),
+                fx.as_ir_value(batch_i64),
+            ]
+        )
+    r = if_op.results
+    return (
+        fx.Int32(r[0]),
+        fx.Int32(r[1]),
+        fx.Int32(r[2]),
+        fx.Int64(r[3]),
+        fx.Int64(r[4]),
+    )
+
+
+def load_u64_or_zero(ptr):
+    """``*ptr`` as an i64, or 0 when ``ptr`` is null (modification 27): a branch, so a null
+    pointer is never loaded. The dropout seed and AOTriton's offset1 pointer, read once per
+    workgroup by a dropout object only."""
+    from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
+
+    nonnull = fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
+    if_op = _scf.IfOp(fx.as_ir_value(nonnull), results_=[T.i64], has_else=True)
+    with ir.InsertionPoint(if_op.then_block):
+        i64_ptr = fx.recast_iter(
+            fx.PointerType.get(
+                elem_ty=fx.Int64.ir_type,
+                address_space=fx.AddressSpace.Global,
+                alignment=8,
+            ),
+            ptr,
+        )
+        _scf.YieldOp([fx.as_ir_value(fx.ptr_load(i64_ptr, fx.Int64))])
+    with ir.InsertionPoint(if_op.else_block):
+        _scf.YieldOp([fx.as_ir_value(fx.Int64(0))])
+    return fx.Int64(if_op.results[0])
 
 
 def build_flash_attn_func_module(
@@ -196,18 +416,23 @@ def build_flash_attn_func_module(
     bias_query_dtype=False,
     head_dim_v=None,
     has_sink=False,
+    has_dropout=False,
 ):
     """Build the gfx11 Flash Attention launcher.
 
     Returns the ``@flyc.jit`` launcher, whose arguments are, in order:
     ``Q, K, V, O, LSE`` (pointers), ``batch_size, seq_len_q, seq_len_kv,
-    num_heads, kv_group, right_bound, left_bound, align_br, lse_on`` (Int32),
+    num_heads, kv_group, right_bound, left_bound, align_br, flags`` (Int32; flags bit 0 is
+    lse_on, bit 1 per-batch lengths, bit 2 padded rows filled, bit 3 packed sequences),
     ``scale`` (Float32), then the fifteen element strides ``(batch, seq, head)``
     of Q, K, V, O and LSE (Int64), the ``BIAS`` pointer and its four element
     strides ``(batch, head, query, key)`` (Int64), the runtime ``head_dim``
     (Int32; read only by a ``generic_head_dim`` build), ``v_group`` (Int32: query
     heads per V head), the ``SINK`` pointer and its head stride (Int64; read only
-    by a ``has_sink`` build), then the stream. The kernel itself takes the
+    by a ``has_sink`` build), the per-batch length pointers ``SEQLEN_Q``/``SEQLEN_KV`` and
+    the packed-sequence offset pointers ``ROW_OFF_Q``/``ROW_OFF_KV``, the dropout seed and
+    offset1 pointers, offset2 (Int64), the keep threshold (Int32) and the scale (Float32)
+    (read only by a ``has_dropout`` build), then the stream. The kernel itself takes the
     same list without ``batch_size``.
     """
 
@@ -224,6 +449,9 @@ def build_flash_attn_func_module(
     # An attention sink (has_sink): a per-head logit in the query's dtype that joins
     # every row's softmax as a key with no value.
     HAS_SINK = bool(has_sink)
+    # Dropout (has_dropout, modification 27): a Philox draw per score, so baked.
+    HAS_DROPOUT = bool(has_dropout)
+    PHILOX = Philox(width=32)
     # head_dim is then the largest served; the actual one (a multiple of 8) is a
     # runtime argument. Columns at or past it are zeroed as Q and K are loaded --
     # both, since 0 * NaN read from a neighbouring row is still NaN -- and not
@@ -239,8 +467,10 @@ def build_flash_attn_func_module(
     PAIR = 2 if HD_PAIR else 1
     QK_DIM = head_dim // PAIR
     if q_resident is None:
+        # At 128 a bias's or a dropout mask's per-tile values tip a resident Q past the
+        # register file (modifications 14 and 27).
         Q_RESIDENT = not HD_PAIR and (
-            head_dim < 128 or (head_dim == 128 and not HAS_BIAS)
+            head_dim < 128 or (head_dim == 128 and not HAS_BIAS and not HAS_DROPOUT)
         )
     else:
         Q_RESIDENT = bool(q_resident)
@@ -392,7 +622,7 @@ def build_flash_attn_func_module(
         right_bound: fx.Int32,
         left_bound: fx.Int32,
         align_br: fx.Int32,
-        lse_on: fx.Int32,
+        flags: fx.Int32,
         scale: fx.Float32,
         q_sb: fx.Int64,
         q_ss: fx.Int64,
@@ -418,6 +648,15 @@ def build_flash_attn_func_module(
         v_group: fx.Int32,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        SEQLEN_Q: fx.Pointer,
+        SEQLEN_KV: fx.Pointer,
+        ROW_OFF_Q: fx.Pointer,
+        ROW_OFF_KV: fx.Pointer,
+        DROPOUT_SEED: fx.Pointer,
+        DROPOUT_OFFSET1: fx.Pointer,
+        dropout_offset2: fx.Int64,
+        idropout_p: fx.Int32,
+        dropout_scale: fx.Float32,
     ):
         elem_dtype = elem_numeric_cls
 
@@ -541,6 +780,22 @@ def build_flash_attn_func_module(
         else:
             q_tile_idx = _q_tile_linear
         batch_idx = batch_q_tile_id // num_q_tiles
+        # Modification 26: this batch's lengths, or the launch's when the pointers are
+        # null. Everything past the grid reads these; the grid and a bias's extents keep
+        # the launch's (the longest sequence). Modification 29: packed (THD), the batch's
+        # rows start at its table entry (row_q / row_kv, the batch index when dense) and
+        # it owns slot_q query rows (the launch's when not packed).
+        seq_q_max = seq_q_v
+        seq_kv_max = seq_kv_v
+        seq_q_b_i32, seq_kv_b_i32, slot_q_i32, row_q, row_kv = load_sequence(
+            flags,
+            batch_idx,
+            (seq_len_q, seq_len_kv),
+            (SEQLEN_Q, SEQLEN_KV),
+            (ROW_OFF_Q, ROW_OFF_KV),
+        )
+        seq_q_v = fx.Int64(seq_q_b_i32)
+        seq_kv_v = fx.Int64(seq_kv_b_i32)
         kv_head_idx = head_idx // kv_group_v
         v_head_idx = head_idx // fx.Int64(v_group)
         q_start = q_tile_idx * BLOCK_M
@@ -549,8 +804,8 @@ def build_flash_attn_func_module(
         load_lane_in_row = tid % THREADS_PER_ROW_LOAD
         load_col_base = load_lane_in_row * VEC_WIDTH
 
-        q_base = batch_idx * q_sb + head_idx * q_sh
-        o_base = batch_idx * o_sb + head_idx * o_sh
+        q_base = row_q * q_sb + head_idx * q_sh
+        o_base = row_q * o_sb + head_idx * o_sh
 
         def q_idx(token_idx, col):
             return q_base + token_idx * q_ss + col
@@ -563,11 +818,16 @@ def build_flash_attn_func_module(
         # tail prefetch -- reads zero instead of a neighbouring head or past the
         # allocation. The slice must fit the descriptor's 32-bit num_records.
         def _kv_buf_ptr(elem_ptr, sb, ss, sh, slice_head, row_elems):
-            slice_base = batch_idx * sb + slice_head * sh
+            slice_base = row_kv * sb + slice_head * sh
+            # A batch with no key still gets one row's extent: its scores are all
+            # masked, and the extent must not go negative.
+            _last_row = fx.Int64(
+                (seq_kv_v > fx.Int64(0)).select(seq_kv_v - fx.Int64(1), fx.Int64(0))
+            )
             if const_expr(GENERIC_D):
-                slice_elems = (seq_kv_v - fx.Int64(1)) * ss + fx.Int64(head_dim_rt)
+                slice_elems = _last_row * ss + fx.Int64(head_dim_rt)
             else:
-                slice_elems = (seq_kv_v - fx.Int64(1)) * ss + fx.Int64(row_elems)
+                slice_elems = _last_row * ss + fx.Int64(row_elems)
             return _bounds_checked_buf_ptr(
                 fx.add_offset(elem_ptr, fx.Int64(slice_base)),
                 fx.Int64(slice_elems) * fx.Int64(ELEM_BYTES),
@@ -709,7 +969,12 @@ def build_flash_attn_func_module(
         q_row_i32 = fx.Int32(q_row)
 
         q_in_bounds = q_row < seq_q_v
-        q_row_safe = fx.Int64(q_in_bounds.select(q_row, fx.Int64(0)))
+        # Q's loads are bounded by the rows the batch owns, not its length: a row past the
+        # batch's length is still inside Q and its values are never stored (modification
+        # 26). Dense or padded that is the launch's length; packed, the batch's slot, so
+        # no load reaches the next sequence or past the last (modification 29).
+        q_load_ok = q_row < fx.Int64(slot_q_i32)
+        q_row_safe = fx.Int64(q_load_ok.select(q_row, fx.Int64(0)))
 
         # The mask, in the reference's terms (CpuFpReferenceSdpa isMasked): kv is
         # masked when kv > q + align + right_bound (the causal variant only) or
@@ -717,10 +982,10 @@ def build_flash_attn_func_module(
         # offset: 0 top-left, seq_len_kv - seq_len_q bottom-right. Computed here
         # from the lengths rather than passed in, so per-batch lengths can later
         # move the diagonal without another change to the argument list.
-        seq_kv_i32 = fx.Int32(seq_len_kv)
+        seq_kv_i32 = seq_kv_b_i32
         align_i32 = fx.Int32(
             (fx.Int32(align_br) != fx.Int32(0)).select(
-                seq_kv_i32 - fx.Int32(seq_len_q), fx.Int32(0)
+                seq_kv_i32 - seq_q_b_i32, fx.Int32(0)
             )
         )
         causal_offset_i32 = align_i32 + fx.Int32(right_bound)
@@ -780,21 +1045,21 @@ def build_flash_attn_func_module(
                 # gfx12: this lane's 8 head-dim values of the K-step, at 8*(l/16).
                 col = qk_col(ks * K_STEP_QK) + klane * 8
                 if const_expr(GENERIC_D):
-                    col_ok = q_in_bounds & (col < fx.Int64(head_dim_rt))
+                    col_ok = q_load_ok & (col < fx.Int64(head_dim_rt))
                     safe = col_ok.select(col, fx.Int64(0))
                     raw = Vec(
                         _load_global_half_vec(q_elem_ptr, q_idx(q_row_safe, safe), 8)
                     )
                     return col_ok.select(raw, Vec.filled(8, 0.0, elem_dtype))
                 raw = _load_global_half_vec(q_elem_ptr, q_idx(q_row_safe, col), 8)
-                return q_in_bounds.select(raw, Vec.filled(8, 0.0, elem_dtype))
+                return q_load_ok.select(raw, Vec.filled(8, 0.0, elem_dtype))
             if const_expr(GENERIC_D):
                 # Two 8-column halves, each wholly in or out (head_dim % 8 == 0);
                 # an out half reads column 0 instead, so nothing reads past a row.
                 halves = []
                 for half in range_constexpr(2):
                     col = qk_col(ks * K_STEP_QK + half * 8)
-                    col_ok = q_in_bounds & (col < fx.Int64(head_dim_rt))
+                    col_ok = q_load_ok & (col < fx.Int64(head_dim_rt))
                     safe = col_ok.select(col, fx.Int64(0))
                     raw = Vec(
                         _load_global_half_vec(q_elem_ptr, q_idx(q_row_safe, safe), 8)
@@ -807,7 +1072,7 @@ def build_flash_attn_func_module(
                 )
             q_col = qk_col(ks * K_STEP_QK)
             raw = _load_global_half_vec(q_elem_ptr, q_idx(q_row_safe, q_col), 16)
-            return q_in_bounds.select(raw, c_zero_v16)
+            return q_load_ok.select(raw, c_zero_v16)
 
         q_b_packs = []
         if const_expr(Q_RESIDENT):
@@ -831,8 +1096,8 @@ def build_flash_attn_func_module(
             # One (batch, head) slice of the broadcast bias; a size-1 axis has
             # stride 0. Reads past it -- the kv tail -- come back as zero.
             _bias_slice_elems = (
-                (seq_q_v - fx.Int64(1)) * bias_sq
-                + (seq_kv_v - fx.Int64(1)) * bias_skv
+                (seq_q_max - fx.Int64(1)) * bias_sq
+                + (seq_kv_max - fx.Int64(1)) * bias_skv
                 + fx.Int64(1)
             )
             bias_buf_ptr = _bounds_checked_buf_ptr(
@@ -867,6 +1132,23 @@ def build_flash_attn_func_module(
             (_kv_lo_raw > fx.Int64(0)).select(_kv_lo_raw, fx.Int64(0))
         )
         kv_lower = (_kv_lo_pos // BLOCK_N_OUT) * BLOCK_N_OUT
+
+        if const_expr(HAS_DROPOUT):
+            # This (batch, query head) plane's first counter and the counters per row
+            # (modification 27): the launch's lengths, not the batch's, as AOTriton's
+            # Max_seqlen_q/k, so dense, padded and packed storage share one mask.
+            _ph_seed = load_u64_or_zero(DROPOUT_SEED)
+            _ph_offset = fx.Int64(dropout_offset2) + load_u64_or_zero(DROPOUT_OFFSET1)
+            _ph_base, _ph_stride = PHILOX.grid_plane(
+                _ph_offset,
+                batch_idx * num_heads_v + head_idx,
+                seq_len_q,
+                seq_len_kv,
+            )
+            _ph_threshold = fx.Int32(idropout_p)
+        # A query tile wholly past this batch's length runs no KV iteration
+        # (modification 26); its rows are out of bounds, so nothing is stored.
+        kv_upper = fx.Int64((q_start < seq_q_v).select(kv_upper, kv_lower))
 
         # Non-causal carries prefetched V across iterations; causal avoids the
         # extra VGPR lifetime and loads V in the current iteration.
@@ -1097,6 +1379,46 @@ def build_flash_attn_func_module(
             l_corr = _fmul(corr, l_running)
             l_new = _fadd(l_corr, tile_sum)
 
+            if const_expr(HAS_DROPOUT):
+                # After the row sum, before P is packed: the sum and the LSE stay undropped
+                # (modification 27). Element (st, r) is key kv_start + 16 st + 2 r + klane on
+                # gfx11, kv_start + 16 st + r + 8 klane on gfx12.
+                for st in range_constexpr(NUM_S_ACCS):
+                    _kb = fx.Int64(kv_block_start) + fx.Int64(st * 16)
+                    # The 8 consecutive keys of this lane's half of the 16: klane 0 the first,
+                    # klane 1 the second (on gfx12 these are the lane's own 8).
+                    _first = PHILOX.grid_offset(
+                        _ph_base, _ph_stride, q_row, _kb + klane * fx.Int64(8)
+                    )
+                    _words = PHILOX.u32(_ph_seed, _first) + PHILOX.u32(
+                        _ph_seed, _first + fx.Int64(1)
+                    )
+                    _keep_half = [fx.Int32(w) > _ph_threshold for w in _words]
+                    if const_expr(WMMA_V8):
+                        _keeps = _keep_half
+                    else:
+                        _own = fx.Int32(0)
+                        for k in range_constexpr(8):
+                            _own = _own | fx.Int32(
+                                _keep_half[k].select(fx.Int32(1 << k), fx.Int32(0))
+                            )
+                        _peer = fx.Int32(_own).shuffle_xor(shuf_16_i32, width_i32)
+                        # klane 0 holds keys 0, 2, .., 14 of the 16: bits 0, 2, 4, 6 of its
+                        # own half, then of its peer's; klane 1 the odd keys, peer first.
+                        _lo = fx.Int32(klane_is_zero.select(_own, _peer))
+                        _hi = fx.Int32(klane_is_zero.select(_peer, _own))
+                        _bit0 = fx.Int32(klane)
+                        _keeps = []
+                        for r in range_constexpr(8):
+                            _src = _lo if const_expr(r < 4) else _hi
+                            _pos = fx.Int32(2 * (r % 4)) + _bit0
+                            _keeps.append(((_src >> _pos) & fx.Int32(1)) != fx.Int32(0))
+                    for r in range_constexpr(8):
+                        _i = st * 8 + r
+                        p_vals[_i] = fx.Float32(
+                            _keeps[r].select(fx.Float32(p_vals[_i]), c_zero_f)
+                        )
+
             corr_vec = Vec.from_elements([corr], fx.Float32).broadcast_to(8)
             for dc in range_constexpr(O_CHUNKS):
                 o_accs[dc] = _fmul(o_accs[dc], corr_vec)
@@ -1239,6 +1561,9 @@ def build_flash_attn_func_module(
             lse_val = m_top + fx.math.log(l_total)
         else:
             inv_l = row_has_keys.select(c_one_f / l_final, c_zero_f)
+        if const_expr(HAS_DROPOUT):
+            # 1 / (1 - p) folds into 1 / l; l itself stays the undropped sum.
+            inv_l = fx.Float32(inv_l) * fx.Float32(dropout_scale)
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(8)
 
         # Element r of an O accumulator is head-dim row 2r + klane on gfx11. Trade
@@ -1278,7 +1603,14 @@ def build_flash_attn_func_module(
                 + fx.math.log(l_final),
                 c_neg_inf,
             )
-        write_lse = q_in_bounds & (fx.Int32(lse_on) != fx.Int32(0))
+        write_lse = q_in_bounds & ((fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0))
+        # Modification 28: a padded row (past the batch's query length, inside the
+        # launch's) is written as O = 0 and LSE = -inf when bit 2 of flags says so.
+        pad_row = (
+            (q_row >= seq_q_v)
+            & q_load_ok
+            & ((fx.Int32(flags) & fx.Int32(4)) != fx.Int32(0))
+        )
 
         if q_in_bounds:
             for dc in range_constexpr(O_CHUNKS):
@@ -1290,12 +1622,31 @@ def build_flash_attn_func_module(
                 else:
                     _store_global_half(o_elem_ptr, o_idx(q_row, d_col), o_trunc)
 
+        if pad_row:
+            o_zero = Vec.filled(8, 0.0, elem_dtype)
+            for dc in range_constexpr(O_CHUNKS):
+                d_col = dv_col_base + fx.Int64(dc * D_CHUNK) + klane * 8
+                if const_expr(GENERIC_D):
+                    if d_col < fx.Int64(head_dim_rt):
+                        _store_global_half(o_elem_ptr, o_idx(q_row, d_col), o_zero)
+                else:
+                    _store_global_half(o_elem_ptr, o_idx(q_row, d_col), o_zero)
+            if (fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0):
+                pad_lse_ptr = fx.recast_iter(
+                    fx.PointerType.get(fx.Float32.ir_type, LSE.address_space), LSE
+                )
+                _store_global_half(
+                    pad_lse_ptr,
+                    row_q * lse_sb + head_idx * lse_sh + q_row * lse_ss,
+                    Vec.from_elements([c_neg_inf], fx.Float32),
+                )
+
         # Both lanes holding a row write the same value to the same address.
         if write_lse:
             lse_ptr = fx.recast_iter(
                 fx.PointerType.get(fx.Float32.ir_type, LSE.address_space), LSE
             )
-            lse_index = batch_idx * lse_sb + head_idx * lse_sh + q_row * lse_ss
+            lse_index = row_q * lse_sb + head_idx * lse_sh + q_row * lse_ss
             _store_global_half(
                 lse_ptr, lse_index, Vec.from_elements([lse_val], fx.Float32)
             )
@@ -1315,7 +1666,7 @@ def build_flash_attn_func_module(
         right_bound: fx.Int32,
         left_bound: fx.Int32,
         align_br: fx.Int32,
-        lse_on: fx.Int32,
+        flags: fx.Int32,
         scale: fx.Float32,
         q_sb: fx.Int64,
         q_ss: fx.Int64,
@@ -1341,6 +1692,15 @@ def build_flash_attn_func_module(
         v_group: fx.Int32,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        SEQLEN_Q: fx.Pointer,
+        SEQLEN_KV: fx.Pointer,
+        ROW_OFF_Q: fx.Pointer,
+        ROW_OFF_KV: fx.Pointer,
+        DROPOUT_SEED: fx.Pointer,
+        DROPOUT_OFFSET1: fx.Pointer,
+        dropout_offset2: fx.Int64,
+        idropout_p: fx.Int32,
+        dropout_scale: fx.Float32,
         stream: fx.Stream = fx.Stream(  # noqa: B008  framework idiom: default is evaluated once at import on purpose
             None
         ),
@@ -1366,7 +1726,7 @@ def build_flash_attn_func_module(
             right_bound,
             left_bound,
             align_br,
-            lse_on,
+            flags,
             scale,
             q_sb,
             q_ss,
@@ -1392,6 +1752,15 @@ def build_flash_attn_func_module(
             v_group,
             SINK,
             sink_stride,
+            SEQLEN_Q,
+            SEQLEN_KV,
+            ROW_OFF_Q,
+            ROW_OFF_KV,
+            DROPOUT_SEED,
+            DROPOUT_OFFSET1,
+            dropout_offset2,
+            idropout_p,
+            dropout_scale,
         )
 
         if const_expr(waves_per_eu is not None):
@@ -1437,4 +1806,5 @@ def build_flash_attn_func_module(
     launch_flash_attn_func.head_dim_v = HEAD_DIM_V
     launch_flash_attn_func.hd_pair = int(HD_PAIR)
     launch_flash_attn_func.has_sink = int(HAS_SINK)
+    launch_flash_attn_func.has_dropout = int(HAS_DROPOUT)
     return launch_flash_attn_func

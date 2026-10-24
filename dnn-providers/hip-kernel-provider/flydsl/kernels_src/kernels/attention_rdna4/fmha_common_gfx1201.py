@@ -1391,10 +1391,17 @@ def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
     nxt = cond_load(cumulative, seqinfo_addr(s0, z + fx.Int32(1)), zero)
     pos = cond_load(array, seqinfo_addr(s1, z), zero)
 
+    # Modification 10 (hipDNN vendoring): an INDIVIDUAL length -- a padded
+    # sequence's -- clamped to [0, max_seqlen], as hipDNN's GPU reference clamps
+    # it; one past max_seqlen would read past the batch's rows.
+    cur_len = common_utils.ssel(cur < zero, zero, cur)
+    cur_len = common_utils.ssel(
+        cur_len > fx.Int32(max_seqlen), fx.Int32(max_seqlen), cur_len
+    )
     seqlen = common_utils.ssel(
         cumulative,
         nxt - cur,
-        common_utils.ssel(individual, cur, fx.Int32(max_seqlen)),
+        common_utils.ssel(individual, cur_len, fx.Int32(max_seqlen)),
     )
     row_off = common_utils.ssel(
         array,
