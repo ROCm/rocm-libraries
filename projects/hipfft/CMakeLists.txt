@@ -52,6 +52,8 @@ set( HIPFFT_BUILD_SCOPE ON )
 
 project( hipfft LANGUAGES CXX )
 
+include( cmake/buildopts.cmake )
+
 # Build options
 option( BUILD_SHARED_LIBS "Build ${PROJECT_NAME} as a shared library" ON )
 option( BUILD_VERBOSE "Output additional build information" OFF )
@@ -152,6 +154,22 @@ list(REMOVE_DUPLICATES GPU_TARGETS)
 
 # Dependencies
 include(cmake/dependencies.cmake)
+
+# This finds the rocm-cmake project, and installs it if not found
+# rocm-cmake contains common cmake code for rocm projects to help setup and install
+find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build-rocmcmake.cmake )
+endif( )
+if( ROCmCMakeBuildTools_FOUND )
+  include(ROCMSetupVersion)
+  include(ROCMCreatePackage)
+  include(ROCMInstallTargets)
+  include(ROCMPackageConfigHelpers)
+  include(ROCMInstallSymlinks)
+  include(ROCMCheckTargetIds)
+  include(ROCMClients)
+endif( )
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set (BUILD_WITH_LIB "CUDA")
