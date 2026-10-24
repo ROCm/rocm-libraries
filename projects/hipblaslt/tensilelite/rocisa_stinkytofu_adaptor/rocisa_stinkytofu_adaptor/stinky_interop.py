@@ -18,6 +18,54 @@ def _arch_to_list(arch: Any) -> List[int]:
     return list(_caps.normalize_isa_key(arch))
 
 
+def _copy_instance_fields(src: Any, dst: Any) -> None:
+    """Copy slots and ``__dict__`` without pickle.
+
+    ``SignatureBase`` refuses ``__deepcopy__`` and ``__reduce__``. Lists are
+    copied so a recorder on the caller (``setGprsCalls``, ``declared``) does
+    not observe writes on the emit copy. Nested objects stay shared until the
+    caller replaces ``kernelDescriptor`` and ``codeMeta``.
+    """
+    if hasattr(src, "__dict__"):
+        dst.__dict__.update(src.__dict__)
+        for key, value in list(dst.__dict__.items()):
+            if isinstance(value, list):
+                dst.__dict__[key] = list(value)
+    for cls in type(src).__mro__:
+        for name in getattr(cls, "__slots__", ()):
+            if name in ("__dict__", "__weakref__"):
+                continue
+            try:
+                value = getattr(src, name)
+            except AttributeError:
+                continue
+            setattr(dst, name, list(value) if isinstance(value, list) else value)
+
+
+def _clone_plain(obj: Any) -> Any:
+    cloned = object.__new__(type(obj))
+    _copy_instance_fields(obj, cloned)
+    return cloned
+
+
+def _clone_emit_signature(signature: Any) -> Any:
+    """Signature emit can refresh without writing the one KernelWriter holds.
+
+    Native ``toStinkySignature`` builds a new descriptor from the rocisa one
+    and ``refreshVgprCount`` updates that copy. ``cmpasm/orig`` is
+    ``str(moduleKernelBody)`` of the original, taken after ``emitAssembly``.
+    """
+    cloned = object.__new__(type(signature))
+    _copy_instance_fields(signature, cloned)
+    kd = getattr(signature, "kernelDescriptor", None)
+    if kd is not None:
+        cloned.kernelDescriptor = _clone_plain(kd)
+    meta = getattr(signature, "codeMeta", None)
+    if meta is not None:
+        cloned.codeMeta = _clone_plain(meta)
+    return cloned
+
+
 # InsertDelayAluPass reads this off Function metadata. Same string as
 # stinkytofu::kSigTotalVgprsMetaKey. Absent or 0 means "unknown" and the pass
 # inserts s_delay_alu; native toStinkyTofuModule always stamps it.
@@ -30,6 +78,11 @@ class StinkyAsmModuleWithAdapterSignature:
     Prepends the Python ``SignatureBase.toString()`` banner before the
     lowered asm module's ``emitAssembly()``, matching what KernelWriter expects
     after ``toStinkyTofuModule`` on the native backend.
+
+    The stored signature is a copy made after the pre-pipeline VGPR stamp.
+    Count refresh writes that copy, so the caller's descriptor stays on the
+    pool ``KernelWriter`` prints as ``cmpasm/orig``. ``getDeclaredVgprCount``
+    and the emitted ``.amdhsa_next_free_vgpr`` still report the required count.
     """
 
     __slots__ = ("_inner", "_signature")
@@ -38,6 +91,8 @@ class StinkyAsmModuleWithAdapterSignature:
         self._inner = inner
         self._signature = signature
         self._stamp_total_vgprs()
+        if signature is not None:
+            self._signature = _clone_emit_signature(signature)
 
     def _stamp_total_vgprs(self) -> None:
         """Expose per-wave VGPR allocation before the optimization pipeline.
@@ -67,6 +122,7 @@ class StinkyAsmModuleWithAdapterSignature:
         if self._signature is not None:
             self._refreshTotalInstructionBytes()
             self._refreshSgprCount()
+            self._refreshVgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
         set_dirs = getattr(self._inner, "getSetDirectives", None)
@@ -116,6 +172,53 @@ class StinkyAsmModuleWithAdapterSignature:
         if required == 0 or required >= kd.totalSgprs:
             return
         self._signature.setGprs(kd.totalVgprs, kd.totalAgprs, required)
+
+    def _refreshVgprCount(self) -> None:
+        """Take the declared VGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshVgprCount``. The
+        producer's pool still counts registers that were checked back in, so
+        ``.amdhsa_next_free_vgpr`` arrives too high. A colouring can also need
+        more than was reserved, so this moves in both directions. Goes through
+        ``setDeclaredVgprs``, which leaves the ``Num VGPR`` comment on the
+        producer's figure and does nothing when AGPRs share the register file.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredVgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.vgprWorkItem))
+        if required == 0:
+            return
+        setter = getattr(self._signature, "setDeclaredVgprs", None)
+        if setter is None:
+            return
+        setter(required)
+
+    def getDeclaredSgprCount(self) -> int:
+        """SGPRs the descriptor declares, as ``.amdhsa_next_free_sgpr``.
+
+        Ask after ``emitAssembly()``: the refresh has then replaced the
+        producer's estimate with the count the emitted code uses. Matches
+        ``StinkyAsmModuleWithSignature::getDeclaredSgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalSgprs)
+
+    def getDeclaredVgprCount(self) -> int:
+        """VGPRs the descriptor declares, as ``.amdhsa_next_free_vgpr``.
+
+        Ask after ``emitAssembly()``. Where AGPRs share the register file the
+        refresh leaves the producer's number, so this returns that number.
+        Matches ``StinkyAsmModuleWithSignature::getDeclaredVgprCount``.
+        """
+        if self._signature is None:
+            return 0
+        return int(self._signature.kernelDescriptor.totalVgprs)
 
     def getName(self) -> str:
         return self._inner.getName()

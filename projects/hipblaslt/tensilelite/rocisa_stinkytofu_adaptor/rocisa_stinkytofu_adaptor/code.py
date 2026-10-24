@@ -2413,6 +2413,24 @@ class SignatureBase(Item):
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
 
+    def setDeclaredVgprs(self, totalVgprs: int) -> None:
+        """Write the VGPR count the emitted code actually names.
+
+        Port of C++ ``SignatureBase::setDeclaredVgprs``. Updates
+        ``.amdhsa_next_free_vgpr`` and ``.vgpr_count`` only.
+        ``originalTotalVgprs`` stays the producer's pool size, which is what
+        the ``Num VGPR`` comment prints. Does nothing when AGPRs share the
+        register file, where the count is ``accumOffset + totalAgprs``.
+        """
+        kd = self.kernelDescriptor
+        if kd.accumOffset != -1:
+            return
+        count = int(totalVgprs)
+        if count <= 0 or count == kd.totalVgprs:
+            return
+        kd.totalVgprs = count
+        self.codeMeta.totalVgprs = count
+
     def setTotalInstructionBytes(self, totalBytes: int) -> None:
         self.kernelDescriptor.setTotalInstructionBytes(totalBytes)
 

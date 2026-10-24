@@ -121,7 +121,9 @@ class TestRefreshSgprCount(AdaptorTestCase):
         sig = _FakeSignature(totalSgprs=80)
         wrapper = StinkyAsmModuleWithAdapterSignature(_FakeModule(required=78), sig)
         self.assertEqual(wrapper.emitAssembly(), "sgprs=78\nbody\n")
-        self.assertEqual(sig.setGprsCalls, [(256, 0, 78)])
+        self.assertEqual(sig.setGprsCalls, [])
+        self.assertEqual(sig.kernelDescriptor.totalSgprs, 80)
+        self.assertEqual(wrapper.getDeclaredSgprCount(), 78)
 
     def test_never_raises_the_count(self):
         sig = _FakeSignature(totalSgprs=80)
@@ -156,6 +158,112 @@ class TestRefreshSgprCount(AdaptorTestCase):
         wrapper = StinkyAsmModuleWithAdapterSignature(module, None)
         self.assertEqual(wrapper.emitAssembly(), "body\n")
         self.assertEqual(module.requiredCalls, [])
+        self.assertEqual(wrapper.getDeclaredVgprCount(), 0)
+        self.assertEqual(wrapper.getDeclaredSgprCount(), 0)
+
+
+class _FakeVgprSignature(_FakeSignature):
+    def __init__(self, totalVgprs=1020, accumOffset=-1):
+        super().__init__(totalSgprs=67)
+        self.kernelDescriptor.totalVgprs = totalVgprs
+        self.kernelDescriptor.originalTotalVgprs = totalVgprs
+        self.kernelDescriptor.vgprWorkItem = 0
+        self.kernelDescriptor.accumOffset = accumOffset
+        self.declared = []
+
+    def setDeclaredVgprs(self, totalVgprs):
+        kd = self.kernelDescriptor
+        if kd.accumOffset != -1:
+            return
+        if totalVgprs <= 0 or totalVgprs == kd.totalVgprs:
+            return
+        kd.totalVgprs = int(totalVgprs)
+        self.declared.append(kd.totalVgprs)
+
+    def toString(self):
+        kd = self.kernelDescriptor
+        return f"vgprs={kd.totalVgprs} comment={kd.originalTotalVgprs}\n"
+
+
+class _FakeVgprModule(_FakeModule):
+    def __init__(self, required):
+        super().__init__(required=0)
+        self._vgprRequired = required
+        self.vgprCalls = []
+
+    def getRequiredVgprCount(self, vgprWorkItem):
+        self.vgprCalls.append(vgprWorkItem)
+        return self._vgprRequired
+
+
+class TestRefreshVgprCount(AdaptorTestCase):
+    def test_lowers_the_descriptor_and_keeps_the_pool_comment(self):
+        sig = _FakeVgprSignature(totalVgprs=1020)
+        wrapper = StinkyAsmModuleWithAdapterSignature(_FakeVgprModule(528), sig)
+        self.assertEqual(wrapper.emitAssembly(), "vgprs=528 comment=1020\nbody\n")
+        self.assertEqual(sig.declared, [])
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 1020)
+        self.assertEqual(sig.kernelDescriptor.originalTotalVgprs, 1020)
+        self.assertEqual(sig.setGprsCalls, [])
+        self.assertEqual(wrapper.getDeclaredVgprCount(), 528)
+        self.assertEqual(wrapper.getDeclaredSgprCount(), 67)
+
+    def test_raises_when_the_code_names_more_than_reserved(self):
+        sig = _FakeVgprSignature(totalVgprs=256)
+        wrapper = StinkyAsmModuleWithAdapterSignature(_FakeVgprModule(528), sig)
+        wrapper.emitAssembly()
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 256)
+        self.assertEqual(sig.kernelDescriptor.originalTotalVgprs, 256)
+        self.assertEqual(wrapper.getDeclaredVgprCount(), 528)
+
+    def test_zero_keeps_the_producers_number(self):
+        sig = _FakeVgprSignature(totalVgprs=1020)
+        StinkyAsmModuleWithAdapterSignature(_FakeVgprModule(0), sig).emitAssembly()
+        self.assertEqual(sig.declared, [])
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 1020)
+
+    def test_shared_agpr_file_is_left_alone(self):
+        sig = _FakeVgprSignature(totalVgprs=1020, accumOffset=1024)
+        StinkyAsmModuleWithAdapterSignature(_FakeVgprModule(528), sig).emitAssembly()
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 1020)
+
+    def test_forwards_the_workitem_id_field(self):
+        sig = _FakeVgprSignature()
+        module = _FakeVgprModule(528)
+        StinkyAsmModuleWithAdapterSignature(module, sig).emitAssembly()
+        self.assertEqual(module.vgprCalls, [0])
+
+    def test_older_binding_without_the_counter_is_a_no_op(self):
+        sig = _FakeVgprSignature(totalVgprs=1020)
+        wrapper = StinkyAsmModuleWithAdapterSignature(_FakeModule(required=0), sig)
+        self.assertEqual(wrapper.emitAssembly(), "vgprs=1020 comment=1020\nbody\n")
+        self.assertEqual(sig.declared, [])
+
+    def test_callers_signature_stays_on_the_pool(self):
+        from rocisa_stinkytofu_adaptor.code import SignatureBase
+
+        sig = SignatureBase(
+            kernelName="k",
+            kernArgsVersion=1,
+            codeObjectVersion="4",
+            groupSegmentSize=256,
+            sgprWorkGroup=(1, 1, 0),
+            vgprWorkItem=0,
+            flatWorkGroupSize=64,
+            totalVgprs=254,
+            totalSgprs=84,
+        )
+        wrapper = StinkyAsmModuleWithAdapterSignature(_FakeVgprModule(90), sig)
+        emitted = wrapper.emitAssembly()
+        caller = sig.toString()
+        self.assertIn(".amdhsa_next_free_vgpr 90", emitted)
+        self.assertIn(".vgpr_count:                 90", emitted)
+        self.assertIn(".amdhsa_next_free_vgpr 254", caller)
+        self.assertIn(".vgpr_count:                 254", caller)
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 254)
+        self.assertEqual(sig.codeMeta.totalVgprs, 254)
+        self.assertEqual(wrapper.getDeclaredVgprCount(), 90)
+        self.assertEqual(wrapper.getDeclaredSgprCount(), 84)
 
 
 class TestApplyOptimizationConfig(AdaptorTestCase):

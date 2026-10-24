@@ -748,6 +748,15 @@ class TestToStinky(AdaptorTestCase):
         reg = rc.to_stinky()
         self.assertEqual(reg.index, 66)  # 64 + 2
 
+    def test_high_vgpr_leaves_bank_offset_for_the_pipeline(self):
+        # InsertVgprMsbPass applies the -256 bias later. Setting it here
+        # makes the pre-pipeline dump disagree with native rocisa.
+        rocIsa.getInstance().setVgprIdx("Serial", 264)
+        rc = RegisterContainer("v", RegName("Serial"), 0, 1)
+        reg = rc.to_stinky()
+        self.assertEqual(reg.index, 264)
+        self.assertEqual(reg.offset, 0)
+
     def test_named_idx_unresolved_falls_back_to_zero(self):
         # Symbol missing from getVgprIdx() defaults to 0+sum(offsets).
         rc = RegisterContainer("v", RegName("UnknownSym", [3]), 0, 1)

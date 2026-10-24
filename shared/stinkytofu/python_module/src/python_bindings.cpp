@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
+#include <stdexcept>
 
 #include "HardwareCaps.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
@@ -131,6 +132,40 @@ NB_MODULE(_stinkytofu, m) {
             "what the dispatch fills before entry. 0 when no function names one. Callers that "
             "own a signature use it the way StinkyAsmModuleWithSignature::refreshSgprCount does "
             "-- to lower a declared count, never to raise it.")
+        .def(
+            "getRequiredVgprCount",
+            [](StinkyAsmModule& self, int vgprWorkItem) {
+                const ArchHelper::ArchInfo* info = nullptr;
+                for (const auto* function : self.getFunctions()) {
+                    if (function == nullptr) continue;
+                    const std::array<int, 3>& isa = function->getGemmTileConfig().arch;
+                    info = ArchHelper::getInstance().getArchInfo(static_cast<uint32_t>(isa[0]),
+                                                                 static_cast<uint32_t>(isa[1]),
+                                                                 static_cast<uint32_t>(isa[2]));
+                    if (info != nullptr) break;
+                }
+                // Unknown arch: treat workitem ids as unpacked, which over-declares
+                // rather than handing out a register the dispatch wrote.
+                const bool packedWorkitemId = info != nullptr && info->packedWorkitemId != 0;
+                uint32_t required = 0;
+                for (const auto* function : self.getFunctions()) {
+                    if (function == nullptr) continue;
+                    required = std::max(
+                        required, requiredVgprCount(*function, vgprWorkItem, packedWorkitemId));
+                }
+                if (info != nullptr && required > info->maxVGPR) {
+                    throw std::runtime_error(
+                        "kernel needs " + std::to_string(required) +
+                        " VGPRs after register allocation but the architecture addresses only " +
+                        std::to_string(info->maxVGPR));
+                }
+                return required;
+            },
+            nb::arg("vgprWorkItem"),
+            "VGPR count this module must declare: the highest index its code names, floored by "
+            "the workitem id the dispatch fills. 0 when no function names one. Moves in both "
+            "directions, unlike getRequiredSgprCount. Raises RuntimeError past the architecture's "
+            "addressable limit.")
         .def(
             "registerPassAtExtensionPoint",
             [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {

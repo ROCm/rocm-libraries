@@ -3388,6 +3388,24 @@ class TestSignatureBaseAddArg(_SignatureKernelSetup, AdaptorTestCase):
         self.assertIn("- .name:            A", sig.toString())
 
 
+class TestSignatureBaseSetDeclaredVgprs(_SignatureKernelSetup, AdaptorTestCase):
+    def test_rewrites_both_counts_and_keeps_the_pool_comment(self):
+        sig = _make_signature_base(totalVgprs=1020)
+        sig.setDeclaredVgprs(528)
+        text = sig.toString()
+        self.assertIn(".amdhsa_next_free_vgpr 528", text)
+        self.assertIn(".vgpr_count:                 528", text)
+        self.assertIn("Num VGPR   =1020", text)
+
+    def test_shared_agpr_file_keeps_the_producers_count(self):
+        sig = _make_signature_base(totalVgprs=64)
+        sig.kernelDescriptor.accumOffset = 64
+        sig.kernelDescriptor.totalVgprs = 96
+        sig.setDeclaredVgprs(16)
+        self.assertEqual(sig.kernelDescriptor.totalVgprs, 96)
+        self.assertEqual(sig.kernelDescriptor.originalTotalVgprs, 64)
+
+
 class TestSignatureBaseDescriptions(_SignatureKernelSetup, AdaptorTestCase):
     def test_description_helpers_emit_in_order(self):
         sig = _make_signature_base()
