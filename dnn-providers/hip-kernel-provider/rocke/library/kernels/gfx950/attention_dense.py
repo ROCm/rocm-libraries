@@ -1758,10 +1758,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # tree. Same unbounded-score limitation as the grid body (see _MAX_SCALE).
     # The window phases keep scaling each score before the max.
     FOLD_SCALE = SW == 0
+    # Without a window the next tile's K load is issued right after this tile's
+    # QK reads instead of at the end of the iteration (see emit_loop_body).
+    EARLY_K = SW == 0
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
+    # One LDS alias scope per allocation, so a read of one allocation does not
+    # wait for an in-flight DMA into the other: V(j+1) can stay in flight across
+    # QK(j+1) and the softmax instead of being drained at the first K read.
+    b.kernel.attrs["lds_alias_scopes"] = True
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -2370,6 +2377,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.s_waitcnt(vmcnt=LOOP_VMCNT)
             b.s_barrier_bare()
             s = do_qk(kbuf)
+            next_key0 = b.mul(b.add(j, b.const_i32(1)), b.const_i32(BN))
+            if EARLY_K:
+                # This wave's K reads for the tile are done, and every wave read
+                # the other K buffer before the loop-top barrier, so K(j+1) can
+                # load during the softmax and PV (the LDS alias scopes keep the V
+                # reads from waiting on it). V(j+1) still waits for PV(j-1).
+                async_load_k(K_lds_addr, pbuf, next_key0)
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
             if mask_kbound:
@@ -2407,7 +2421,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 o_acc = rescale_o(o_acc, alpha)
             p_packs = relayout_p(p_vals)
             b.s_barrier_bare()
-            load_tile(pbuf, b.add(j, b.const_i32(1)))
+            if EARLY_K:
+                async_load_v(V_lds_addr, pbuf, next_key0)
+            else:
+                load_tile(pbuf, b.add(j, b.const_i32(1)))
             b.scf_yield(m_new, l_new, *o_acc, *p_packs)
 
         if causal:
