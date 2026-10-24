@@ -602,8 +602,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 }
 
 // Exercises packer code paths for FP8 descale/scale tensors, amax output
-// tensors, the optional int32 max_seq_len_kv scalar, and the conditional
-// mma_core_mode enum branch.
+// tensors, the optional int32 max_seq_len_kv scalar (with the page tables and
+// seq_len_kv it requires), and the conditional mma_core_mode enum branch.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
 {
     auto descaleQ = std::make_shared<TensorAttributes>();
@@ -654,6 +654,24 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     amaxO->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     amaxO->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
+    auto seqLenKv = std::make_shared<TensorAttributes>();
+    seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID).set_name("SEQ_LEN_KV");
+    seqLenKv->set_data_type(DataType::INT32);
+    seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
+    seqLenKv->set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
+
+    auto pageTableK = std::make_shared<TensorAttributes>();
+    pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID).set_name("PAGE_TABLE_K");
+    pageTableK->set_data_type(DataType::INT32);
+    pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));
+    pageTableK->set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
+
+    auto pageTableV = std::make_shared<TensorAttributes>();
+    pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID).set_name("PAGE_TABLE_V");
+    pageTableV->set_data_type(DataType::INT32);
+    pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));
+    pageTableV->set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
+
     SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_fp8");
     sdpaAttrs.set_descale_q(descaleQ);
@@ -664,7 +682,10 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     sdpaAttrs.set_scale_o(scaleO);
     sdpaAttrs.set_amax_s(amaxS);
     sdpaAttrs.set_amax_o(amaxO);
-    sdpaAttrs.set_paged_attention_max_seq_len_kv(256);
+    sdpaAttrs.set_seq_len_kv(seqLenKv);
+    sdpaAttrs.set_paged_attention_k_table(pageTableK);
+    sdpaAttrs.set_paged_attention_v_table(pageTableV);
+    sdpaAttrs.set_paged_attention_max_seq_len_kv(K_SDPA_PAGED_MAX_SEQ_LEN_KV);
     sdpaAttrs.set_mma_core_mode(DataType::HALF);
 
     auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs), DataType::HALF);
@@ -673,8 +694,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
         return;
     }
 
-    // Q + K + V + O + 6 descale/scale + 2 amax = 12
-    EXPECT_EQ(graphT.tensors.size(), 12u);
+    // Q + K + V + O + 6 descale/scale + 2 amax + seq_len_kv + 2 page tables = 15
+    EXPECT_EQ(graphT.tensors.size(), 15u);
 
     std::unordered_set<int64_t> uids;
     for(const auto& t : graphT.tensors)
@@ -693,6 +714,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     EXPECT_NE(uids.count(K_SDPA_TENSOR_SCALE_O_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_AMAX_S_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_AMAX_O_UID), 0u);
+    EXPECT_NE(uids.count(K_SDPA_TENSOR_SEQ_LEN_KV_UID), 0u);
+    EXPECT_NE(uids.count(K_SDPA_TENSOR_PAGE_TABLE_K_UID), 0u);
+    EXPECT_NE(uids.count(K_SDPA_TENSOR_PAGE_TABLE_V_UID), 0u);
 
     // -- Verify SDPA node attributes --
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -724,9 +748,19 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithFp8Tensors)
     ASSERT_TRUE(sdpa->amax_o_tensor_uid.has_value());
     EXPECT_EQ(sdpa->amax_o_tensor_uid.value(), K_SDPA_TENSOR_AMAX_O_UID);
 
+    // Paged K/V tensor UIDs
+    ASSERT_TRUE(sdpa->seq_len_kv_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->seq_len_kv_tensor_uid.value(), K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+
+    ASSERT_TRUE(sdpa->page_table_k_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->page_table_k_tensor_uid.value(), K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+
+    ASSERT_TRUE(sdpa->page_table_v_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->page_table_v_tensor_uid.value(), K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+
     // Optional int32 scalar
     ASSERT_TRUE(sdpa->max_seq_len_kv.has_value());
-    EXPECT_EQ(sdpa->max_seq_len_kv.value(), 256);
+    EXPECT_EQ(sdpa->max_seq_len_kv.value(), K_SDPA_PAGED_MAX_SEQ_LEN_KV);
 
     // MMA core mode
     EXPECT_EQ(sdpa->mma_core_mode, DataTypeSdk::HALF);

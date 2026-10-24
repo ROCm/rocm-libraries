@@ -26,19 +26,24 @@ namespace
 {
 
 // Runs `graph` on the CPU executor (host buffers) and the GPU executor (device copies of the same
-// buffers) and compares every output buffer element by element.
+// buffers) and compares every output buffer element by element. The token offsets are always
+// bound; intInputs adds INT32 inputs (seq_len tensors, page tables).
 void expectGpuMatchesCpu(std::vector<uint8_t> graph,
                          const std::unordered_map<int64_t, std::vector<float>>& inputs,
                          const std::unordered_map<int64_t, size_t>& outputSizes,
-                         float tolerance)
+                         float tolerance,
+                         std::unordered_map<int64_t, std::vector<int32_t>> intInputs = {})
 {
-    std::vector<int32_t> qOffsets = Q_TOKENS;
-    std::vector<int32_t> kvOffsets = KV_TOKENS;
+    intInputs.emplace(Q_OFFSETS, Q_TOKENS);
+    intInputs.emplace(KV_OFFSETS, KV_TOKENS);
 
     // CPU: host buffers.
     std::unordered_map<int64_t, std::vector<float>> cpuData = inputs;
-    std::unordered_map<int64_t, void*> cpuPack
-        = {{Q_OFFSETS, qOffsets.data()}, {KV_OFFSETS, kvOffsets.data()}};
+    std::unordered_map<int64_t, void*> cpuPack;
+    for(auto& [uid, values] : intInputs)
+    {
+        cpuPack[uid] = values.data();
+    }
     for(auto& [uid, values] : cpuData)
     {
         cpuPack[uid] = values.data();
@@ -68,12 +73,14 @@ void expectGpuMatchesCpu(std::vector<uint8_t> graph,
         t.fillWithValue(std::numeric_limits<float>::quiet_NaN());
         gpuPack[uid] = t.memory().deviceData();
     }
-    Tensor<int32_t> qOff({B + 1});
-    Tensor<int32_t> kvOff({B + 1});
-    std::memcpy(qOff.memory().hostData(), qOffsets.data(), qOffsets.size() * sizeof(int32_t));
-    std::memcpy(kvOff.memory().hostData(), kvOffsets.data(), kvOffsets.size() * sizeof(int32_t));
-    gpuPack[Q_OFFSETS] = qOff.memory().deviceData();
-    gpuPack[KV_OFFSETS] = kvOff.memory().deviceData();
+    std::unordered_map<int64_t, Tensor<int32_t>> gpuInt;
+    for(const auto& [uid, values] : intInputs)
+    {
+        auto& t = gpuInt.emplace(uid, Tensor<int32_t>({static_cast<int64_t>(values.size())}))
+                      .first->second;
+        std::memcpy(t.memory().hostData(), values.data(), values.size() * sizeof(int32_t));
+        gpuPack[uid] = t.memory().deviceData();
+    }
 
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpu;
     ASSERT_TRUE(gpu.isApplicable(graph.data(), graph.size()));
@@ -134,4 +141,48 @@ TEST(TestGpuRaggedSdpaDensify, BackwardMatchesCpu)
                          {DK, static_cast<size_t>(13 * H * D)},
                          {DV, static_cast<size_t>(13 * H * D)}},
                         1e-4F);
+}
+
+// vLLM's shape: ragged Q over a paged K/V cache, with and without a sink, through the rewrite.
+// The unreferenced cache block holds NaN.
+TEST(TestGpuRaggedSdpaDensify, RaggedQOverPagedKvMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto cacheSize = static_cast<size_t>(NUM_BLOCKS * H * BLOCK * D);
+    const auto cache = [&](unsigned seed) {
+        auto values = packedValues(NUM_BLOCKS * BLOCK, H * D, seed);
+        for(size_t i = 0; i < cacheSize; ++i)
+        {
+            if(static_cast<int64_t>(i) / (H * BLOCK * D) == 2)
+            {
+                values[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        return values;
+    };
+    std::vector<int32_t> seqQ;
+    std::vector<int32_t> seqKv;
+    for(int64_t b = 0; b < B; ++b)
+    {
+        seqQ.push_back(static_cast<int32_t>(Q_LENS[static_cast<size_t>(b)]));
+        seqKv.push_back(static_cast<int32_t>(KV_LENS[static_cast<size_t>(b)]));
+    }
+    for(const bool sink : {false, true})
+    {
+        SCOPED_TRACE(sink ? "with sink" : "no sink");
+        std::unordered_map<int64_t, std::vector<float>> inputs
+            = {{Q, packedValues(10, H * D, 51)}, {K, cache(52)}, {V, cache(53)}};
+        if(sink)
+        {
+            inputs[SINK] = {0.7F, -0.4F};
+        }
+        expectGpuMatchesCpu(raggedQPagedKvGraph(sink),
+                            inputs,
+                            {{O, static_cast<size_t>(10 * H * D)}},
+                            1e-5F,
+                            {{SEQ_Q, seqQ},
+                             {SEQ_KV, seqKv},
+                             {PAGE_TABLE_K, PAGE_TABLE},
+                             {PAGE_TABLE_V, PAGE_TABLE}});
+    }
 }

@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -141,8 +143,10 @@ bool isSupportedSdpaPadding(const SdpaAttributesType& nodeAttributes, const Tens
     return true;
 }
 
-/// Logical key extent of a paged SDPA forward node: max_seq_len_kv when set, otherwise
-/// tableSize * blockSize of the K side (or V when only V is paged). Returns -1 when the node is
+/// Logical key extent of a paged SDPA forward node, inferred as cuDNN does
+/// (scaled_dot_product_flash_attention.h): max_seq_len_kv when set; else a non-paged K's (then
+/// V's) sequence length; else the bias's last dim; else rng_dump's last dim; else the smaller
+/// tableSize * blockSize of the two sides. Returns -1 when the node is
 /// not a paging layout the references implement:
 /// - paging needs padding (both seq_len tensors), as cuDNN requires;
 /// - each page table is INT32 [B, 1, tableSize, 1] over a rank-4 [blocks, H, blockSize, D]
@@ -214,10 +218,31 @@ int64_t sdpaPagedMaxSeqKv(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttrib
         }
     }
 
-    int64_t maxSeqKv = pageK.has_value() ? capacityK : capacityV;
+    const auto lastDimOf = [&dimsOf](std::optional<int64_t> uid) -> int64_t {
+        const auto dims = uid.has_value() ? dimsOf(uid.value()) : std::vector<int64_t>{};
+        return dims.size() == 4 ? dims[3] : -1;
+    };
+    int64_t maxSeqKv = -1;
     if(attrs.max_seq_len_kv().has_value())
     {
         maxSeqKv = static_cast<int64_t>(attrs.max_seq_len_kv().value());
+    }
+    else if(!pageK.has_value() || !pageV.has_value())
+    {
+        const auto dense = dimsOf(pageK.has_value() ? attrs.v_tensor_uid() : attrs.k_tensor_uid());
+        maxSeqKv = dense.size() == 4 ? dense[2] : -1;
+    }
+    else if(attrs.attn_mask_tensor_uid().has_value())
+    {
+        maxSeqKv = lastDimOf(attrs.attn_mask_tensor_uid());
+    }
+    else if(attrs.rng_dump_tensor_uid().has_value())
+    {
+        maxSeqKv = lastDimOf(attrs.rng_dump_tensor_uid());
+    }
+    else
+    {
+        maxSeqKv = std::min(capacityK, capacityV);
     }
     if(maxSeqKv <= 0 || (pageK.has_value() && maxSeqKv > capacityK)
        || (pageV.has_value() && maxSeqKv > capacityV))

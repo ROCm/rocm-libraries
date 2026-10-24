@@ -13,7 +13,9 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace hipdnn_frontend::graph
 {
@@ -106,20 +108,8 @@ public:
                                 "SdpaFwdNode: batch size mismatch between Q and V: "
                                     + std::to_string(qDims[0]) + " vs " + std::to_string(vDims[0]));
         }
-        // Every batch needs a page-table row.
-        for(const auto& [table, name] : {std::pair{pageTableK, "K"}, std::pair{pageTableV, "V"}})
-        {
-            if(table == nullptr)
-            {
-                continue;
-            }
-            const auto& tableDims = table->get_dim();
-            HIPDNN_RETURN_IF_TRUE(tableDims.empty() || tableDims[0] != qDims[0],
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaFwdNode: page table for ") + name
-                                      + " must have the batch size of Q ("
-                                      + std::to_string(qDims[0]) + ") as its first dim");
-        }
+        // Paged K/V tables, extent and padding (cuDNN's rules).
+        HIPDNN_CHECK_ERROR(validatePagedKv(qDims[0], kDims, vDims));
         // Rule 2: head_dim: Q[-1] == K[-1]; V[-1] is independent (may differ)
         const auto headDimQ = qDims[3];
         const auto headDimK = kDims[3];
@@ -166,6 +156,14 @@ public:
                               "GQA/MQA. num_heads="
                                   + std::to_string(numHeads)
                                   + ", num_heads_v=" + std::to_string(numHeadsV));
+
+        // Rule 4b: variable sequence lengths (cuDNN): INT32 [B, 1, 1, 1].
+        HIPDNN_CHECK_ERROR(validateSeqLenTensor(attributes.get_seq_len_q(), "seq_len_q", qDims[0]));
+        HIPDNN_CHECK_ERROR(
+            validateSeqLenTensor(attributes.get_seq_len_kv(), "seq_len_kv", qDims[0]));
+
+        // Rule 4c: attention sink (cuDNN): one FLOAT logit per query head, [1, H_q, 1, 1].
+        HIPDNN_CHECK_ERROR(validateSinkToken(numHeads));
 
         // Rule 5: Optional attention mask validation
         const auto attnMask = attributes.get_bias();
@@ -259,6 +257,127 @@ public:
         return {};
     }
 
+private:
+    // The data type a tensor will have once fill_from_context runs: its own, or the graph's
+    // io_data_type when unset.
+    DataType effectiveDataType(const std::shared_ptr<TensorAttributes>& tensor) const
+    {
+        const auto dataType = tensor->get_data_type();
+        return dataType == DataType::NOT_SET ? graph_attributes.get_io_data_type() : dataType;
+    }
+
+    // sink_token, when present: FLOAT [1, H_q, 1, 1] (cuDNN).
+    Error validateSinkToken(int64_t numHeadsQ) const
+    {
+        const auto sink = attributes.get_sink_token();
+        if(!sink)
+        {
+            return {};
+        }
+        const auto& dims = sink->get_dim();
+        HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeadsQ
+                                  || dims[2] != 1 || dims[3] != 1,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: sink_token must have dims [1, H_q, 1, 1] with H_q="
+                                  + std::to_string(numHeadsQ));
+        HIPDNN_RETURN_IF_TRUE(effectiveDataType(sink) != DataType::FLOAT,
+                              ErrorCode::INVALID_VALUE,
+                              std::string("SdpaFwdNode: sink_token must have FLOAT data type"));
+        return {};
+    }
+
+    // seq_len_q / seq_len_kv, when present: INT32 [B, 1, 1, 1] (cuDNN).
+    static Error validateSeqLenTensor(const std::shared_ptr<TensorAttributes>& seqLen,
+                                      const std::string& name,
+                                      int64_t batch)
+    {
+        if(!seqLen)
+        {
+            return {};
+        }
+        const auto& dims = seqLen->get_dim();
+        HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != batch || dims[1] != 1 || dims[2] != 1
+                                  || dims[3] != 1,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: " + name
+                                  + " must have dims [B, 1, 1, 1] with B=" + std::to_string(batch));
+        HIPDNN_RETURN_IF_TRUE(seqLen->get_data_type() != DataType::INT32,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: " + name + " must have INT32 data type");
+        return {};
+    }
+
+    // Paged K/V (cuDNN): each page table is INT32 [B, 1, max_blocks_per_seq, 1] and not packed,
+    // and when max_seq_len_kv is given it is exactly ceil(max_seq_len_kv / block_size) wide
+    // (block_size = that side's container dim 2). Paging needs both seq_len tensors;
+    // max_seq_len_kv without paging is rejected. K or V may be paged alone, with its own block
+    // size, and an unset max_seq_len_kv is inferred by the engine (as cuDNN does).
+    Error validatePagedKv(int64_t batch,
+                          const std::vector<int64_t>& kDims,
+                          const std::vector<int64_t>& vDims) const
+    {
+        const auto pageTableK = attributes.get_page_table_k();
+        const auto pageTableV = attributes.get_page_table_v();
+        if(!pageTableK && !pageTableV)
+        {
+            HIPDNN_RETURN_IF_TRUE(attributes.max_seq_len_kv.has_value(),
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: max_seq_len_kv is only valid with "
+                                              "paged K/V (page_table_k / page_table_v)"));
+            return {};
+        }
+        HIPDNN_RETURN_IF_TRUE(!attributes.get_seq_len_q() || !attributes.get_seq_len_kv(),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              std::string("SdpaFwdNode: paged K/V needs seq_len_q and seq_len_kv"));
+        HIPDNN_RETURN_IF_TRUE(attributes.max_seq_len_kv.has_value()
+                                  && attributes.max_seq_len_kv.value() <= 0,
+                              ErrorCode::INVALID_VALUE,
+                              std::string("SdpaFwdNode: max_seq_len_kv must be positive"));
+        for(const auto& [table, container, name] : {std::tuple{pageTableK, &kDims, "page_table_k"},
+                                                    std::tuple{pageTableV, &vDims, "page_table_v"}})
+        {
+            if(!table)
+            {
+                continue;
+            }
+            const auto& dims = table->get_dim();
+            HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != batch || dims[1] != 1
+                                      || dims[2] <= 0 || dims[3] != 1,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: ") + name
+                                      + " must have dims [B, 1, max_blocks_per_seq, 1] with B="
+                                      + std::to_string(batch));
+            HIPDNN_RETURN_IF_TRUE(table->get_data_type() != DataType::INT32,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: ") + name
+                                      + " must have INT32 data type");
+            HIPDNN_RETURN_IF_TRUE(table->has_ragged_offset(),
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: packed (ragged) ") + name
+                                      + " is not supported");
+            const auto blockSize = (*container)[2];
+            HIPDNN_RETURN_IF_TRUE(blockSize <= 0,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: paged container for ") + name
+                                      + " needs a positive block size");
+            if(attributes.max_seq_len_kv.has_value())
+            {
+                const auto maxSeqLenKv = static_cast<int64_t>(attributes.max_seq_len_kv.value());
+                const auto expected = (maxSeqLenKv + blockSize - 1) / blockSize;
+                HIPDNN_RETURN_IF_NE(dims[2],
+                                    expected,
+                                    ErrorCode::INVALID_VALUE,
+                                    std::string("SdpaFwdNode: ") + name
+                                        + " max_blocks_per_seq must equal ceil(max_seq_len_kv / "
+                                          "block_size) = "
+                                        + std::to_string(expected) + ", got "
+                                        + std::to_string(dims[2]));
+            }
+        }
+        return {};
+    }
+
+public:
     Error infer_properties_node() override
     {
         const auto q = attributes.get_q();

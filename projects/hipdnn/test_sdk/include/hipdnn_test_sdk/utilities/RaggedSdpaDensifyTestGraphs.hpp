@@ -50,7 +50,18 @@ enum Uid : int64_t
     BIAS,
     SEQ_Q,
     SEQ_KV,
+    PAGE_TABLE_K,
+    PAGE_TABLE_V,
+    SINK,
 };
+
+// Paged K/V for raggedQPagedKvGraph: NUM_BLOCKS blocks of BLOCK keys, TABLE entries per batch
+// (TABLE * BLOCK = SKV). PAGE_TABLE maps batch 0 to blocks {3, 0} and batch 1 to {4, 1}; block 2
+// is never referenced (it holds NaN in the tests, so reading it shows up).
+constexpr int64_t BLOCK = 4;
+constexpr int64_t TABLE = 2;
+constexpr int64_t NUM_BLOCKS = 5;
+inline const std::vector<int32_t> PAGE_TABLE = {3, 0, 4, 1};
 
 inline std::unique_ptr<TensorAttributesT> tensor(int64_t uid,
                                                  DataType type,
@@ -174,6 +185,57 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
         }
         node->attributes.Set(std::move(attrs));
     }
+    graph.nodes.push_back(std::move(node));
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+}
+
+// vLLM's prefill / decode shape: ragged Q and O (token offsets Q_TOKENS, seq_len_q = Q_LENS) over
+// a paged K/V cache ([NUM_BLOCKS, H, BLOCK, D] containers, page tables INT32 [B, 1, TABLE, 1],
+// seq_len_kv = KV_LENS), bottom-right causal, with an optional FLOAT sink [1, H, 1, 1].
+// max_seq_len_kv is left unset, so the extent comes from the tables (TABLE * BLOCK = SKV).
+inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink)
+{
+    GraphT graph;
+    graph.name = "ragged_q_paged_kv";
+    graph.io_data_type = DataType::FLOAT;
+    graph.compute_data_type = DataType::FLOAT;
+    graph.intermediate_data_type = DataType::FLOAT;
+    const std::vector<int64_t> containerDims = {NUM_BLOCKS, H, BLOCK, D};
+    const std::vector<int64_t> containerStrides = {H * BLOCK * D, BLOCK * D, D, 1};
+    auto& t = graph.tensors;
+    t.push_back(tensor(Q, DataType::FLOAT, {B, H, SQ, D}, packedStrides(SQ), Q_OFFSETS));
+    t.push_back(tensor(K, DataType::FLOAT, containerDims, containerStrides));
+    t.push_back(tensor(V, DataType::FLOAT, containerDims, containerStrides));
+    t.push_back(tensor(O, DataType::FLOAT, {B, H, SQ, D}, packedStrides(SQ), Q_OFFSETS));
+    t.push_back(tensor(Q_OFFSETS, DataType::INT32, {B + 1, 1, 1, 1}, {1, 1, 1, 1}));
+    t.push_back(tensor(SEQ_Q, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
+    t.push_back(tensor(SEQ_KV, DataType::INT32, {B, 1, 1, 1}, {1, 1, 1, 1}));
+    t.push_back(tensor(PAGE_TABLE_K, DataType::INT32, {B, 1, TABLE, 1}, {TABLE, TABLE, 1, 1}));
+    t.push_back(tensor(PAGE_TABLE_V, DataType::INT32, {B, 1, TABLE, 1}, {TABLE, TABLE, 1, 1}));
+    SdpaAttributesT attrs;
+    attrs.q_tensor_uid = Q;
+    attrs.k_tensor_uid = K;
+    attrs.v_tensor_uid = V;
+    attrs.o_tensor_uid = O;
+    attrs.attn_scale_value = 0.5F;
+    attrs.right_bound = 0;
+    attrs.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+    attrs.seq_len_q_tensor_uid = SEQ_Q;
+    attrs.seq_len_kv_tensor_uid = SEQ_KV;
+    attrs.padding_mask = true;
+    attrs.page_table_k_tensor_uid = PAGE_TABLE_K;
+    attrs.page_table_v_tensor_uid = PAGE_TABLE_V;
+    if(sink)
+    {
+        t.push_back(tensor(SINK, DataType::FLOAT, {1, H, 1, 1}, {H, 1, 1, 1}));
+        attrs.sink_token_tensor_uid = SINK;
+    }
+    auto node = std::make_unique<NodeT>();
+    node->name = "sdpa";
+    node->compute_data_type = DataType::FLOAT;
+    node->attributes.Set(std::move(attrs));
     graph.nodes.push_back(std::move(node));
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(Graph::Pack(builder, &graph));

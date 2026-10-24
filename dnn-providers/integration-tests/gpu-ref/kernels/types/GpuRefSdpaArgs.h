@@ -96,8 +96,8 @@ struct SdpaFwdArgs
     SdpaStrides rowMaxStr;
     SdpaStrides rowSumExpStr;
     // cuDNN sdpa_fp8 softmax scaling (SEM-024): P @ V uses
-    // fp8(exp(s - Max) * scaleS) * descaleS / Sum_exp, in format pFp8Format (0 = off, 1 = OCP
-    // E4M3, 2 = FNUZ). amaxS (nullptr = off, zeroed by the host) gets max exp(s - Max).
+    // fp8(exp(s - Max) * scaleS) * descaleS / Sum_exp, in format pFp8Format (0 = off, else a
+    // GPU_REF_FP8_* format from GpuRefTypes.h). amaxS (nullptr = off, zeroed by the host) gets max exp(s - Max).
     int pFp8Format;
     float scaleS;
     float descaleS;

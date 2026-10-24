@@ -2128,13 +2128,18 @@ TEST(TestGpuSdpaFwdDropoutFp32, MatchesCpuReference)
 namespace
 {
 
-// fp8 bit patterns that decode to NaN: OCP E4M3 has 0x7F / 0xFF, FNUZ the single 0x80.
+// fp8 bit patterns that decode to NaN: OCP E4M3 has 0x7F / 0xFF, OCP E5M2 every exponent-31
+// code with a nonzero mantissa, the FNUZ formats the single 0x80.
 template <typename Fp8>
 bool isFp8NanBits(unsigned bits)
 {
-    if constexpr(std::is_same_v<Fp8, fp8_e4m3_fnuz>)
+    if constexpr(std::is_same_v<Fp8, fp8_e4m3_fnuz> || std::is_same_v<Fp8, fp8_e5m2_fnuz>)
     {
         return bits == 0x80u;
+    }
+    else if constexpr(std::is_same_v<Fp8, fp8_e5m2>)
+    {
+        return (bits & 0x7Cu) == 0x7Cu && (bits & 0x3u) != 0;
     }
     else
     {
@@ -2282,6 +2287,30 @@ TEST(TestGpuSdpaFwdFp8, FnuzE4m3DeviceDecodeMatchesHost)
 {
     SKIP_IF_NO_DEVICES();
     expectFp8DeviceDecodeMatchesHost<fp8_e4m3_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE5m2DeviceDecodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceDecodeMatchesHost<fp8_e5m2>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE5m2DeviceDecodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceDecodeMatchesHost<fp8_e5m2_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE5m2MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ForwardMatchesCpu<fp8_e5m2>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE5m2MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ForwardMatchesCpu<fp8_e5m2_fnuz>();
 }
 
 // A per-head descale on a paged K or V is ill-defined (container blocks are not batches).
@@ -2466,6 +2495,8 @@ void expectFp8ScaledForwardMatchesCpu()
     EXPECT_NEAR(
         amaxOGpu.getHostValue(0), amaxOCpu.getHostValue(0), 1e-5f * amaxOCpu.getHostValue(0));
 
+    constexpr bool E5M2 = std::is_same_v<Fp8, fp8_e5m2> || std::is_same_v<Fp8, fp8_e5m2_fnuz>;
+    constexpr float STEP = E5M2 ? 0.25f : 0.125f;
     int64_t exact = 0;
     int64_t total = 0;
     for(int64_t b = 0; b < BATCH; ++b)
@@ -2478,8 +2509,9 @@ void expectFp8ScaledForwardMatchesCpu()
                 {
                     const auto c = static_cast<float>(oCpu.getHostValue(b, h, s, d));
                     const auto g = static_cast<float>(oGpu.getHostValue(b, h, s, d));
-                    // One E4M3 step is at most 1/8 of the value (2^-9 below the normals).
-                    EXPECT_NEAR(g, c, std::fabs(c) / 8.0f + 0.002f)
+                    // One fp8 step is at most 1/8 (E4M3) or 1/4 (E5M2) of the value, plus the
+                    // subnormal spacing near zero.
+                    EXPECT_NEAR(g, c, std::fabs(c) * STEP + 0.002f)
                         << "b=" << b << " h=" << h << " s=" << s << " d=" << d;
                     exact
                         += oCpu.getHostValue(b, h, s, d).data == oGpu.getHostValue(b, h, s, d).data
@@ -2517,6 +2549,30 @@ TEST(TestGpuSdpaFwdFp8, FnuzE4m3ScaledForwardMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     expectFp8ScaledForwardMatchesCpu<fp8_e4m3_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE5m2DeviceEncodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceEncodeMatchesHost<fp8_e5m2>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE5m2DeviceEncodeMatchesHost)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8DeviceEncodeMatchesHost<fp8_e5m2_fnuz>();
+}
+
+TEST(TestGpuSdpaFwdFp8, OcpE5m2ScaledForwardMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ScaledForwardMatchesCpu<fp8_e5m2>();
+}
+
+TEST(TestGpuSdpaFwdFp8, FnuzE5m2ScaledForwardMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFp8ScaledForwardMatchesCpu<fp8_e5m2_fnuz>();
 }
 
 // P is stored in Q's fp8 format, so softmax scaling needs fp8 Q, as on the CPU.
@@ -2586,3 +2642,194 @@ TEST(TestGpuSdpaFwdBlockMaskFp32, MatchesCpuReference)
                                   .setBlockMask(&blockMask));
     assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
+
+// ============================================================================
+// Standard tier: CPU vs GPU forward at medium shapes. Rows of hundreds of keys exercise the
+// accumulation order and the multi-tile / multi-byte block mask; each case combines several
+// features. Quick runs the small per-feature cases above on every change.
+// ============================================================================
+
+namespace
+{
+
+struct FwdSweepCase
+{
+    const char* name;
+    int64_t batch, heads, headsKv, seqQ, seqKv, headDim, headDimV;
+    int64_t leftBound, rightBound;
+    bool topLeft;
+    bool bias, padding, sink, blockMask, alibi, softcap;
+};
+
+std::string fwdSweepName(const ::testing::TestParamInfo<FwdSweepCase>& info)
+{
+    return info.param.name;
+}
+
+} // namespace
+
+class TestGpuSdpaFwdSweepFp32 : public ::testing::TestWithParam<FwdSweepCase>
+{
+};
+
+TEST_P(TestGpuSdpaFwdSweepFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& c = GetParam();
+    const std::vector<int64_t> oDims = {c.batch, c.heads, c.seqQ, c.headDimV};
+    Tensor<float> q({c.batch, c.heads, c.seqQ, c.headDim});
+    Tensor<float> k({c.batch, c.headsKv, c.seqKv, c.headDim});
+    Tensor<float> v({c.batch, c.headsKv, c.seqKv, c.headDimV});
+    q.fillWithRandomValues(-1.0f, 1.0f, 301);
+    k.fillWithRandomValues(-1.0f, 1.0f, 302);
+    v.fillWithRandomValues(-1.0f, 1.0f, 303);
+    Tensor<float> bias({1, c.heads, c.seqQ, c.seqKv});
+    bias.fillWithRandomValues(-2.0f, 2.0f, 304);
+    Tensor<float> sink({1, c.heads, 1, 1});
+    sink.fillWithRandomValues(-1.0f, 3.0f, 305);
+    Tensor<int32_t> seqLenQ({c.batch, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({c.batch, 1, 1, 1});
+    for(int64_t b = 0; b < c.batch; ++b)
+    {
+        seqLenQ.setHostValue(static_cast<int32_t>(c.seqQ - 37 * b), b, 0, 0, 0);
+        seqLenKv.setHostValue(static_cast<int32_t>(c.seqKv - 53 * b), b, 0, 0, 0);
+    }
+    const auto tilesKv = (c.seqKv + 127) / 128;
+    Tensor<uint8_t> blockMask({c.batch, c.heads, (c.seqQ + 127) / 128, (tilesKv + 7) / 8});
+    for(int64_t i = 0; i < static_cast<int64_t>(blockMask.elementCount()); ++i)
+    {
+        blockMask.memory().hostData()[i] = static_cast<uint8_t>((0x6B + 41 * i) & 0xFF);
+    }
+
+    Tensor<float> oCpu(oDims);
+    Tensor<float> oGpu(oDims);
+    Tensor<float> lseCpu({c.batch, c.heads, c.seqQ, 1});
+    Tensor<float> lseGpu({c.batch, c.heads, c.seqQ});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    const std::optional<float> softcap = c.softcap ? std::optional<float>(5.0f) : std::nullopt;
+    CpuFpReferenceSdpa::forward(
+        q,
+        k,
+        v,
+        oCpu,
+        SdpaFwdOptions<float>{}
+            .setScale(0.125f)
+            .setMask(c.bias ? static_cast<const TensorBase<float>*>(&bias) : nullptr)
+            .setBand(c.leftBound, c.rightBound, c.topLeft)
+            .setSeqLens(c.padding ? &seqLenQ : nullptr, c.padding ? &seqLenKv : nullptr)
+            .setSink(c.sink ? &sink : nullptr)
+            .setBlockMask(c.blockMask ? &blockMask : nullptr)
+            .setAlibi(c.alibi)
+            .setSoftcap(softcap)
+            .setLse(&lseCpu));
+    GpuFpReferenceSdpa::fprop(
+        q,
+        k,
+        v,
+        oGpu,
+        GpuSdpaFwdOptions<float>{}
+            .setScale(0.125f)
+            .setMask(c.bias ? static_cast<TensorBase<float>*>(&bias) : nullptr)
+            .setBand(c.leftBound, c.rightBound, c.topLeft)
+            .setSeqLens(c.padding ? &seqLenQ : nullptr, c.padding ? &seqLenKv : nullptr)
+            .setSink(c.sink ? &sink : nullptr)
+            .setBlockMask(c.blockMask ? &blockMask : nullptr)
+            .setAlibi(c.alibi)
+            .setSoftcap(softcap)
+            .setLse(&lseGpu));
+    assertAllClose(oCpu, oGpu, 1e-4f);
+    lseGpu.memory().hostData();
+    for(int64_t b = 0; b < c.batch; ++b)
+    {
+        for(int64_t h = 0; h < c.heads; ++h)
+        {
+            for(int64_t s = 0; s < c.seqQ; ++s)
+            {
+                const float want = lseCpu.getHostValue(b, h, s, 0);
+                const float got = lseGpu.getHostValue(b, h, s);
+                if(std::isinf(want))
+                {
+                    ASSERT_EQ(got, want) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                else
+                {
+                    ASSERT_NEAR(got, want, 1e-4f * std::max(1.0f, std::fabs(want)))
+                        << "b=" << b << " h=" << h << " s=" << s;
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuSdpaFwdSweepFp32,
+                         ::testing::Values(FwdSweepCase{"GqaCausalBrPaddingSink",
+                                                        2,
+                                                        8,
+                                                        2,
+                                                        300,
+                                                        700,
+                                                        64,
+                                                        64,
+                                                        -1,
+                                                        0,
+                                                        false,
+                                                        false,
+                                                        true,
+                                                        true,
+                                                        false,
+                                                        false,
+                                                        false},
+                                           FwdSweepCase{"BiasWindowBlockMask",
+                                                        1,
+                                                        4,
+                                                        4,
+                                                        260,
+                                                        1100,
+                                                        64,
+                                                        32,
+                                                        200,
+                                                        0,
+                                                        false,
+                                                        true,
+                                                        false,
+                                                        false,
+                                                        true,
+                                                        false,
+                                                        false},
+                                           FwdSweepCase{"AlibiCausalTlSoftcap",
+                                                        1,
+                                                        6,
+                                                        3,
+                                                        384,
+                                                        512,
+                                                        128,
+                                                        128,
+                                                        -1,
+                                                        0,
+                                                        true,
+                                                        false,
+                                                        false,
+                                                        false,
+                                                        false,
+                                                        true,
+                                                        true},
+                                           FwdSweepCase{"EverythingButAlibi",
+                                                        2,
+                                                        4,
+                                                        1,
+                                                        270,
+                                                        1040,
+                                                        32,
+                                                        48,
+                                                        300,
+                                                        0,
+                                                        false,
+                                                        true,
+                                                        true,
+                                                        true,
+                                                        true,
+                                                        false,
+                                                        true}),
+                         fwdSweepName);
