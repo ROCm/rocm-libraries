@@ -16,6 +16,7 @@ from functools import lru_cache
 from itertools import product
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
+from rocke.dispatch.tuning import WavesPerEuSpace
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
 from .axes import (
@@ -27,7 +28,7 @@ from .axes import (
     tuning_axes,
 )
 from .common import AttentionTuningSpec
-from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
+from .waves import waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
 # Request-set fields: never recorded as a tuning point's defaults (problem fields,

@@ -106,9 +106,9 @@ A swept configuration is built in four layers. A registered candidate fixes a
 coarse geometry, `select_spec` fills in the problem, a walk over the arch's
 knob axes varies the tuning fields, and a `waves_per_eu` loop runs inside each
 knob set. That loop is the shared `KnobSpace` outer-knob hook: both attention
-spaces derive from `WavesPerEuSpace` (`waves.py`), which names `waves_per_eu`
-as the outer knob and puts it in the id stem, and each supplies its own WPE
-values:
+spaces derive from the shared `rocke.dispatch.tuning.WavesPerEuSpace`, which
+names `waves_per_eu` as the outer knob and puts it in the id stem, and each
+supplies its own WPE values (`waves.py`):
 
 ```text
 candidate            one geometry variant, fixed at registration
@@ -120,9 +120,9 @@ candidate            one geometry variant, fixed at registration
 
 The axes and production stacks are data in `axes.py`; `dense_rules.py` and
 `unified_rules.py` state attention's legality rules as `KnobSpace`
-subclasses (through `waves.py`'s `WavesPerEuSpace`); `candidate.py` turns a
-variant into a registered candidate. The RDNA WMMA kernels have no occupancy
-loop: `wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
+subclasses (through `WavesPerEuSpace`); `candidate.py` turns a variant into a
+registered candidate. The RDNA WMMA kernels have no occupancy loop:
+`wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
 Walking, sampling, canonicalizing and naming are the shared
 `rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
 catalogs live in the arch modules.
@@ -336,8 +336,8 @@ the replacement silently. A change to the payload or the canonicalization
 rules bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`. gfx942 dense
 resolves `persistent` and `waves_per_eu` per problem, so those two are always
 recorded with their effective value. Pins match on `config_key`; the
-`{variant_id}_wpe{N}` stem (`waves.py`: `waves_per_eu` is the attention
-spaces' outer knob) is only read to skip variants a bare id cannot name
+`{variant_id}_wpe{N}` stem (`tuning.WavesPerEuSpace`: `waves_per_eu` is the
+attention spaces' outer knob) is only read to skip variants a bare id cannot name
 (`KnobSpace.stem_prefix`). Knob values take the type their axis declares, so
 `True` and `1` name the same configuration. The compiled binary has a separate
 identity: `AttentionTuningSpec.identity()` (the kernel cache key), which
@@ -610,9 +610,9 @@ from the gfx942 spec rather than from a free field.
   gfx950 2D LDS / KQ-pad legality, stated as the `UnifiedSpace` hooks.
 - `wmma_rules.py` — RDNA WMMA knob scope and launch legality for both kernels,
   stated as the `WmmaSpace` hooks.
-- `waves.py` — `waves_per_eu` as the attention spaces' outer knob: the WPE
-  sweep values and `WavesPerEuSpace`, which sets the outer knob and the
-  `{variant_id}_wpe{N}` id stem for both spaces.
+- `waves.py` — the WPE values each sweep level tries for `waves_per_eu`, the
+  attention spaces' outer knob; the shared `rocke.dispatch.tuning.WavesPerEuSpace`
+  sets the outer knob and the `{variant_id}_wpe{N}` id stem for both spaces.
 - `candidate.py` — `make_tuning_candidate` and `make_dense_candidate`, both
   over `rocke.dispatch.tuning.make_tuned_candidate`.
 - `tuning_specs.py` — shared explicit kernel-spec/build construction.
