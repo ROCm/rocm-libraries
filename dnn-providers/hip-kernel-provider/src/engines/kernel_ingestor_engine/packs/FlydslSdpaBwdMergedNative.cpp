@@ -632,7 +632,8 @@ bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
         .has_value();
 }
 
-/// Every row's position is its descriptor order, which is the priority order.
+/// The score is the row's priority. Rows of equal priority tie, and a tie breaks on kernelId:
+/// stable, but not the table's order.
 double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
                                 const BoundTokens& /*bound*/,
                                 const KernelDefinition& kernel)

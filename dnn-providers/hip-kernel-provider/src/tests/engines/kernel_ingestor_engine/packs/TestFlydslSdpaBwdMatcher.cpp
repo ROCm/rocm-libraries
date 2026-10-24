@@ -104,7 +104,7 @@ constexpr std::array<NamedOperand, 9> OPERANDS{{{"q", "Q"},
 // Baseline
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, Baseline_TestSdkGraphIsAccepted)
+TEST(TestFlydslSdpaBwdMatcher, BaselineSdkGraphIsAccepted)
 {
     const auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
     const auto result = matchSdpaBwdBuffer(builder);
@@ -130,7 +130,7 @@ TEST(TestFlydslSdpaBwdMatcher, Baseline_TestSdkGraphIsAccepted)
     EXPECT_EQ(problem->statsLayout, StatsLayout::HT);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, Baseline_DefaultSpecMatchesTheTestSdkGraph)
+TEST(TestFlydslSdpaBwdMatcher, BaselineDefaultSpecMatchesTheSdkGraph)
 {
     const auto problem = accepted(baseline());
     ASSERT_TRUE(problem.has_value());
@@ -149,7 +149,7 @@ TEST(TestFlydslSdpaBwdMatcher, Baseline_DefaultSpecMatchesTheTestSdkGraph)
 // Structure
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, ST1_NodeCountOrKindOtherThanOneBackwardNodeDeclines)
+TEST(TestFlydslSdpaBwdMatcher, ST1NodeCountOrKindOtherThanOneBackwardNodeDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.nodeCount = 2; }),
              "node",
@@ -160,7 +160,7 @@ TEST(TestFlydslSdpaBwdMatcher, ST1_NodeCountOrKindOtherThanOneBackwardNodeDeclin
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.nodeCount = 1; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, ST2_OverrideShapeGraphDeclines)
+TEST(TestFlydslSdpaBwdMatcher, ST2OverrideShapeGraphDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.overrideShape = true; }),
              "node",
@@ -168,7 +168,7 @@ TEST(TestFlydslSdpaBwdMatcher, ST2_OverrideShapeGraphDeclines)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.overrideShape = false; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, ST3_ComputeTypeOutsideUnsetFloatHalfBf16Declines)
+TEST(TestFlydslSdpaBwdMatcher, ST3ComputeTypeOutsideUnsetFloatHalfBf16Declines)
 {
     for(const auto type : {data_objects::DataType::UNSET,
                            data_objects::DataType::FLOAT,
@@ -190,7 +190,7 @@ TEST(TestFlydslSdpaBwdMatcher, ST3_ComputeTypeOutsideUnsetFloatHalfBf16Declines)
     }
 }
 
-TEST(TestFlydslSdpaBwdMatcher, ST4_MissingVirtualOrPassByValueOperandDeclines)
+TEST(TestFlydslSdpaBwdMatcher, ST4MissingVirtualOrPassByValueOperandDeclines)
 {
     for(const auto& operand : OPERANDS)
     {
@@ -218,7 +218,7 @@ TEST(TestFlydslSdpaBwdMatcher, ST4_MissingVirtualOrPassByValueOperandDeclines)
     EXPECT_TRUE(accepted(baseline()));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, ST5_OutputUidSharedWithAnotherRoleDeclines)
+TEST(TestFlydslSdpaBwdMatcher, ST5OutputUidSharedWithAnotherRoleDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.dQ = sdpa_bwd_uid::Q; }),
              "operand",
@@ -244,7 +244,7 @@ TEST(TestFlydslSdpaBwdMatcher, ST5_OutputUidSharedWithAnotherRoleDeclines)
 // Dtype and shape
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, DT1_F16OrBf16OnEveryTensorAcceptsAndMixedDeclines)
+TEST(TestFlydslSdpaBwdMatcher, DT1F16OrBf16OnEveryTensorAcceptsAndMixedDeclines)
 {
     for(const auto type : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
     {
@@ -267,7 +267,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT1_F16OrBf16OnEveryTensorAcceptsAndMixedDeclines
              "dK (uid 8) is BFLOAT16, but Q is HALF");
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT2_Fp32Declines)
+TEST(TestFlydslSdpaBwdMatcher, DT2FloatDeclines)
 {
     SdpaBwdSpec fp32;
     fp32.dtype = data_objects::DataType::FLOAT;
@@ -275,7 +275,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT2_Fp32Declines)
     EXPECT_TRUE(accepted(baseline()));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT3_Fp8Declines)
+TEST(TestFlydslSdpaBwdMatcher, DT3Fp8Declines)
 {
     SdpaBwdSpec fp8;
     fp8.dtype = data_objects::DataType::FP8_E4M3;
@@ -283,7 +283,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT3_Fp8Declines)
     EXPECT_TRUE(accepted(baseline()));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT4_HeadDimAbove512Declines)
+TEST(TestFlydslSdpaBwdMatcher, DT4HeadDimAbove512Declines)
 {
     SdpaBwdSpec wideQk;
     wideQk.headDimQk = 520;
@@ -297,7 +297,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT4_HeadDimAbove512Declines)
     EXPECT_TRUE(accepted(limit));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT5_UnequalQkAndVHeadDimsAccept)
+TEST(TestFlydslSdpaBwdMatcher, DT5UnequalQkAndVHeadDimsAccept)
 {
     SdpaBwdSpec spec;
     spec.headDimQk = 128;
@@ -317,7 +317,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT5_UnequalQkAndVHeadDimsAccept)
     EXPECT_EQ(problem->headDimV, 128);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT6_GqaAndMqaAcceptAndNonMultipleHeadCountsDecline)
+TEST(TestFlydslSdpaBwdMatcher, DT6GqaAndMqaAcceptAndNonMultipleHeadCountsDecline)
 {
     SdpaBwdSpec ragged;
     ragged.heads = 8;
@@ -342,7 +342,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT6_GqaAndMqaAcceptAndNonMultipleHeadCountsDeclin
     }
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT7_SequenceAbove8192AndTensorAbove4GiBAccept)
+TEST(TestFlydslSdpaBwdMatcher, DT7SequenceAbove8192AndTensorAbove4GiBAccept)
 {
     SdpaBwdSpec longSequence;
     longSequence.seqQ = 16384;
@@ -360,7 +360,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT7_SequenceAbove8192AndTensorAbove4GiBAccept)
     EXPECT_EQ(problem->batch, 512);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT8_HeadDimNotAMultipleOf8NeedsRowStrideOfThePaddedWidth)
+TEST(TestFlydslSdpaBwdMatcher, DT8HeadDimNotAMultipleOf8NeedsRowStrideOfThePaddedWidth)
 {
     for(const int64_t headDim : {7, 12, 23, 37})
     {
@@ -398,7 +398,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT8_HeadDimNotAMultipleOf8NeedsRowStrideOfThePadd
     EXPECT_TRUE(accepted(singleRow));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT9_SlabAbove32BitByteOffsetsDeclines)
+TEST(TestFlydslSdpaBwdMatcher, DT9SlabAbove32BitByteOffsetsDeclines)
 {
     const auto withQStride = [](int64_t seqStride) {
         return baseline().withEdit(
@@ -406,6 +406,23 @@ TEST(TestFlydslSdpaBwdMatcher, DT9_SlabAbove32BitByteOffsetsDeclines)
     };
     declined(withQStride(134217728), "layout", "32-bit byte offset limit");
     EXPECT_TRUE(accepted(withQStride(1048576)));
+
+    for(const auto& operand : OPERANDS)
+    {
+        if(std::string_view(operand.tensor) == "stats")
+        {
+            continue;
+        }
+        SCOPED_TRACE(operand.tensor);
+        const std::string tensor = operand.tensor;
+        const auto withSeqStride = [tensor](int64_t seqStride) {
+            return baseline().withEdit(
+                [tensor, seqStride](SdpaBwdGraph& g) { g.tensor(tensor).strides[2] = seqStride; });
+        };
+        declined(withSeqStride(134217728), "layout", std::string(operand.label) + " (uid ");
+        declined(withSeqStride(134217728), "layout", "32-bit byte offset limit");
+        EXPECT_TRUE(accepted(withSeqStride(1048576)));
+    }
 
     const auto withBiasStride = [](int64_t seqStride, bool dbias) {
         return baseline().withEdit([seqStride, dbias](SdpaBwdGraph& g) {
@@ -427,7 +444,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT9_SlabAbove32BitByteOffsetsDeclines)
     EXPECT_TRUE(accepted(withBiasStride(1048576, true)));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SH1_ShapeDisagreementDeclines)
+TEST(TestFlydslSdpaBwdMatcher, SH1ShapeDisagreementDeclines)
 {
     struct Case
     {
@@ -471,7 +488,7 @@ TEST(TestFlydslSdpaBwdMatcher, SH1_ShapeDisagreementDeclines)
 // Layout
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, LY1_AlignmentBelow16BytesDeclinesOnEveryDataTensorBiasAndDbias)
+TEST(TestFlydslSdpaBwdMatcher, LY1AlignmentBelow16BytesDeclinesOnEveryDataTensorBiasAndDbias)
 {
     for(const auto& operand : OPERANDS)
     {
@@ -505,7 +522,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY1_AlignmentBelow16BytesDeclinesOnEveryDataTenso
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY2_LastStrideOtherThanOneDeclines)
+TEST(TestFlydslSdpaBwdMatcher, LY2LastStrideOtherThanOneDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("k").strides[3] = 2; }),
              "layout",
@@ -517,7 +534,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY2_LastStrideOtherThanOneDeclines)
         accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("k").strides[3] = 1; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY3_StrideOfANonUnitAxisNotAMultipleOf8Declines)
+TEST(TestFlydslSdpaBwdMatcher, LY3StrideOfANonUnitAxisNotAMultipleOf8Declines)
 {
     const auto withQSeqStride = [](int64_t stride) {
         return baseline().withEdit(
@@ -538,7 +555,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY3_StrideOfANonUnitAxisNotAMultipleOf8Declines)
     EXPECT_EQ(unit->q.batch, 0);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY4_PackedQkvViewsAndOneBufferGradientsAccept)
+TEST(TestFlydslSdpaBwdMatcher, LY4PackedQkvViewsAndOneBufferGradientsAccept)
 {
     // Q, K and V (and dQ, dK, dV) as strided views into one [B, S, 3, H, D] buffer.
     const std::vector<int64_t> packed{16 * 3 * 8 * 64, 64, 3 * 8 * 64, 1};
@@ -554,7 +571,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY4_PackedQkvViewsAndOneBufferGradientsAccept)
     expectStrides(problem->o, 8192, 1024, 64);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY5_OverlappingOutputElementsDecline)
+TEST(TestFlydslSdpaBwdMatcher, LY5OverlappingOutputElementsDecline)
 {
     for(const auto& operand :
         {NamedOperand{"dq", "dQ"}, NamedOperand{"dk", "dK"}, NamedOperand{"dv", "dV"}})
@@ -578,7 +595,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY5_OverlappingOutputElementsDecline)
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY6_ZeroSequenceStrideOnAMultiRowAxisDeclines)
+TEST(TestFlydslSdpaBwdMatcher, LY6ZeroSequenceStrideOnAMultiRowAxisDeclines)
 {
     for(const auto& operand : {NamedOperand{"q", "Q"},
                                NamedOperand{"k", "K"},
@@ -619,7 +636,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY6_ZeroSequenceStrideOnAMultiRowAxisDeclines)
 // Stats
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, SS1_PackedStatsInEitherOrderAcceptAndOtherStridesDecline)
+TEST(TestFlydslSdpaBwdMatcher, SS1PackedStatsInEitherOrderAcceptAndOtherStridesDecline)
 {
     auto problem = accepted(baseline());
     ASSERT_TRUE(problem.has_value());
@@ -641,11 +658,36 @@ TEST(TestFlydslSdpaBwdMatcher, SS1_PackedStatsInEitherOrderAcceptAndOtherStrides
              "stats (uid 6) is BFLOAT16, not FLOAT");
 }
 
+TEST(TestFlydslSdpaBwdMatcher, SS1StatsSpanOfABatchAbove32BitByteOffsetsDeclines)
+{
+    // Nine query heads of head dim 16: each per-head slab of every data tensor fits 32 bits at
+    // these lengths, so only the stats span (query heads * Sq FLOAT rows per batch) can decline.
+    // 536870911 rows is the most 32-bit byte offsets address. The grouped-query case shows the
+    // span counts query heads, not key/value heads.
+    const auto withSeqQ = [](int64_t seqQ, int64_t kvHeads) {
+        SdpaBwdSpec spec;
+        spec.batch = 1;
+        spec.heads = 9;
+        spec.kvHeads = kvHeads;
+        spec.headDimQk = 16;
+        spec.headDimV = 16;
+        spec.seqQ = seqQ;
+        return spec;
+    };
+    for(const int64_t kvHeads : {9, 3})
+    {
+        SCOPED_TRACE(kvHeads);
+        EXPECT_TRUE(accepted(withSeqQ(59652323, kvHeads)));
+        declined(
+            withSeqQ(59652324, kvHeads), "layout", "stats (uid 6) spans 536870916 rows per batch");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Mask and window
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, MW1_BothDeprecatedCausalFlagsDecline)
+TEST(TestFlydslSdpaBwdMatcher, MW1BothDeprecatedCausalFlagsDecline)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.causalMask = true;
@@ -659,7 +701,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW1_BothDeprecatedCausalFlagsDecline)
         baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW2_CausalFlagImpliesRightBoundZeroUnlessRightBoundIsSet)
+TEST(TestFlydslSdpaBwdMatcher, MW2CausalFlagImpliesRightBoundZeroUnlessRightBoundIsSet)
 {
     auto problem
         = accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; }));
@@ -685,7 +727,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW2_CausalFlagImpliesRightBoundZeroUnlessRightBou
     EXPECT_EQ(problem->windowRight, 0);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW3_BoundBelowMinusOneDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW3BoundBelowMinusOneDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.rightBound = -2; }),
              "mask",
@@ -702,7 +744,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW3_BoundBelowMinusOneDeclines)
 }
 
 TEST(TestFlydslSdpaBwdMatcher,
-     MW4_AlignmentOtherThanTopLeftOrBottomRightDeclinesAndFlagsKeepOrForceIt)
+     MW4AlignmentOtherThanTopLeftOrBottomRightDeclinesAndFlagsKeepOrForceIt)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.causalMask = true;
@@ -745,7 +787,7 @@ TEST(TestFlydslSdpaBwdMatcher,
     EXPECT_EQ(problem->diagonalOffset, 0);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW5_LeftBoundWithoutRightAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW5LeftBoundWithoutRightAccepts)
 {
     auto problem
         = accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 128; }));
@@ -768,7 +810,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW5_LeftBoundWithoutRightAccepts)
     EXPECT_EQ(problem->diagonalOffset, 288);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW6_NonCausalBandWithRightBoundAboveZeroAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW6NonCausalBandWithRightBoundAboveZeroAccepts)
 {
     auto problem
         = accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.rightBound = 4; }));
@@ -786,7 +828,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW6_NonCausalBandWithRightBoundAboveZeroAccepts)
     EXPECT_EQ(problem->windowRight, 4);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW7_DiagonalOffsetPastSkvMinusSqAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW7DiagonalOffsetPastSkvMinusSqAccepts)
 {
     SdpaBwdSpec rect;
     rect.seqQ = 300;
@@ -800,7 +842,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW7_DiagonalOffsetPastSkvMinusSqAccepts)
     EXPECT_EQ(problem->diagonalOffset, 288);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW8_LeftBoundIsRecordedInTheCudnnWindowConvention)
+TEST(TestFlydslSdpaBwdMatcher, MW8LeftBoundIsRecordedInTheCudnnWindowConvention)
 {
     // left_bound L keeps the L keys up to the diagonal; the engine derives the kernel's left
     // as L - 1 - diagonalOffset, so the problem carries L itself and the offset.
@@ -822,7 +864,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW8_LeftBoundIsRecordedInTheCudnnWindowConvention
     EXPECT_EQ(bottomRight->diagonalOffset, 8);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW9a_LeftBoundZeroWithRightBoundAtLeastOneAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW9aLeftBoundZeroWithRightBoundAtLeastOneAccepts)
 {
     const auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.leftBound = 0;
@@ -834,7 +876,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW9a_LeftBoundZeroWithRightBoundAtLeastOneAccepts
     EXPECT_EQ(problem->windowRight, 1);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW9b_LeftBoundZeroWithRightBoundZeroDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW9bLeftBoundZeroWithRightBoundZeroDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.leftBound = 0;
@@ -854,7 +896,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW9b_LeftBoundZeroWithRightBoundZeroDeclines)
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW9c_LeftBoundZeroWithUnboundedRightDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW9cLeftBoundZeroWithUnboundedRightDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 0; }),
              "mask",
@@ -866,7 +908,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW9c_LeftBoundZeroWithUnboundedRightDeclines)
     EXPECT_EQ(control->windowRight, NO_WINDOW);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW10_AnyMaskWithBiasDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW10AnyMaskWithBiasDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g);
@@ -886,7 +928,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW10_AnyMaskWithBiasDeclines)
     EXPECT_FALSE(biasOnly->masked);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW11_BottomRightCausalWithDropoutAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW11BottomRightCausalWithDropoutAccepts)
 {
     const auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.causalMaskBottomRight = true;
@@ -898,7 +940,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW11_BottomRightCausalWithDropoutAccepts)
     EXPECT_EQ(problem->dropoutP, 0.25F);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW12_AlibiMaskDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW12AlibiMaskDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.alibiMask = true; }),
              "alibi_mask",
@@ -907,7 +949,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW12_AlibiMaskDeclines)
         accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.alibiMask = false; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW13_WindowWithBottomRightAlignmentUnderPaddingMaskDeclines)
+TEST(TestFlydslSdpaBwdMatcher, MW13WindowWithBottomRightAlignmentUnderPaddingMaskDeclines)
 {
     const auto bottomRightCausal = [](SdpaBwdGraph& g) {
         addSeqLens(g);
@@ -939,7 +981,7 @@ TEST(TestFlydslSdpaBwdMatcher, MW13_WindowWithBottomRightAlignmentUnderPaddingMa
 // Padding and varlen
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, PV1_PaddingMaskWithBothLengthTensorsAccepts)
+TEST(TestFlydslSdpaBwdMatcher, PV1PaddingMaskWithBothLengthTensorsAccepts)
 {
     const auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); }));
     ASSERT_TRUE(problem.has_value());
@@ -948,7 +990,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV1_PaddingMaskWithBothLengthTensorsAccepts)
     EXPECT_EQ(problem->seqLenKvUid, sdpa_bwd_uid::SEQ_LEN_KV);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV2_PaddingFlagAndLengthTensorsMustComeTogether)
+TEST(TestFlydslSdpaBwdMatcher, PV2PaddingFlagAndLengthTensorsMustComeTogether)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.paddingMask = true; }),
              "varlen",
@@ -968,7 +1010,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV2_PaddingFlagAndLengthTensorsMustComeTogether)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV3_RaggedOffsetOnADataTensorDeclines)
+TEST(TestFlydslSdpaBwdMatcher, PV3RaggedOffsetOnADataTensorDeclines)
 {
     for(const auto& operand : OPERANDS)
     {
@@ -986,7 +1028,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV3_RaggedOffsetOnADataTensorDeclines)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV4_SeqLenOtherThanInt32Declines)
+TEST(TestFlydslSdpaBwdMatcher, PV4SeqLenOtherThanInt32Declines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addSeqLens(g);
@@ -1012,7 +1054,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV4_SeqLenOtherThanInt32Declines)
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV7_SeqLenMustBeADeviceTensorWithoutRaggedOffsets)
+TEST(TestFlydslSdpaBwdMatcher, PV7SeqLenMustBeADeviceTensorWithoutRaggedOffsets)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addSeqLens(g);
@@ -1041,7 +1083,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV7_SeqLenMustBeADeviceTensorWithoutRaggedOffsets
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV8_RaggedOffsetOnBiasDbiasSeedOffsetOrStatsDeclines)
+TEST(TestFlydslSdpaBwdMatcher, PV8RaggedOffsetOnBiasDbiasSeedOffsetOrStatsDeclines)
 {
     const auto withBias = [](SdpaBwdGraph& g) {
         addBias(g);
@@ -1072,7 +1114,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV8_RaggedOffsetOnBiasDbiasSeedOffsetOrStatsDecli
     EXPECT_TRUE(accepted(baseline().withEdit(withBias).withEdit(withDropout)));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV10_BiasOrDbiasWithPaddingMaskDeclines)
+TEST(TestFlydslSdpaBwdMatcher, PV10BiasOrDbiasWithPaddingMaskDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addSeqLens(g);
@@ -1097,7 +1139,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV10_BiasOrDbiasWithPaddingMaskDeclines)
 // Bias and dBias
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, BI1_BiasRankUpToFourRightAlignedWithBroadcastBatchHeadAndRows)
+TEST(TestFlydslSdpaBwdMatcher, BI1BiasRankUpToFourRightAlignedWithBroadcastBatchHeadAndRows)
 {
     struct Case
     {
@@ -1144,7 +1186,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI1_BiasRankUpToFourRightAlignedWithBroadcastBatc
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addBias(g).strides[2] = 16; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI2_BiasDtypeOtherThanQsDeclines)
+TEST(TestFlydslSdpaBwdMatcher, BI2BiasDtypeOtherThanQsDeclines)
 {
     declined(baseline().withEdit(
                  [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::BFLOAT16; }),
@@ -1158,7 +1200,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI2_BiasDtypeOtherThanQsDeclines)
         [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::HALF; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI3_BiasBroadcastOverBatchOrHeadWithDbiasAccepts)
+TEST(TestFlydslSdpaBwdMatcher, BI3BiasBroadcastOverBatchOrHeadWithDbiasAccepts)
 {
     auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g, {1, 8, 16, 16});
@@ -1180,7 +1222,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI3_BiasBroadcastOverBatchOrHeadWithDbiasAccepts)
     EXPECT_EQ(problem->dbiasUid, sdpa_bwd_uid::DBIAS);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI4_RowBroadcastBiasWithDbiasDeclinesAndBiasAloneAccepts)
+TEST(TestFlydslSdpaBwdMatcher, BI4RowBroadcastBiasWithDbiasDeclinesAndBiasAloneAccepts)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g, {2, 8, 1, 16});
@@ -1195,7 +1237,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI4_RowBroadcastBiasWithDbiasDeclinesAndBiasAlone
     EXPECT_EQ(biasOnly->dbiasUid, NO_UID);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI5_DbiasShapeOtherThanBiasShapeDeclines)
+TEST(TestFlydslSdpaBwdMatcher, BI5DbiasShapeOtherThanBiasShapeDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g);
@@ -1209,7 +1251,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI5_DbiasShapeOtherThanBiasShapeDeclines)
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI6_DbiasWithoutBiasDeclines)
+TEST(TestFlydslSdpaBwdMatcher, BI6DbiasWithoutBiasDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g);
@@ -1224,7 +1266,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI6_DbiasWithoutBiasDeclines)
     })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, BI7_DbiasDtypeOtherThanBiasDtypeDeclines)
+TEST(TestFlydslSdpaBwdMatcher, BI7DbiasDtypeOtherThanBiasDtypeDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g);
@@ -1242,7 +1284,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI7_DbiasDtypeOtherThanBiasDtypeDeclines)
 // Dropout and seed
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, DR1_NullOrZeroProbabilityIsOffAndOpenUnitIntervalIsOn)
+TEST(TestFlydslSdpaBwdMatcher, DR1NullOrZeroProbabilityIsOffAndOpenUnitIntervalIsOn)
 {
     auto problem = accepted(baseline());
     ASSERT_TRUE(problem.has_value());
@@ -1263,7 +1305,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR1_NullOrZeroProbabilityIsOffAndOpenUnitInterval
     EXPECT_EQ(problem->offsetUid, sdpa_bwd_uid::OFFSET);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DR2_ProbabilityOutsideZeroToOneDeclines)
+TEST(TestFlydslSdpaBwdMatcher, DR2ProbabilityOutsideZeroToOneDeclines)
 {
     for(const float p : {1.0F, 1.5F, -0.1F, std::numeric_limits<float>::quiet_NaN()})
     {
@@ -1275,7 +1317,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR2_ProbabilityOutsideZeroToOneDeclines)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g, 0.999F); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DR3_ProbabilityNeedsBothSeedAndOffsetAndTheyNeedProbability)
+TEST(TestFlydslSdpaBwdMatcher, DR3ProbabilityNeedsBothSeedAndOffsetAndTheyNeedProbability)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addDropout(g);
@@ -1304,7 +1346,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR3_ProbabilityNeedsBothSeedAndOffsetAndTheyNeedP
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DR4_Int32AndInt64SeedAndOffsetAcceptAndRecordTheWidth)
+TEST(TestFlydslSdpaBwdMatcher, DR4Int32AndInt64SeedAndOffsetAcceptAndRecordTheWidth)
 {
     auto problem = accepted(baseline().withEdit(
         [](SdpaBwdGraph& g) { addDropout(g, 0.2F, data_objects::DataType::INT32); }));
@@ -1328,7 +1370,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR4_Int32AndInt64SeedAndOffsetAcceptAndRecordTheW
              "seed (uid 15) is INT64 but offset (uid 16) is INT32");
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DR6_SeedAndOffsetAsDeviceOrPassByValueScalarsAccept)
+TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetAsDeviceOrPassByValueScalarsAccept)
 {
     auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g); }));
     ASSERT_TRUE(problem.has_value());
@@ -1379,7 +1421,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR6_SeedAndOffsetAsDeviceOrPassByValueScalarsAcce
              "differ");
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DR7_DropoutMaskScaleAndScaleInvTensorsDecline)
+TEST(TestFlydslSdpaBwdMatcher, DR7DropoutMaskScaleAndScaleInvTensorsDecline)
 {
     declined(baseline().withEdit(
                  [](SdpaBwdGraph& g) { g.attributes.dropoutMaskUid = sdpa_bwd_uid::DROPOUT_MASK; }),
@@ -1402,7 +1444,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR7_DropoutMaskScaleAndScaleInvTensorsDecline)
 // Scale
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, SC1_ScaleValueOrPassByValueTensorAcceptsAndAbsentIsOne)
+TEST(TestFlydslSdpaBwdMatcher, SC1ScaleValueOrPassByValueTensorAcceptsAndAbsentIsOne)
 {
     auto problem = accepted(baseline());
     ASSERT_TRUE(problem.has_value());
@@ -1429,7 +1471,7 @@ TEST(TestFlydslSdpaBwdMatcher, SC1_ScaleValueOrPassByValueTensorAcceptsAndAbsent
     EXPECT_EQ(problem->scaleUid, sdpa_bwd_uid::SCALE);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SC2_DeviceScaleTensorDeclines)
+TEST(TestFlydslSdpaBwdMatcher, SC2DeviceScaleTensorDeclines)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         auto& scale = addScaleTensor(g, std::nullopt);
@@ -1440,7 +1482,7 @@ TEST(TestFlydslSdpaBwdMatcher, SC2_DeviceScaleTensorDeclines)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addScaleTensor(g, 0.25F); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SC3_ScaleValueAndScaleTensorTogetherDecline)
+TEST(TestFlydslSdpaBwdMatcher, SC3ScaleValueAndScaleTensorTogetherDecline)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addScaleTensor(g, 0.25F);
@@ -1452,7 +1494,7 @@ TEST(TestFlydslSdpaBwdMatcher, SC3_ScaleValueAndScaleTensorTogetherDecline)
         baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.attnScaleValue = 0.125F; })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SC4_ZeroAndNegativeScalesAccept)
+TEST(TestFlydslSdpaBwdMatcher, SC4ZeroAndNegativeScalesAccept)
 {
     for(const float scale : {0.0F, -1.2F, 1.2F})
     {
@@ -1471,7 +1513,7 @@ TEST(TestFlydslSdpaBwdMatcher, SC4_ZeroAndNegativeScalesAccept)
     }
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SC5_ScaleBeyond2Pow20InMagnitudeOrNonFiniteDeclines)
+TEST(TestFlydslSdpaBwdMatcher, SC5ScaleBeyond2Pow20InMagnitudeOrNonFiniteDeclines)
 {
     for(const float scale : {TWO_POW_20 + 1.0F,
                              -2.0F * TWO_POW_20,

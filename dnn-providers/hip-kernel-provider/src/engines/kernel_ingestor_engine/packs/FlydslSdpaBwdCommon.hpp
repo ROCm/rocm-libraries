@@ -179,6 +179,7 @@ inline constexpr uint32_t DIM_AXIS = 3;
 
 inline constexpr int64_t INT32_LIMIT = 2147483647LL;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
+inline constexpr int64_t STATS_BYTES_PER_ELEMENT = 4; // stats is FLOAT
 inline constexpr int64_t REQUIRED_ALIGNMENT_BYTES = 16;
 inline constexpr int64_t MAX_HEAD_DIM = 512;
 inline constexpr int64_t VECTOR_ELEMENTS = 8;
@@ -797,7 +798,8 @@ private:
     }
 
     /// SS-1: stats is packed (B*H, Sq) (HT) or packed (B, Sq, H) (TH); the kernels take no
-    /// stats strides, so any other layout declines.
+    /// stats strides, so any other layout declines. The kernels also address one batch's H*Sq
+    /// FLOAT rows through a 32-bit byte range, so a batch whose stats span exceeds it declines.
     Verdict checkStats()
     {
         const auto& strides = stridesOf(_stats);
@@ -805,6 +807,12 @@ private:
         const int64_t heads = _problem.numHeads;
         const int64_t seq = _problem.seqLenQ;
         const auto packed = checkedProduct({heads, seq});
+        if(packed.has_value() && *packed > INT32_LIMIT / STATS_BYTES_PER_ELEMENT)
+        {
+            return Decline{"layout",
+                           describe(_stats) + " spans " + std::to_string(*packed)
+                               + " rows per batch, over the 32-bit byte offset limit"};
+        }
         const auto matches = [&](int64_t batchStride, int64_t headStride, int64_t seqStride) {
             return (batch == 1 || strides.Get(BATCH_AXIS) == batchStride)
                    && (heads == 1 || strides.Get(HEAD_AXIS) == headStride)
