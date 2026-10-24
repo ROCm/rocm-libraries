@@ -95,13 +95,15 @@ namespace
     }
 
     // outcome of a call: accepted, std::invalid_argument, std::logic_error reporting
-    // something not implemented yet, or any other std::logic_error
+    // something not implemented yet, or any other std::logic_error; S marks expected
+    // outcomes that depend on the data set (see the dedicated tests)
     enum outcome
     {
         Y,
         I,
         N,
-        L
+        L,
+        S
     };
     template <typename F>
     outcome outcome_of(F&& f)
@@ -982,15 +984,16 @@ TEST_F(data_set_test, type_and_precision_unset_by_default)
 // Expected outcomes for all pairs of array types (unset included), rows and columns in
 // all_array_types order: enabling a pair is a one-entry change.
 // reinterpret_as(to) on a data set of array type from (rows):
-// relabeling only, real <-> complex not implemented yet
+// relabeling, real <-> planar complex depends on the data set (see the
+// reinterpret_real_planar_* tests), real <-> interleaved complex not implemented yet
 const outcome reinterpret_outcomes[6][6] = {
     //unset CI CP R  HI HP
     {I, I, I, I, I, I}, // unset
     {I, Y, I, N, Y, I}, // CI
-    {I, I, Y, N, I, Y}, // CP
-    {I, N, N, Y, N, N}, // R
+    {I, I, Y, S, I, Y}, // CP
+    {I, N, S, Y, N, S}, // R
     {I, Y, I, N, Y, I}, // HI
-    {I, I, Y, N, I, Y}, // HP
+    {I, I, Y, S, I, Y}, // HP
 };
 // make_contiguous_intersection_of, offset_in, is_continuous_in and operator== relate two
 // data sets describing the same data, so their array types must be identical (and so
@@ -1031,16 +1034,19 @@ TEST_F(data_set_test, array_type_pair_rules)
 
                 // only the array type changes; operator== ignores the embedding map, so
                 // compare it separately
-                const auto reinterpret = outcome_of([&] {
-                    const auto relabeled = a.reinterpret_as(type_b);
-                    const auto expected  = with_type(a, type_b, prec_a);
-                    EXPECT_TRUE(relabeled == expected) << relabeled.str();
-                    EXPECT_TRUE(relabeled.get_embedding_data_set()
-                                == expected.get_embedding_data_set());
-                    EXPECT_EQ(relabeled.corresponding_axes_in_embedding(),
-                              a.corresponding_axes_in_embedding());
-                });
-                EXPECT_EQ(reinterpret, reinterpret_outcomes[ta][tb]);
+                if(reinterpret_outcomes[ta][tb] != S)
+                {
+                    const auto reinterpret = outcome_of([&] {
+                        const auto relabeled = a.reinterpret_as(type_b);
+                        const auto expected  = with_type(a, type_b, prec_a);
+                        EXPECT_TRUE(relabeled == expected) << relabeled.str();
+                        EXPECT_TRUE(relabeled.get_embedding_data_set()
+                                    == expected.get_embedding_data_set());
+                        EXPECT_EQ(relabeled.corresponding_axes_in_embedding(),
+                                  a.corresponding_axes_in_embedding());
+                    });
+                    EXPECT_EQ(reinterpret, reinterpret_outcomes[ta][tb]);
+                }
 
                 const bool same = same_data_array_types[ta][tb] && prec_a == prec_b;
                 EXPECT_EQ(a == b, same);
@@ -1181,6 +1187,210 @@ TEST_F(data_set_test, packed_data_set)
         EXPECT_EQ(type_of(packed), type_of(data_set));
         EXPECT_EQ(precision_of(packed), precision_of(data_set));
         EXPECT_FALSE(packed.is_embedded());
+    }
+}
+
+namespace
+{
+    const rocfft_array_type planar_types[]
+        = {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_planar};
+
+    // in-buffer position (in elements, offset included) of logical coordinate `coord`
+    // in part `part`
+    size_t position_of(const data_set_t& layout, const std::vector<size_t>& coord, data_part part)
+    {
+        const auto strides = layout.strides_and_distances();
+        size_t     ret     = layout.get_offset(part);
+        for(size_t d = 0; d < coord.size(); d++)
+            ret += coord[d] * strides[d];
+        return ret;
+    }
+
+    // calls f(coord) for every logical coordinate of a non-empty layout
+    template <typename F>
+    void for_each_coordinate(const data_set_t& layout, F f)
+    {
+        const auto lower = layout.lower();
+        const auto upper = layout.upper();
+        auto       coord = lower;
+        while(true)
+        {
+            f(coord);
+            size_t d = 0;
+            for(; d < coord.size() && ++coord[d] == upper[d]; d++)
+                coord[d] = lower[d];
+            if(d == coord.size())
+                return;
+        }
+    }
+}
+
+TEST_F(data_set_test, reinterpret_real_as_planar)
+{
+    struct layout_t
+    {
+        std::vector<size_t>   lower, upper, strides;
+        std::array<size_t, 2> offsets;
+    };
+    struct case_t
+    {
+        layout_t real, planar;
+        size_t   batch_rank;
+    };
+    // {real layout, expected planar layout, batch rank}: 1D, 2D with lower bounds,
+    // a non-unit stride along length axis 0 and an offset, 3D with two batch axes
+    // and odd other strides and offset (unchanged)
+    const case_t cases[]
+        = {{{{0, 0}, {8, 3}, {1, 10}, {0, 0}}, {{0, 0}, {4, 3}, {2, 10}, {0, 1}}, 1},
+           {{{2, 1, 0}, {8, 5, 3}, {3, 30, 200}, {5, 0}},
+            {{1, 1, 0}, {4, 5, 3}, {6, 30, 200}, {5, 8}},
+            1},
+           {{{0, 0, 0, 0, 0}, {6, 4, 2, 3, 2}, {1, 7, 29, 61, 190}, {3, 0}},
+            {{0, 0, 0, 0, 0}, {3, 4, 2, 3, 2}, {2, 7, 29, 61, 190}, {3, 4}},
+            2}};
+    for(const auto& [r, c, batch_rank] : cases)
+    {
+        for(auto p : {rocfft_precision_single, rocfft_precision_double})
+        {
+            for(auto t : planar_types)
+            {
+                const auto real     = with_type(data_set_t(r.lower, r.upper, r.strides, batch_rank),
+                                            rocfft_array_type_real,
+                                            p,
+                                            r.offsets);
+                const auto expected = with_type(
+                    data_set_t(c.lower, c.upper, c.strides, batch_rank), t, p, c.offsets);
+                SCOPED_TRACE(real.str());
+                const auto dst = real.reinterpret_as(t);
+                EXPECT_TRUE(dst == expected) << dst.str();
+                EXPECT_EQ(dst.get_precision(), p);
+                EXPECT_TRUE(expected.reinterpret_as(rocfft_array_type_real) == real);
+            }
+        }
+    }
+}
+
+TEST_F(data_set_test, reinterpret_real_planar_round_trip_and_positions)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // random planar layout (any lower bounds, other strides and first offset)
+        // with an even stride along length axis 0 and planes offset by half of it
+        const auto len_rank   = uniform(1, 3);
+        const auto batch_rank = uniform(1, 2);
+        const auto lower      = random_vec(len_rank + batch_rank, 0, 3);
+        auto       upper      = random_vec(len_rank + batch_rank, 1, 4);
+        for(size_t d = 0; d < upper.size(); d++)
+            upper[d] += lower[d];
+        auto strides      = random_vec(len_rank + batch_rank, 1, 40);
+        strides[0]        = 2 * uniform(1, 5);
+        const auto p      = uniform(0, 1) ? rocfft_precision_single : rocfft_precision_double;
+        const auto t      = planar_types[uniform(0, 1)];
+        const auto first  = uniform(0, 9);
+        const auto planar = with_type(
+            data_set_t(lower, upper, strides, batch_rank), t, p, {first, first + strides[0] / 2});
+        SCOPED_TRACE(planar.str());
+
+        const auto real = planar.reinterpret_as(rocfft_array_type_real);
+        SCOPED_TRACE(real.str());
+        EXPECT_EQ(real.get_precision(), p);
+        EXPECT_EQ(real.logical_count(), 2 * planar.logical_count());
+        EXPECT_TRUE(real.reinterpret_as(t) == planar);
+        for(auto t2 : planar_types)
+            EXPECT_TRUE(real.reinterpret_as(t2).reinterpret_as(rocfft_array_type_real) == real);
+
+        // real element 2k (resp. 2k + 1) is element k of the real (resp. imaginary)
+        // part, at the same byte position
+        for_each_coordinate(planar, [&](const std::vector<size_t>& coord) {
+            auto real_coord = coord;
+            real_coord[0] *= 2;
+            EXPECT_EQ(position_of(real, real_coord, data_part::ALL),
+                      position_of(planar, coord, data_part::REAL));
+            EXPECT_EQ(position_of(real, real_coord, data_part::ALL) * real.element_byte_size(),
+                      position_of(planar, coord, data_part::REAL) * planar.element_byte_size());
+            real_coord[0] += 1;
+            EXPECT_EQ(position_of(real, real_coord, data_part::ALL),
+                      position_of(planar, coord, data_part::IMAGINARY));
+        });
+    }
+}
+
+TEST_F(data_set_test, reinterpret_real_planar_rejects_bad_layouts)
+{
+    for(auto t : planar_types)
+    {
+        // real to planar requires even bounds along length axis 0 only
+        const auto real = [](const std::vector<size_t>& lower, const std::vector<size_t>& upper) {
+            return with_type(data_set_t(lower, upper, {3, 25, 101, 303}, 2),
+                             rocfft_array_type_real,
+                             rocfft_precision_single,
+                             {7, 0});
+        };
+        EXPECT_NO_THROW(real({2, 0, 0, 0}, {8, 4, 3, 2}).reinterpret_as(t));
+        EXPECT_THROW(real({1, 0, 0, 0}, {8, 4, 3, 2}).reinterpret_as(t), std::invalid_argument);
+        EXPECT_THROW(real({2, 0, 0, 0}, {7, 4, 3, 2}).reinterpret_as(t), std::invalid_argument);
+
+        // planar to real requires an even stride along length axis 0 and planes
+        // offset by half of it
+        const auto planar = [t](size_t stride0, const std::array<size_t, 2>& offsets) {
+            return with_type(data_set_t({1, 0, 0, 0}, {7, 4, 3, 2}, {stride0, 25, 101, 303}, 2),
+                             t,
+                             rocfft_precision_single,
+                             offsets);
+        };
+        EXPECT_NO_THROW(planar(4, {5, 7}).reinterpret_as(rocfft_array_type_real));
+        EXPECT_THROW(planar(3, {5, 6}).reinterpret_as(rocfft_array_type_real),
+                     std::invalid_argument);
+        EXPECT_THROW(planar(3, {5, 7}).reinterpret_as(rocfft_array_type_real),
+                     std::invalid_argument);
+        for(const auto& offsets :
+            std::vector<std::array<size_t, 2>>{{5, 5}, {5, 6}, {5, 8}, {7, 5}})
+        {
+            EXPECT_THROW(planar(4, offsets).reinterpret_as(rocfft_array_type_real),
+                         std::invalid_argument);
+        }
+    }
+}
+
+TEST_F(data_set_test, reinterpret_real_planar_embedded)
+{
+    const auto L = with_type(data_set_t({0, 0, 0, 0}, {8, 4, 6, 3}, {1, 10, 40, 240}),
+                             rocfft_array_type_real,
+                             rocfft_precision_double,
+                             {4, 0});
+    for(auto t : planar_types)
+    {
+        // length axis 0 of the sub-layout is L's: the embedding map is kept and
+        // reinterpreting commutes with get_embedding_data_set() (whose Hermitian
+        // results get the complex counterpart)
+        const auto sub = L.get_data_set_for_len_axes({0, 2});
+        ASSERT_TRUE(sub.is_embedded());
+        const auto dst = sub.reinterpret_as(t);
+        EXPECT_TRUE(dst.is_embedded());
+        EXPECT_TRUE(dst.get_embedding_data_set()
+                    == L.reinterpret_as(rocfft_array_type_complex_planar))
+            << dst.str();
+        EXPECT_EQ(dst.corresponding_axes_in_embedding(), sub.corresponding_axes_in_embedding());
+        const auto back = dst.reinterpret_as(rocfft_array_type_real);
+        EXPECT_TRUE(back == sub);
+        EXPECT_TRUE(back.get_embedding_data_set() == L);
+
+        // length axis 0 of the sub-layout is not the embedding's, although it is
+        // otherwise reinterpretable
+        const auto L_t = with_type(data_set_t({0, 0, 0, 0}, {4, 8, 6, 3}, {8, 1, 32, 192}),
+                                   rocfft_array_type_real,
+                                   rocfft_precision_double,
+                                   {4, 0});
+        EXPECT_THROW(L_t.get_data_set_for_len_axes({1}).reinterpret_as(t), std::invalid_argument);
+        EXPECT_THROW(L_t.get_data_set_for_len_axes({1, 2}).reinterpret_as(t),
+                     std::invalid_argument);
+        const auto L_t_planar = with_type(data_set_t({0, 0, 0, 0}, {4, 8, 6, 3}, {16, 2, 64, 384}),
+                                          t,
+                                          rocfft_precision_double,
+                                          {3, 4});
+        EXPECT_THROW(
+            L_t_planar.get_data_set_for_len_axes({1}).reinterpret_as(rocfft_array_type_real),
+            std::invalid_argument);
     }
 }
 
