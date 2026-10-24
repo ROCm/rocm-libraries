@@ -145,14 +145,14 @@ def table_row(spec: Spec) -> str:
     return "        (" + ", ".join(json.dumps(f) for f in fields) + "),"
 
 
-def render_tables(pins: dict[str, dict], s0_commit: str) -> str:
+def render_tables(pins: dict[str, dict]) -> str:
     by_kind: dict[str, list[Spec]] = {kernel: [] for kernel in KERNELS}
     for row in pins.values():
         spec = Spec.parse(row["spec"])
         by_kind[spec.kernel].append(spec)
     lines = [
         BEGIN,
-        f"# Source: sweep snapshot, sweep commit {s0_commit} (tools/sdpa_bwd_tables_from_sweep.py).",
+        "# Source: the sweep's pinned objects (tools/sdpa_bwd_tables_from_sweep.py).",
         "# fmt: off",
         "SDPA_BWD_TABLES = {",
     ]
@@ -195,9 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     _, found_end, tail = rest.partition(END)
     if not (found and found_end):
         raise SystemExit(f"{args.instances}: no {BEGIN!r} / {END!r} markers")
-    args.instances.write_text(
-        head + render_tables(pins, commit.group(1)) + tail, encoding="utf-8"
-    )
+    args.instances.write_text(head + render_tables(pins) + tail, encoding="utf-8")
 
     ordered = sorted(pins.values(), key=lambda r: r["spec"])
     write_csv(
@@ -217,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
     )
     print(
-        f"{len(pins)} rows from sweep commit {commit.group(1)}: "
+        f"{len(pins)} rows from the sweep snapshot: "
         + ", ".join(f"{k} {v}" for k, v in counts.items())
     )
     print(f"{len(flaky)} known-flaky hashes")

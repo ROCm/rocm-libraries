@@ -12,7 +12,7 @@ descriptor lanes, a different mechanism present before register allocation).
 
 `split_dumps` and `scan_text` take the text LLVM printed under `print-after=greedy`; `sdpa_bwd_gate.py` drives them.
 
-Source: the sweep's `tools/rmir.py` at the sweep snapshot (sweep commit e196d0d), without its `build_and_scan` (the generators dump and scan in
+Source: the sweep's `tools/rmir.py`, without its `build_and_scan` (the generators dump and scan in
 their own compile). The lane scanner `mirlanescan2` (`parse`, `ops`, `scan`) is copied verbatim.
 """
 

@@ -406,15 +406,14 @@ def exp2_wait_state(values):
 
 # --- the DS transpose reads, vendored ---------------------------------------
 #
-# `flash_attn_utils` at the `third_party/flydsl-kernel.txt` pin emits
+# `flash_attn_utils` at the pinned FlyDSL kernel commit (`FLYDSL_KERNELS_COMMIT`) emits
 # `ds_read_b64_tr_b16` as inline asm and takes no alias-scope arguments. The
 # gfx950 feature branch replaced that with the ROCDL op (FlyDSL `0a9c5906`),
 # and that commit is on no tag and not on `upstream/main` -- so no value of the
-# pin can reach it. Rather than make every build pass
-# `-DAOTRITON_FLYDSL_KERNEL_ROOT=<live checkout>` to be numerically correct,
-# the five emitters live here until the delta lands upstream. RETIRE THEM
-# when `0a9c5906` merges into FlyDSL's `upstream/main` and
-# `third_party/flydsl-kernel.txt` is bumped to a tag containing it: delete the
+# pin can reach it. Rather than depend on a live FlyDSL checkout to be
+# numerically correct, the five emitters live here until the delta lands
+# upstream. RETIRE THEM when `0a9c5906` merges into FlyDSL's `upstream/main`
+# and `FLYDSL_KERNELS_COMMIT` is bumped to a tag containing it: delete the
 # five, and put the `dualwave.` prefix back on the six call sites.
 
 
@@ -2372,7 +2371,7 @@ class ParityStoreHelper(dualwave.DualwaveStoreHelper):
 
         A Q block whose every row attends nothing never enters the kernel body
         -- `active` is `causal_end_raw > 0` -- so this method is the *only*
-        writer for it. At the pinned FlyDSL (`third_party/flydsl-kernel.txt`) it
+        writer for it. At the pinned FlyDSL (`FLYDSL_KERNELS_COMMIT`) it
         writes O and stops, which leaves LSE holding whatever the caller
         allocated. That is a wrong answer for any caller who will run a
         backward, and an unreadable one for a test harness: AOTriton's fills L

@@ -26,6 +26,13 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_compare  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
+from test_sdpa_bwd_gate import (
+    MERGED,
+    MERGED_CODE,
+    REDUCE,
+    REDUCE_CODE,
+    _elf,
+)  # noqa: E402
 
 RESOURCES = {
     "vgpr": 100,
@@ -51,11 +58,16 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _build_fixture(tmp_path: Path, **edits) -> list[str]:
+def _build_fixture(
+    tmp_path: Path, objects: dict[str, tuple[bytes, bytes]] | None = None, **edits
+) -> list[str]:
     """Reference data and a generator out-dir; returns the compare argv.
 
-    @p edits maps a fixture row name to a record patch applied to its manifest record.
+    @p objects maps a fixture row name to the (pin, shipped) object bytes that replace the
+    default text bodies. @p edits maps a fixture row name to a record patch applied to its
+    manifest record.
     """
+    objects = objects or {}
     ref_objects = tmp_path / "ref"
     ref_objects.mkdir()
     with (tmp_path / "ref.csv").open("w", newline="", encoding="utf-8") as fh:
@@ -63,7 +75,7 @@ def _build_fixture(tmp_path: Path, **edits) -> list[str]:
         writer.writerow(("hash", "spec", "sha256", *RESOURCES))
         for name, key in SPECS.items():
             digest = Spec.parse(key).hash()
-            body = f"pin {name}".encode()
+            body = objects[name][0] if name in objects else f"pin {name}".encode()
             (ref_objects / f"{digest}.hsaco").write_bytes(body)
             writer.writerow((digest, key, _sha(body), *RESOURCES.values()))
     with (tmp_path / "flaky.csv").open("w", newline="", encoding="utf-8") as fh:
@@ -81,6 +93,7 @@ def _build_fixture(tmp_path: Path, **edits) -> list[str]:
             "spec": key,
             "spec_hash": digest,
             "file": f"{name}.hsaco",
+            "symbol": MERGED,
             "resources": dict(RESOURCES),
             "gates": {"rmir": {"verdict": "ok", "spill_findings": 0}},
         }
@@ -89,6 +102,9 @@ def _build_fixture(tmp_path: Path, **edits) -> list[str]:
         body = f"pin {name}".encode()
         if name == "byte":
             body = b"pin bytf"
+        if name in objects:
+            body = objects[name][1]
+        record["sha256"] = _sha(body)
         if name == "resource":
             record["resources"]["vgpr"] += 1
         if name == "flaky":
@@ -124,9 +140,9 @@ def _run(argv: list[str], capsys) -> tuple[int, list[str]]:
 def test_differences_are_reported_and_the_exit_is_zero(tmp_path, capsys) -> None:
     status, lines = _run(_build_fixture(tmp_path), capsys)
     assert status == 0
-    assert lines[0] == "rocm_version: generator 10.2.0; reference unknown"
-    assert lines[1] == "2/5 byte-identical"  # the resource-row row has the pin's bytes
-    report = "\n".join(lines[2:])
+    assert "rocm_version: generator 10.2.0; reference unknown" in lines
+    assert "2/5 byte-identical" in lines  # the resource-row row has the pin's bytes
+    report = "\n".join(lines)
     assert "RED" not in report
     expected = {
         "sha differs": "dkdv tile=64 cls=causal",
@@ -167,7 +183,7 @@ def test_red_rows_exit_nonzero(tmp_path, capsys, row, patch, line) -> None:
     status, lines = _run(_build_fixture(tmp_path, **{row: patch}), capsys)
     assert status == 1
     assert any(l.startswith(line) for l in lines)
-    assert lines[-1] == "RED: 1 row(s)"
+    assert "RED: 1 row(s)" in lines
 
 
 DUAL = {"build_status": "dual_object", "file": "", "detail": "dual"}
@@ -198,7 +214,7 @@ def test_a_dual_object_outside_the_dq_causal_family_is_red(
     status, lines = _run(_build_fixture(tmp_path, **{row: DUAL}), capsys)
     assert status == 1
     assert sum(l.startswith("RED missing") for l in lines) == 1
-    assert lines[-1] == "RED: 1 row(s)"
+    assert "RED: 1 row(s)" in lines
 
 
 def test_an_op_without_a_manifest_is_missing_and_red(tmp_path, capsys) -> None:
@@ -211,11 +227,11 @@ def test_an_op_without_a_manifest_is_missing_and_red(tmp_path, capsys) -> None:
         for l in lines
     )
     assert any("no manifest: sdpa_bwd_merged" in l for l in lines)
-    assert lines[1] == "2/5 byte-identical"
+    assert "2/5 byte-identical" in lines
 
     status, lines = _run([*argv, "--only-built"], capsys)
     assert status == 0
-    assert lines[1] == "2/4 byte-identical"
+    assert "2/4 byte-identical" in lines
     assert any("no manifest: sdpa_bwd_merged" in l for l in lines)
 
 
@@ -235,7 +251,7 @@ def test_a_pinned_row_is_compared_by_its_rebuild(tmp_path, capsys) -> None:
     }
     status, lines = _run(_build_fixture(tmp_path, same=patch), capsys)
     assert status == 0
-    assert lines[1] == "1/5 byte-identical"
+    assert "1/5 byte-identical" in lines
     assert any(l.startswith("sha differs: dkdv tile=64 cls=plain") for l in lines)
     assert any("vgpr 104 != 100" in l for l in lines)
 
@@ -248,29 +264,79 @@ def test_a_shipped_object_that_is_not_the_pin_is_red(tmp_path, capsys) -> None:
     assert any(l.startswith("RED shipped: dkdv tile=64 cls=plain") for l in lines)
 
 
-def test_a_combined_row_is_judged_by_its_per_kernel_gate(tmp_path, capsys) -> None:
-    status, lines = _run(
-        _build_fixture(tmp_path, byte={"ship": "combined", "gates": _pin_gate("ok")}),
-        capsys,
+PIN_ELF = _elf({MERGED: MERGED_CODE})
+COMBINED_ELF = _elf({MERGED: MERGED_CODE, REDUCE: REDUCE_CODE})
+COMBINED = {"ship": "combined", "gates": _pin_gate("ok")}
+CAUSAL = "dkdv tile=64 cls=causal"
+
+
+@pytest.fixture(autouse=True)
+def _pin_metadata(monkeypatch) -> None:
+    """The ELF fixtures carry no AMDGPU metadata note; the pin's only kernel is the merged one."""
+    monkeypatch.setattr(
+        sdpa_bwd_compare.analyze,
+        "amdgpu_metadata",
+        lambda blob: {"amdhsa.kernels": [{".name": MERGED}]},
     )
+
+
+def _combined_fixture(
+    tmp_path: Path, shipped: bytes = COMBINED_ELF, **patch
+) -> list[str]:
+    return _build_fixture(
+        tmp_path, {"byte": (PIN_ELF, shipped)}, byte={**COMBINED, **patch}
+    )
+
+
+def test_a_combined_row_is_judged_by_its_per_kernel_gate(tmp_path, capsys) -> None:
+    status, lines = _run(_combined_fixture(tmp_path), capsys)
     assert status == 0
-    assert lines[3] == "1 combined object(s): 1 pass the per-kernel gate"
+    assert "1 combined object(s): 1 pass the per-kernel gate" in lines
     assert not any(
-        "dkdv tile=64 cls=causal" in l for l in lines
-    )  # not "sha differs": it is not the pin by construction
+        CAUSAL in l for l in lines
+    )  # not "sha differs": not the pin by construction
 
 
 def test_a_combined_row_with_a_red_gate_is_red(tmp_path, capsys) -> None:
     gates = _pin_gate(
         "red", "reduce resource row differs from the pin bb2f7c351824: vgpr 103 != 81"
     )
-    status, lines = _run(
-        _build_fixture(tmp_path, byte={"ship": "combined", "gates": gates}), capsys
-    )
+    status, lines = _run(_combined_fixture(tmp_path, gates=gates), capsys)
     assert status == 1
-    assert lines[3] == "1 combined object(s): 0 pass the per-kernel gate"
+    assert "1 combined object(s): 0 pass the per-kernel gate" in lines
     assert any(
-        l.startswith("RED per-kernel gate: dkdv tile=64 cls=causal")
+        l.startswith(f"RED per-kernel gate: {CAUSAL}")
         and "reduce resource row differs" in l
         for l in lines
     )
+
+
+def test_a_combined_object_with_another_merged_function_is_red(
+    tmp_path, capsys
+) -> None:
+    tampered = _elf({MERGED: MERGED_CODE[:-1] + b"\xff", REDUCE: REDUCE_CODE})
+    status, lines = _run(_combined_fixture(tmp_path, tampered), capsys)
+    assert status == 1
+    assert any(
+        l.startswith(f"RED per-kernel gate: {CAUSAL}")
+        and "merged function bytes differ from the pin" in l
+        for l in lines
+    )
+
+
+def test_a_combined_object_that_is_not_the_manifests_is_red(tmp_path, capsys) -> None:
+    argv = _combined_fixture(tmp_path)
+    (tmp_path / "out" / "sdpa_bwd_dkdv" / "gfx950" / "byte.hsaco").write_bytes(
+        b"garbage"
+    )
+    status, lines = _run(argv, capsys)
+    assert status == 1
+    assert any(l.startswith(f"RED shipped: {CAUSAL}") for l in lines)
+
+
+def test_a_missing_combined_object_is_red(tmp_path, capsys) -> None:
+    argv = _combined_fixture(tmp_path)
+    (tmp_path / "out" / "sdpa_bwd_dkdv" / "gfx950" / "byte.hsaco").unlink()
+    status, lines = _run(argv, capsys)
+    assert status == 1
+    assert any(l.startswith(f"RED missing: {CAUSAL}") for l in lines)

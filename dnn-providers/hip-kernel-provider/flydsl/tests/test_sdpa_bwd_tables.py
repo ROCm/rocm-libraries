@@ -7,7 +7,8 @@ The tables in ``generators/_instances.py`` are generated from the sweep snapshot
 (``tools/sdpa_bwd_tables_from_sweep.py``); ``tests/data/sdpa_bwd_reference.csv`` carries the
 hash and Spec key the sweep gave each pinned object. These tests hold the two to each
 other and to ``generators/_sdpa_bwd_spec.py``, so a table row that no longer names its
-pinned object, or a knob outside its domain, fails here. Pure Python: no FlyDSL.
+pinned object, or a knob outside its domain, fails here. Pure Python, except the engine-constant
+test, which resolves the dK/dV tuning and needs FlyDSL.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
     KERNELS,
+    LADDER,
     KNOBS,
     NON_KEY_FIELDS,
     ROW_FIELDS,
@@ -150,3 +152,30 @@ def test_known_flaky_hashes_are_pinned_objects() -> None:
     assert flaky and flaky.keys() <= reference.keys()
     for digest, row in flaky.items():
         assert row["spec"] == reference[digest]["spec"]
+
+
+def test_the_engines_restated_constants_match_the_tables(tables, monkeypatch) -> None:
+    """The merged engine restates three generator facts (`FlydslSdpaBwdMergedNative.cpp`).
+
+    * `LADDER`: the head-dim tiles objects are built at.
+    * The exact-tile range of its graph check: equal head dims of 64, 96, 128, 160 or 192,
+      plus one padded tile (32) for smaller dims.
+    * `PACK_MAX_BLOCK_Q`: the largest dK/dV block_q of a `gqa_pack == 1` row, which bounds the
+      engine's pack_split exactness test.
+    """
+    pytest.importorskip("flydsl")
+    monkeypatch.syspath_prepend(str(FLYDSL / "kernels_src"))
+    from generators import _sdpa_bwd_cdna_build as build  # noqa: PLC0415
+
+    assert LADDER == (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)  # LADDER
+    rows = tables["sdpa_bwd_merged"]
+    assert {to_spec(r).tile for r in rows} == {32, 64, 96, 128, 160, 192}  # exactTile
+    assert {to_spec(r).tile for r in rows if to_spec(r).padded} == {32}
+
+    packed = [r for r in rows if r.knobs["gqa_pack"] == 1]
+    assert packed
+    block_q = {r.name: build._build_merged(to_spec(r)).knobs[0].block_q for r in packed}
+    assert max(block_q.values()) <= 64, (  # PACK_MAX_BLOCK_Q
+        "a gqa_pack row has a dK/dV block_q above PACK_MAX_BLOCK_Q (64, "
+        f"FlydslSdpaBwdMergedNative.cpp): {block_q}"
+    )

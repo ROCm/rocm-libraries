@@ -1,10 +1,10 @@
 # attention_bwd_cdna
 
-The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce and dSink reduce, with the modules they share. Every file is written for this provider and has no upstream (`# Not vendored` header).
+The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce and dSink reduce, with the modules they share. Every file is written for this provider and has no upstream (`# Not vendored` header). "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources and pins come from.
 
 ## Origin
 
-The FlyDSL SDPA backward sweep at commit `e196d0d` (its sources are unchanged since `8142d08`). The kernel sources are the sweep snapshot's with three differences: the headers, the import lines (flat module imports became `kernels.attention_bwd_cdna` package imports, and the `sys.path` insertions of the prep, dBias and dSink modules were dropped), and black formatting. Two additions are deliberate: the merged launcher's optional second launch of the dBias reduce kernel (with its fast-math reset), and `_launch.kernel` on the reduce module.
+The FlyDSL SDPA backward sweep (an AMD-internal repository), at the commit whose pins are recorded in `tests/data/sdpa_bwd_reference.csv`. The kernel sources are the sweep snapshot's with three differences: the headers, the import lines (flat module imports became `kernels.attention_bwd_cdna` package imports, and the `sys.path` insertions of the prep, dBias and dSink modules were dropped), and black formatting. Two additions are deliberate: the merged launcher's optional second launch of the dBias reduce kernel (with its fast-math reset), and `_launch.kernel` on the reduce module.
 
 ## Modules
 
@@ -14,8 +14,8 @@ The FlyDSL SDPA backward sweep at commit `e196d0d` (its sources are unchanged si
 
 ## `flash_attn_utils`
 
-`gfx950_standalone.dualwave` resolves to `kernels.attention_cdna.flash_attn_utils`, the forward kernels' copy. It differs from the one the sweep built against (bias constants and `_no_keys`, generic bias and softmax paths, dual-wave scaled-score branches). The sampled specs were compiled against it: none of the backward objects changed, and every non-flaky one reproduced its pinned sha256.
+`gfx950_standalone.dualwave` resolves to `kernels.attention_cdna.flash_attn_utils`, the forward kernels' copy. It differs from the one the sweep built against (bias constants and `_no_keys`, generic bias and softmax paths, dual-wave scaled-score branches). The sampled specs (28, one per kind and dtype plus the known-flaky and special cases) were compiled against it: every non-flaky one reproduced its pinned sha256; the others are known-flaky builds.
 
 ## Build nondeterminism
 
-LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. Five specs are known to be bimodal: `1a114be37069`, `4691c39657a8`, `5f6f40c7b88a`, `065be7bccb37`, `d86ab8bde882`. A shipped object is pinned by hash; it is not rebuilt blindly.
+LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. `tests/data/sdpa_bwd_known_flaky.csv` lists the 22 `dq` causal specs that were nondeterministic in the sweep (a `source` column says how: `bimodal`, `rmir-retry`, `attempts`). Five of them are bimodal: `1a114be37069`, `4691c39657a8`, `5f6f40c7b88a`, `065be7bccb37`, `d86ab8bde882`. A shipped object is pinned by hash; it is not rebuilt blindly.

@@ -138,7 +138,7 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
     ued = _doc(documents, merged, "ued")
     assert ued["name"] == "hipkernel:flydsl_sdpa_bwd_merged"
     assert ued["sort_kernel_catalog"] == {"default": uhd["id"]}
-    assert ued["sdk_version"] == "1.2.0"
+    assert ued["sdk_version"] == _doc(documents, sibling, "ued")["sdk_version"]
 
 
 def test_kernel_metadata_carries_every_manifest_knob(documents):
