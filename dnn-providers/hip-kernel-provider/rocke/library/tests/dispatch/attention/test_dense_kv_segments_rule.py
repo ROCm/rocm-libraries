@@ -61,6 +61,8 @@ def _gfx950_grid_spec(sq, sk, hq, hkv=8, **over):
         (256, 4096, 32, 128, 8),
         (2048, 8192, 32, 256, 1),
         (2048, 2048, 32, 256, 1),
+        (2048, 32768, 40, 256, 2),
+        (2048, 16384, 64, 256, 1),
     ],
 )
 def test_gfx950_short_bottom_right_chunk_splits_kv(sq, sk, hq, block_m, segments):

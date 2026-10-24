@@ -30,7 +30,7 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments
+from .dense_rules import dense_kv_segments, dense_wave_segments
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -195,6 +195,10 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             if not _is_ragged(sq, sk, sbm, sbn):
                 bm, bn, ragged = sbm, sbn, False
                 kv_segments = dense_kv_segments(-(-sq // bm) * batch_heads, cus)
+        elif not ragged:
+            # A grid that covers the device can still leave its last wave mostly
+            # empty (a head count just past the CU count): split to fill it.
+            kv_segments = dense_wave_segments(-(-sq // bm) * batch_heads, cus)
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
             if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
