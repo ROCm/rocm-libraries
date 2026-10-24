@@ -1788,6 +1788,22 @@ INSTANTIATE_TEST_SUITE_P(
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     std::string{});
             }},
+        // An id names one candidate per device, even when the metadata tuples differ.
+        StateManagerConstructionThrowCase{
+            "RejectsTwoKernelsSharingAKernelId",
+            "is declared twice on an arch both declarations reach",
+            [] {
+                KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID});
+                // testId(0x64) is already "kernel_64_float"; this one differs in tuple only.
+                pack.kernels.push_back(makeKernel(testId(0x64), "kernel_same_id", 512, "FLOAT"));
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    "test.graph");
+            }},
         // The tuple is the completed one: a kernel leaving BLOCK_SIZE to its default of 64
         // is kernel_64_half under another spelling.
         StateManagerConstructionThrowCase{

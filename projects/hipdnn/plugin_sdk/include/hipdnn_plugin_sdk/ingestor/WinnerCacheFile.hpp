@@ -60,6 +60,8 @@ constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
 constexpr const char* WINNER_LINE_DISPATCH_ID_FIELD = "dispatch_id";
 constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
 constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
+constexpr const char* WINNER_LINE_SLOT_FIELD = "slot";
+constexpr const char* WINNER_LINE_PROGRAM_FIELD = "program";
 /// Bump when a record line's fields keep their shape but a meaning underneath one of them
 /// changes (decode would still succeed, just on a different interpretation than what was
 /// written). A change to GraphContentKey's own shape does not need a bump: it changes the key
@@ -70,6 +72,10 @@ constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
 /// Version 2 added the memory fields DeviceKey compares; version-1 lines are skipped
 /// rather than decoded with those fields zeroed.
 constexpr int WINNER_LINE_FORMAT_VERSION = 2;
+/// Format of the lines only a slotted engine writes: slot records (the v2 line plus a `slot`
+/// field) and `program` lines. Decode accepts v2 and v3; the encoder picks by key, so an
+/// unslotted engine's bytes stay v2.
+constexpr int WINNER_LINE_SLOTTED_FORMAT_VERSION = 3;
 
 /// True if @p component is usable verbatim as a path component: a non-empty run of ASCII
 /// letters, digits, '_' and '-'.
@@ -139,7 +145,8 @@ struct EngineIdentity
     hipdnn_data_sdk::utilities::Version version{};
 
     /// The catalog-ranking UHD's descriptor id; empty when the engine ships no UHD and
-    /// ranks on priority then id.
+    /// ranks on priority then id. A slotted engine's is its UED id, since it has one ranker
+    /// per slot and none of its own.
     std::string uhdId = {};
 
     /// Content hash over every model this engine can resolve, not a declared version
@@ -155,7 +162,8 @@ struct EngineIdentity
 
 /// Where @p engine's shard for @p gcnArchName lives:
 /// `cacheRoot()/ingestor-winners/<data-sdk version>/<sanitized-engine>/<uhd id>/
-///  <engine revision>-<model hash>/<base-arch>/winners.jsonl`.
+///  <engine revision>-<model hash>/<base-arch>/winners.jsonl`. A slotted engine's `<model hash>`
+/// is one combined digest over every slot's models, so all its slots share one shard.
 ///
 /// The last three components are RFC 0019 §9.2's "directory per heuristic build", so a
 /// new model or engine revision invalidates by writing to a new directory.
@@ -234,14 +242,14 @@ inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
     return hipdnn_data_sdk::utilities::openLineStore(path, winnerCacheVersion());
 }
 
-/// Encodes @p key and @p record as one JSON-Lines record: `key.graph` via
-/// `GraphContentKey::toJson()`, every field of `key.device` as plain JSON, and @p record as an
-/// array of ranked entries. `DescriptorId`s use the same UUID text format as
-/// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
-inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
+namespace detail
 {
-    // Structured binding so growing DeviceProperties stops this compiling until the codec
-    // (and WINNER_LINE_FORMAT_VERSION) persist the new field; DeviceKey compares them all.
+
+/// The envelope every line shares: the format stamp, the graph and the device. Structured
+/// binding so growing DeviceProperties stops this compiling until the codec (and the format
+/// versions) persist the new field; DeviceKey compares them all.
+inline nlohmann::json winnerLineEnvelope(const WinnerKey& key, int version)
+{
     const auto& [gcnArchName,
                  warpSize,
                  multiProcessorCount,
@@ -251,14 +259,66 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
                  sharedMemPerBlock]
         = key.device.properties();
     nlohmann::json device;
-    device[detail::WINNER_LINE_GCN_ARCH_NAME_FIELD] = gcnArchName;
-    device[detail::WINNER_LINE_WARP_SIZE_FIELD] = warpSize;
-    device[detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD] = multiProcessorCount;
-    device[detail::WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD] = totalGlobalMem;
-    device[detail::WINNER_LINE_MEMORY_BUS_WIDTH_FIELD] = memoryBusWidth;
-    device[detail::WINNER_LINE_MEMORY_CLOCK_RATE_FIELD] = memoryClockRate;
-    device[detail::WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD] = sharedMemPerBlock;
+    device[WINNER_LINE_GCN_ARCH_NAME_FIELD] = gcnArchName;
+    device[WINNER_LINE_WARP_SIZE_FIELD] = warpSize;
+    device[WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD] = multiProcessorCount;
+    device[WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD] = totalGlobalMem;
+    device[WINNER_LINE_MEMORY_BUS_WIDTH_FIELD] = memoryBusWidth;
+    device[WINNER_LINE_MEMORY_CLOCK_RATE_FIELD] = memoryClockRate;
+    device[WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD] = sharedMemPerBlock;
 
+    nlohmann::json line;
+    line[WINNER_LINE_FORMAT_FIELD] = version;
+    line[WINNER_LINE_GRAPH_FIELD] = key.graph.toJson();
+    line[WINNER_LINE_DEVICE_FIELD] = std::move(device);
+    return line;
+}
+
+/// Every DeviceKey field is required: a line missing one (a version-1 line, or a truncated
+/// one) must miss, never decode with a zero the writer did not measure. Throws on a
+/// mistyped field; the caller's catch turns that into a skipped line.
+inline std::optional<DeviceProperties> readDeviceProperties(const nlohmann::json& deviceField)
+{
+    DeviceProperties properties;
+    properties.gcnArchName = deviceField.at(WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
+    const auto warpSize = readNonNegative<int>(deviceField, WINNER_LINE_WARP_SIZE_FIELD);
+    const auto multiProcessorCount
+        = readNonNegative<int>(deviceField, WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
+    const auto totalGlobalMem
+        = readNonNegative<std::size_t>(deviceField, WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD);
+    const auto memoryBusWidth
+        = readNonNegative<int>(deviceField, WINNER_LINE_MEMORY_BUS_WIDTH_FIELD);
+    const auto memoryClockRate
+        = readNonNegative<int>(deviceField, WINNER_LINE_MEMORY_CLOCK_RATE_FIELD);
+    const auto sharedMemPerBlock
+        = readNonNegative<std::size_t>(deviceField, WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD);
+    if(!warpSize.has_value() || !multiProcessorCount.has_value() || !totalGlobalMem.has_value()
+       || !memoryBusWidth.has_value() || !memoryClockRate.has_value()
+       || !sharedMemPerBlock.has_value())
+    {
+        return std::nullopt;
+    }
+    properties.warpSize = *warpSize;
+    properties.multiProcessorCount = *multiProcessorCount;
+    properties.totalGlobalMem = *totalGlobalMem;
+    properties.memoryBusWidth = *memoryBusWidth;
+    properties.memoryClockRate = *memoryClockRate;
+    properties.sharedMemPerBlock = *sharedMemPerBlock;
+    return properties;
+}
+
+} // namespace detail
+
+/// Encodes @p key and @p record as one JSON-Lines record: `key.graph` via
+/// `GraphContentKey::toJson()`, every field of `key.device` as plain JSON, and @p record as an
+/// array of ranked entries. `DescriptorId`s use the same UUID text format as
+/// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
+///
+/// The encoder picks the format: a key with no slot is the unslotted whole-graph record, written
+/// as format v2; a key with a slot is a slot record, written as v3 with a
+/// `slot` field. v3 is therefore only ever written for slotted engines.
+inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
+{
     nlohmann::json entries = nlohmann::json::array();
     for(const auto& entry : record)
     {
@@ -270,23 +330,61 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
         entries.push_back(std::move(entryJson));
     }
 
-    nlohmann::json line;
-    line[detail::WINNER_LINE_FORMAT_FIELD] = detail::WINNER_LINE_FORMAT_VERSION;
-    line[detail::WINNER_LINE_GRAPH_FIELD] = key.graph.toJson();
-    line[detail::WINNER_LINE_DEVICE_FIELD] = std::move(device);
+    const bool slotted = !key.slot.empty();
+    auto line = detail::winnerLineEnvelope(key,
+                                           slotted ? detail::WINNER_LINE_SLOTTED_FORMAT_VERSION
+                                                   : detail::WINNER_LINE_FORMAT_VERSION);
+    if(slotted)
+    {
+        line[detail::WINNER_LINE_SLOT_FIELD] = key.slot;
+    }
     line[detail::WINNER_LINE_ENTRIES_FIELD] = std::move(entries);
     return line.dump();
 }
 
-/// Decodes one line written by `encodeWinnerRecordLine()`. A missing/mistyped field, a
-/// graph payload `GraphContentKey::fromJson()` declines, or an unparsable `DescriptorId`
-/// all return std::nullopt (never throw), matching LineStore's skip-malformed-line contract.
+/// Encodes @p program as one format-v3 `program` line for @p baseKey (whose `slot` is
+/// ignored: a program line belongs to the whole graph): the slot-to-kernel map in slot order and
+/// the total time.
+inline std::string encodeProgramLine(const WinnerKey& baseKey, const ProgramRecord& program)
+{
+    nlohmann::json picks = nlohmann::json::array();
+    for(const auto& pick : program.picks)
+    {
+        nlohmann::json pickJson;
+        pickJson[detail::WINNER_LINE_SLOT_FIELD] = pick.slot;
+        pickJson[detail::WINNER_LINE_KERNEL_ID_FIELD] = toString(pick.kernelId);
+        picks.push_back(std::move(pickJson));
+    }
+
+    auto line = detail::winnerLineEnvelope(baseKey, detail::WINNER_LINE_SLOTTED_FORMAT_VERSION);
+    line[detail::WINNER_LINE_PROGRAM_FIELD] = std::move(picks);
+    line[detail::WINNER_LINE_TIME_MS_FIELD] = program.timeMs;
+    return line.dump();
+}
+
+/// One decoded shard line: a ranking under `key` (a whole-graph record when `key.slot` is
+/// empty, a slot record otherwise), or, when `program` is set, the program line for `key`.
+struct DecodedWinnerLine
+{
+    WinnerKey key;
+    /// Meaningful only when `program` is empty.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    WinnerRecord record{};
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<ProgramRecord> program{};
+};
+
+/// Decodes one line written by `encodeWinnerRecordLine()` or `encodeProgramLine()`. Format v2
+/// is a whole-graph record; v3 is a slot record (`slot` and `entries`) or a program line
+/// (`program`). A v3 line with neither is skipped, so v3 never reads back as an unslotted
+/// record. A missing/mistyped field, a graph payload `GraphContentKey::fromJson()` declines, or
+/// an unparsable `DescriptorId` all return std::nullopt (never throw), matching LineStore's
+/// skip-malformed-line contract.
 ///
 /// The catch is unrestricted because this is `noexcept`: a shard line has no size bound,
 /// so parsing one can throw `std::bad_alloc` as readily as a JSON error or `parseUuid()`'s
 /// `std::invalid_argument`, and any of them escaping calls `std::terminate`.
-inline std::optional<std::pair<WinnerKey, WinnerRecord>>
-    decodeWinnerRecordLine(std::string_view line) noexcept
+inline std::optional<DecodedWinnerLine> decodeWinnerLine(std::string_view line) noexcept
 {
     try
     {
@@ -297,11 +395,17 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         }
 
         const auto formatField = json.find(detail::WINNER_LINE_FORMAT_FIELD);
-        if(formatField == json.end() || !formatField->is_number_integer()
-           || formatField->get<int64_t>() != detail::WINNER_LINE_FORMAT_VERSION)
+        if(formatField == json.end() || !formatField->is_number_integer())
         {
             return std::nullopt;
         }
+        const auto version = formatField->get<int64_t>();
+        if(version != detail::WINNER_LINE_FORMAT_VERSION
+           && version != detail::WINNER_LINE_SLOTTED_FORMAT_VERSION)
+        {
+            return std::nullopt;
+        }
+        const bool slottedFormat = version == detail::WINNER_LINE_SLOTTED_FORMAT_VERSION;
 
         const auto graphField = json.find(detail::WINNER_LINE_GRAPH_FIELD);
         if(graphField == json.end())
@@ -320,36 +424,51 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         {
             return std::nullopt;
         }
-
-        // Every DeviceKey field is required: a line missing one (a version-1 line, or a
-        // truncated one) must miss, never decode with a zero the writer did not measure.
-        DeviceProperties properties;
-        properties.gcnArchName
-            = deviceField->at(detail::WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
-        const auto warpSize
-            = detail::readNonNegative<int>(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
-        const auto multiProcessorCount = detail::readNonNegative<int>(
-            *deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
-        const auto totalGlobalMem = detail::readNonNegative<std::size_t>(
-            *deviceField, detail::WINNER_LINE_TOTAL_GLOBAL_MEM_FIELD);
-        const auto memoryBusWidth = detail::readNonNegative<int>(
-            *deviceField, detail::WINNER_LINE_MEMORY_BUS_WIDTH_FIELD);
-        const auto memoryClockRate = detail::readNonNegative<int>(
-            *deviceField, detail::WINNER_LINE_MEMORY_CLOCK_RATE_FIELD);
-        const auto sharedMemPerBlock = detail::readNonNegative<std::size_t>(
-            *deviceField, detail::WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD);
-        if(!warpSize.has_value() || !multiProcessorCount.has_value() || !totalGlobalMem.has_value()
-           || !memoryBusWidth.has_value() || !memoryClockRate.has_value()
-           || !sharedMemPerBlock.has_value())
+        auto properties = detail::readDeviceProperties(*deviceField);
+        if(!properties.has_value())
         {
             return std::nullopt;
         }
-        properties.warpSize = *warpSize;
-        properties.multiProcessorCount = *multiProcessorCount;
-        properties.totalGlobalMem = *totalGlobalMem;
-        properties.memoryBusWidth = *memoryBusWidth;
-        properties.memoryClockRate = *memoryClockRate;
-        properties.sharedMemPerBlock = *sharedMemPerBlock;
+
+        DecodedWinnerLine decoded{
+            WinnerKey{std::move(*graph), DeviceKey{std::move(*properties)}}, {}, std::nullopt};
+
+        const auto programField = json.find(detail::WINNER_LINE_PROGRAM_FIELD);
+        if(slottedFormat && programField != json.end())
+        {
+            if(!programField->is_array() || programField->empty())
+            {
+                return std::nullopt;
+            }
+            ProgramRecord program;
+            program.picks.reserve(programField->size());
+            for(const auto& pickJson : *programField)
+            {
+                ProgramPick pick;
+                pick.slot = pickJson.at(detail::WINNER_LINE_SLOT_FIELD).get<std::string>();
+                if(pick.slot.empty())
+                {
+                    return std::nullopt;
+                }
+                pick.kernelId = hipdnn_flatbuffers_sdk::utilities::parseUuid(
+                    pickJson.at(detail::WINNER_LINE_KERNEL_ID_FIELD).get<std::string>());
+                program.picks.push_back(std::move(pick));
+            }
+            program.timeMs = json.at(detail::WINNER_LINE_TIME_MS_FIELD).get<double>();
+            decoded.program = std::move(program);
+            return decoded;
+        }
+
+        if(slottedFormat)
+        {
+            const auto slotField = json.find(detail::WINNER_LINE_SLOT_FIELD);
+            if(slotField == json.end() || !slotField->is_string()
+               || slotField->get<std::string>().empty())
+            {
+                return std::nullopt;
+            }
+            decoded.key.slot = slotField->get<std::string>();
+        }
 
         const auto entriesField = json.find(detail::WINNER_LINE_ENTRIES_FIELD);
         if(entriesField == json.end() || !entriesField->is_array())
@@ -357,8 +476,7 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
             return std::nullopt;
         }
 
-        WinnerRecord record;
-        record.reserve(entriesField->size());
+        decoded.record.reserve(entriesField->size());
         for(const auto& entryJson : *entriesField)
         {
             RankedEntry entry;
@@ -369,16 +487,27 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
             entry.dispatchId = hipdnn_flatbuffers_sdk::utilities::parseUuid(
                 entryJson.at(detail::WINNER_LINE_DISPATCH_ID_FIELD).get<std::string>());
             entry.timeMs = entryJson.at(detail::WINNER_LINE_TIME_MS_FIELD).get<double>();
-            record.push_back(entry);
+            decoded.record.push_back(entry);
         }
-
-        return std::make_pair(WinnerKey{std::move(*graph), DeviceKey{std::move(properties)}},
-                              std::move(record));
+        return decoded;
     }
     catch(...)
     {
         return std::nullopt;
     }
+}
+
+/// Decodes a ranking line (format v2, or a v3 slot record); a program line yields nullopt.
+/// See `decodeWinnerLine()` for the full set of lines and the fail-soft contract.
+inline std::optional<std::pair<WinnerKey, WinnerRecord>>
+    decodeWinnerRecordLine(std::string_view line) noexcept
+{
+    auto decoded = decodeWinnerLine(line);
+    if(!decoded.has_value() || decoded->program.has_value())
+    {
+        return std::nullopt;
+    }
+    return std::make_pair(std::move(decoded->key), std::move(decoded->record));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

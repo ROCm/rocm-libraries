@@ -96,7 +96,8 @@ arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
 error; `2` unusable input: a missing or invalid config, a non-existent `--emitted-root`, an
 `--output-dir` that is not a directory, a non-empty output directory without `--force`,
-a config the renderer rejects, or a bad flag (argparse).
+a config the renderer rejects, `--check-placeholders` on a slotted config (descriptors
+only: nothing to check), or a bad flag (argparse).
 
 ### Extending a live engine
 
@@ -156,7 +157,8 @@ verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` be
                                     # descriptors/<producer>/<bundle>/ (packaged)
     <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
     <slug>.ued.json                 # UED -- the engine descriptor
-    <slug>.udd.json                 # UDD -- dispatch symbol
+    <slug>.udd.json                 # UDD -- dispatch symbol (a slotted engine: one
+                                    # <slug>_<slot>.udd.json per slot)
     <slug>.uhd.json                 # UHD -- only when engine.heuristic != "none"
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
@@ -743,8 +745,39 @@ names it launches and owns their order, and the provider drops a kernel whose la
 differ from the handler's when it builds its catalog. One engine has one handler, so every
 kernel of an engine must name the same set of launches: a config mixing single- and
 multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). See the
+engines by launch set). In a slotted engine the rule holds per slot, because each slot has
+its own handler (see "Slotted engines"). See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
+## Slotted engines: `slots`
+
+A config with a `slots` list describes a slotted engine (RFC 0021): `engine.shared_workspace`
+names the shared-workspace token, each slot declares `name`, `kmd_fields`, `knobs`, `ranker`
+and `specialization`, and every pack names its `slot`. The loader refuses `kmd_fields`,
+`specialization`, `engine.knobs` and a non-`none` `engine.heuristic` beside `slots`, so a
+slotted config declares them per slot. `tests/fixtures/slotted_three_slot.yaml` is the
+reference. A slotted config generates descriptors only: no native stub, census, matcher test or fragments,
+and no provider splice (`generate.py` prints `Descriptors only: no provider splice for slotted
+engines`), and `--check-placeholders` is refused for it (exit 2). The slotted engine's runtime
+behavior, benchmarking and tooling are in the
+[RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md#slotted-engines-rfc-0021).
+
+Each slot emits its own KMD, its own UDD (`<slug>_<slot>.udd.json`, dispatch symbol
+`<namespace>.<slot>_dispatch`) and, when it ranks, its own UHD; a slot's KDPs name the slot's
+UDD. Packs with different launch sets need different dispatch descriptors (RFC 0021 §4), so
+a single-launch `prep` slot can sit beside a multi-launch `dkdv` slot. In the packaged
+dialect a slotted `rocke` pack accepts `launches` exactly as an unslotted one does and emits
+the authored UKD with a `sources` map (UKD 1.1); the launch-set check runs per slot, and a
+slot mixing single- and multi-launch kernels is a `ConfigError`. Kernels whose dependent
+launches live in one code object, as an `hsaco` UKD cannot carry `sources`, are launched by
+the slot's native handler by symbol names its KMD records, which needs no descriptor beyond
+the KMD field (RFC 0021 §3). Unslotted output is byte-identical to a generator without
+slots (`tests/test_slots.py` pins it against a golden).
+
+The `uhd_gen` slot tests (`uhd_gen/tests/test_promote_slots.py`,
+`test_slot_ranker_install.py`, `test_slotted_sweep.py`) import pandas, pyarrow and lightgbm,
+which CI does not install: they skip there and run only locally. CI covers slots through the
+validator roots (`hipdnn_validate_descriptors_slotted_*`) and this suite.
 
 ## The five pre-mint config-loader checks
 

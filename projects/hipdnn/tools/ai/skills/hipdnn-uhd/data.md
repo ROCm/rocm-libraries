@@ -191,6 +191,25 @@ segment is the selector revision with `/` as `-`.
    prediction. Grow the set with those quotas: `hipdnn_corpus_gen ... --regime-quotas
    <regime_quotas.json> --count 0` (the quotas alone), excluding every active set.
 
+## Slotted sweeps
+
+A slotted engine's measurements ([generate.md](generate.md), "Slotted engines") are
+`hipdnn_bench --sweep` CSVs. They hold every composite candidate: `kernel` (the composite id,
+`prep=<id>|dkdv=<id>|dq=<id>`), `kernel.<slot>.<field>` per slot knob and a `slot_reference`
+column naming the slots (joined by `|`) whose training rows a row is. Convert one as in
+step 4's `--csv` row (`dataset add --csv`, binding flags stated); `ws.*` columns are
+dropped on the way in. One dataset then trains every slot:
+
+- `uhd_gen generate --dataset <dataset dir> --slot <slot> --no-promote --features ...
+  --descriptor-tree <tree> --engine <UED name> ...` trains that slot's ranker
+  ([generate.md](generate.md), "Slotted engines");
+- `python3 -m uhd_gen.dataset export --from <dataset dir> --purpose training --slot <slot>
+  --out <file>` writes that slot's rows, `kernel.<slot>.<field>` renamed `kernel.<field>`;
+- `uhd_gen knobs --input <sweep.csv> --slot <slot>` judges that slot's knobs on its rows.
+
+`--slot` on a corpus that is not a slotted sweep, a sweep without `slot_reference`, or an
+unknown slot name is refused; `generate --slot` needs `--dataset`.
+
 ## Published engines
 
 An engine whose measurements come from another source only converts and trains: no shape

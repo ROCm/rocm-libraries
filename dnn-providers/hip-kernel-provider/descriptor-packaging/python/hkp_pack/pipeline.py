@@ -722,7 +722,7 @@ def _agreement_inputs(flat, arch):
                 f"KDP {kdp.path.name}: engine '{engine_id}' resolves to no descriptor"
             )
         engine = generics[canonical_id(engine_id)].doc
-        kmd_id = engine.get("metadata")
+        kmd_id = agreement.pack_kmd_reference(engine, kdp.doc, f"KDP {kdp.path.name}")
         kmd_desc = generics.get(canonical_id(kmd_id))
         if kmd_desc is None or kmd_desc.type != "kmd":
             raise HkpPackError(

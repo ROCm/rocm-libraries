@@ -106,6 +106,26 @@ nlohmann::json baseDocument(Base base)
     return document;
 }
 
+/// The slot provenance forms of RFC 0021 §9 exist only in a 1.1 document.
+nlohmann::json slotKmdForm(nlohmann::json document, const std::string& slot)
+{
+    document["version"] = "1.1";
+    document["trained_against"]["slot"] = slot;
+    return document;
+}
+
+/// A 1.1 native document whose provenance names a slot's KMD per slot (`kmds`) in place of `kmd`.
+nlohmann::json kmdsForm(nlohmann::json document)
+{
+    document["version"] = "1.1";
+    auto& provenance = document["trained_against"];
+    provenance.erase("kmd");
+    provenance["kmds"]
+        = {{{"slot", "prep"}, {"id", "31112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}},
+           {{"slot", "dkdv"}, {"id", "32112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.2"}}};
+    return document;
+}
+
 /// Nested arrays reaching one level past what either bound admits.
 nlohmann::json nestedBeyondDepthBound()
 {
@@ -196,7 +216,7 @@ const std::vector<Refusal> REFUSALS = {
     {"RootIsNotAnObject", Base::NATIVE, [](nlohmann::json& doc) { doc = nlohmann::json::array(); }},
     {"UnknownRootKey", Base::NATIVE, [](nlohmann::json& doc) { doc["featuresHash"] = "x"; }},
     {"MissingVersion", Base::NATIVE, [](nlohmann::json& doc) { doc.erase("version"); }},
-    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.1"; }},
+    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.2"; }},
     {"IdIsNotAUuid", Base::NATIVE, [](nlohmann::json& doc) { doc["id"] = "model-1"; }},
     {"EmptyName", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = ""; }},
     {"NameIsNotAString", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = 3; }},
@@ -326,6 +346,114 @@ const std::vector<Refusal> REFUSALS = {
     {"FeatureSemanticsRevisionIsABoolean",
      Base::NATIVE,
      [](nlohmann::json& doc) { doc["trained_against"]["feature_semantics_revision"] = true; }},
+    // Slot provenance (RFC 0021 §9), each a valid 1.1 form changed in one place
+    {"SlotProvenanceInAVersion10Document",
+     Base::NATIVE,
+     [](nlohmann::json& doc) { doc["trained_against"]["slot"] = "prep"; }},
+    {"KmdsInAVersion10Document",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         const auto version = doc["version"];
+         doc = kmdsForm(doc);
+         doc["version"] = version;
+     }},
+    {"KmdsNamesASlotTwice",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"].push_back(doc["trained_against"]["kmds"][0]);
+     }},
+    {"KmdsBesideKmd",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         const auto kmd = doc["trained_against"]["kmd"];
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmd"] = kmd;
+     }},
+    {"SlotWithoutKmd",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["slot"] = "prep";
+     }},
+    {"KmdsSlotIsGlobal",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["slot"] = "global";
+     }},
+    {"KmdsSlotStartsWithADigit",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["slot"] = "1prep";
+     }},
+    {"KmdsSlotStartsWithAnUnderscore",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["slot"] = "_prep";
+     }},
+    {"KmdsSlotHasAnUppercaseLetter",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][1]["slot"] = "dkDv";
+     }},
+    {"KmdsSlotIsEmpty",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["slot"] = "";
+     }},
+    {"EmptyKmds",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"] = nlohmann::json::array();
+     }},
+    {"KmdsIsNotAnArray",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"] = doc["trained_against"]["kmds"][0];
+     }},
+    {"KmdsEntryWithAnUnknownKey",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["kmd"] = "x";
+     }},
+    {"KmdsEntryIdIsNotAUuid",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["id"] = "prep";
+     }},
+    {"KmdsEntryRevisionIsNotMajorMinor",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"]["kmds"][0]["revision"] = "1";
+     }},
+    {"KmdsWithoutUed",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = kmdsForm(doc);
+         doc["trained_against"].erase("ued");
+     }},
+    {"SingleSlotIsGlobal",
+     Base::NATIVE,
+     [](nlohmann::json& doc) { doc = slotKmdForm(doc, "global"); }},
+    {"SingleSlotHasAnUppercaseLetter",
+     Base::NATIVE,
+     [](nlohmann::json& doc) { doc = slotKmdForm(doc, "Prep"); }},
+    {"SingleSlotIsNotAString",
+     Base::NATIVE,
+     [](nlohmann::json& doc) {
+         doc = slotKmdForm(doc, "prep");
+         doc["trained_against"]["slot"] = 3;
+     }},
     // Bodies
     {"NativeWithoutASymbol",
      Base::NATIVE,
@@ -380,6 +508,29 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     // static_order scores nothing, so it is admitted without an objective.
     const auto ordered = parseUhdConfig(baseDocument(Base::STATIC_ORDER), descriptorPath());
     EXPECT_EQ(ordered.adapterType, "static_order");
+}
+
+/// Each slot provenance form of RFC 0021 §9 is accepted in a 1.1 document, including names the
+/// refusals sit next to.
+TEST(TestUhdParser, AcceptsEachSlotProvenanceForm)
+{
+    const auto base = baseDocument(Base::NATIVE);
+
+    const auto single = parseUhdConfig(slotKmdForm(base, "dkdv_2"), descriptorPath());
+    EXPECT_EQ(single.trainedAgainst.at("slot"), "dkdv_2");
+    EXPECT_TRUE(single.trainedAgainst.contains("kmd"));
+    EXPECT_FALSE(single.trainedAgainst.contains("kmds"));
+
+    const auto many = parseUhdConfig(kmdsForm(base), descriptorPath());
+    EXPECT_FALSE(many.trainedAgainst.contains("kmd"));
+    ASSERT_EQ(many.trainedAgainst.at("kmds").size(), 2U);
+    EXPECT_EQ(many.trainedAgainst.at("kmds")[1].at("slot"), "dkdv");
+
+    // One slot is a valid kmds, and a name may contain digits and underscores after its letter.
+    auto one = kmdsForm(base);
+    one["trained_against"]["kmds"] = nlohmann::json::array({one["trained_against"]["kmds"][0]});
+    one["trained_against"]["kmds"][0]["slot"] = "p_9";
+    EXPECT_NO_THROW(parseUhdConfig(one, descriptorPath()));
 }
 
 /// The boundaries the int32 refusals sit next to are themselves accepted.

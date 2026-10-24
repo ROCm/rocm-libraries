@@ -23,6 +23,98 @@ from typing import Any
 #: The statistic a repeat is judged by, lowest kept.
 BEST_STATISTIC = "avgTimeMs"
 
+#: A slotted sweep's marker column (RFC 0021 §7): the slots, joined by `|`, whose training rows
+#: this row is. Empty when it is no slot's.
+SLOT_REFERENCE = "slot_reference"
+
+#: The root of a slotted engine's workspace tokens (`ws.scratch_offset`, `ws.<name>.offset`).
+#: They describe the engine's own buffer layout, not the problem, so no training row carries
+#: them (RFC 0021 §6).
+WORKSPACE_PREFIX = "ws."
+
+
+def slot_kernels(identity: object) -> dict[str, str]:
+    """A slotted candidate's composite id, `prep=<id>|dkdv=<id>|dq=<id>`, as slot -> kernel id
+    in slot order; empty for the bare kernel id of an unslotted candidate."""
+    if not isinstance(identity, str) or "=" not in identity:
+        return {}
+    kernels: dict[str, str] = {}
+    for part in identity.split("|"):
+        slot, equals, kernel = part.partition("=")
+        if not equals or not slot or not kernel or slot in kernels:
+            raise ValueError(f"{identity!r} is not a composite candidate id")
+        kernels[slot] = kernel
+    return kernels
+
+
+def slot_names(rows: list[dict]) -> list[str]:
+    """The slots of a slotted sweep's rows, in slot order; empty for an unslotted corpus."""
+    names: list[str] = []
+    for row in rows:
+        for slot in slot_kernels(row.get("kernel")):
+            if slot not in names:
+                names.append(slot)
+    return names
+
+
+def _marked_slots(row: dict) -> set[str]:
+    marks = row.get(SLOT_REFERENCE)
+    return set(marks.split("|")) if isinstance(marks, str) and marks else set()
+
+
+def slot_training_rows(rows: list[dict], slot: str) -> list[dict]:
+    """The rows that train `slot`'s ranker, in the shape of an unslotted corpus.
+
+    Keeps the rows whose `slot_reference` names `slot`: the reference program and every
+    candidate that varies only this slot, i.e. the whole-program times of this slot's kernels
+    with the other slots at their reference picks. Each is rewritten to a bare kernel: `kernel`
+    is this slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
+    `$kernel.<field>` signature), `knob_settings` keeps this slot's knobs under their field
+    names, and the other slots' columns, the marker and the `ws.` tokens are dropped.
+
+    Raises when the rows are not a slotted sweep, name no such slot, or hold none of its rows.
+    """
+    slots = slot_names(rows)
+    if not slots:
+        raise ValueError(
+            "--slot needs the rows of a slotted engine's sweep: none carries a composite "
+            "`slot=<kernel id>|...` kernel id"
+        )
+    if slot not in slots:
+        raise ValueError(f"the sweep has no slot {slot!r}; its slots are {slots}")
+    if not any(SLOT_REFERENCE in row for row in rows):
+        raise ValueError(
+            f"the sweep has no {SLOT_REFERENCE} column, so its reference rows cannot be told; "
+            "collect it with a hipdnn_bench that marks slotted sweeps"
+        )
+    own = f"kernel.{slot}."
+    others = tuple(f"kernel.{other}." for other in slots if other != slot)
+    kept = []
+    for row in rows:
+        if slot not in _marked_slots(row):
+            continue
+        view = {}
+        for name, value in row.items():
+            if name == SLOT_REFERENCE or name.startswith((WORKSPACE_PREFIX, *others)):
+                continue
+            view[f"kernel.{name[len(own):]}" if name.startswith(own) else name] = value
+        view["kernel"] = slot_kernels(row["kernel"])[slot]
+        knobs = view.get("knob_settings")
+        if isinstance(knobs, (str, dict)):
+            parsed = json.loads(knobs) if isinstance(knobs, str) else knobs
+            mine = {
+                name[len(slot) + 1 :]: pinned
+                for name, pinned in parsed.items()
+                if name.startswith(f"{slot}.")
+            }
+            view["knob_settings"] = (
+                json.dumps(mine, sort_keys=True) if isinstance(knobs, str) else mine
+            )
+        kept.append(view)
+    if not kept:
+        raise ValueError(f"no row of the sweep is a reference row of slot {slot!r}")
+    return kept
+
 
 def measurement_key(row: dict) -> tuple:
     """What a measurement is of: a configuration on a graph, on a kind of device.

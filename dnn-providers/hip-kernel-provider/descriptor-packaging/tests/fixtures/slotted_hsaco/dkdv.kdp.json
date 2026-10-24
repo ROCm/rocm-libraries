@@ -1,0 +1,50 @@
+{
+  "version": "1.1",
+  "id": "d5c00000-0000-4000-8000-000000000011",
+  "name": "hipkernel:slotted_hsaco_dkdv",
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "d5c00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "d5c00000-0000-4000-8000-000000000001",
+  "dispatch": "d5c00000-0000-4000-8000-000000000009",
+  "slot": "dkdv",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d5c00000-0000-4000-8000-000000000021",
+      "name": "dkdv.hsaco",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "objects/gfx950/HsacoFixture.co",
+        "symbol": "HsacoFixtureAdd"
+      },
+      "metadata": {
+        "dtype": "FLOAT"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "d5c00000-0000-4000-8000-000000000001",
+              "kmd_id": "d5c00000-0000-4000-8000-000000000003",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "dtype"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

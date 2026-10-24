@@ -1,0 +1,22 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000001",
+  "name": "hipkernel:ValidateFixtureSlottedMultiLaunch",
+  "graph_match": {
+    "native": "hipkernel.fixture_slotted_multi_launch.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "c2a00000-0000-4000-8000-000000000002"
+    },
+    {
+      "name": "dkdv",
+      "metadata": "c2a00000-0000-4000-8000-000000000003"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "hkp-packed.marker": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "solo.kdp.json": "a5d654e9b6c1e0619d11cd90dfddd255f4a6a133dec34617f08050cd844b5609",
+  "solo.kdp.provenance.json.gz": "22af2ee2416b05429d973d9af400f77aafb00bb925de26445438881e04fe1145",
+  "solo.kmd.json": "0149db603d09376d037da305d67744309bdf8a3ea707e7c8a40daf3dfa94599d",
+  "solo.udd.json": "963df4156a5794870952b286a8f636f222bffc8768f74afc15f2d496a7d36367",
+  "solo.ued.json": "e5e94dafea159ca19c46319bff00b9257ac536d9e527fea2157da4f580cc31ab",
+  "solo.uhd.json": "939aaddaddcb41c51dbf3d59ea6b37e37c49f4c051e4e031f9211ced52c3fdb9",
+  "solo.umd.json": "cc6a16d64ab1f516486570f4afb6830ad5dfe17aa1f9afe3f62bce05497a3f67"
+}
