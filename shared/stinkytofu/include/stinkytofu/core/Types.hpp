@@ -124,6 +124,12 @@ struct PassFeatureConfig {
         /// Minimum WMMAs in a forced burst: 1..wmmaQueueDepth (clamped), -1 = wmmaQueueDepth.
         /// Only the burst length changes; the queue model keeps wmmaQueueDepth.
         int queueStartMinWmmaBurst = -1;
+        /// After a forced burst, a calibrated WMMA timeline charges every pick this many issue
+        /// cycles: the modeled timeline charges most picks 1, while the hardware spends ~4
+        /// between WMMAs and runs waits the scheduler does not see. When the calibrated queued
+        /// cover drops below two picks, the next ready WMMA goes ahead of ds_loads and fillers,
+        /// as in the burst. Only with queueStartForceWmmaBurst; 0 = off.
+        int queueStartCalibratedIssueCycles = 0;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.

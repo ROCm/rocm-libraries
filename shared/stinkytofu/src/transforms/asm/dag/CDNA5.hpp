@@ -769,6 +769,31 @@ class CDNA5ReadyQueue : public ReadyQueue {
         wmmaRefilling_ = false;
         wmmaRefillLeft_ = 0;
     }
+    // Calibrated WMMA timeline (dagFeatures.queueStartCalibratedIssueCycles): from a forced
+    // burst on, every pick costs that many issue cycles, and each WMMA runs its latency after
+    // the previous one ends.
+    bool calibratedOn_ = false;
+    int calibratedClock_ = 0;
+    int calibratedEnd_ = 0;
+    int calibratedIssueCycles() const {
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        return f.queueStartForceWmmaBurst ? std::max(0, f.queueStartCalibratedIssueCycles) : 0;
+    }
+    void startCalibratedTimeline() {
+        calibratedOn_ = calibratedIssueCycles() > 0;
+        calibratedClock_ = 0;
+        calibratedEnd_ = 0;
+    }
+    int calibratedCoverCycles() const {
+        return std::max(0, calibratedEnd_ - calibratedClock_);
+    }
+    void advanceCalibratedTimeline(const DAGNode* node) {
+        if (!calibratedOn_) return;
+        if (isMatrixInstruction(*node->inst))
+            calibratedEnd_ = std::max(calibratedEnd_, calibratedClock_) +
+                             std::max(1, static_cast<int>(node->inst->latencyCycles));
+        calibratedClock_ += calibratedIssueCycles();
+    }
     void planBursts(std::vector<DsSpreadPacer::Load>& loads, int drainWindows);
     DsSpreadPacer dsSpread_;
     // The region's ds_loads cost more issue cycles than its WMMAs take, so they cannot all hide
@@ -2438,6 +2463,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
         noteSccChainIssue(node);
+        advanceCalibratedTimeline(node);
         return node;
     };
 
@@ -2502,8 +2528,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool refillActive = wmmaRefillActive(bestWMMA->inst->latencyCycles);
         // The refill only hides a stall: a non-WMMA pick that carries no wait issues now, so a
         // ready ds_load at a region start does not wait for the queue to fill.
-        const bool preemptForQueue =
-            burstPreempt || (refillActive && (!hasPickableNonWmma || pickWait > 0));
+        // After a forced burst the modeled cover runs ahead of the hardware: once the calibrated
+        // cover cannot take one more pick before this WMMA, the WMMA goes first, as in the burst.
+        const bool calibratedPreempt = calibratedOn_ && hasPickableNonWmma &&
+                                       !(pickKind == kGlobalRead || pickKind == kPrefetch) &&
+                                       outstandingWmmas() < wmmaQueueDepth() &&
+                                       calibratedCoverCycles() < 2 * calibratedIssueCycles();
+        const bool preemptForQueue = burstPreempt || calibratedPreempt ||
+                                     (refillActive && (!hasPickableNonWmma || pickWait > 0));
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);
@@ -2535,6 +2567,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " credFull=" << dsReadInflight_.full() << " preempt=" << preemptForQueue
             << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
+            << " calCover=" << (calibratedOn_ ? calibratedCoverCycles() : -1)
             << " burstLeft=" << burstLeft_ << " fills=" << nonWmmaFillsSinceActiveWmma_
             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
@@ -2650,6 +2683,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                     endBurst();
                     burstLeft_ =
                         std::min(burst->second, wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_);
+                    startCalibratedTimeline();
                 }
             }
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
@@ -2895,6 +2929,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     burstLeft_ = 0;
+    calibratedOn_ = false;
     plannedBursts_.clear();
     barrierWaitBurst_.clear();
     burstWmmasPlanned_ = 0;
@@ -3656,8 +3691,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         std::vector<DsSpreadPacer::Load> noLoads;
         planBursts(noLoads, 0);
     }
-    if (regionStartBurst_ && !plannedBursts_.empty() && plannedBursts_.front().first == 0)
+    if (regionStartBurst_ && !plannedBursts_.empty() && plannedBursts_.front().first == 0) {
         burstLeft_ = plannedBursts_.front().second;
+        startCalibratedTimeline();
+    }
 
     // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
     // 25 / 128), and floor would give a quota of 0 that never closes a window.

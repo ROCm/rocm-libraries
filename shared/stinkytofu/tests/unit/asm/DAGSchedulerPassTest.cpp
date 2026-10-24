@@ -2870,6 +2870,56 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_AfterABarrierWait) {
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 24) << shapes[1];
 }
 
+// After a forced burst the modeled cover lets the ds_loads of the stage catch up for many picks.
+// queueStartCalibratedIssueCycles charges each pick more issue cycles, so the next WMMA goes
+// ahead sooner: the burst stays, fewer ds_loads sit right behind it, and none are dropped.
+// Without the forced burst the option changes nothing.
+TEST_F(DAGSchedulerPassTest, QueueStartCalibratedIssueCycles_WmmaPreemptsAfterTheBurst) {
+    struct Variant {
+        bool forced;
+        int calibrated;
+    };
+    const Variant variants[4] = {{true, 0}, {true, 3}, {false, 0}, {false, 3}};
+    std::string shapes[4];
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        const int beforeCount = countStinkyInstructions(*bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = variants[v].forced;
+        pfc.dagFeatures.queueStartMinWmmaBurst = 4;
+        pfc.dagFeatures.queueStartCalibratedIssueCycles = variants[v].calibrated;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    auto dsRunAfterBurst = [](const std::string& s) {
+        size_t n = 0;
+        while (4 + n < s.size() && s[4 + n] == 'd') ++n;
+        return n;
+    };
+    for (int v = 0; v < 2; ++v) {
+        EXPECT_EQ(shapes[v].substr(0, 5), "WWWWd") << shapes[v];
+        EXPECT_EQ(std::count(shapes[v].begin(), shapes[v].end(), 'W'), 16) << shapes[v];
+        EXPECT_EQ(std::count(shapes[v].begin(), shapes[v].end(), 'd'), 24) << shapes[v];
+    }
+    EXPECT_LT(dsRunAfterBurst(shapes[1]), dsRunAfterBurst(shapes[0]))
+        << shapes[0] << " vs " << shapes[1];
+    EXPECT_EQ(shapes[3], shapes[2]);
+}
+
 // The loop-head deferral wins: when the latch ends in a WMMA and the header region is cut from
 // the block start, its first WMMA waits for other work, and no burst runs there.
 TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {

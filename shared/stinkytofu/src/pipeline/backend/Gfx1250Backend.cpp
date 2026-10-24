@@ -190,6 +190,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.QueueStartForceWmmaBurst;
                 passFeatureConfig.dagFeatures.queueStartMinWmmaBurst =
                     moduleOptions.QueueStartMinWmmaBurst;
+                passFeatureConfig.dagFeatures.queueStartCalibratedIssueCycles =
+                    moduleOptions.QueueStartCalibratedIssueCycles;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
