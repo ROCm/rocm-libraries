@@ -406,6 +406,10 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
+    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so
+    # they must be forwarded or an FP8 cache is read unscaled.
+    k_scale = float(kwargs.get("k_scale", 1.0))
+    v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -425,6 +429,8 @@ def bind_tuning_attention_torch(
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
+            k_scale=float(_kw.get("k_scale", k_scale)),
+            v_scale=float(_kw.get("v_scale", v_scale)),
             tuning_spec=spec,
         )
 
