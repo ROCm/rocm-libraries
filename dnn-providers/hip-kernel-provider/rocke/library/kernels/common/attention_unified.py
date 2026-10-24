@@ -2355,7 +2355,7 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
     """
     return (
         arch == "gfx942"
-        and problem.head_size in (64, 128)
+        and problem.head_size in (64, 128, 192)
         and problem.dtype == "bf16"
         and not problem.use_fp8
         # D128 sliding-window prefill rides the non-ring wide flash
@@ -2421,7 +2421,9 @@ def _gfx942_bf16_wide_geometry(
     cfvst is not enabled on D128 (it needs nw=4, which only fits with the
     sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
     """
-    if problem.head_size == 128:
+    # D192 takes the D128 geometry: its nw=4 double-buffered form exceeds the
+    # 64 KB LDS cap as well.
+    if problem.head_size in (128, 192):
         # gfx942 bf16 D128 small-tile double-K (synthesized from the gfx942
         # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
         # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
@@ -2571,6 +2573,10 @@ def _enable_gfx942_flash_mask_limit(
     # which is invalid once a sliding window must be applied. Disable it for SW so
     # the emitter's per-element window mask (dist < sliding_window) runs.
     if problem.sliding_window > 0:
+        return False
+    # D192 keeps the plain wide flash body: the transposed softmax VALU stack is
+    # validated at D64/D128 only.
+    if problem.head_size == 192:
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):

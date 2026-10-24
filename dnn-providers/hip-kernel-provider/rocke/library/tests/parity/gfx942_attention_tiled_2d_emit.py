@@ -141,6 +141,26 @@ _CONFIGS = {
         use_register_pv=True,
         tile_size=32,
     ),
+    # --- idx9: head_size=192 MHA prefill selector spec (wide flash geometry)
+    9: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        waves_per_eu=2,
+        tile_size=64,
+        block_m_per_warp=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=True,
+        kv_cache_policy="all",
+    ),
 }
 
 
