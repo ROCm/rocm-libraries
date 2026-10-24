@@ -363,14 +363,27 @@ struct data_descriptor_t
 
     /**
      * @param[in] new_array_type array type to be given to the returned object.
-     * @return A copy of this object relabeled with `new_array_type`. Only relabeling
-     * is supported, i.e., the array type must be unchanged or switch between the
-     * hermitian and complex variants of the same format (interleaved or planar).
-     * The precision is never changed and the offsets are kept (allowed relabels never
-     * change the number of planes).
+     * @return A copy of this object reinterpreted as `new_array_type`, describing
+     * the very same buffer bytes. The precision is never changed.
+     * - Between non-real array types of the same format (interleaved or planar), or
+     *   from real to real, this is a relabel: axes and offsets are kept.
+     * - From real to interleaved complex/hermitian: the bounds of length axis 0 are
+     *   halved (its stride stays 1), all other strides and distances and the offset
+     *   are halved, i.e., real element `2k` (resp. `2k + 1`) is the real (resp.
+     *   imaginary) part of complex element `k`.
+     * - From interleaved complex/hermitian to real: the reverse, i.e., the bounds
+     *   of length axis 0, all other strides and distances and the offset are doubled.
+     *
+     * Embedded objects are supported iff their length axis 0 is the embedding data
+     * set's length axis 0: the embedding map is kept and `get_embedding_layout()`
+     * of the result is the reinterpreted `get_embedding_layout()` of this object.
      * @throw An `std::invalid_argument` is thrown if this object's array type or
-     * `new_array_type` is unset, or if the request switches between interleaved and
-     * planar formats. An `std::logic_error` is thrown for requests between real and
+     * `new_array_type` is unset, if the request switches between interleaved and
+     * planar formats, or, for requests between real and interleaved complex/hermitian
+     * array types, if this object is embedded with a length axis 0 that is not the
+     * embedding's, if the stride of length axis 0 is not 1, or (from real only) if
+     * any bound of length axis 0, any other stride or distance, or the offset is odd.
+     * An `std::logic_error` is thrown for requests between real and planar
      * complex/hermitian array types (not implemented yet).
      */
     data_descriptor_t reinterpret_as(rocfft_array_type new_array_type) const;
