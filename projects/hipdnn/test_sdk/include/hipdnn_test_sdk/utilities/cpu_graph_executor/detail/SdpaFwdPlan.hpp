@@ -112,6 +112,9 @@ struct SdpaFwdParams
     // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor and this is
     // 1 / (1 - p).
     std::optional<float> philoxDropoutScale;
+    // cuDNN Max / Sum_exp row statistics outputs, FLOAT [B, H, Sq, 1].
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
 };
 
 template <typename QDataType,
@@ -130,9 +133,12 @@ public:
     std::vector<int64_t> getOutputTensorIds() const override
     {
         std::vector<int64_t> ids = {_params.oTensor.uid};
-        if(_params.lseTensor.has_value())
+        for(const auto* stats : {&_params.lseTensor, &_params.maxTensor, &_params.sumExpTensor})
         {
-            ids.push_back(_params.lseTensor->uid);
+            if(stats->has_value())
+            {
+                ids.push_back((*stats)->uid);
+            }
         }
         return ids;
     }
@@ -155,12 +161,14 @@ public:
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowLseTensor;
-        if(_params.lseTensor.has_value())
-        {
-            shallowLseTensor = createShallowTensor<float>(*_params.lseTensor,
-                                                          variantPack.at(_params.lseTensor->uid));
-        }
+        const auto bindStats = [&variantPack](const auto& stats) {
+            return stats.has_value()
+                       ? createShallowTensor<float>(*stats, variantPack.at(stats->uid))
+                       : std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>>{};
+        };
+        auto shallowLseTensor = bindStats(_params.lseTensor);
+        auto shallowMaxTensor = bindStats(_params.maxTensor);
+        auto shallowSumExpTensor = bindStats(_params.sumExpTensor);
 
         // FP8 descale tensors (float32). Absent for non-fp8 graphs.
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleQ;
@@ -271,7 +279,10 @@ public:
                 shallowSeqLenKv.get(),
                 shallowSink.get(),
                 shallowDropoutMask.get(),
-                dropoutScale);
+                dropoutScale,
+                std::nullopt,
+                shallowMaxTensor.get(),
+                shallowSumExpTensor.get());
     }
 
 private:
@@ -403,12 +414,16 @@ public:
             return false;
         }
 
-        // Unsupported: max / running-sum softmax stats outputs (the reference does not
-        // produce these). The log-sum-exp stats tensor IS supported and handled below.
-        if(nodeAttributes->max_tensor_uid().has_value()
-           || nodeAttributes->sum_exp_tensor_uid().has_value())
+        // cuDNN Max / Sum_exp row statistics: FLOAT outputs (the reference checks [B, H, Sq, 1]).
+        for(const auto uid :
+            {nodeAttributes->max_tensor_uid(), nodeAttributes->sum_exp_tensor_uid()})
         {
-            return false;
+            if(uid.has_value())
+            {
+                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+                CHECK_TENSOR_TYPE(
+                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+            }
         }
 
         // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
@@ -500,6 +515,16 @@ public:
                              nodeAttributes->sink_token_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                                  : nullptr);
+        if(nodeAttributes->max_tensor_uid().has_value())
+        {
+            params.maxTensor
+                = unpackTensorAttributes(*tensorMap.at(nodeAttributes->max_tensor_uid().value()));
+        }
+        if(nodeAttributes->sum_exp_tensor_uid().has_value())
+        {
+            params.sumExpTensor = unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->sum_exp_tensor_uid().value()));
+        }
         if(nodeAttributes->dropout_mask_tensor_uid().has_value())
         {
             params.dropoutMaskTensor = unpackTensorAttributes(

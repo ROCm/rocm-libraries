@@ -112,7 +112,9 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
         std::optional<float> dropoutScale = std::nullopt,
-        std::optional<float> softcap = std::nullopt)
+        std::optional<float> softcap = std::nullopt,
+        hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* rowSumExp = nullptr)
     {
         validateSoftcap(softcap);
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
@@ -184,6 +186,17 @@ public:
             }
             lsePtr = lse->memory().deviceData();
             lseStrides = lse->strides();
+        }
+        // cuDNN Max / Sum_exp row statistics: rank-3 [B, H, Sq], as the LSE.
+        for(auto* stats : {rowMax, rowSumExp})
+        {
+            if(stats != nullptr
+               && (stats->dims().size() != 3 || stats->dims()[0] != batch
+                   || stats->dims()[1] != numHeads || stats->dims()[2] != seqQ))
+            {
+                throw std::invalid_argument(
+                    "GpuFpReferenceSdpa: rowMax / rowSumExp must be rank-3 [B, H, Sq]");
+            }
         }
 
         // Padding (cuDNN seq_len_q / seq_len_kv): one INT32 per batch, both or neither.
@@ -264,12 +277,19 @@ public:
                       dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv),
                       dropoutMaskStrides(dropoutMask),
                       dropoutScale.value_or(1.0F),
-                      softcap.value_or(0.0F));
+                      softcap.value_or(0.0F),
+                      rowMax != nullptr ? rowMax->memory().deviceData() : nullptr,
+                      rowMax != nullptr ? rowMax->strides() : std::vector<int64_t>{},
+                      rowSumExp != nullptr ? rowSumExp->memory().deviceData() : nullptr,
+                      rowSumExp != nullptr ? rowSumExp->strides() : std::vector<int64_t>{});
 
         o.memory().markDeviceModified();
-        if(lse != nullptr)
+        for(auto* stats : {lse, rowMax, rowSumExp})
         {
-            lse->memory().markDeviceModified();
+            if(stats != nullptr)
+            {
+                stats->memory().markDeviceModified();
+            }
         }
     }
 
@@ -597,7 +617,11 @@ private:
                               const float* dropoutMaskPtr = nullptr,
                               const std::vector<int64_t>& dropoutMaskStrides = {},
                               float dropoutScale = 1.0F,
-                              float softcap = 0.0F);
+                              float softcap = 0.0F,
+                              void* rowMaxPtr = nullptr,
+                              const std::vector<int64_t>& rowMaxStrides = {},
+                              void* rowSumExpPtr = nullptr,
+                              const std::vector<int64_t>& rowSumExpStrides = {});
 
     // Logit softcap (reference-only extension, SEM-020): finite and > 0 when given.
     static void validateSoftcap(std::optional<float> softcap)

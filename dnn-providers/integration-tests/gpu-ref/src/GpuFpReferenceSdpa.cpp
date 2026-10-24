@@ -92,7 +92,11 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        const float* dropoutMaskPtr,
                                        const std::vector<int64_t>& dropoutMaskStrides,
                                        float dropoutScale,
-                                       float softcap)
+                                       float softcap,
+                                       void* rowMaxPtr,
+                                       const std::vector<int64_t>& rowMaxStrides,
+                                       void* rowSumExpPtr,
+                                       const std::vector<int64_t>& rowSumExpStrides)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -145,6 +149,10 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.dropoutMaskStr = toSdpaStrides(dropoutMaskStrides);
     args.dropoutScale = dropoutScale;
     args.softcap = softcap;
+    args.rowMax = rowMaxPtr;
+    args.rowSumExp = rowSumExpPtr;
+    args.rowMaxStr = toSdpaStrides(rowMaxStrides);
+    args.rowSumExpStr = toSdpaStrides(rowSumExpStrides);
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
