@@ -5,6 +5,9 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 5.3.0
 
+### Added
+* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info` to get and set the fields of a `HYB` matrix. `set_info` sets every field in one call so a `HYB` matrix can be built from existing arrays without `csr2hyb`. Like `rocsparse_csr_set_pointers`, it does not take ownership of the arrays: the caller frees them, and rocSPARSE frees only the arrays it allocated.
+
 ### Changed
 * The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
 

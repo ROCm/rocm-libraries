@@ -38,6 +38,9 @@ extern "C" {
 *  \details
 *  \p rocsparse_csr2hyb converts a CSR matrix into a HYB matrix. It is assumed
 *  that \p hyb has been initialized with \ref rocsparse_create_hyb_mat().
+*  \p hyb may hold the result of an earlier conversion, which is released.
+*  Arrays set with \ref rocsparse_hyb_mat_set_info belong to the caller: \p hyb
+*  stops referencing them, and the caller still frees them.
 *
 *  \note
 *  This function requires a significant amount of storage for the HYB matrix,
@@ -80,7 +83,8 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p user_ell_width is invalid.
 *  \retval     rocsparse_status_invalid_value \p partition_type is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p hyb, \p csr_val,
-*              \p csr_row_ptr, or \p csr_col_ind pointer is invalid.
+*              \p csr_row_ptr, or \p csr_col_ind pointer is invalid, or \p hyb
+*              holds arrays set with \ref rocsparse_hyb_mat_set_info.
 *  \retval     rocsparse_status_memory_error the buffer for the HYB matrix could not be
 *              allocated.
 *  \retval     rocsparse_status_internal_error an internal error occurred.

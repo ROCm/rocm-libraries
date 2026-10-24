@@ -56,4 +56,14 @@ struct _rocsparse_hyb_mat
     void*          coo_val{};
 
     rocsparse_datatype data_type_T = rocsparse_datatype_f32_r;
+
+    // Arrays rocSPARSE allocated (csr2hyb, copy_hyb_mat), which rocSPARSE
+    // frees. They are tracked apart from the fields above because
+    // rocsparse_hyb_mat_set_info can point those at caller arrays, which
+    // rocSPARSE never frees.
+    rocsparse_int* allocated_ell_col_ind{};
+    void*          allocated_ell_val{};
+    rocsparse_int* allocated_coo_row_ind{};
+    rocsparse_int* allocated_coo_col_ind{};
+    void*          allocated_coo_val{};
 };

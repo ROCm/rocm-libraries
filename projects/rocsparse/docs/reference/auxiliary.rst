@@ -175,6 +175,16 @@ rocsparse_copy_hyb_mat()
 
 .. doxygenfunction:: rocsparse_copy_hyb_mat
 
+rocsparse_hyb_mat_get_info()
+----------------------------
+
+.. doxygenfunction:: rocsparse_hyb_mat_get_info
+
+rocsparse_hyb_mat_set_info()
+----------------------------
+
+.. doxygenfunction:: rocsparse_hyb_mat_set_info
+
 rocsparse_create_mat_info()
 ---------------------------
 

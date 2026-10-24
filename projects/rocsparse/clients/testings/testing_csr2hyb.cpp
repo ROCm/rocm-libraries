@@ -178,11 +178,10 @@ void testing_csr2hyb(const Arguments& arg)
             handle, M, N, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, hyb, user_ell_width, part));
 
         // Copy output to host
-        rocsparse_hyb_mat ptr  = hyb;
-        test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+        const rocsparse_hyb_fields dhyb(hyb);
 
-        rocsparse_int ell_nnz = dhyb->ell_nnz;
-        rocsparse_int coo_nnz = dhyb->coo_nnz;
+        rocsparse_int ell_nnz = dhyb.ell_nnz;
+        rocsparse_int coo_nnz = dhyb.coo_nnz;
 
         host_vector<rocsparse_int> hhyb_ell_col_ind(ell_nnz);
         host_vector<T>             hhyb_ell_val(ell_nnz);
@@ -192,21 +191,21 @@ void testing_csr2hyb(const Arguments& arg)
 
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(hhyb_ell_col_ind,
-                                  dhyb->ell_col_ind,
+                                  dhyb.ell_col_ind,
                                   sizeof(rocsparse_int) * ell_nnz,
                                   hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(
-            hipMemcpy(hhyb_ell_val, dhyb->ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
+            hipMemcpy(hhyb_ell_val, dhyb.ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hhyb_coo_row_ind,
-                                  dhyb->coo_row_ind,
+                                  dhyb.coo_row_ind,
                                   sizeof(rocsparse_int) * coo_nnz,
                                   hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hhyb_coo_col_ind,
-                                  dhyb->coo_col_ind,
+                                  dhyb.coo_col_ind,
                                   sizeof(rocsparse_int) * coo_nnz,
                                   hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(
-            hipMemcpy(hhyb_coo_val, dhyb->coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
+            hipMemcpy(hhyb_coo_val, dhyb.coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
 
         // CPU csr2hyb
         rocsparse_int ell_width_gold = user_ell_width;
@@ -230,11 +229,11 @@ void testing_csr2hyb(const Arguments& arg)
                            part,
                            base);
 
-        unit_check_scalar<rocsparse_int>(M, dhyb->m);
-        unit_check_scalar<rocsparse_int>(N, dhyb->n);
-        unit_check_scalar<rocsparse_int>(ell_width_gold, dhyb->ell_width);
-        unit_check_scalar<rocsparse_int>(ell_nnz_gold, dhyb->ell_nnz);
-        unit_check_scalar<rocsparse_int>(coo_nnz_gold, dhyb->coo_nnz);
+        unit_check_scalar<rocsparse_int>(M, dhyb.m);
+        unit_check_scalar<rocsparse_int>(N, dhyb.n);
+        unit_check_scalar<rocsparse_int>(ell_width_gold, dhyb.ell_width);
+        unit_check_scalar<rocsparse_int>(ell_nnz_gold, dhyb.ell_nnz);
+        unit_check_scalar<rocsparse_int>(coo_nnz_gold, dhyb.coo_nnz);
         hhyb_ell_col_ind_gold.unit_check(hhyb_ell_col_ind);
         hhyb_ell_val_gold.unit_check(hhyb_ell_val);
         hhyb_coo_row_ind_gold.unit_check(hhyb_coo_row_ind);
@@ -258,11 +257,10 @@ void testing_csr2hyb(const Arguments& arg)
                                                                       user_ell_width,
                                                                       part);
 
-        rocsparse_hyb_mat ptr  = hyb;
-        test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+        const rocsparse_hyb_fields dhyb(hyb);
 
-        rocsparse_int ell_nnz = dhyb->ell_nnz;
-        rocsparse_int coo_nnz = dhyb->coo_nnz;
+        rocsparse_int ell_nnz = dhyb.ell_nnz;
+        rocsparse_int coo_nnz = dhyb.coo_nnz;
 
         double gbyte_count = csr2hyb_gbyte_count<T>(M, nnz, ell_nnz, coo_nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
@@ -327,17 +325,15 @@ void testing_csr2hyb_extra(const Arguments& arg)
         hipMemcpy(dcsr_col_ind, hcsr_col_ind, sizeof(hcsr_col_ind), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val, sizeof(hcsr_val), hipMemcpyHostToDevice));
 
-    rocsparse_hyb_mat ptr  = hyb;
-    test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
-
-    const auto check_parts = [dhyb](bool has_ell, bool has_coo) {
-        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_nnz > 0);
-        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_col_ind != nullptr);
-        unit_check_scalar<rocsparse_int>(has_ell, dhyb->ell_val != nullptr);
-        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_nnz > 0);
-        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_row_ind != nullptr);
-        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_col_ind != nullptr);
-        unit_check_scalar<rocsparse_int>(has_coo, dhyb->coo_val != nullptr);
+    const auto check_parts = [&hyb](bool has_ell, bool has_coo) {
+        const rocsparse_hyb_fields dhyb(hyb);
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb.ell_nnz > 0);
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb.ell_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_ell, dhyb.ell_val != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb.coo_nnz > 0);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb.coo_row_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb.coo_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(has_coo, dhyb.coo_val != nullptr);
     };
 
     CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<float>(handle,
