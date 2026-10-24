@@ -299,22 +299,24 @@ TEST(TestBatchnormFwdInferencePlanFp32, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=HIP_PLUGIN_BN_N"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS0=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRPS2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCH_ELEMENTS=HIP_PLUGIN_BN_BATCHES"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=4"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL=2500"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
@@ -357,6 +359,9 @@ TEST(TestBatchnormFwdInferencePlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferencePlanFp16, CompileSetsCorrectDefines)
@@ -396,6 +401,9 @@ TEST(TestBatchnormFwdInferencePlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
 TEST(TestBatchnormFwdInferencePlanBfp16, CompileSetsCorrectDefines)
@@ -436,9 +444,12 @@ TEST(TestBatchnormFwdInferencePlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_BATCHES=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHANNELS=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SPATIAL_SIZE=50176"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
+TEST(TestBatchnormFwdInferencePlan, CompileNclLayoutSetsCorrectDefine)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -455,8 +466,8 @@ TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
             return program;
         });
 
-    // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
-    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    // NCL strides: N=C*L, C=L, L=1
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 1}, {1, 3, 50176});
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -466,10 +477,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
 }
 
-TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
+TEST(TestBatchnormFwdInferencePlan, CompileNlcLayoutSetsCorrectDefine)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -486,8 +497,8 @@ TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
             return program;
         });
 
-    // NHWC strides: N=H*W*C, H=W*C, W=C, C=1
-    auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    // NLC strides: N=L*C, L=C, C=1
+    auto [fbb, plan] = createPlanFromGraph({150528, 1, 3}, {1, 3, 50176});
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -497,16 +508,16 @@ TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
 }
 
 TEST(TestBatchnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
 {
     const MockKernelCompiler mockCompiler;
 
-    // 3D tensor is not supported
+    // 2D tensor is not supported
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
-        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        {4, 1}, {1, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

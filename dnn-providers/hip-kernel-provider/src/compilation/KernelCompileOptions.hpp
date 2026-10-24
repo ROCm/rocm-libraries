@@ -114,7 +114,7 @@ private:
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorAttrs)
     {
         auto inputDataType = tensorAttrs->data_type();
-        auto isLayoutNhwc = core::utils::isChannelLastLayout(tensorAttrs);
+        auto isLayoutChannelLast = core::utils::isChannelLastLayout(tensorAttrs);
 
         add("HIP_PLUGIN_USE_FP32",
             inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
@@ -125,7 +125,7 @@ private:
         add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
         add("HIP_PLUGIN_USE_FPMIX", false);
         add("HIP_PLUGIN_USE_BFPMIX", false);
-        add("HIP_PLUGIN_LAYOUT_NHWC", isLayoutNhwc);
+        add("HIP_PLUGIN_LAYOUT_CHANNEL_LAST", isLayoutChannelLast);
         add("HIP_PLUGIN_USE_AMDGCN", 0);
     }
 
