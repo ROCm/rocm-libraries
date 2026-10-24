@@ -36,17 +36,17 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
-template <bool STRIDED, bool GEHRD, typename T, typename U>
+template <bool STRIDED, bool GEHRD, typename T, typename I, typename U>
 void gehd2_gehrd_checkBadArgs(const rocblas_handle handle,
-                              const rocblas_int n,
-                              const rocblas_int ilo,
-                              const rocblas_int ihi,
+                              const I n,
+                              const I ilo,
+                              const I ihi,
                               T dA,
-                              const rocblas_int lda,
+                              const I lda,
                               const rocblas_stride stA,
                               U dIpiv,
                               const rocblas_stride stP,
-                              const rocblas_int bc)
+                              const I bc)
 {
     // handle
     EXPECT_ROCBLAS_STATUS(
@@ -59,7 +59,7 @@ void gehd2_gehrd_checkBadArgs(const rocblas_handle handle,
     // sizes (only check batch_count if applicable)
     if(STRIDED)
         EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi, dA, lda,
-                                                    stA, dIpiv, stP, (rocblas_int)-1),
+                                                    stA, dIpiv, stP, (I)-1),
                               rocblas_status_invalid_size);
 
     // pointers
@@ -71,29 +71,29 @@ void gehd2_gehrd_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, (rocblas_int)0, ilo, ihi,
+    EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, (I)0, ilo, ihi,
                                                 (T) nullptr, lda, stA, (U) nullptr, stP, bc),
                           rocblas_status_success);
 
     // quick return with zero batch_count if applicable
     if(STRIDED)
         EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi, dA, lda,
-                                                    stA, dIpiv, stP, (rocblas_int)0),
+                                                    stA, dIpiv, stP, (I)0),
                               rocblas_status_success);
 }
 
-template <bool BATCHED, bool STRIDED, bool GEHRD, typename T>
+template <bool BATCHED, bool STRIDED, bool GEHRD, typename T, typename I>
 void testing_gehd2_gehrd_bad_arg()
 {
     // safe arguments
     rocblas_local_handle handle;
-    rocblas_int n = 2;
-    rocblas_int ilo = 1;
-    rocblas_int ihi = 2;
-    rocblas_int lda = 2;
+    I n = 2;
+    I ilo = 1;
+    I ihi = 2;
+    I lda = 2;
     rocblas_stride stA = 1;
     rocblas_stride stP = 1;
-    rocblas_int bc = 1;
+    I bc = 1;
 
 #ifdef ROCSOLVER_ENABLE_HESSENBERG
     if(BATCHED)
@@ -123,17 +123,17 @@ void testing_gehd2_gehrd_bad_arg()
 #endif
 }
 
-template <bool CPU, bool GPU, typename T, typename Td, typename Ud, typename Th, typename Uh>
+template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void gehd2_gehrd_initData(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int ilo,
-                          const rocblas_int ihi,
+                          const I n,
+                          const I ilo,
+                          const I ihi,
                           Td& dA,
-                          const rocblas_int lda,
+                          const I lda,
                           const rocblas_stride stA,
                           Ud& dIpiv,
                           const rocblas_stride stP,
-                          const rocblas_int bc,
+                          const I bc,
                           Th& hA,
                           Uh& hIpiv)
 {
@@ -142,11 +142,11 @@ void gehd2_gehrd_initData(const rocblas_handle handle,
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
-        for(rocblas_int b = 0; b < bc; ++b)
+        for(I b = 0; b < bc; ++b)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(I i = 0; i < n; i++)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                for(I j = 0; j < n; j++)
                 {
                     if(i == j)
                         hA[b][i + j * lda] += 400;
@@ -166,17 +166,17 @@ void gehd2_gehrd_initData(const rocblas_handle handle,
     }
 }
 
-template <bool STRIDED, bool GEHRD, typename T, typename Td, typename Ud, typename Th, typename Uh>
+template <bool STRIDED, bool GEHRD, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void gehd2_gehrd_getError(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int ilo,
-                          const rocblas_int ihi,
+                          const I n,
+                          const I ilo,
+                          const I ihi,
                           Td& dA,
-                          const rocblas_int lda,
+                          const I lda,
                           const rocblas_stride stA,
                           Ud& dIpiv,
                           const rocblas_stride stP,
-                          const rocblas_int bc,
+                          const I bc,
                           Th& hA,
                           Th& hARes,
                           Uh& hIpiv,
@@ -196,7 +196,7 @@ void gehd2_gehrd_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hIpivRes.transfer_from(dIpiv));
 
     // CPU lapack
-    for(rocblas_int b = 0; b < bc; ++b)
+    for(I b = 0; b < bc; ++b)
     {
         GEHRD ? cpu_gehrd(n, ilo, ihi, hA[b], lda, hIpiv[b], hW.data(), n)
               : cpu_gehd2(n, ilo, ihi, hA[b], lda, hIpiv[b], hW.data());
@@ -207,7 +207,7 @@ void gehd2_gehrd_getError(const rocblas_handle handle,
     // IT MIGHT BE REVISITED IN THE FUTURE)
     double err;
     *max_err = 0;
-    for(rocblas_int b = 0; b < bc; ++b)
+    for(I b = 0; b < bc; ++b)
     {
         err = norm_error('F', n, n, lda, hA[b], hARes[b]);
         *max_err = err > *max_err ? err : *max_err;
@@ -217,17 +217,17 @@ void gehd2_gehrd_getError(const rocblas_handle handle,
     }
 }
 
-template <bool STRIDED, bool GEHRD, typename T, typename Td, typename Ud, typename Th, typename Uh>
+template <bool STRIDED, bool GEHRD, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void gehd2_gehrd_getPerfData(const rocblas_handle handle,
-                             const rocblas_int n,
-                             const rocblas_int ilo,
-                             const rocblas_int ihi,
+                             const I n,
+                             const I ilo,
+                             const I ihi,
                              Td& dA,
-                             const rocblas_int lda,
+                             const I lda,
                              const rocblas_stride stA,
                              Ud& dIpiv,
                              const rocblas_stride stP,
-                             const rocblas_int bc,
+                             const I bc,
                              Th& hA,
                              Uh& hIpiv,
                              double* gpu_time_used,
@@ -246,7 +246,7 @@ void gehd2_gehrd_getPerfData(const rocblas_handle handle,
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
-        for(rocblas_int b = 0; b < bc; ++b)
+        for(I b = 0; b < bc; ++b)
         {
             GEHRD ? cpu_gehrd(n, ilo, ihi, hA[b], lda, hIpiv[b], hW.data(), n)
                   : cpu_gehd2(n, ilo, ihi, hA[b], lda, hIpiv[b], hW.data());
@@ -295,19 +295,19 @@ void gehd2_gehrd_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
-template <bool BATCHED, bool STRIDED, bool GEHRD, typename T>
+template <bool BATCHED, bool STRIDED, bool GEHRD, typename T, typename I>
 void testing_gehd2_gehrd(Arguments& argus)
 {
     // get arguments
     rocblas_local_handle handle;
-    rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int ilo = argus.get<rocblas_int>("ilo", 1);
-    rocblas_int ihi = argus.get<rocblas_int>("ihi", n);
-    rocblas_int lda = argus.get<rocblas_int>("lda", n);
+    I n = argus.get<I>("n");
+    I ilo = argus.get<I>("ilo", 1);
+    I ihi = argus.get<I>("ihi", n);
+    I lda = argus.get<I>("lda", n);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stP = argus.get<rocblas_stride>("strideP", std::max(n - 1, 0));
+    rocblas_stride stP = argus.get<rocblas_stride>("strideP", std::max<I>(n - 1, 0));
 
-    rocblas_int bc = argus.batch_count;
+    I bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
 
     rocblas_stride stARes = (argus.unit_check || argus.norm_check) ? stA : 0;
@@ -516,4 +516,5 @@ INSTANTIATE(EXTERN_TESTING_GEHD2_GEHRD,
             FOREACH_MATRIX_DATA_LAYOUT,
             FOREACH_BLOCKED_VARIANT,
             FOREACH_SCALAR_TYPE,
+            FOREACH_INT_TYPE,
             APPLY_STAMP)
