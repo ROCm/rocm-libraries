@@ -98,7 +98,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        void* rowSumExpPtr,
                                        const std::vector<int64_t>& rowSumExpStrides,
                                        bool alibi,
-                                       const SdpaFp8Softmax& fp8)
+                                       const SdpaFp8Softmax& fp8,
+                                       const uint8_t* blockMask,
+                                       const std::vector<int64_t>& blockMaskStrides)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -156,6 +158,8 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.rowMaxStr = toSdpaStrides(rowMaxStrides);
     args.rowSumExpStr = toSdpaStrides(rowSumExpStrides);
     args.score.alibi = alibi ? 1 : 0;
+    args.score.blockMask = blockMask;
+    args.score.blockMaskStr = toSdpaStrides(blockMaskStrides);
     args.pFp8Format = static_cast<int>(fp8.format);
     args.scaleS = fp8.scaleS;
     args.descaleS = fp8.descaleS;

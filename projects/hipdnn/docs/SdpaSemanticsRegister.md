@@ -266,6 +266,19 @@ batch when `seq_len_q/kv` are set).
   outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined.
 - **Contract:** cuDNN for <= 128 keys. A tile-faithful mode would need the tile size as an input.
 
+### SEM-025: Block-sparse mask
+
+- **Status:** Matches cuDNN (forward only; cuDNN's backward node takes no block mask).
+- **cuDNN:** `block_mask` is UINT8 `[B, H_q, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)]`. Bit i of byte j
+  enables the 128 x 128 score tile in tile row `sq / 128` and tile column `8 j + i`; a clear bit adds -inf to the
+  tile's scores.
+  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (block_mask expansion) and `fp16.py` (shape).
+- **hipDNN:** the references mask the cleared tiles' keys to -inf with the band, in absolute positions; padding
+  and paging do not move tiles (Skv is the paged key extent). A row whose every key is cleared behaves as
+  SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
+  cuDNN's code.
+- **Contract:** cuDNN.
+
 ### SEM-020: Softcap
 
 - **Status:** Extension, implemented in the references only; not expressible in the graph.

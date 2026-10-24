@@ -17,6 +17,7 @@ Supported, fully composable operation axes:
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
+  - block mask:   --block-mask (cuDNN block-sparse UINT8 tile bitmask; dense BATCH mode)
   - fp8 scaling:  --fp8-scaling (cuDNN sdpa_fp8: scale_s/descale_s/scale_o, amax_s/amax_o,
                   FP8_E4M3 output; dense, S_kv <= 128; requires --dtype fp8)
 
@@ -99,7 +100,9 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 # 1.6.0 — Added --fp8-scaling: cuDNN sdpa_fp8's softmax and output scaling
 #         (cudnn-frontend test/python/sdpa/fp8_ref.py) with FP8_E4M3 output and amax
 #         outputs. Every other bundle is unchanged.
-GENERATOR_VERSION = "1.6.0"
+# 1.7.0 — Added --block-mask: cuDNN's block-sparse mask (UINT8, one bit per 128 x 128 score
+#         tile, cudnn-frontend test/python/sdpa/fp16_ref.py). Every other bundle is unchanged.
+GENERATOR_VERSION = "1.7.0"
 
 # FP8 operation: FP8_E4M3 inputs (Q/K/V), BF16 output. AITER's fmha fp8 path uses
 # the OCP e4m3 encoding (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -128,6 +131,10 @@ UID_DESCALE_S = 13
 UID_SCALE_O = 14
 UID_AMAX_S = 15
 UID_AMAX_O = 16
+UID_BLOCK_MASK = 17
+
+# cuDNN's block-sparse tile (both dims) and bits per mask byte.
+BLOCK_MASK_TILE = 128
 
 # cuDNN sdpa_fp8 quantizes P per 128-key tile against the running row max; with one tile that
 # is the final row max, which is what the references implement (SdpaSemanticsRegister SEM-024).
@@ -192,6 +199,33 @@ def quantize_fp8_per_tensor(t):
     return fp8, scale.reshape(1), dequant
 
 
+def block_mask_dims(B, H_q, S_q, S_kv):
+    """cuDNN's block-mask shape: [B, H_q, ceil(S_q / 128), ceil(ceil(S_kv / 128) / 8)]."""
+    tiles_kv = (S_kv + BLOCK_MASK_TILE - 1) // BLOCK_MASK_TILE
+    return [B, H_q, (S_q + BLOCK_MASK_TILE - 1) // BLOCK_MASK_TILE, (tiles_kv + 7) // 8]
+
+
+def random_block_mask(dims, S_kv, rng):
+    """Random cuDNN block mask (as cudnn-frontend's fp16.py draws it) with tile column 0 kept
+    in every tile row, so no query row loses every key (PyTorch MATH would give NaN there).
+    """
+    mask = torch.randint(0, 256, dims, dtype=torch.uint8, generator=rng)
+    mask[..., 0] |= 1
+    return mask
+
+
+def block_mask_bias(mask, S_q, S_kv):
+    """Expand a cuDNN block mask to an additive [B, H, S_q, S_kv] bias (0 kept, -inf cleared),
+    as cudnn-frontend fp16_ref.py does: bit i of byte j covers tile column 8 j + i."""
+    bits = (mask[..., None] & (1 << torch.arange(8, dtype=torch.uint8))) != 0
+    bits = bits.reshape(mask.shape[0], mask.shape[1], mask.shape[2], mask.shape[3] * 8)
+    keep = bits.repeat_interleave(BLOCK_MASK_TILE, dim=2).repeat_interleave(
+        BLOCK_MASK_TILE, dim=3
+    )[:, :, :S_q, :S_kv]
+    bias = torch.zeros(keep.shape, dtype=torch.float32)
+    return bias.masked_fill(~keep, float("-inf"))
+
+
 def fp8_scale_factor(amax):
     """cudnn-frontend's get_fp8_scale_factor for float8_e4m3fn: 128 / next_po2(amax) * 0.25."""
     po2 = 2.0 ** math.ceil(math.log2(max(amax, 0.0625)))
@@ -242,6 +276,7 @@ def build_graph_json(
     layout="bhsd",
     ragged=False,
     fp8_scaling=False,
+    block_mask=False,
 ):
     B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
     qkv_dtype = FP8_JSON_DTYPE if fp8 else dtype_str
@@ -314,6 +349,19 @@ def build_graph_json(
                 }
             )
 
+    if block_mask:
+        dims = block_mask_dims(B, H_q, S_q, k_dims[2])
+        tensors.append(
+            {
+                "uid": UID_BLOCK_MASK,
+                "name": "BlockMask",
+                "dims": dims,
+                "strides": compute_contiguous_strides(dims),
+                "data_type": "uint8",
+                "virtual": False,
+            }
+        )
+
     if fp8_scaling:
         for uid, name in [
             (UID_SCALE_S, "ScaleS"),
@@ -381,7 +429,7 @@ def build_graph_json(
                     "dropout_scale_tensor_uid": None,
                     "page_table_k_tensor_uid": None,
                     "page_table_v_tensor_uid": None,
-                    "block_mask_tensor_uid": None,
+                    "block_mask_tensor_uid": UID_BLOCK_MASK if block_mask else None,
                     "sink_token_tensor_uid": None,
                     "descale_q_tensor_uid": UID_DESCALE_Q if fp8 else None,
                     "descale_k_tensor_uid": UID_DESCALE_K if fp8 else None,
@@ -480,6 +528,7 @@ def build_meta_json(config, pytorch_version):
             "ragged": config["ragged"],
             "ragged_physical_lens": config["ragged_physical_lens"],
             "fp8_scaling": config["fp8_scaling"],
+            "block_mask": config["block_mask"],
         },
     }
 
@@ -695,6 +744,7 @@ def generate_forward_bundle(
     layout="bhsd",
     ragged=False,
     fp8_scaling=False,
+    block_mask=False,
 ):
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
@@ -765,6 +815,8 @@ def generate_forward_bundle(
         errors.append(
             "--fp8-scaling needs --dtype fp8 and a dense BATCH bundle (no seq-lens, no ragged)"
         )
+    if block_mask and (has_seq_lens or ragged or fp8_scaling):
+        errors.append("--block-mask needs a dense BATCH bundle without --fp8-scaling")
     if fp8_scaling and S_kv > FP8_SCALING_MAX_SEQ_KV:
         errors.append(
             f"--fp8-scaling needs S_kv <= {FP8_SCALING_MAX_SEQ_KV} (one cuDNN key tile; "
@@ -820,6 +872,11 @@ def generate_forward_bundle(
         Q_store, K_store, V_store = Q, K, V
 
     keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
+    block_mask_t = None
+    block_bias = None
+    if block_mask:
+        block_mask_t = random_block_mask(block_mask_dims(B, H_q, S_q, S_kv), S_kv, rng)
+        block_bias = block_mask_bias(block_mask_t, S_q, S_kv)
 
     scale_s = descale_s = scale_o = amax_s = amax_o = None
     try:
@@ -861,10 +918,25 @@ def generate_forward_bundle(
             )
         else:
             O = compute_forward(
-                Q_compute, K_compute, V_compute, attn_scale, H_q, H_kv, keep_mask
+                Q_compute,
+                K_compute,
+                V_compute,
+                attn_scale,
+                H_q,
+                H_kv,
+                keep_mask,
+                attn_bias=block_bias,
             ).to(o_torch_dtype)
             lse = (
-                compute_lse(Q_compute, K_compute, attn_scale, H_q, H_kv, keep_mask)
+                compute_lse(
+                    Q_compute,
+                    K_compute,
+                    attn_scale,
+                    H_q,
+                    H_kv,
+                    keep_mask,
+                    attn_bias=block_bias,
+                )
                 if stats
                 else None
             )
@@ -929,6 +1001,10 @@ def generate_forward_bundle(
         tensor_list.append(
             ("DescaleV", descale_v, UID_DESCALE_V, list(descale_v.shape))
         )
+    if block_mask:
+        tensor_list.append(
+            ("BlockMask", block_mask_t, UID_BLOCK_MASK, list(block_mask_t.shape))
+        )
     if fp8_scaling:
         for name, uid, value in [
             ("ScaleS", UID_SCALE_S, scale_s),
@@ -973,6 +1049,7 @@ def generate_forward_bundle(
         layout=layout,
         ragged=ragged,
         fp8_scaling=fp8_scaling,
+        block_mask=block_mask,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -1013,6 +1090,7 @@ def generate_forward_bundle(
             {"q": physical_q, "kv": physical_kv} if ragged else None
         ),
         "fp8_scaling": fp8_scaling,
+        "block_mask": block_mask,
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"
@@ -1133,6 +1211,12 @@ def main():
         "without them blocks are full uniform S_max.",
     )
     parser.add_argument(
+        "--block-mask",
+        action="store_true",
+        help="Add cuDNN's block-sparse mask (UINT8, one bit per 128 x 128 score tile, random "
+        "with tile column 0 kept). Dense BATCH mode only",
+    )
+    parser.add_argument(
         "--fp8-scaling",
         action="store_true",
         help="cuDNN sdpa_fp8 softmax and output scaling: scale_s/descale_s/scale_o inputs, "
@@ -1184,6 +1268,7 @@ def main():
         layout=args.layout,
         ragged=args.ragged,
         fp8_scaling=args.fp8_scaling,
+        block_mask=args.block_mask,
     )
     print("\nDone.")
 

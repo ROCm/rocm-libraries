@@ -19,7 +19,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/SdpaFp8TestGraphs.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaFwdTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "RaggedGraphTestUtils.hpp"
@@ -791,9 +791,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
 // an accepted graph.
 TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
 {
-    using namespace hipdnn_test_sdk::utilities::sdpa_fp8_test;
-    const auto applicable = [](const auto& builder, const Fp8GraphSpec& spec) {
-        auto graphBuilder = makeFp8Graph(spec);
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const auto applicable = [](const auto& builder, const SdpaGraphSpec& spec) {
+        auto graphBuilder = makeSdpaGraph(spec);
         auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -821,7 +821,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
 
     // Descales.
     EXPECT_TRUE(applicable(ocp, {}));
-    Fp8GraphSpec spec;
+    SdpaGraphSpec spec;
     spec.fp8Type = DataType::FP8_E4M3_FNUZ;
     EXPECT_TRUE(applicable(fnuz, spec));
     EXPECT_FALSE(applicable(ocp, spec)) << "dtype keys the builder";
@@ -853,8 +853,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
     spec = {};
     spec.withFullScaling().descaleS = false;
     EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
-    for(auto Fp8GraphSpec::*field :
-        {&Fp8GraphSpec::scaleO, &Fp8GraphSpec::amaxS, &Fp8GraphSpec::amaxO})
+    for(auto SdpaGraphSpec::*field :
+        {&SdpaGraphSpec::scaleO, &SdpaGraphSpec::amaxS, &SdpaGraphSpec::amaxO})
     {
         spec = {};
         spec.*field = true;
@@ -876,4 +876,35 @@ TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
     spec.descales = 0;
     spec.scaleO = true;
     EXPECT_FALSE(applicable(bf16, spec)) << "scale_o on bf16 inputs";
+}
+
+// cuDNN's block mask (SEM-025), the same rules as the CPU plan test.
+TEST(TestGpuSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16>
+        bf16;
+    const auto applicable = [&bf16](const SdpaGraphSpec& spec) {
+        auto graphBuilder = makeSdpaGraph(spec);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return bf16.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    SdpaGraphSpec spec;
+    spec.fp8Type = DataType::BFLOAT16;
+    spec.descales = 0;
+    spec.blockMaskType = DataType::UINT8;
+    EXPECT_TRUE(applicable(spec));
+    spec.blockMaskType = DataType::INT8;
+    EXPECT_FALSE(applicable(spec)) << "UINT8 only";
+    spec.blockMaskType = DataType::UINT8;
+    for(const auto& dims : std::vector<std::vector<int64_t>>{
+            {2, 2, 1, 1}, {1, 1, 1, 1}, {1, 2, 2, 1}, {1, 2, 1, 2}, {1, 2, 1}})
+    {
+        spec.blockMaskDims = dims;
+        EXPECT_FALSE(applicable(spec)) << "dims must be [B, H_q, ceil(Sq/128), ceil(tiles/8)]";
+    }
 }

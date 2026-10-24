@@ -108,6 +108,8 @@ struct GpuSdpaFwdOptions
     std::optional<float> dropoutScale;
     std::optional<float> softcap;
     bool alibi = false;
+    /// cuDNN block-sparse mask, as CpuFpReferenceSdpa's SdpaFwdOptions::blockMask (SEM-025).
+    hipdnn_data_sdk::utilities::TensorBase<uint8_t>* blockMask = nullptr;
     /// Outputs, FP32 rank 3 [B, H, Sq].
     hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* rowMax = nullptr;
@@ -181,6 +183,11 @@ struct GpuSdpaFwdOptions
     GpuSdpaFwdOptions& setAlibi(bool value)
     {
         alibi = value;
+        return *this;
+    }
+    GpuSdpaFwdOptions& setBlockMask(hipdnn_data_sdk::utilities::TensorBase<uint8_t>* value)
+    {
+        blockMask = value;
         return *this;
     }
     GpuSdpaFwdOptions& setLse(hipdnn_data_sdk::utilities::TensorBase<float>* value)
@@ -576,7 +583,9 @@ public:
             SdpaFp8Softmax{options.pFormat,
                            options.scaleS.value_or(1.0F),
                            options.descaleS.value_or(1.0F),
-                           singleElement(options.amaxS, "amaxS")});
+                           singleElement(options.amaxS, "amaxS")},
+            blockMaskPointer(options.blockMask, batch, numHeads, seqQ, seqKv),
+            options.blockMask != nullptr ? options.blockMask->strides() : std::vector<int64_t>{});
 
         o.memory().markDeviceModified();
         for(auto* stats : {options.lse, options.rowMax, options.rowSumExp, options.amaxS})
@@ -964,7 +973,31 @@ private:
                               void* rowSumExpPtr = nullptr,
                               const std::vector<int64_t>& rowSumExpStrides = {},
                               bool alibi = false,
-                              const SdpaFp8Softmax& fp8 = {});
+                              const SdpaFp8Softmax& fp8 = {},
+                              const uint8_t* blockMask = nullptr,
+                              const std::vector<int64_t>& blockMaskStrides = {});
+
+    // cuDNN block-sparse mask on the device, after checking its shape (CpuFpReferenceSdpa's
+    // validateBlockMask): UINT8 [B, H, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)].
+    static const uint8_t* blockMaskPointer(hipdnn_data_sdk::utilities::TensorBase<uint8_t>* mask,
+                                           int64_t batch,
+                                           int64_t heads,
+                                           int64_t seqQ,
+                                           int64_t seqKv)
+    {
+        if(mask == nullptr)
+        {
+            return nullptr;
+        }
+        const auto tilesKv = (seqKv + 127) / 128;
+        const std::vector<int64_t> want = {batch, heads, (seqQ + 127) / 128, (tilesKv + 7) / 8};
+        if(mask->dims() != want)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: blockMask must be UINT8 [B, H, "
+                                        "ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)]");
+        }
+        return static_cast<const uint8_t*>(mask->memory().deviceData());
+    }
 
     static void launchSdpaScaleOut(const float* in,
                                    const std::vector<int64_t>& dims,

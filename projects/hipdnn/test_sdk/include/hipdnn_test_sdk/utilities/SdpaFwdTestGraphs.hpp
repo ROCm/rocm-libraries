@@ -13,9 +13,9 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-// One-node fp8 SDPA forward graphs for the fp8 applicability rules of the CPU and GPU plans: each
-// field of Fp8GraphSpec changes one thing about an accepted graph.
-namespace hipdnn_test_sdk::utilities::sdpa_fp8_test
+// One-node SDPA forward graphs for the applicability rules of the CPU and GPU plans (fp8 descales
+// and scaling, block mask): each field of SdpaGraphSpec changes one thing about an accepted graph.
+namespace hipdnn_test_sdk::utilities::sdpa_graph_test
 {
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -39,13 +39,15 @@ enum Uid : int64_t
     PAGE_TABLE_K,
     DROPOUT_MASK = 40,
     DROPOUT_SCALE,
+    BLOCK_MASK = 50,
 };
 
 // Q [1, 2, 4, 8] in fp8Type with bf16 (or oType) O and `descales` scalar Q/K/V descales (K's dims
 // descaleKDims). The softmax / output scaling fields add one-element tensors of scalingType.
 // pagedK pages K through a [1, 1, 2, 1] table over [2, 2, 4, 8] blocks with seq_len tensors (V
-// dense at the 8-key extent). dropout adds an explicit dropout mask and scale.
-struct Fp8GraphSpec
+// dense at the 8-key extent). dropout adds an explicit dropout mask and scale. blockMaskType adds a
+// block mask of that dtype and blockMaskDims (cuDNN's shape for these graphs is [1, 2, 1, 1]).
+struct SdpaGraphSpec
 {
     DataType fp8Type = DataType::FP8_E4M3;
     DataType oType = DataType::BFLOAT16;
@@ -60,16 +62,18 @@ struct Fp8GraphSpec
     std::vector<int64_t> scalingDims = {1, 1, 1, 1};
     bool pagedK = false;
     bool dropout = false;
+    std::optional<DataType> blockMaskType;
+    std::vector<int64_t> blockMaskDims = {1, 2, 1, 1};
 
     // Every cuDNN sdpa_fp8 scale and amax.
-    Fp8GraphSpec& withFullScaling()
+    SdpaGraphSpec& withFullScaling()
     {
         scaleS = descaleS = scaleO = amaxS = amaxO = true;
         return *this;
     }
 };
 
-inline flatbuffers::FlatBufferBuilder makeFp8Graph(const Fp8GraphSpec& spec)
+inline flatbuffers::FlatBufferBuilder makeSdpaGraph(const SdpaGraphSpec& spec)
 {
     using hipdnn_data_sdk::utilities::generateStrides;
     const std::vector<int64_t> qDims = {1, 2, 4, 8};
@@ -134,6 +138,11 @@ inline flatbuffers::FlatBufferBuilder makeFp8Graph(const Fp8GraphSpec& spec)
         attrs.seq_len_kv_tensor_uid = SEQ_LEN_KV;
         attrs.page_table_k_tensor_uid = PAGE_TABLE_K;
     }
+    if(spec.blockMaskType.has_value())
+    {
+        add(BLOCK_MASK, "BlockMask", spec.blockMaskType.value(), spec.blockMaskDims);
+        attrs.block_mask_tensor_uid = BLOCK_MASK;
+    }
     if(spec.dropout)
     {
         add(DROPOUT_MASK, "DropoutMask", DataType::FLOAT, dropoutDims);
@@ -149,15 +158,10 @@ inline flatbuffers::FlatBufferBuilder makeFp8Graph(const Fp8GraphSpec& spec)
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "Fp8SdpaFwdTestGraph",
-                                   spec.fp8Type,
-                                   spec.oType,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    auto graph = CreateGraphDirect(
+        builder, "SdpaFwdTestGraph", spec.fp8Type, spec.oType, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
 }
 
-} // namespace hipdnn_test_sdk::utilities::sdpa_fp8_test
+} // namespace hipdnn_test_sdk::utilities::sdpa_graph_test
