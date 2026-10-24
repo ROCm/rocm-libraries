@@ -1130,9 +1130,10 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 
     lds = length[0] * bwd;
 
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
-    gp.wgs_x = wgs;
+    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
+                             * batch,
+                         wgs,
+                         deviceProp.maxGridSize[1]);
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()
@@ -1283,9 +1284,10 @@ void SBRCNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.b_x      = (length[1] - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
-    gp.wgs_x = wgs;
+    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
+                             * batch,
+                         wgs,
+                         deviceProp.maxGridSize[1]);
 }
 
 SBRC_TRANSPOSE_TYPE SBRCNode::sbrc_transpose_type(unsigned int blockWidth) const
@@ -1401,10 +1403,11 @@ void SBCRNode::SetupGridParam_internal(GridParam& gp)
 
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 
-    lds    = (length[0] + lds_padding) * bwd;
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
-    gp.wgs_x = wgs;
+    lds = (length[0] + lds_padding) * bwd;
+    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
+                             * batch,
+                         wgs,
+                         deviceProp.maxGridSize[1]);
 
     return;
 }

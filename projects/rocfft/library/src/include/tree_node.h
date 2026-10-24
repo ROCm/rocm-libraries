@@ -91,6 +91,21 @@ struct GridParam
         , lds_bytes(0)
     {
     }
+
+    // Stockham kernels flatten blockIdx over x and y, so any exact split of `blocks` is equivalent.
+    // Keep everything in x unless x would exceed 2^32 work items.
+    void set_stockham_grid(size_t blocks, unsigned int wgs, size_t max_y)
+    {
+        constexpr size_t max_items = std::numeric_limits<uint32_t>::max();
+        size_t           y         = (blocks * wgs + max_items - 1) / max_items;
+        while(y <= max_y && blocks % y)
+            ++y;
+        if(y > max_y)
+            y = 1;
+        b_x   = blocks / y;
+        b_y   = y;
+        wgs_x = wgs;
+    }
 };
 
 // get the arch name, as a part of key of solution map
