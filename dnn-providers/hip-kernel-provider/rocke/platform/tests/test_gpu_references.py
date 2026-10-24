@@ -22,6 +22,8 @@ _OPERATIONS = sorted(
     registry.parents[1].name.removesuffix("_reference")
     for registry in (_LIBRARY / "tests").glob("*_reference/architectures/registry.json")
 )
+# The variant that each fixture architecture publishes with its committed lock.
+_VARIANT = "family"
 
 
 @pytest.fixture
@@ -56,12 +58,15 @@ def project(tmp_path):
             "schema": 2,
             "baseline_revision": "a" * 40,
             "operation": declared["manifest_operation"],
+            "cases": {},
             "files": {"kernel.hsaco": hashlib.sha256(payload).hexdigest()},
         }
         encoded = json.dumps(manifest).encode()
         (bundle / "manifest.json").write_bytes(encoded)
-        lock = package / "architectures/gfx942/baseline_lock.json"
+        lock = package / f"architectures/gfx942/{_VARIANT}/baseline_lock.json"
         lock.parent.mkdir(parents=True)
+        # Configuration requires each lock's adapter but does not import it.
+        (lock.parent / "__init__.py").touch()
         lock.write_text(
             json.dumps(
                 {
@@ -71,27 +76,10 @@ def project(tmp_path):
                 }
             )
         )
-        archive = library / f"tests/reference_bundles/{operation}/gfx942.tar.gz"
-        archive.parent.mkdir(parents=True)
-        subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                str(common / "artifact.py"),
-                "pack",
-                "--operation",
-                operation,
-                "--bundle",
-                str(bundle),
-                "--lock",
-                str(lock),
-                "--archive",
-                str(archive),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        archives = library / f"tests/reference_bundles/{operation}/gfx942"
+        archives.mkdir(parents=True)
+        pack(tmp_path, operation, lock, archives / f"{_VARIANT}.tar.gz")
+        track(archives / f"{_VARIANT}.tar.gz")
     (tmp_path / "CMakeLists.txt").write_text(
         f"""cmake_minimum_required(VERSION 3.25)
 project(reference_install NONE)
@@ -100,14 +88,50 @@ set(ROCKE_TEST_INSTALL_DIR "tests")
 set(Python3_EXECUTABLE "{Path(sys.executable).as_posix()}")
 include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/InstallGpuReferences.cmake")
 set(installed "")
+set(variants "")
 foreach(operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
   string(TOUPPER "${{operation}}" upper)
   string(APPEND installed "${{operation}}=${{_ROCKE_${{upper}}_INSTALLED_ARCHITECTURES}}\\n")
+  foreach(arch IN LISTS _ROCKE_${{upper}}_INSTALLED_ARCHITECTURES)
+    string(APPEND variants "${{operation}}/${{arch}}=${{_ROCKE_${{upper}}_${{arch}}_INSTALLED_VARIANTS}}\\n")
+  endforeach()
 endforeach()
 file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/installed.txt" "${{installed}}")
+file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/variants.txt" "${{variants}}")
 """
     )
     return tmp_path
+
+
+def pack(project, operation, lock, archive):
+    """Pack the operation's fixture bundle after checking it against `lock`."""
+    subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(project / "library/tests/reference_common/artifact.py"),
+            "pack",
+            "--operation",
+            operation,
+            "--bundle",
+            str(project / operation),
+            "--lock",
+            str(lock),
+            "--archive",
+            str(archive),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def track(archive):
+    """Write the DVC pointer that git tracks for `archive`.
+
+    Configuration checks only that each lock has one; it never reads it.
+    """
+    Path(f"{archive}.dvc").write_text(f"outs:\n- path: {archive.name}\n")
 
 
 def publish(project, **architectures):
@@ -151,6 +175,23 @@ def installed(project):
     return _architecture_lists((project / "build/installed.txt").read_text())
 
 
+def installed_variants(project):
+    """Return each installed `operation/arch` pair's installed variants."""
+    return _architecture_lists((project / "build/variants.txt").read_text())
+
+
+def install(project):
+    """Install the configured build and return its prefix."""
+    prefix = project / "installed"
+    subprocess.run(
+        [_CMAKE, "--install", str(project / "build"), "--prefix", str(prefix)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return prefix
+
+
 def _artifact_operations(library):
     """Return the operations the artifact CLI under `library` discovers."""
     result = subprocess.run(
@@ -166,6 +207,23 @@ def _artifact_operations(library):
         text=True,
     )
     return result.stdout.split()
+
+
+def _artifact_published(library):
+    """Return the published variants that the artifact CLI under `library` lists."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(library / "tests/reference_common/artifact.py"),
+            "published",
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
 def configure(project, *, enabled=True, python=True):
@@ -188,33 +246,26 @@ def test_published_operations_install_separately(project):
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     assert installed(project) == {operation: ["gfx942"] for operation in _OPERATIONS}
-    prefix = project / "installed"
-    subprocess.run(
-        [
-            _CMAKE,
-            "--install",
-            str(project / "build"),
-            "--prefix",
-            str(prefix),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    assert installed_variants(project) == {
+        f"{operation}/gfx942": [_VARIANT] for operation in _OPERATIONS
+    }
+    prefix = install(project)
     for operation in _OPERATIONS:
+        # TheRock splits test payloads by the first processor-named directory.
         payload = (
             prefix
-            / f"tests/engines/test_arch_content/rocke/{operation}/gfx942/payload/kernel.hsaco"
+            / f"tests/engines/test_arch_content/rocke/{operation}/gfx942/{_VARIANT}"
+            / "payload/kernel.hsaco"
         )
         assert payload.read_bytes() == operation.encode()
 
 
 def test_disabled_references_need_neither_python_nor_bundles(project):
-    # Operations are still discovered so their host CTests stay registered.
+    # Operations are still discovered so their host CTests stay registered, and
+    # committed locks and pointers are still checked, but no archive is read.
     tests = project / "library/tests"
-    shutil.rmtree(tests / "reference_bundles")
-    for path in tests.glob("*_reference/architectures/*/baseline_lock.json"):
-        path.unlink()
+    for archive in tests.glob("reference_bundles/*/*/*.tar.gz"):
+        archive.unlink()
     (tests / "reference_common/artifact.py").unlink()
     result = configure(project, enabled=False, python=False)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -224,45 +275,45 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
 def test_shared_code_payloads_install_under_separate_processor_directories(project):
     """Artifact routing follows the qualification processor, not shared code bytes."""
     tests = project / "library/tests"
+    architectures = tests / "sdpa_reference/architectures"
+    archives = tests / "reference_bundles/sdpa"
     for architecture in ("gfx1200", "gfx1201"):
-        lock_dir = tests / f"sdpa_reference/architectures/{architecture}"
-        lock_dir.mkdir()
-        shutil.copyfile(
-            tests / "sdpa_reference/architectures/gfx942/baseline_lock.json",
-            lock_dir / "baseline_lock.json",
-        )
-        shutil.copyfile(
-            tests / "reference_bundles/sdpa/gfx942.tar.gz",
-            tests / f"reference_bundles/sdpa/{architecture}.tar.gz",
-        )
+        shutil.copytree(architectures / "gfx942", architectures / architecture)
+        shutil.copytree(archives / "gfx942", archives / architecture)
+    # Only listed architectures may keep a committed lock.
+    for directory in (architectures, archives):
+        shutil.rmtree(directory / "gfx942")
     published = publish(project, sdpa=["gfx1200", "gfx1201"])
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     assert installed(project) == published
-    prefix = project / "installed"
-    subprocess.run(
-        [_CMAKE, "--install", str(project / "build"), "--prefix", str(prefix)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    root = prefix / "tests/engines/test_arch_content/rocke/sdpa"
+    root = install(project) / "tests/engines/test_arch_content/rocke/sdpa"
     assert {p.name for p in root.iterdir()} == {"gfx1200", "gfx1201"}
     for architecture in ("gfx1200", "gfx1201"):
-        assert (root / architecture / "payload/kernel.hsaco").read_bytes() == b"sdpa"
+        payload = root / architecture / _VARIANT / "payload/kernel.hsaco"
+        assert payload.read_bytes() == b"sdpa"
 
 
-@pytest.mark.parametrize("problem", ["archive", "lock", "integrity", "python"])
+@pytest.mark.parametrize(
+    "problem", ["archive", "lock", "integrity", "cohort", "python"]
+)
 def test_required_reference_prerequisites_fail_configuration(project, problem):
     library = project / "library/tests"
-    lock = library / "conv_reference/architectures/gfx942/baseline_lock.json"
+    variants = library / "conv_reference/architectures/gfx942"
+    lock = variants / _VARIANT / "baseline_lock.json"
+    archive = library / f"reference_bundles/conv/gfx942/{_VARIANT}.tar.gz"
     if problem == "archive":
-        (library / "reference_bundles/conv/gfx942.tar.gz").unlink()
+        archive.unlink()
     elif problem == "lock":
+        # The architecture is listed, but none of its variants is published.
         lock.unlink()
-    elif problem == "integrity":
+        Path(f"{archive}.dvc").unlink()
+    elif problem in ("integrity", "cohort"):
+        # A stale lock pins another manifest; a lock mixed from two
+        # qualifications pins the archive's manifest but another cohort.
+        field = "manifest_sha256" if problem == "integrity" else "cohort_sha256"
         data = json.loads(lock.read_text())
-        data["manifest_sha256"] = "0" * 64
+        data[field] = "0" * 64
         lock.write_text(json.dumps(data))
     result = configure(project, python=problem != "python")
     assert result.returncode != 0
@@ -270,17 +321,96 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         "archive": "reference archive missing",
         "lock": "No qualified conv baseline lock for gfx942",
         "integrity": "does not match the pinned lock",
+        "cohort": "pins a cohort that its manifest does not record",
         "python": "requires a Python3 interpreter",
     }
     output = result.stdout + result.stderr
-    assert expected[problem] in output
+    # CMake wraps long messages.
+    assert expected[problem] in " ".join(output.split())
     if problem == "archive":
         # CMake wraps message text at spaces, so a path with a space spans lines.
-        pointer = str(library / "reference_bundles/conv/gfx942.tar.gz.dvc")
-        assert " ".join(pointer.split()) in " ".join(output.split())
+        assert " ".join(f"{archive}.dvc".split()) in " ".join(output.split())
     if problem == "lock":
         assert "baseline_lock.json" in output
         assert "Traceback" not in output
+
+
+def test_an_architecture_installs_each_published_variant(project):
+    """Each variant's lock publishes its own archive below the same architecture.
+
+    The architecture is still installed once, so it keeps one GPU CTest, whose
+    timeout scales with the variants installed for it.
+    """
+    tests = project / "library/tests"
+    variants = tests / "conv_reference/architectures/gfx942"
+    archives = tests / "reference_bundles/conv/gfx942"
+    shutil.copytree(variants / _VARIANT, variants / "second")
+    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
+    track(archives / "second.tar.gz")
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert installed(project)["conv"] == ["gfx942"]
+    assert installed_variants(project)["conv/gfx942"] == [_VARIANT, "second"]
+    root = install(project) / "tests/engines/test_arch_content/rocke/conv/gfx942"
+    assert {p.name for p in root.iterdir()} == {_VARIANT, "second"}
+    for variant in (_VARIANT, "second"):
+        assert (root / variant / "payload/kernel.hsaco").read_bytes() == b"conv"
+    # A published variant cannot reuse another variant's archive.
+    (archives / "second.tar.gz").unlink()
+    result = configure(project)
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "CONV reference archive missing" in " ".join(output.split())
+    # CMake wraps message text at spaces, so a path with a space spans lines.
+    pointer = f"{archives / 'second.tar.gz'}.dvc"
+    assert " ".join(pointer.split()) in " ".join(output.split())
+
+
+def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
+    """Tools list the installed variants and their archives without CMake."""
+    tests = project / "library/tests"
+    variants = tests / "conv_reference/architectures/gfx942"
+    archives = tests / "reference_bundles/conv/gfx942"
+    shutil.copytree(variants / _VARIANT, variants / "second")
+    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
+    track(archives / "second.tar.gz")
+    # An adapter without a committed lock is enrolled but not published.
+    (variants / "draft").mkdir()
+    (variants / "draft/__init__.py").touch()
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    listed = {}
+    for entry in _artifact_published(project / "library"):
+        pair = f"{entry['operation']}/{entry['architecture']}"
+        listed.setdefault(pair, []).append(entry["variant"])
+        for name in ("lock", "pointer", "archive"):
+            assert Path(entry[name]).is_file(), entry
+    assert listed == installed_variants(project)
+
+
+def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
+    """A manifest that declares its variant must declare the lock's variant."""
+    tests = project / "library/tests"
+    bundle = project / "conv"
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    encoded = json.dumps(dict(manifest, variant="other")).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    lock = tests / f"conv_reference/architectures/gfx942/{_VARIANT}/baseline_lock.json"
+    pinned = json.loads(lock.read_text())
+    pinned["manifest_sha256"] = hashlib.sha256(encoded).hexdigest()
+    lock.write_text(json.dumps(pinned))
+    archive = tests / f"reference_bundles/conv/gfx942/{_VARIANT}.tar.gz"
+    archive.unlink()
+    pack(project, "conv", lock, archive)
+    result = configure(project)
+    assert result.returncode != 0
+    # CMake wraps long messages.
+    output = " ".join((result.stdout + result.stderr).split())
+    assert f"CONV reference staging failed for gfx942 {_VARIANT}" in output
+    assert f"bundle variant 'other' does not match '{_VARIANT}'" in output
+    # The archive is the one that the lock pins, so fetching it cannot help.
+    assert "baseline_lock.json pins a bundle qualified for variant 'other'" in output
+    assert "dvc pull" not in output
 
 
 @pytest.mark.parametrize("missing", ["package", "publication", "metadata"])
@@ -310,6 +440,94 @@ def test_half_wired_operation_fails_configuration(project, missing):
     assert all(message in output for message in expected), output
 
 
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "legacy-lock",
+        "legacy-pointer",
+        "pointer-without-lock",
+        "lock-without-pointer",
+        "unlisted-architecture",
+        "adapter",
+        "operation-gitignore",
+        "architecture-gitignore",
+    ],
+)
+def test_half_wired_or_pre_variant_references_fail_configuration(
+    project, problem, enabled
+):
+    """A lock or pointer that installation would not read fails every build.
+
+    A branch opened before the variant layout can restore a file at its old
+    path through a merge, and a variant can be committed without one of its
+    parts. Builds without references check them too, so the failure is not
+    left to the jobs that install references.
+    """
+    tests = project / "library/tests"
+    architectures = tests / "conv_reference/architectures"
+    lock = architectures / f"gfx942/{_VARIANT}/baseline_lock.json"
+    archives = tests / "reference_bundles/conv"
+    pointer = archives / f"gfx942/{_VARIANT}.tar.gz.dvc"
+    if problem == "legacy-lock":
+        path = architectures / "gfx942/baseline_lock.json"
+        shutil.copyfile(lock, path)
+        expected = f"{path} is a pre-variant baseline lock"
+    elif problem == "legacy-pointer":
+        path = archives / "gfx942.tar.gz.dvc"
+        shutil.copyfile(pointer, path)
+        expected = f"{path} is a pre-variant DVC pointer"
+    elif problem == "pointer-without-lock":
+        lock.unlink()
+        expected = f"{pointer} tracks an archive that no lock publishes: {lock}"
+    elif problem == "lock-without-pointer":
+        pointer.unlink()
+        expected = f"{lock} has no DVC pointer: {pointer} does not exist"
+    elif problem == "unlisted-architecture":
+        publish(project, conv=[])
+        expected = (
+            f"{lock} publishes gfx942, which ROCKE_PUBLISHED_CONV_ARCHITECTURES in "
+            "PublishedGpuReferences.cmake does not list"
+        )
+    elif problem == "adapter":
+        adapter = lock.with_name("__init__.py")
+        adapter.unlink()
+        expected = f"{lock} has no adapter: {adapter} does not exist"
+    else:
+        # dvc add writes one beside an archive that no ignore file covers.
+        directory = archives if problem == "operation-gitignore" else pointer.parent
+        path = directory / ".gitignore"
+        path.write_text(f"/{_VARIANT}.tar.gz\n")
+        expected = f"Delete {path}"
+    result = configure(project, enabled=enabled)
+    assert result.returncode != 0
+    # CMake wraps long messages.
+    output = " ".join((result.stdout + result.stderr).split())
+    assert expected in output, output
+
+
+@pytest.mark.parametrize("variant", ["gfx942", "gfx_wide", "Wide", "wide-v2", "2wide"])
+def test_invalid_variant_names_fail_configuration(project, variant):
+    """A published variant needs a lowercase package name, never a processor's.
+
+    TheRock splits installed payloads by their first gfx-named directory, and
+    the variant directory sits below the processor's.
+    """
+    tests = project / "library/tests"
+    variants = tests / "conv_reference/architectures/gfx942"
+    archives = tests / "reference_bundles/conv/gfx942"
+    (variants / _VARIANT).rename(variants / variant)
+    for suffix in (".tar.gz", ".tar.gz.dvc"):
+        (archives / f"{_VARIANT}{suffix}").rename(archives / f"{variant}{suffix}")
+    result = configure(project)
+    assert result.returncode != 0
+    # CMake wraps long messages.
+    output = " ".join((result.stdout + result.stderr).split())
+    lock = variants / variant / "baseline_lock.json"
+    expected = f"{lock} publishes the invalid variant name {variant}."
+    assert " ".join(expected.split()) in " ".join(output.split()), output
+
+
 def test_registered_operation_may_publish_no_architecture(project):
     register(project, "fictional")
     published = publish(project, fictional=[])
@@ -332,14 +550,51 @@ def test_operations_extending_a_name_keep_the_artifact_cli_order(project):
 
 
 def _cmake_script(tmp_path, body):
-    """Run a CMake script and return the value it leaves in `result`."""
+    """Run a CMake script and return the value it leaves in `result`.
+
+    The script runs with the policies of the CMake version that the platform
+    requires, as the modules it includes do in a build.
+    """
     script = tmp_path / "script.cmake"
     output = tmp_path / "result.txt"
-    script.write_text(body + f'file(WRITE "{output.as_posix()}" "${{result}}")\n')
-    subprocess.run(
-        [_CMAKE, "-P", str(script)], check=True, capture_output=True, text=True
+    script.write_text(
+        "cmake_minimum_required(VERSION 3.16)\n"
+        + body
+        + f'file(WRITE "{output.as_posix()}" "${{result}}")\n'
     )
+    result = subprocess.run(
+        [_CMAKE, "-P", str(script)], check=False, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
     return output.read_text()
+
+
+# Commands newer than the CMake 3.16 that platform/CMakeLists.txt requires.
+# The fixture project declares a newer CMake, so configuring it cannot find them.
+_NEWER_CMAKE_COMMANDS = {
+    "block()": r"\bblock\s*\(",
+    "cmake_path()": r"\bcmake_path\s*\(",
+    "string(JSON)": r"\bstring\s*\(\s*JSON\b",
+}
+
+
+def _newer_cmake_commands(text):
+    """Return the newer commands that CMake code outside comments uses."""
+    code = re.sub(r"#.*", "", text)
+    return [
+        command
+        for command, pattern in _NEWER_CMAKE_COMMANDS.items()
+        if re.search(pattern, code, re.IGNORECASE)
+    ]
+
+
+def test_reference_install_module_needs_only_the_required_cmake():
+    module = _PLATFORM / "cmake/InstallGpuReferences.cmake"
+    assert _newer_cmake_commands(module.read_text()) == [], module
+    # CMake command names ignore case; comments are not code.
+    newer = 'BLOCK()\nendblock()\ncmake_path(GET x)\nstring( JSON y GET "{}")\n'
+    assert _newer_cmake_commands(newer) == list(_NEWER_CMAKE_COMMANDS)
+    assert _newer_cmake_commands("# block() and string(JSON) are newer\n") == []
 
 
 def _published(tmp_path):
@@ -361,7 +616,11 @@ def _published(tmp_path):
 
 
 def test_reference_operations_are_defined_once_by_their_packages(tmp_path):
-    """CMake, the artifact CLI and publication all follow the operation packages."""
+    """CMake, the artifact CLI and publication all follow the operation packages.
+
+    Including the install module also checks this tree's committed locks and
+    pointers, as every configuration does.
+    """
     discovered = _cmake_script(
         tmp_path,
         f'set(_ROCKE_LIBRARY_DIR "{_LIBRARY.as_posix()}")\n'
@@ -403,10 +662,40 @@ def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
         supported = json.loads((root / "registry.json").read_text())
         assert set(architectures) <= set(supported)
         for architecture in architectures:
-            lock = json.loads((root / architecture / "baseline_lock.json").read_text())
-            assert lock["schema"] == 2
-            assert len(bytes.fromhex(lock["baseline_revision"])) == 20
-            assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
+            # Each variant with a committed lock installs its own archive.
+            locks = sorted((root / architecture).glob("*/baseline_lock.json"))
+            assert locks, f"{operation} {architecture} has no committed lock"
+            for path in locks:
+                variant = path.parent.name
+                assert (path.parent / "__init__.py").is_file()
+                pointer = (
+                    tests
+                    / f"reference_bundles/{operation}/{architecture}"
+                    / f"{variant}.tar.gz.dvc"
+                )
+                assert f"  path: {variant}.tar.gz\n" in pointer.read_text()
+                lock = json.loads(path.read_text())
+                assert lock["schema"] == 2
+                assert len(bytes.fromhex(lock["baseline_revision"])) == 20
+                assert len(bytes.fromhex(lock["cohort_sha256"])) == 32
+                assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
+
+
+def test_artifact_cli_lists_the_published_architectures(tmp_path):
+    """Listing committed locks finds exactly the real publication lists' pairs.
+
+    Configuration rejects a listed architecture without a lock and a lock
+    under an unlisted one, so tools need not evaluate the CMake lists.
+    """
+    listed = {
+        (entry["operation"], entry["architecture"])
+        for entry in _artifact_published(_LIBRARY)
+    }
+    assert listed == {
+        (operation, architecture)
+        for operation, architectures in _published(tmp_path).items()
+        for architecture in architectures
+    }
 
 
 def _reference_ctests(published):

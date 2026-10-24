@@ -6,14 +6,14 @@
 import numpy as np
 import pytest
 
-from conv_reference.architectures import get_architecture
+from conv_reference.architectures import get_adapter
 from conv_reference.contract import independent_reference, make_inputs, reference_scale
 from conv_reference.torch_reference import cross_check
 
 pytest.importorskip("torch")
 
 
-@pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", get_adapter("gfx942").CASES, ids=lambda c: c.id)
 def test_torch_oracles_agree_with_numpy_and_detect_bad_baseline(case):
     inputs = make_inputs(case)
     reference = independent_reference(case, inputs)
@@ -27,7 +27,7 @@ def test_torch_oracles_agree_with_numpy_and_detect_bad_baseline(case):
 
 
 def test_torch_cross_check_reports_disagreement_without_reserve():
-    case = get_architecture("gfx942").CASES[0]
+    case = get_adapter("gfx942").CASES[0]
     inputs = make_inputs(case)
     reference = independent_reference(case, inputs)
     scale = reference_scale(reference)
@@ -41,7 +41,7 @@ def test_torch_cross_check_rejects_nonfinite_answer(monkeypatch):
     import torch
     import torch.nn.functional as functional
 
-    case = get_architecture("gfx942").CASES[0]
+    case = get_adapter("gfx942").CASES[0]
     inputs = make_inputs(case)
     reference = independent_reference(case, inputs)
     monkeypatch.setattr(

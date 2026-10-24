@@ -10,9 +10,9 @@ and the old/current comparison are shared, so every operation certifies its
 original tolerance in the same way. The snapshot and qualification commands are
 offline maintenance operations. Verification only executes a locked bundle and
 current kernels; it never downloads dependencies, generates independent answers,
-or promotes a baseline. The cases and diff commands only read the enrolled cohort
-and an authenticated manifest, so an author can review a cohort change on a host
-without a GPU.
+or promotes a baseline. The cases, diff, and status commands only read the
+enrolled cohorts and authenticated manifests, so an author can review a cohort
+change on a host without a GPU.
 """
 
 from __future__ import annotations
@@ -35,7 +35,13 @@ from typing import Any
 
 import numpy as np
 
-from .artifact import display_command, manifest_operation, unpack
+from .artifact import (
+    cohort_digest,
+    display_command,
+    manifest_cohort_digest,
+    manifest_operation,
+    unpack,
+)
 from .cases import compare_manifest_cases, describe_case, match_manifest_cases
 from .numeric import (
     ErrorBudget,
@@ -86,6 +92,24 @@ def _shown(path: Path) -> str:
     return str(path.relative_to(here) if path.is_relative_to(here) else path)
 
 
+def _shared_cohort(
+    cohorts: Mapping[tuple[str, str], str], slot: tuple[str, str]
+) -> str:
+    """Name the other enrolled slots whose cases have ``slot``'s cohort digest.
+
+    ``cohorts`` maps each enrolled (architecture, variant) slot to its digest,
+    which a published slot's lock pins as ``cohort_sha256``, so a change to a
+    shared cohort needs each of those slots requalified. The note is empty
+    when no other slot shares the cohort.
+    """
+    shared = [
+        f"{name} {variant}"
+        for (name, variant), digest in cohorts.items()
+        if digest == cohorts[slot] and (name, variant) != slot
+    ]
+    return f"; cohort shared with {', '.join(shared)}" if shared else ""
+
+
 @dataclass(frozen=True)
 class Metric:
     """An operation's comparison against its original tolerance.
@@ -127,10 +151,14 @@ class ReferenceOperation:
     ``label`` names the operation in messages and ``description`` documents its
     command line. ``contract`` provides ``SCHEMA_VERSION``, ``INPUT_GENERATOR``,
     ``make_inputs``, and ``independent_reference``; ``architectures`` provides
-    ``ARCHITECTURES``, ``get_architecture``, and ``baseline_lock``. ``reference``
-    describes the independent reference's implementation, metric, and input
-    generator in each manifest. Without ``torch``, qualification bounds only the
-    independent reference and offers no ``--torch-reference`` option.
+    ``ARCHITECTURES``, ``resolve_variant``, ``get_adapter``, and ``baseline_lock``.
+    A ``variant`` argument selects one of an architecture's adapters and
+    defaults to its only one. Qualification records it in the manifest; a
+    manifest qualified before variants records none, and the lock that the
+    variant selects identifies it. ``reference`` describes the independent
+    reference's implementation, metric, and input generator in each manifest.
+    Without ``torch``, qualification bounds only the independent reference and
+    offers no ``--torch-reference`` option.
     """
 
     name: str
@@ -179,15 +207,17 @@ class ReferenceOperation:
             # parent's own traceback would only repeat it.
             kind = TimeoutError if isinstance(error, TimeoutError) else RuntimeError
             raise kind(
-                self._worker_failure(case, request["architecture"], side, error)
+                self._worker_failure(
+                    case, request["architecture"], request["variant"], side, error
+                )
             ) from None
 
     def _worker_failure(
-        self, case: Any, architecture: str, side: str, error: Exception
+        self, case: Any, architecture: str, variant: str, side: str, error: Exception
     ) -> str:
         adapter = (
             f"library/tests/{self.name}_reference/architectures/{architecture}/"
-            "__init__.py"
+            f"{variant}/__init__.py"
         )
         if side == _BASELINE:
             cause = (
@@ -246,6 +276,37 @@ class ReferenceOperation:
             ),
         )
 
+    def enrolled_cohort_digest(
+        self, architecture: str, variant: str | None = None
+    ) -> str:
+        """Digest a variant's enrolled cohort as its lock's ``cohort_sha256``.
+
+        Each case contributes its contract, generated input digests, and
+        tolerance, as qualification records them in the manifest. Generating
+        inputs needs NumPy but no GPU or bundle data, so a host can tell that
+        the adapter's cases are no longer the cohort that the lock pins.
+        """
+        target = self.architectures.get_adapter(architecture, variant)
+        return cohort_digest(
+            {
+                "case": asdict(case),
+                "input_digests": {
+                    name: array_digest(array)
+                    for name, array in self.contract.make_inputs(case).items()
+                },
+                "tolerance": case.tolerance,
+            }
+            for case in target.CASES
+        )
+
+    def _enrolled_cohorts(self) -> dict[tuple[str, str], str]:
+        """Digest every enrolled (architecture, variant) slot's cohort."""
+        return {
+            (name, variant): self.enrolled_cohort_digest(name, variant)
+            for name in self.architectures.ARCHITECTURES
+            for variant in self.architectures.variants(name)
+        }
+
     def checked_inputs(
         self, case: Any, digests: dict[str, str]
     ) -> dict[str, np.ndarray]:
@@ -265,10 +326,12 @@ class ReferenceOperation:
         repetitions: int,
         architecture: str = "gfx942",
         *,
+        variant: str | None = None,
         torch_reference: str | None = None,
     ) -> None:
         """Measure the old version's bounds and require deterministic old outputs."""
-        target = self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
+        target = self.architectures.get_adapter(architecture, variant)
         if torch_reference is not None:
             if self.torch is None:
                 raise ValueError(f"{self.label} qualification has no Torch reference")
@@ -284,6 +347,12 @@ class ReferenceOperation:
         source = baseline / "source"
         if payload_digests(source) != metadata["files"]:
             raise ValueError("baseline sources no longer match the committed snapshot")
+        # The variant may be the architecture's default, so name the one qualified.
+        print(
+            f"{self.label} {architecture} {variant}: qualifying "
+            f"{len(target.CASES)} enrolled cases",
+            flush=True,
+        )
         output.mkdir(parents=True, exist_ok=False)
         payload = output / "payload"
         payload.mkdir()
@@ -310,6 +379,7 @@ class ReferenceOperation:
                     {
                         "mode": "source",
                         "architecture": architecture,
+                        "variant": variant,
                         "case": asdict(case),
                         "inputs": str(input_file),
                         "input_digests": input_digests,
@@ -380,6 +450,8 @@ class ReferenceOperation:
             "input_generation": self.contract.INPUT_GENERATOR,
             "baseline_revision": metadata["revision"],
             "baseline_snapshot_sha256": file_digest(baseline / "snapshot.json"),
+            # Verification and staging refuse the bundle as another variant's.
+            "variant": variant,
             "reference": {
                 **self.reference,
                 "numpy_version": np.__version__,
@@ -397,6 +469,7 @@ class ReferenceOperation:
             {
                 "schema": self.contract.SCHEMA_VERSION,
                 "baseline_revision": metadata["revision"],
+                "cohort_sha256": manifest_cohort_digest(manifest),
                 "manifest_sha256": file_digest(output / "manifest.json"),
             },
         )
@@ -410,28 +483,37 @@ class ReferenceOperation:
         lock_path: Path | None = None,
         *,
         architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> dict:
         """Require the independently pinned manifest, payload, and exact case cohort."""
-        manifest = self._authenticated_manifest(bundle, lock_path, architecture)
-        self.validate_cases(manifest, architecture)
+        manifest = self._authenticated_manifest(
+            bundle, lock_path, architecture, variant
+        )
+        self.validate_cases(manifest, architecture, variant)
         return manifest
 
     def _authenticated_manifest(
-        self, bundle: Path, lock_path: Path | None, architecture: str
+        self,
+        bundle: Path,
+        lock_path: Path | None,
+        architecture: str,
+        variant: str | None = None,
     ) -> dict:
         """Require the pinned manifest and payload; the cohort is checked separately.
 
         A bundle the lock rejects, such as one extracted from an earlier archive,
         fails with the commands that replace it.
         """
-        self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
         schema = self.contract.SCHEMA_VERSION
-        lock_path = lock_path or self.architectures.baseline_lock(architecture)
+        lock_path = lock_path or self.architectures.baseline_lock(architecture, variant)
         lock = json.loads(lock_path.read_text())
         if lock["schema"] != schema:
             raise ValueError(f"unsupported {self.label} lock schema")
         if bundle.is_file():
-            raise ValueError(self.bundle_hint(architecture, bundle, lock_path))
+            raise ValueError(
+                self.bundle_hint(architecture, bundle, lock_path, variant=variant)
+            )
         manifest_path = bundle / "manifest.json"
         if not manifest_path.is_file():
             raise ValueError(
@@ -440,6 +522,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         digest = file_digest(manifest_path)
@@ -452,6 +535,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         manifest = json.loads(manifest_path.read_text())
@@ -480,6 +564,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         expected = manifest_operation(self.name)
@@ -491,6 +576,14 @@ class ReferenceOperation:
                 f"wrong reference operation: the manifest declares {declared!r}, "
                 f"but {self.label} bundles declare {expected!r}"
             )
+        # Manifests qualified before variants declare none and are likewise
+        # identified through the selected lock, which is the variant's.
+        declared = manifest.get("variant", variant)
+        if declared != variant:
+            raise ValueError(
+                f"wrong reference variant: the manifest declares {declared!r}, but "
+                f"the selected {self.label} {architecture} variant is {variant!r}"
+            )
         if manifest.get("input_generation") != self.contract.INPUT_GENERATOR:
             raise ValueError(f"unsupported {self.label} input generator contract")
         if any(p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")):
@@ -500,13 +593,18 @@ class ReferenceOperation:
         return manifest
 
     def _rejected_bundle(
-        self, problem: str, architecture: str, bundle: Path, lock: Path
+        self,
+        problem: str,
+        architecture: str,
+        bundle: Path,
+        lock: Path,
+        variant: str | None = None,
     ) -> str:
         return _triage(
             problem,
             "the extracted bundle is stale (left from an earlier archive), partly "
             "extracted, or modified, or the lock does not belong to it",
-            self.bundle_hint(architecture, bundle, lock, stale=True),
+            self.bundle_hint(architecture, bundle, lock, variant=variant, stale=True),
         )
 
     def bundle_hint(
@@ -515,6 +613,7 @@ class ReferenceOperation:
         bundle: Path,
         lock: Path | None = None,
         *,
+        variant: str | None = None,
         stale: bool = False,
         option: str = "--bundle",
     ) -> str:
@@ -529,20 +628,22 @@ class ReferenceOperation:
         without a committed lock in an installed tree, is unpublished and needs
         a qualified candidate. ``stale`` asks for the directory's removal first,
         since neither unpack nor installation replaces an existing bundle.
-        ``option`` names the setting that selects a bundle.
+        ``option`` names the setting that selects a bundle. ``variant`` selects
+        the committed lock and the default bundle, and defaults to the
+        architecture's only variant.
         """
-        committed = self.architectures.baseline_lock(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
+        committed = self.architectures.baseline_lock(architecture, variant)
         lock = lock or committed
         if bundle.is_file():
-            return self._unpack_hint(bundle, lock, option=option)
+            return self._unpack_hint(bundle, lock, variant, option=option)
         if lock.resolve() != committed.resolve():
             return (
                 "pass a candidate bundle directory together with the "
                 "qualification-lock.json that qualification wrote with it"
             )
-        tests = self._package.parent
-        published = default_bundle_path(tests, architecture, operation=self.name)
-        if installed_test_root(tests) is not None:
+        published = self._default_bundle(architecture, variant)
+        if installed_test_root(self._package.parent) is not None:
             if not committed.is_file():
                 return (
                     f"no published {architecture} {self.label} bundle is pinned at "
@@ -579,13 +680,15 @@ class ReferenceOperation:
         return (
             f"{lead} dvc pull and artifact.py unpack:\n"
             f"    {display_command(['dvc', 'pull', _shown(pointer)])}\n"
-            f"    {self._unpack_command(archive, bundle, lock)}"
+            f"    {self._unpack_command(archive, bundle, lock, variant)}"
         )
 
-    def validate_cases(self, manifest: dict, architecture: str) -> None:
+    def validate_cases(
+        self, manifest: dict, architecture: str, variant: str | None = None
+    ) -> None:
         """Preserve the cohort and budgets across qualification and verification."""
         policy = _budget_policy(manifest)
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         keys = match_manifest_cases(manifest["cases"], target.CASES, label=self.label)
         for case in target.CASES:
             entry = manifest["cases"][keys[case.id]]
@@ -593,7 +696,9 @@ class ReferenceOperation:
             if problem is not None:
                 raise ValueError(f"{self.label} {problem}")
 
-    def cohort_differences(self, manifest: dict, architecture: str) -> list[str]:
+    def cohort_differences(
+        self, manifest: dict, architecture: str, variant: str | None = None
+    ) -> list[str]:
         """Describe every way the enrolled cohort differs from a manifest's cases.
 
         This applies ``validate_cases``'s contract matching and per-case checks,
@@ -602,7 +707,7 @@ class ReferenceOperation:
         empty list means verification accepts the manifest's cases.
         """
         policy = _budget_policy(manifest)
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         comparison = compare_manifest_cases(
             manifest["cases"], target.CASES, label=self.label
         )
@@ -659,7 +764,12 @@ class ReferenceOperation:
         return None
 
     def diff_bundle(
-        self, bundle: Path, lock_path: Path | None = None, *, architecture: str
+        self,
+        bundle: Path,
+        lock_path: Path | None = None,
+        *,
+        architecture: str,
+        variant: str | None = None,
     ) -> list[str]:
         """Compare the enrolled cohort with a bundle directory or packed archive.
 
@@ -669,9 +779,9 @@ class ReferenceOperation:
         decompressed or read as tar, such as a truncated fetch or a DVC pointer,
         raises ``ValueError`` with the step that replaces it.
         """
-        lock = lock_path or self.architectures.baseline_lock(architecture)
+        lock = lock_path or self.architectures.baseline_lock(architecture, variant)
         if bundle.is_dir():
-            manifest = self._authenticated_manifest(bundle, lock, architecture)
+            manifest = self._authenticated_manifest(bundle, lock, architecture, variant)
         else:
             with tempfile.TemporaryDirectory(
                 prefix=f"rocke-{self.name}-diff-"
@@ -681,18 +791,22 @@ class ReferenceOperation:
                     unpack(bundle, staged, lock, operation=self.name)
                 except _ARCHIVE_ERRORS as error:
                     raise ValueError(
-                        self._unreadable_archive(bundle, architecture, error)
+                        self._unreadable_archive(bundle, architecture, variant, error)
                     ) from None
-                manifest = self._authenticated_manifest(staged, lock, architecture)
-        return self.cohort_differences(manifest, architecture)
+                manifest = self._authenticated_manifest(
+                    staged, lock, architecture, variant
+                )
+        return self.cohort_differences(manifest, architecture, variant)
 
     def _unreadable_archive(
-        self, archive: Path, architecture: str, error: Exception
+        self,
+        archive: Path,
+        architecture: str,
+        variant: str | None,
+        error: Exception,
     ) -> str:
         """Explain an archive that cannot be read and how to replace it."""
-        directory = default_bundle_path(
-            self._package.parent, architecture, operation=self.name
-        )
+        directory = self._default_bundle(architecture, variant)
         published = directory.with_name(f"{directory.name}.tar.gz")
         pointer = published.with_name(f"{published.name}.dvc")
         if archive.resolve() == published.resolve() and pointer.is_file():
@@ -716,28 +830,43 @@ class ReferenceOperation:
             step,
         )
 
-    def published_bundle(self, architecture: str) -> Path:
+    def _default_bundle(self, architecture: str, variant: str | None) -> Path:
+        """Locate a variant's bundle in this tree's layout; it need not exist.
+
+        ``variant`` defaults to the architecture's only variant.
+        """
+        return default_bundle_path(
+            self._package.parent,
+            architecture,
+            operation=self.name,
+            variant=self.architectures.resolve_variant(architecture, variant),
+        )
+
+    def published_bundle(self, architecture: str, variant: str | None = None) -> Path:
         """Locate the published bundle data that this tree provides by default.
 
-        A source checkout provides the DVC archive, else a bundle extracted
-        beside it; an installed tree provides the bundle that CMake staged. The
-        path need not exist.
+        A source checkout provides the variant's DVC archive, else a bundle
+        extracted beside it; an installed tree provides the bundle that CMake
+        staged. The path need not exist.
         """
-        directory = default_bundle_path(
-            self._package.parent, architecture, operation=self.name
-        )
+        directory = self._default_bundle(architecture, variant)
         archive = directory.with_name(f"{directory.name}.tar.gz")
         return archive if archive.is_file() else directory
 
     def manifest_key(
-        self, manifest: dict, case: Any, *, architecture: str = "gfx942"
+        self,
+        manifest: dict,
+        case: Any,
+        *,
+        architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> str:
         """Return the manifest key, which also names the payload directory, for a case.
 
         Published bundles may key cases by an earlier id format; the recorded case
         contract, not the key, identifies the entry.
         """
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         keys = match_manifest_cases(manifest["cases"], target.CASES, label=self.label)
         return keys[case.id]
 
@@ -763,6 +892,7 @@ class ReferenceOperation:
         current_root: Path | None = None,
         repetitions: int = 2,
         architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> dict:
         """Run old/current in separate interpreters and check every current output.
 
@@ -775,16 +905,22 @@ class ReferenceOperation:
         """
         if repetitions < 1:
             raise ValueError("verification must execute at least once")
-        target = self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
+        target = self.architectures.get_adapter(architecture, variant)
         if case not in target.CASES:
             raise ValueError("case is not enrolled for the selected architecture")
-        key = self.manifest_key(manifest, case, architecture=architecture)
+        key = self.manifest_key(
+            manifest, case, architecture=architecture, variant=variant
+        )
         entry = manifest["cases"][key]
         subject = f"{self.label} {architecture} case {case.id}"
         payload = bundle / "payload"
         case_dir = payload / "cases" / key
+        # Source mode runs the variant's adapter. Replay reads only the
+        # processor, so published runners, which predate the variant, ignore it.
         base = {
             "architecture": architecture,
+            "variant": variant,
             "case": asdict(case),
             "input_digests": entry["input_digests"],
             "repetitions": repetitions,
@@ -876,7 +1012,7 @@ class ReferenceOperation:
                 budget.check(distance, metric=self.metric.name)
             except AssertionError as error:
                 rerun = self._rerun_command(
-                    case, architecture, bundle, lock, current_root
+                    case, architecture, variant, bundle, lock, current_root
                 )
                 raise AssertionError(
                     _triage(
@@ -906,10 +1042,14 @@ class ReferenceOperation:
 
     def _parser(self) -> argparse.ArgumentParser:
         architectures = self.architectures.ARCHITECTURES
+        variant_help = (
+            "enrolled variant of the architecture (default: its only variant; "
+            "required when it has several)"
+        )
         parser = argparse.ArgumentParser(
             description=self.description,
             epilog=(
-                "The cases and diff commands need no GPU or Torch. See "
+                "The cases, diff, and status commands need no GPU or Torch. See "
                 f"{_WORKFLOW} for the authoring and publication procedure."
             ),
         )
@@ -949,6 +1089,9 @@ class ReferenceOperation:
             choices=architectures,
             default="gfx942",
             help="enrolled architecture of this GPU (default: %(default)s)",
+        )
+        qualification.add_argument(
+            "--variant", help=f"{variant_help}; qualification prints the one it runs"
         )
         qualification.add_argument(
             "--baseline",
@@ -999,6 +1142,7 @@ class ReferenceOperation:
             default="gfx942",
             help="enrolled architecture of this GPU (default: %(default)s)",
         )
+        verification.add_argument("--variant", help=variant_help)
         verification.add_argument(
             "--bundle",
             required=True,
@@ -1036,14 +1180,22 @@ class ReferenceOperation:
             "cases",
             help="list an architecture's enrolled cases",
             description=(
-                "Print each enrolled case id with its tolerance and case contract."
+                "Print each enrolled case id with its tolerance and case contract, "
+                "grouped by variant. Each variant's count names the other enrolled "
+                "variants that share its cohort, so a change to that cohort needs "
+                "their requalification too."
             ),
         )
         listing.add_argument(
             "--arch", choices=architectures, required=True, help="enrolled architecture"
         )
         listing.add_argument(
-            "--json", action="store_true", help="print the cohort as JSON"
+            "--variant",
+            help="list only this enrolled variant (default: every variant; --json "
+            "needs one when the architecture has several)",
+        )
+        listing.add_argument(
+            "--json", action="store_true", help="print one variant's cohort as JSON"
         )
         comparison = commands.add_parser(
             "diff",
@@ -1052,27 +1204,50 @@ class ReferenceOperation:
                 "Authenticate a bundle's manifest against its lock, then report "
                 "enrolled cases it does not record, recorded cases that are not "
                 "enrolled, and changed tolerances or budgets, matching cases as "
-                "verification does. Exits with status 1 on any difference and 2 "
-                "when the lock or bundle cannot be read or authenticated. Reading "
-                "the recorded device targets needs the rocKE platform package: "
-                "install rocKE or set PYTHONPATH=platform/python from the rocKE "
-                "root."
+                "verification does. Without --variant, --bundle, or --lock, it "
+                "compares every published variant of the architecture. Exits "
+                "with status 1 on any difference and 2 when the lock or bundle "
+                "cannot be read or authenticated. Reading the recorded device "
+                "targets needs the rocKE platform package: install rocKE or set "
+                "PYTHONPATH=platform/python from the rocKE root."
             ),
         )
         comparison.add_argument(
             "--arch", choices=architectures, required=True, help="enrolled architecture"
         )
         comparison.add_argument(
+            "--variant",
+            help="compare only this enrolled variant (default: every published "
+            "variant; with --bundle or --lock, the architecture's only variant)",
+        )
+        comparison.add_argument(
             "--bundle",
             type=Path,
-            help="bundle directory or .tar.gz archive (default: the "
-            "architecture's DVC archive, else its extracted bundle)",
+            help="bundle directory or .tar.gz archive (default: the variant's "
+            "DVC archive, else its extracted bundle)",
         )
         comparison.add_argument(
             "--lock",
             type=Path,
             help="lock that authenticates the bundle (default: the committed "
             "baseline_lock.json)",
+        )
+        commands.add_parser(
+            "status",
+            help="summarize every enrolled variant's publication and bundle",
+            description=(
+                "Print one line per enrolled architecture and variant: whether "
+                "a committed lock publishes it and from which baseline "
+                "revision, the other variants that share its cohort, and "
+                "whether the published bundle that diff reads by default "
+                "matches the enrolled cases, differs from them, is missing, or "
+                "is unusable. A lock that pins another cohort's digest differs "
+                "without bundle data. Exits with status 1 when a published "
+                "bundle differs, otherwise 2 when the lock or bundle cannot be "
+                "read or authenticated; a missing bundle is reported with how to "
+                "provide it and does not fail. Reading the recorded device "
+                "targets needs the rocKE platform package, as diff does."
+            ),
         )
         return parser
 
@@ -1088,21 +1263,54 @@ class ReferenceOperation:
                 args.output.resolve(),
                 args.repetitions,
                 args.arch,
+                variant=self._variant(parser, args),
                 torch_reference=args.torch_reference,
             )
         elif args.command == "cases":
-            self._list_cases(args.arch, as_json=args.json)
+            # The text listing groups every variant; JSON describes one cohort.
+            variants = (
+                self.architectures.variants(args.arch)
+                if args.variant is None and not args.json
+                else (self._variant(parser, args),)
+            )
+            self._list_cases(args.arch, variants, as_json=args.json)
         elif args.command == "diff":
             self._diff(parser, args)
+        elif args.command == "status":
+            self._status()
         else:
             self._verify(parser, args)
 
-    def _list_cases(self, architecture: str, *, as_json: bool) -> None:
-        cases = self.architectures.get_architecture(architecture).CASES
+    def _variant(
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+    ) -> str:
+        """Return ``--variant`` or the architecture's only variant, or exit.
+
+        The error lists the enrolled variants when ``--variant`` is not one of
+        them or is missing for an architecture with several.
+        """
+        try:
+            return self.architectures.resolve_variant(args.arch, args.variant)
+        except ValueError as error:
+            parser.error(f"argument --variant: {error}")
+
+    def _list_cases(
+        self, architecture: str, variants: Sequence[str], *, as_json: bool
+    ) -> None:
+        """Print each variant's enrolled cases, or one variant's cohort as JSON.
+
+        A variant's count names the other enrolled (architecture, variant)
+        slots whose cases have the same cohort digest, which their locks pin as
+        ``cohort_sha256``: a change to a shared cohort needs each of those
+        slots requalified.
+        """
         if as_json:
+            (variant,) = variants
+            cases = self.architectures.get_adapter(architecture, variant).CASES
             listing = {
                 "operation": self.name,
                 "architecture": architecture,
+                "variant": variant,
                 "cases": [
                     {"id": case.id, "tolerance": case.tolerance, "case": asdict(case)}
                     for case in cases
@@ -1110,21 +1318,33 @@ class ReferenceOperation:
             }
             print(json.dumps(listing, indent=2))
             return
-        width = max((len(case.id) for case in cases), default=0)
-        for case in cases:
-            fields = " ".join(f"{name}={value}" for name, value in asdict(case).items())
-            print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
-        print(f"{self.label} {architecture}: {len(cases)} enrolled cases")
+        cohorts = self._enrolled_cohorts()
+        for index, variant in enumerate(variants):
+            if index:
+                print()
+            cases = self.architectures.get_adapter(architecture, variant).CASES
+            width = max((len(case.id) for case in cases), default=0)
+            for case in cases:
+                fields = " ".join(
+                    f"{name}={value}" for name, value in asdict(case).items()
+                )
+                print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
+            note = _shared_cohort(cohorts, (architecture, variant))
+            print(
+                f"{self.label} {architecture} {variant}: {len(cases)} enrolled "
+                f"cases{note}"
+            )
 
     def _selected_lock(
-        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace, variant: str
     ) -> Path:
-        """Return ``--lock`` or the committed lock, or exit when it does not exist."""
-        lock = args.lock or self.architectures.baseline_lock(args.arch)
+        """Return ``--lock`` or the variant's committed lock, or exit when missing."""
+        lock = args.lock or self.architectures.baseline_lock(args.arch, variant)
         if args.lock is None and not lock.is_file():
             parser.error(
-                f"{args.arch} has no published {self.label} bundle: {_shown(lock)} "
-                "does not exist; pass a candidate's --bundle and --lock"
+                f"{args.arch} {variant} has no published {self.label} bundle: "
+                f"{_shown(lock)} does not exist; pass a candidate's --bundle and "
+                "--lock"
             )
         if not lock.is_file():
             parser.error(f"lock not found: {_shown(lock)}")
@@ -1132,92 +1352,236 @@ class ReferenceOperation:
 
     @contextmanager
     def _bundle_errors(
-        self, parser: argparse.ArgumentParser, command: str
+        self, report: Callable[[str], object], command: str
     ) -> Iterator[None]:
-        """Report an unusable lock or bundle as one message and exit status 2.
+        """Report an unusable lock or bundle as one message.
 
         The message already names the lock or bundle problem, so a traceback
-        would only repeat it, and status 2 keeps these errors apart from a
-        reported difference or a failed comparison. Matching recorded device
-        targets needs the rocKE platform package, so its absence is reported
-        the same way.
+        would only repeat it. ``report`` is ``parser.error``, whose status 2
+        keeps these errors apart from a reported difference or a failed
+        comparison, or collects the message so that other variants are still
+        compared. Matching recorded device targets needs the rocKE platform
+        package, so its absence is reported the same way.
         """
         try:
             yield
         except (ValueError, OSError) as error:
-            parser.error(str(error))
+            report(str(error))
         except ModuleNotFoundError as error:
             # Any other missing module is a defect; keep its traceback.
             if error.name is None or error.name.partition(".")[0] != "rocke":
                 raise
-            parser.error(
+            report(
                 f"{command} reads recorded device target ids with the rocKE "
                 f"platform package, which cannot be imported ({error}); install "
                 "rocKE or set PYTHONPATH=platform/python from the rocKE root"
             )
 
     def _diff(self, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-        lock = self._selected_lock(parser, args)
-        if args.bundle is not None:
-            bundle = args.bundle.resolve()
-            if not bundle.exists():
-                parser.error(f"bundle not found: {_shown(bundle)}")
+        published = [
+            variant
+            for variant in self.architectures.variants(args.arch)
+            if self.architectures.baseline_lock(args.arch, variant).is_file()
+        ]
+        selection = (args.variant, args.bundle, args.lock)
+        if published and all(option is None for option in selection):
+            # Without a selected variant, bundle, or lock, compare every
+            # published variant with its published bundle.
+            variants = published
         else:
-            bundle = self.published_bundle(args.arch)
-            if not bundle.exists():
-                archive = bundle.with_name(f"{bundle.name}.tar.gz")
-                parser.error(
-                    f"no {args.arch} {self.label} bundle at {_shown(archive)} or "
-                    f"{_shown(bundle)}; fetch the archive with DVC or pass --bundle"
+            variants = [self._variant(parser, args)]
+        unusable, differed = [], False
+        for variant in variants:
+            lock = self._selected_lock(parser, args, variant)
+            if args.bundle is not None:
+                bundle = args.bundle.resolve()
+                if not bundle.exists():
+                    parser.error(f"bundle not found: {_shown(bundle)}")
+            else:
+                bundle = self.published_bundle(args.arch, variant)
+                if not bundle.exists():
+                    archive = bundle.with_name(f"{bundle.name}.tar.gz")
+                    unusable.append(
+                        f"no {args.arch} {variant} {self.label} bundle at "
+                        f"{_shown(archive)} or {_shown(bundle)}; fetch the archive "
+                        "with DVC or pass --bundle"
+                    )
+                    continue
+            differences = None
+            with self._bundle_errors(unusable.append, args.command):
+                differences = self.diff_bundle(
+                    bundle, lock, architecture=args.arch, variant=variant
                 )
-        with self._bundle_errors(parser, args.command):
-            differences = self.diff_bundle(bundle, lock, architecture=args.arch)
-        cases = self.architectures.get_architecture(args.arch).CASES
-        if not differences:
+            if differences is None:
+                continue
+            subject = f"{self.label} {args.arch} {variant}"
+            if not differences:
+                cases = self.architectures.get_adapter(args.arch, variant).CASES
+                print(
+                    f"{subject}: all {len(cases)} enrolled cases match "
+                    f"{_shown(bundle)}"
+                )
+                continue
+            differed = True
+            print(f"{subject}: the enrolled cases differ from {_shown(bundle)}")
+            for difference in differences:
+                print(f"  {difference}")
+        if differed:
             print(
-                f"{self.label} {args.arch}: all {len(cases)} enrolled cases match "
-                f"{_shown(bundle)}"
+                "A cohort or budget change needs a complete requalification; see "
+                f"{_WORKFLOW}."
             )
-            return
-        print(
-            f"{self.label} {args.arch}: the enrolled cases differ from "
-            f"{_shown(bundle)}"
+        if unusable:
+            # A missing rocKE platform package fails every variant alike.
+            parser.error("\n".join(dict.fromkeys(unusable)))
+        if differed:
+            raise SystemExit(1)
+
+    def _status(self) -> None:
+        """Print each enrolled slot's publication, shared cohort, and bundle state.
+
+        A slot is published once its committed lock exists. The lock pins the
+        digest of the cohort that its bundle records, so a published slot whose
+        cohort edit was not requalified reports a difference even where the
+        tree has no bundle data, and so does each slot that shares the cohort.
+        Otherwise its bundle is compared as ``diff`` compares it by default.
+        Missing bundle data is reported with the command that provides it and
+        does not fail; an unusable lock or bundle fails with status 2 unless a
+        difference fails with status 1.
+        """
+        cohorts = self._enrolled_cohorts()
+        states = set()
+        for architecture, variant in cohorts:
+            subject = f"{self.label} {architecture} {variant}"
+            note = _shared_cohort(cohorts, (architecture, variant))
+            lock = self.architectures.baseline_lock(architecture, variant)
+            if not lock.is_file():
+                print(f"{subject}: unpublished{note}")
+                continue
+            try:
+                pinned = json.loads(lock.read_text())
+                baseline = pinned["baseline_revision"][:12]
+            except (OSError, ValueError, LookupError, TypeError) as error:
+                # A merge conflict, for one, leaves a lock that is not JSON.
+                states.add("unusable")
+                print(
+                    f"{subject}: published{note}; lock {_shown(lock)} is unusable: "
+                    f"{type(error).__name__}: {error}"
+                )
+                continue
+            # Host tests require the digest in every committed lock; without
+            # it, only the bundle data can show a difference.
+            locked = pinned.get("cohort_sha256")
+            state, detail = self._bundle_state(
+                architecture,
+                variant,
+                cohort_differs=locked not in (None, cohorts[architecture, variant]),
+            )
+            states.add(state)
+            print(f"{subject}: published at baseline {baseline}{note}; {detail}")
+        if "differs" in states:
+            print(
+                "A cohort or budget change needs a complete requalification; see "
+                f"{_WORKFLOW}."
+            )
+            raise SystemExit(1)
+        if "unusable" in states:
+            raise SystemExit(2)
+
+    def _bundle_state(
+        self, architecture: str, variant: str, *, cohort_differs: bool = False
+    ) -> tuple[str, str]:
+        """Compare a published variant's default bundle data with its enrolled cases.
+
+        ``cohort_differs`` says that the variant's lock pins another cohort's
+        digest. Configuration requires the published bundle to record the
+        cohort that its lock pins, so the variant then differs without its
+        bundle data being read, or even present.
+
+        Returns ``matches``, ``differs``, ``missing``, or ``unusable`` and a
+        description that names the bundle or lock and the command to run next.
+        """
+        bundle = self.published_bundle(architecture, variant)
+        diff = self._script_command(
+            "diff", "--arch", architecture, "--variant", variant
         )
-        for difference in differences:
-            print(f"  {difference}")
-        print(
-            "A cohort or budget change needs a complete requalification; see "
-            f"{_WORKFLOW}."
-        )
-        raise SystemExit(1)
+        lock = self.architectures.baseline_lock(architecture, variant)
+        differs = f"the enrolled cases differ from the cohort that {_shown(lock)} pins"
+        if not bundle.exists():
+            archive = bundle.with_name(f"{bundle.name}.tar.gz")
+            pointer = archive.with_name(f"{archive.name}.dvc")
+            if installed_test_root(self._package.parent) is not None:
+                missing = (
+                    f"bundle missing at {_shown(bundle)}; installed trees receive "
+                    "it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON "
+                    "and assembled with its architecture's test artifact"
+                )
+            elif not pointer.is_file():
+                missing = (
+                    "bundle missing; no DVC pointer tracks its archive at "
+                    f"{_shown(pointer)}"
+                )
+            else:
+                fetch = display_command(["dvc", "pull", _shown(pointer)])
+                missing = f"bundle missing; fetch it with: {fetch}"
+                if cohort_differs:
+                    missing += f", then list the differences with: {diff}"
+            if cohort_differs:
+                return "differs", f"{differs}; {missing}"
+            return "missing", missing
+        if cohort_differs:
+            return "differs", f"{differs}; list the differences with: {diff}"
+        unusable = []
+        differences = None
+        with self._bundle_errors(unusable.append, "status"):
+            differences = self.diff_bundle(
+                bundle, architecture=architecture, variant=variant
+            )
+        if differences is None:
+            # The first line states the problem; diff shows the whole message.
+            reason = unusable[0].partition("\n")[0]
+            return "unusable", (
+                f"bundle {_shown(bundle)} is unusable: {reason}; see the full "
+                f"error with: {diff}"
+            )
+        if differences:
+            return "differs", (
+                f"bundle {_shown(bundle)} differs from the enrolled cases; list "
+                f"the differences with: {diff}"
+            )
+        return "matches", f"bundle {_shown(bundle)} matches the enrolled cases"
 
     def _verify(
         self, parser: argparse.ArgumentParser, args: argparse.Namespace
     ) -> None:
-        lock = self._selected_lock(parser, args)
+        variant = self._variant(parser, args)
+        lock = self._selected_lock(parser, args, variant)
         bundle = args.bundle.resolve()
         if bundle.is_file():
-            parser.error(self._unpack_hint(bundle, lock))
+            parser.error(self._unpack_hint(bundle, lock, variant))
         if not bundle.is_dir():
             parser.error(f"bundle directory not found: {_shown(bundle)}")
-        target = self.architectures.get_architecture(args.arch)
+        target = self.architectures.get_adapter(args.arch, variant)
         cases = target.CASES
         if args.cases:
             unknown = sorted(set(args.cases) - {case.id for case in cases})
             if unknown:
                 parser.error(
-                    f"not enrolled for {args.arch}: {', '.join(unknown)}; list the "
-                    f"enrolled ids with: {parser.prog} cases --arch {args.arch}"
+                    f"not enrolled for {args.arch} {variant}: {', '.join(unknown)}; "
+                    f"list the enrolled ids with: {parser.prog} cases --arch "
+                    f"{args.arch} --variant {variant}"
                 )
             cases = tuple(case for case in cases if case.id in args.cases)
         skipped = len(target.CASES) - len(cases)
-        with self._bundle_errors(parser, args.command):
-            manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
+        with self._bundle_errors(parser.error, args.command):
+            manifest = self.load_bundle(
+                bundle, args.lock, architecture=args.arch, variant=variant
+            )
         if skipped:
             print(
                 f"{self.label}: running {len(cases)} of {len(target.CASES)} "
-                f"enrolled {args.arch} cases selected with --case; a subset run "
-                "is not a full verification",
+                f"enrolled {args.arch} {variant} cases selected with --case; a "
+                "subset run is not a full verification",
                 flush=True,
             )
         current = args.current_root.resolve() if args.current_root else None
@@ -1231,6 +1595,7 @@ class ReferenceOperation:
                     current_root=current,
                     repetitions=args.repetitions,
                     architecture=args.arch,
+                    variant=variant,
                 )
                 print(json.dumps(report, sort_keys=True), flush=True)
         if skipped:
@@ -1251,18 +1616,19 @@ class ReferenceOperation:
         self,
         case: Any,
         architecture: str,
+        variant: str,
         bundle: Path,
         lock: Path | None,
         current_root: Path | None,
     ) -> str:
         """Show the verify command that repeats one case's comparison.
 
-        The command checks the same bundle against the same lock, so a failing
-        candidate is not rerun against the committed lock. The script is
-        installed beside the operation package, so its path is valid in source
-        and installed trees.
+        The command checks the same variant's bundle against the same lock, so
+        a failing candidate is not rerun against the committed lock. It names
+        the variant even when it is the default, so it stays valid once the
+        architecture enrolls another.
         """
-        committed = self.architectures.baseline_lock(architecture)
+        committed = self.architectures.baseline_lock(architecture, variant)
         candidate = (
             []
             if lock is None or lock.resolve() == committed.resolve()
@@ -1271,24 +1637,36 @@ class ReferenceOperation:
         current = (
             [] if current_root is None else ["--current-root", _shown(current_root)]
         )
-        return display_command(
-            [
-                "python",
-                _shown(self._package.parent / f"run_{self.name}_reference.py"),
-                "verify",
-                "--arch",
-                architecture,
-                "--bundle",
-                _shown(bundle),
-                *candidate,
-                *current,
-                "--case",
-                case.id,
-            ]
+        return self._script_command(
+            "verify",
+            "--arch",
+            architecture,
+            "--variant",
+            variant,
+            "--bundle",
+            _shown(bundle),
+            *candidate,
+            *current,
+            "--case",
+            case.id,
         )
 
-    def _unpack_command(self, archive: Path, bundle: Path, lock: Path) -> str:
-        """Show the artifact.py command that extracts and authenticates an archive."""
+    def _script_command(self, *arguments: str) -> str:
+        """Show a command that runs this operation's reference script.
+
+        The script is installed beside the operation package, so its path is
+        valid in source and installed trees.
+        """
+        script = self._package.parent / f"run_{self.name}_reference.py"
+        return display_command(["python", _shown(script), *arguments])
+
+    def _unpack_command(
+        self, archive: Path, bundle: Path, lock: Path, variant: str
+    ) -> str:
+        """Show the artifact.py command that extracts and authenticates an archive.
+
+        ``variant`` names the variant that ``lock`` belongs to.
+        """
         return display_command(
             [
                 "python",
@@ -1296,6 +1674,8 @@ class ReferenceOperation:
                 "unpack",
                 "--operation",
                 self.name,
+                "--variant",
+                variant,
                 "--archive",
                 _shown(archive),
                 "--bundle",
@@ -1306,7 +1686,7 @@ class ReferenceOperation:
         )
 
     def _unpack_hint(
-        self, archive: Path, lock: Path, *, option: str = "--bundle"
+        self, archive: Path, lock: Path, variant: str, *, option: str = "--bundle"
     ) -> str:
         """Explain how to extract an archive passed where a bundle directory belongs."""
         stem = archive.name.removesuffix(".tar.gz")
@@ -1316,6 +1696,6 @@ class ReferenceOperation:
         return (
             f"{_shown(archive)} is a file, but {option} needs an extracted bundle "
             "directory. Unpack and authenticate the archive with:\n  "
-            f"{self._unpack_command(archive, directory, lock)}\n"
+            f"{self._unpack_command(archive, directory, lock, variant)}\n"
             f"then pass {display_command([option, _shown(directory)])}"
         )
