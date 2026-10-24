@@ -73,6 +73,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
   stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
   including a 3x3 112x112 tile.
+* [Conv] `ConvDepthwiseFwd2D` now covers every packed NCHW fp16/bf16 depthwise forward shape
+  on gfx950 whose plane sizes and launch grid fit in 32 bits (filters up to 15x15, stride and
+  dilation up to 8) with a general HIP kernel. Shapes with a matching CK instance keep using
+  it by default.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
