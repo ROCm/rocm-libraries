@@ -127,7 +127,8 @@ def naive_paged_sdpa(bundle: PagedBundle):
                     t
                     for t in range(skv)
                     if (right < 0 or t <= i + off + right)
-                    and (left < 0 or t >= i + off - left)
+                    # cuDNN's left_bound L keeps L keys up to and including the diagonal.
+                    and (left < 0 or t > i + off - left)
                 ]
                 sink = sinks[h] if sinks is not None else -math.inf
                 if not keys:
@@ -317,7 +318,7 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
 
         attrs = bundle.node["attributes"]
         self.assertEqual(attrs["max_seq_len_kv"], self.MAX_KV)
-        self.assertFalse(attrs["padding_mask"])
+        self.assertTrue(attrs["padding_mask"])
         self.assertEqual(attrs["diagonal_alignment"], "BOTTOM_RIGHT")
         self.assertEqual(attrs["right_bound"], 0)
         self.assertEqual(attrs["left_bound"], 3)
@@ -507,20 +508,28 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
         )
 
     def test_sink_tensor_graph_fields(self):
-        for sink_dtype, json_dtype in (("io", "half"), ("float", "float")):
-            bundle = self.dense("--sinks", "--sink-dtype", sink_dtype)
-            self.assertEqual(bundle.node["inputs"]["sink_token_tensor_uid"], UID_SINK)
-            spec = bundle.tensors[UID_SINK]
-            self.assertEqual(spec["dims"], [1, self.H_Q, 1, 1])
-            self.assertEqual(spec["strides"], [self.H_Q, 1, 1, 1])
-            self.assertEqual(spec["data_type"], json_dtype)
-            meta = json.loads(Path(f"{bundle.base}.meta.json").read_text())
-            self.assertEqual(meta["config"]["sink_dtype"], sink_dtype)
-            self.assertEqual(
-                meta["config"]["sinks"],
-                [float(x) for x in bundle.strided(UID_SINK).reshape(-1)],
-            )
+        # cuDNN takes FLOAT sinks only.
+        bundle = self.dense("--sinks")
+        self.assertEqual(bundle.node["inputs"]["sink_token_tensor_uid"], UID_SINK)
+        spec = bundle.tensors[UID_SINK]
+        self.assertEqual(spec["dims"], [1, self.H_Q, 1, 1])
+        self.assertEqual(spec["strides"], [self.H_Q, 1, 1, 1])
+        self.assertEqual(spec["data_type"], "float")
+        meta = json.loads(Path(f"{bundle.base}.meta.json").read_text())
+        self.assertEqual(
+            meta["config"]["sinks"],
+            [float(x) for x in bundle.strided(UID_SINK).reshape(-1)],
+        )
         self.assertIsNone(self.dense().node["inputs"]["sink_token_tensor_uid"])
+
+    def test_dense_q_carries_seq_len_q(self):
+        # cuDNN pages K/V only with both seq_len tensors, so dense Q gets Sq per batch.
+        bundle = self.dense()
+        self.assertEqual(bundle.node["inputs"]["seq_len_q_tensor_uid"], UID_SEQ_LEN_Q)
+        s_q = bundle.tensors[UID_Q]["dims"][2]
+        batch = bundle.tensors[UID_Q]["dims"][0]
+        self.assertEqual(bundle.flat(UID_SEQ_LEN_Q).tolist(), [s_q] * batch)
+        self.assertTrue(bundle.node["attributes"]["padding_mask"])
 
     def test_sinks_match_naive_paged_loop(self):
         # Dense Q with an empty sequence and stats: keyless rows give LSE = sink.
@@ -531,7 +540,7 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
         for h in range(self.H_Q):
             self.assertTrue((lse[1, h, :, 0] == sinks[h]).all())
         self.assertTrue((dense.strided(UID_O)[1] == 0).all())
-        self.assert_matches_naive(self.ragged("--sinks", "--sink-dtype", "float"))
+        self.assert_matches_naive(self.ragged("--sinks"))
 
     def test_sinks_keep_the_other_tensors(self):
         # The sink is drawn last, so every other tensor matches the sink-free bundle.

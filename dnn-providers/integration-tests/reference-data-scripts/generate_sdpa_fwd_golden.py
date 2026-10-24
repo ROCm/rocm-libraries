@@ -17,6 +17,8 @@ Supported, fully composable operation axes:
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
+  - Max/Sum_exp:  --row-stats (cuDNN's Max and Sum_exp outputs, uids 18/19)
+  - ALiBi:        --alibi (cuDNN's alibi_mask: + (j - i) * slope(h); top-left causal only)
   - block mask:   --block-mask (cuDNN block-sparse UINT8 tile bitmask; dense BATCH mode)
   - fp8 scaling:  --fp8-scaling (cuDNN sdpa_fp8: scale_s/descale_s/scale_o, amax_s/amax_o,
                   FP8_E4M3 output; dense, S_kv <= 128; requires --dtype fp8)
@@ -50,6 +52,7 @@ import torch
 from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
     DTYPE_MAP,
     build_mask,
+    combined_attn_mask,
     compute_contiguous_strides,
     compute_forward,
     compute_lse,
@@ -102,16 +105,27 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         outputs. Every other bundle is unchanged.
 # 1.7.0 — Added --block-mask: cuDNN's block-sparse mask (UINT8, one bit per 128 x 128 score
 #         tile, cudnn-frontend test/python/sdpa/fp16_ref.py). Every other bundle is unchanged.
-GENERATOR_VERSION = "1.7.0"
+# 1.8.0 — Added --fp8-format {e4m3,e5m2} for --dtype fp8 (OCP E5M2 inputs, and E5M2 output with
+#         --fp8-scaling). E4M3 bundles are unchanged.
+# 1.9.0 — Added --alibi: cuDNN's ALiBi bias (cudnn-frontend fp16_ref.py slopes), with
+#         --causal top_left as cuDNN requires. Every other bundle is unchanged.
+# 1.10.0 — Added --row-stats: cuDNN's Max / Sum_exp outputs (fp16_ref.py score_max_ref /
+#          score_sum_exp_ref). Every other bundle is unchanged.
+GENERATOR_VERSION = "1.10.0"
 
-# FP8 operation: FP8_E4M3 inputs (Q/K/V), BF16 output. AITER's fmha fp8 path uses
-# the OCP e4m3 encoding (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
-# The "fp8_e4m3" json name matches the flatbuffers DataType enum string map.
-FP8_TORCH_DTYPE = torch.float8_e4m3fn
-FP8_JSON_DTYPE = "fp8_e4m3"
+# FP8 operation: OCP fp8 inputs (Q/K/V, E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
+# AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
+# The json names match the flatbuffers DataType enum string map.
 FP8_OUTPUT_TORCH = torch.bfloat16
 FP8_OUTPUT_JSON = "bfloat16"
 FP8_E4M3_MAX = 448.0  # max representable magnitude of float8_e4m3fn
+
+# --fp8-format: torch dtype, json name, largest finite value, and cudnn-frontend's
+# get_fp8_largest_po2 (helpers.py) for the scale factors.
+FP8_FORMATS = {
+    "e4m3": (torch.float8_e4m3fn, "fp8_e4m3", FP8_E4M3_MAX, 128.0),
+    "e5m2": (torch.float8_e5m2, "fp8_e5m2", 57344.0, 32768.0),
+}
 
 # Tensor UID assignment (stable contract with the JSON consumer / loader).
 UID_Q = 0
@@ -132,6 +146,8 @@ UID_SCALE_O = 14
 UID_AMAX_S = 15
 UID_AMAX_O = 16
 UID_BLOCK_MASK = 17
+UID_MAX = 18
+UID_SUM_EXP = 19
 
 # cuDNN's block-sparse tile (both dims) and bits per mask byte.
 BLOCK_MASK_TILE = 128
@@ -185,18 +201,51 @@ def physical_seqlens(valid_lens, s_max):
     return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
 
 
-def quantize_fp8_per_tensor(t):
+def quantize_fp8_per_tensor(t, fmt="e4m3"):
     """Quantize a float tensor to FP8_E4M3 with a single per-tensor descale.
 
     Returns (fp8_tensor, descale_scalar, dequantized_fp32). descale maps FP8 codes
     back to the original scale: x ~= fp8_code * descale (AITER convention).
     """
+    torch_dtype, _, fp8_max, _ = FP8_FORMATS[fmt]
     amax = t.abs().max().float()
-    scale = (amax / FP8_E4M3_MAX).clamp(min=1e-12)
-    quantized = (t.float() / scale).clamp(-FP8_E4M3_MAX, FP8_E4M3_MAX)
-    fp8 = quantized.to(FP8_TORCH_DTYPE)
+    scale = (amax / fp8_max).clamp(min=1e-12)
+    quantized = (t.float() / scale).clamp(-fp8_max, fp8_max)
+    fp8 = quantized.to(torch_dtype)
     dequant = fp8.float() * scale
     return fp8, scale.reshape(1), dequant
+
+
+def compute_row_stats(Q, K, scale, H_q, H_kv, keep_mask=None, attn_bias=None):
+    """cuDNN's Max and Sum_exp [B, H_q, S_q, 1] (cudnn-frontend fp16_ref.py): Max is the row
+    max of the masked scores, Sum_exp the sum of exp(s - Max) over the unmasked keys."""
+    k_f = K.float()
+    if H_q != H_kv:
+        k_f = k_f.repeat_interleave(H_q // H_kv, dim=1)
+    s = torch.matmul(Q.float(), k_f.transpose(-2, -1)) * scale
+    attn_mask = combined_attn_mask(keep_mask, attn_bias)
+    if attn_mask is not None:
+        s = s + attn_mask
+    score_max = s.amax(dim=-1, keepdim=True)
+    s_normalized = torch.where(torch.isneginf(s), float("-inf"), s - score_max)
+    return score_max, torch.exp(s_normalized).sum(dim=-1, keepdim=True)
+
+
+def alibi_bias(H_q, S_q, S_kv):
+    """cuDNN's ALiBi bias [1, H_q, S_q, S_kv] = (j - i) * slope(h), with the slopes of
+    cudnn-frontend test/python/sdpa/fp16_ref.py (copied as written there)."""
+    index_row = torch.arange(S_q, dtype=torch.float32).view(-1, 1)
+    index_col = torch.arange(S_kv, dtype=torch.float32)
+    distance = index_col - index_row
+    n = 2 ** math.floor(math.log2(H_q))
+    m_0 = 2.0 ** (-8.0 / n)
+    m = torch.pow(m_0, torch.arange(1, 1 + n))
+    if n < H_q:
+        m_hat_0 = 2.0 ** (-4.0 / n)
+        m_hat = torch.pow(m_hat_0, torch.arange(1, 1 + 2 * (H_q - n), 2))
+        m = torch.cat([m, m_hat])
+    m = m.view(1, -1, 1, 1)
+    return distance.to(dtype=torch.float32) * m
 
 
 def block_mask_dims(B, H_q, S_q, S_kv):
@@ -226,14 +275,24 @@ def block_mask_bias(mask, S_q, S_kv):
     return bias.masked_fill(~keep, float("-inf"))
 
 
-def fp8_scale_factor(amax):
-    """cudnn-frontend's get_fp8_scale_factor for float8_e4m3fn: 128 / next_po2(amax) * 0.25."""
+def fp8_scale_factor(amax, fmt="e4m3"):
+    """cudnn-frontend's get_fp8_scale_factor: largest_po2 / next_po2(amax) * 0.25."""
     po2 = 2.0 ** math.ceil(math.log2(max(amax, 0.0625)))
-    return 128.0 / po2 * 0.25
+    return FP8_FORMATS[fmt][3] / po2 * 0.25
 
 
 def compute_fp8_scaled_forward(
-    Q_fp8, K_fp8, V_fp8, descales, scale, H_q, H_kv, keep_mask, scale_s, descale_s
+    Q_fp8,
+    K_fp8,
+    V_fp8,
+    descales,
+    scale,
+    H_q,
+    H_kv,
+    keep_mask,
+    scale_s,
+    descale_s,
+    fmt="e4m3",
 ):
     """cuDNN sdpa_fp8 forward (cudnn-frontend fp8_ref.py compute_ref) for one key tile.
 
@@ -252,7 +311,7 @@ def compute_fp8_scaled_forward(
     m = s.amax(dim=-1, keepdim=True)
     e = torch.exp(s - m).nan_to_num()
     l = e.sum(dim=-1, keepdim=True)
-    p = (e * scale_s).to(FP8_TORCH_DTYPE).float() * descale_s
+    p = (e * scale_s).to(FP8_FORMATS[fmt][0]).float() * descale_s
     o = torch.einsum("bhqk,bhkd->bhqd", p, v) * dv / l.clamp(min=1.0)
     lse = (m + torch.log(l)).float()
     return o, lse, e.max().item(), o.abs().max().item()
@@ -277,9 +336,13 @@ def build_graph_json(
     ragged=False,
     fp8_scaling=False,
     block_mask=False,
+    fp8_format="e4m3",
+    alibi=False,
+    row_stats=False,
 ):
     B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
-    qkv_dtype = FP8_JSON_DTYPE if fp8 else dtype_str
+    fp8_json = FP8_FORMATS[fp8_format][1]
+    qkv_dtype = fp8_json if fp8 else dtype_str
     o_dtype = o_dtype_str if o_dtype_str is not None else dtype_str
 
     tensors = []
@@ -344,6 +407,20 @@ def build_graph_json(
                     "name": name,
                     "dims": [1],
                     "strides": [1],
+                    "data_type": "float",
+                    "virtual": False,
+                }
+            )
+
+    if row_stats:
+        stat_dims = [B, H_q, S_q, 1]
+        for uid, name in [(UID_MAX, "Max"), (UID_SUM_EXP, "SumExp")]:
+            tensors.append(
+                {
+                    "uid": uid,
+                    "name": name,
+                    "dims": stat_dims,
+                    "strides": compute_contiguous_strides(stat_dims),
                     "data_type": "float",
                     "virtual": False,
                 }
@@ -441,15 +518,15 @@ def build_graph_json(
                 "outputs": {
                     "o_tensor_uid": UID_O,
                     "stats_tensor_uid": UID_LSE if stats else None,
-                    "max_tensor_uid": None,
-                    "sum_exp_tensor_uid": None,
+                    "max_tensor_uid": UID_MAX if row_stats else None,
+                    "sum_exp_tensor_uid": UID_SUM_EXP if row_stats else None,
                     "rng_dump_tensor_uid": None,
                     "amax_s_tensor_uid": UID_AMAX_S if fp8_scaling else None,
                     "amax_o_tensor_uid": UID_AMAX_O if fp8_scaling else None,
                 },
                 "attributes": {
                     "generate_stats": True if stats else None,
-                    "alibi_mask": False,
+                    "alibi_mask": alibi,
                     "padding_mask": False,
                     "causal_mask": False,
                     "causal_mask_bottom_right": False,
@@ -459,7 +536,7 @@ def build_graph_json(
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
-                    "mma_core_mode": "fp8_e4m3" if fp8 else "unset",
+                    "mma_core_mode": fp8_json if fp8 else "unset",
                     "implementation": "AUTO",
                 },
             }
@@ -529,6 +606,9 @@ def build_meta_json(config, pytorch_version):
             "ragged_physical_lens": config["ragged_physical_lens"],
             "fp8_scaling": config["fp8_scaling"],
             "block_mask": config["block_mask"],
+            "fp8_format": config["fp8_format"],
+            "alibi": config["alibi"],
+            "row_stats": config["row_stats"],
         },
     }
 
@@ -745,6 +825,9 @@ def generate_forward_bundle(
     ragged=False,
     fp8_scaling=False,
     block_mask=False,
+    fp8_format="e4m3",
+    alibi=False,
+    row_stats=False,
 ):
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
@@ -766,9 +849,11 @@ def generate_forward_bundle(
 
     if is_fp8 and fp8_scaling:
         gen_torch_dtype = torch.float32  # quantize FP8 from FP32
-        o_torch_dtype = FP8_TORCH_DTYPE  # cuDNN sdpa_fp8 writes O = fp8(O_f * scale_o)
-        io_json = FP8_JSON_DTYPE
-        o_json = FP8_JSON_DTYPE
+        o_torch_dtype = FP8_FORMATS[fp8_format][
+            0
+        ]  # cuDNN sdpa_fp8: O = fp8(O_f * scale_o)
+        io_json = FP8_FORMATS[fp8_format][1]
+        o_json = FP8_FORMATS[fp8_format][1]
     elif is_fp8:
         gen_torch_dtype = torch.float32  # quantize FP8 from FP32
         o_torch_dtype = FP8_OUTPUT_TORCH
@@ -814,6 +899,15 @@ def generate_forward_bundle(
     if fp8_scaling and (not is_fp8 or has_seq_lens or ragged):
         errors.append(
             "--fp8-scaling needs --dtype fp8 and a dense BATCH bundle (no seq-lens, no ragged)"
+        )
+    if row_stats and (has_seq_lens or ragged or fp8_scaling):
+        errors.append("--row-stats needs a dense BATCH bundle without --fp8-scaling")
+    if alibi and (
+        causal != "top_left" or has_seq_lens or ragged or fp8_scaling or block_mask
+    ):
+        errors.append(
+            "--alibi needs --causal top_left (cuDNN accepts ALiBi only there) and a dense "
+            "BATCH bundle without --fp8-scaling or --block-mask"
         )
     if block_mask and (has_seq_lens or ragged or fp8_scaling):
         errors.append("--block-mask needs a dense BATCH bundle without --fp8-scaling")
@@ -862,9 +956,9 @@ def generate_forward_bundle(
 
     descale_q = descale_k = descale_v = None
     if is_fp8:
-        Q_fp8, descale_q, Q_deq = quantize_fp8_per_tensor(Q)
-        K_fp8, descale_k, K_deq = quantize_fp8_per_tensor(K)
-        V_fp8, descale_v, V_deq = quantize_fp8_per_tensor(V)
+        Q_fp8, descale_q, Q_deq = quantize_fp8_per_tensor(Q, fp8_format)
+        K_fp8, descale_k, K_deq = quantize_fp8_per_tensor(K, fp8_format)
+        V_fp8, descale_v, V_deq = quantize_fp8_per_tensor(V, fp8_format)
         Q_compute, K_compute, V_compute = Q_deq, K_deq, V_deq
         Q_store, K_store, V_store = Q_fp8, K_fp8, V_fp8
     else:
@@ -873,16 +967,19 @@ def generate_forward_bundle(
 
     keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
     block_mask_t = None
-    block_bias = None
+    # An additive score bias the generator applies itself (block mask or ALiBi).
+    extra_bias = None
     if block_mask:
         block_mask_t = random_block_mask(block_mask_dims(B, H_q, S_q, S_kv), S_kv, rng)
-        block_bias = block_mask_bias(block_mask_t, S_q, S_kv)
+        extra_bias = block_mask_bias(block_mask_t, S_q, S_kv)
+    if alibi:
+        extra_bias = alibi_bias(H_q, S_q, S_kv)
 
     scale_s = descale_s = scale_o = amax_s = amax_o = None
     try:
         if fp8_scaling:
             # cudnn-frontend's fp8.py scales S for amax 1 (P <= 1), and O from the reference amax.
-            scale_s = fp8_scale_factor(1.0)
+            scale_s = fp8_scale_factor(1.0, fp8_format)
             descale_s = 1.0 / scale_s
             o_float, lse, amax_s, amax_o = compute_fp8_scaled_forward(
                 Q_fp8,
@@ -895,9 +992,10 @@ def generate_forward_bundle(
                 keep_mask,
                 scale_s,
                 descale_s,
+                fp8_format,
             )
-            scale_o = fp8_scale_factor(amax_o)
-            O = (o_float * scale_o).to(FP8_TORCH_DTYPE)
+            scale_o = fp8_scale_factor(amax_o, fp8_format)
+            O = (o_float * scale_o).to(FP8_FORMATS[fp8_format][0])
             if not stats:
                 lse = None
         elif has_seq_lens:
@@ -925,7 +1023,7 @@ def generate_forward_bundle(
                 H_q,
                 H_kv,
                 keep_mask,
-                attn_bias=block_bias,
+                attn_bias=extra_bias,
             ).to(o_torch_dtype)
             lse = (
                 compute_lse(
@@ -935,7 +1033,7 @@ def generate_forward_bundle(
                     H_q,
                     H_kv,
                     keep_mask,
-                    attn_bias=block_bias,
+                    attn_bias=extra_bias,
                 )
                 if stats
                 else None
@@ -982,6 +1080,14 @@ def generate_forward_bundle(
 
     if lse is not None:
         tensor_list.append(("LSE", lse, UID_LSE, list(lse.shape)))
+    if row_stats:
+        row_max, row_sum_exp = compute_row_stats(
+            Q_compute, K_compute, attn_scale, H_q, H_kv, keep_mask, attn_bias=extra_bias
+        )
+        tensor_list.append(("Max", row_max, UID_MAX, list(row_max.shape)))
+        tensor_list.append(
+            ("SumExp", row_sum_exp, UID_SUM_EXP, list(row_sum_exp.shape))
+        )
     if has_seq_lens:
         for name, uid, lens in [
             ("SeqLenQ", UID_SEQ_LEN_Q, seq_lens_q),
@@ -1050,6 +1156,9 @@ def generate_forward_bundle(
         ragged=ragged,
         fp8_scaling=fp8_scaling,
         block_mask=block_mask,
+        fp8_format=fp8_format,
+        alibi=alibi,
+        row_stats=row_stats,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -1091,6 +1200,9 @@ def generate_forward_bundle(
         ),
         "fp8_scaling": fp8_scaling,
         "block_mask": block_mask,
+        "fp8_format": fp8_format if is_fp8 else None,
+        "alibi": alibi,
+        "row_stats": row_stats,
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"
@@ -1211,6 +1323,24 @@ def main():
         "without them blocks are full uniform S_max.",
     )
     parser.add_argument(
+        "--row-stats",
+        action="store_true",
+        help="Emit cuDNN's Max (uid 18) and Sum_exp (uid 19) outputs, FP32 [B, H_q, S_q, 1]. "
+        "Dense BATCH mode only",
+    )
+    parser.add_argument(
+        "--alibi",
+        action="store_true",
+        help="cuDNN ALiBi (alibi_mask): + (j - i) * slope(h) after the scale. Needs --causal "
+        "top_left and dense BATCH mode",
+    )
+    parser.add_argument(
+        "--fp8-format",
+        default="e4m3",
+        choices=list(FP8_FORMATS.keys()),
+        help="OCP fp8 format for --dtype fp8 (default: e4m3)",
+    )
+    parser.add_argument(
         "--block-mask",
         action="store_true",
         help="Add cuDNN's block-sparse mask (UINT8, one bit per 128 x 128 score tile, random "
@@ -1269,6 +1399,9 @@ def main():
         ragged=args.ragged,
         fp8_scaling=args.fp8_scaling,
         block_mask=args.block_mask,
+        fp8_format=args.fp8_format,
+        alibi=args.alibi,
+        row_stats=args.row_stats,
     )
     print("\nDone.")
 
