@@ -77,6 +77,19 @@ def _base_spec(req: AttentionRequest):
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did.
     persistent = head_size == 128
+    # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
+    # matches against ``features`` below, so a band this body cannot shift (a
+    # bottom-right window) reaches ``supports_attention_dense`` and is rejected
+    # there instead of running top-left.
+    bottom_right = "causal_bottom_right" in req.features()
+    if bottom_right and mask_type == AttentionMaskType.NO_MASK:
+        # The band normalizer maps a cross-length NO_MASK request on this arch to
+        # the bottom-right causal band; the dense body serves only explicit
+        # causal kinds there.
+        raise ValueError(
+            "gfx942 dense: cross-length NO_MASK requests are not served by the "
+            "dense kernel"
+        )
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -96,6 +109,7 @@ def _base_spec(req: AttentionRequest):
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        causal_bottom_right=bottom_right,
     )
 
 
@@ -131,10 +145,12 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         variant_id=_VARIANT_ID,
         base_spec=_base_spec,
         supports=_supports,
-        # Dense: causal, sliding-window and sinks (alone or combined), optional
-        # LSE output; no moving bottom-right diagonal. Head size stays out:
-        # D64/D128 coverage is ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
+        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
+        # is ``supports_attention_dense``'s call.
+        features=frozenset(
+            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+        ),
         # _base_spec picks these from the dtype and head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )

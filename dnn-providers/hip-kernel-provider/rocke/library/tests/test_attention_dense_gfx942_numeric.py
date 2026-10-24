@@ -134,6 +134,7 @@ def _spec(
     sliding_window=0,
     use_sinks=False,
     persist_decode="auto",
+    bottom_right=False,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -175,7 +176,7 @@ def _spec(
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
-            mask_type=1 if causal else 0,
+            mask_type=(2 if bottom_right else 1) if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
             use_sinks=use_sinks,
@@ -321,6 +322,172 @@ def test_dense_fp16_d128_large_equal_scores(persistent):
         f"fp16 D128 equal scores scale=16 "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}"
     )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal_diag_split,
+# seqlen_q, seqlen_kv): bottom-right causal, seqlen_q < seqlen_kv (chunked prefill).
+# The diagonal offset seqlen_kv - seqlen_q is a runtime value: block-aligned (512,
+# 3584) and not (64, 576), both grids, with and without the unmasked-body split.
+_BOTTOM_RIGHT_COHORT = [
+    ("bf16", 128, 16, 4, False, False, 512, 1024),
+    ("bf16", 128, 16, 4, False, True, 512, 1088),
+    ("bf16", 128, 16, 4, True, False, 512, 576),
+    ("bf16", 128, 16, 4, True, True, 256, 3840),
+    ("fp16", 128, 16, 4, False, True, 512, 1024),
+    ("fp16", 128, 16, 4, True, True, 512, 1088),
+    ("bf16", 64, 16, 4, False, True, 512, 576),
+    ("bf16", 64, 16, 4, True, False, 256, 1024),
+]
+
+
+def _bottom_right_keep(sq, sk, device):
+    """Boolean keep-mask: query q sees key k iff k <= q + (sk - sq)."""
+    import torch
+
+    qi = torch.arange(sq, device=device).view(sq, 1)
+    ki = torch.arange(sk, device=device).view(1, sk)
+    return ki <= qi + (sk - sq)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,diag_split,sq,sk", _BOTTOM_RIGHT_COHORT
+)
+def test_dense_bottom_right_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, persistent, diag_split, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B = 1
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(dtype, d, hq, hkv, persistent, sq=sq, sk=sk, bottom_right=True)
+    assert spec.causal_bottom_right
+    spec = dataclasses.replace(spec, causal_diag_split=diag_split)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    keep = _bottom_right_keep(sq, sk, q.device)
+    ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} GQA{hq}/{hkv} bottom-right sq={sq} sk={sk} "
+        f"{'persist' if persistent else 'default'} split={diag_split}: "
+        f"max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, mask, causal_diag_split,
+# kv_segments, seqlen_q, seqlen_kv): the KV-segment split on the default grid. mask
+# is "br" (bottom-right causal), "tl" (top-left causal, where early query blocks
+# leave trailing segments empty) or "full".
+_KV_SEGMENT_COHORT = [
+    ("bf16", 128, 16, 4, "br", True, 4, 512, 4096),
+    ("bf16", 128, 16, 4, "br", False, 3, 256, 1088),
+    ("fp16", 128, 16, 4, "br", True, 8, 512, 2048),
+    ("bf16", 64, 16, 4, "br", True, 4, 512, 2048),
+    ("bf16", 128, 16, 4, "tl", True, 4, 1024, 1024),
+    ("fp16", 128, 16, 16, "full", False, 2, 1024, 1024),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,mask,diag_split,segments,sq,sk", _KV_SEGMENT_COHORT
+)
+def test_dense_kv_segments_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, mask, diag_split, segments, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        False,
+        causal=mask != "full",
+        sq=sq,
+        sk=sk,
+        bottom_right=mask == "br",
+    )
+    spec = dataclasses.replace(
+        spec,
+        causal_diag_split=diag_split,
+        kv_segments=segments,
+        block_m=128,
+    )
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    if mask == "br":
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+    else:
+        ref = _sdpa_reference(q, k, v, scale, causal=mask == "tl")
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} {mask} split={diag_split} segments={segments} sq={sq} "
+        f"sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_one_bottom_right_binary_serves_every_chunk_length():
+    """The diagonal offset is read from the shape params, so one compiled binary
+    must serve chunks with different seqlen_kv - seqlen_q, each correctly."""
+    import torch
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    dtype, d, hq, hkv = "bf16", 128, 16, 4
+    tol = 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    shapes = ((512, 1024), (256, 4096), (512, 576))
+    specs = [
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, sq=a, sk=c, bottom_right=True))
+        for a, c in shapes
+    ]
+    keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
+    assert len(keys) == 1, f"chunk lengths {shapes} did not share a cache key"
+    launchers = []
+    for (sq, sk), spec in zip(shapes, specs):
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"sq={sq} sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    assert launchers[0] is not None
+    assert all(x is launchers[0] for x in launchers)
 
 
 def _launcher_for(spec):

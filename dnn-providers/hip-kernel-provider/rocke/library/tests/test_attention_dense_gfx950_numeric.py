@@ -26,6 +26,7 @@ from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
     run_attention_dense_torch,
+    supports_attention_dense,
 )
 
 
@@ -884,6 +885,75 @@ class TestDenseBottomRightNumeric:
         )
         assert top_left_err > 1e-3, (
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
+        )
+
+
+# KV-segment split on the default grid: (geometry, mask, diag_split, segments, sq,
+# skv, head_size). mask "br" is bottom-right causal, "tl" top-left causal (early
+# query blocks leave trailing segments empty or fully masked), "full" no mask
+# (exercises the empty-segment discard).
+_KV_SEGMENT_CASES = [
+    pytest.param("bm128", "br", True, 4, 512, 8192, 128, id="bm128-br-s4-512x8192"),
+    pytest.param("bm128", "br", False, 3, 256, 1088, 128, id="bm128-br-s3-nosplit"),
+    pytest.param("default", "br", True, 8, 512, 4096, 128, id="bm256-br-s8"),
+    pytest.param("bm128", "br", True, 4, 512, 2048, 64, id="bm128-br-s4-d64"),
+    pytest.param("bm128", "tl", True, 4, 1024, 1024, 128, id="bm128-tl-s4"),
+    pytest.param("bm128", "full", False, 4, 256, 320, 128, id="bm128-full-s4-empty"),
+]
+
+
+class TestDenseKvSegmentsNumeric:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "geometry,mask,diag_split,segments,sq,skv,d", _KV_SEGMENT_CASES
+    )
+    def test_kv_segments_match_reference(
+        self, geometry, mask, diag_split, segments, sq, skv, d
+    ):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES[geometry]
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=d,
+            causal=mask != "full",
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            persistent=False,
+            causal_bottom_right=mask == "br",
+            causal_diag_split=diag_split,
+            kv_segments=segments,
+        )
+        ok, why = supports_attention_dense(spec, arch="gfx950")
+        assert ok, why
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 8, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 2, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 2, d, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        if mask == "full":
+            qh = q.transpose(1, 2).float()
+            kh = k.transpose(1, 2).repeat_interleave(4, dim=1).float()
+            vh = v.transpose(1, 2).repeat_interleave(4, dim=1).float()
+            p = torch.softmax(torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale, -1)
+            ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
+        else:
+            ref = _bottom_right_reference(
+                q, k, v, None, scale, top_left=mask == "tl"
+            )
+        err = (out.float() - ref).abs().max().item()
+        assert err < _BOTTOM_RIGHT_TOL, (
+            f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "
+            f"max_abs={err:.3e}"
         )
 
 

@@ -3402,6 +3402,16 @@ def cases():
                 "geometry": "bm128",
             },
         ),
+        # KV-segment split of the default grid (segment epilogue + range).
+        (
+            "bottom_right_kvs4_bm128_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+                "kv_segments": 4,
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -3611,6 +3621,23 @@ def cases():
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+        # Bottom-right causal: runtime diagonal offset on both grids, and the
+        # diagonal split with the KV-segment split.
+        ("bottom_right_sq512", {"seqlen_kv": 1024, "causal_bottom_right": True}),
+        (
+            "persist_bottom_right_sq512",
+            {**_persist942, "seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "bottom_right_dsplit_kvs4_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+                "kv_segments": 4,
+                "block_m": 128,
+            },
+        ),
     ):
         add(
             "attention_dense",

@@ -218,19 +218,27 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
-    def test_moving_bottom_right_declines_at_capability(self):
+    def test_moving_bottom_right_is_admitted_with_a_shifted_diagonal(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             with self.subTest(mask_type=mask_type), _Gfx942Arch():
-                ok, why = _candidate().admits(
-                    _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
-                )
-                self.assertFalse(ok)
-                self.assertIn("capability", why)
-                self.assertIn("causal_bottom_right", why)
-                with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-                    _spec(_req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type))
+                req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
+                ok, why = _candidate().admits(req)
+                self.assertTrue(ok, why)
+                spec = _spec(req)
+                self.assertTrue(spec.causal)
+                self.assertTrue(spec.causal_bottom_right)
 
-    def test_concrete_support_rejects_shared_bottom_right_spec(self):
+    def test_cross_length_no_mask_still_declines(self):
+        """The band normalizer reads a cross-length NO_MASK request on this arch as
+        the bottom-right causal band; the dense body does not serve it."""
+        with _Gfx942Arch():
+            req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=0)
+            ok, _ = _candidate().admits(req)
+            self.assertFalse(ok)
+            with self.assertRaisesRegex(ValueError, "NO_MASK"):
+                _spec(req)
+
+    def test_concrete_support_rejects_bottom_right_window(self):
         common = dict(
             batch=1,
             seqlen_q=2048,
@@ -242,12 +250,13 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
             causal_bottom_right=True,
             dtype="bf16",
         )
-        spec = AttentionDenseSpec(**common)
-        ok, why = supports_attention_dense(spec, arch="gfx942")
+        ok, why = supports_attention_dense(AttentionDenseSpec(**common), arch="gfx942")
+        self.assertTrue(ok, why)
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(**common, sliding_window=128), arch="gfx942"
+        )
         self.assertFalse(ok)
         self.assertIn("causal_bottom_right", why)
-        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-            Gfx942AttentionDenseSpec(**common)
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
         common = dict(batch=16, seqlen_q=2048, seqlen_k=2048)
