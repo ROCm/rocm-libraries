@@ -30,40 +30,48 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_gesv_strided_batched_impl(rocblas_handle handle,
-                                                   const rocblas_int n,
-                                                   const rocblas_int nrhs,
-                                                   U A,
-                                                   const rocblas_int lda,
+                                                   const I n,
+                                                   const I nrhs,
+                                                   U A_arg,
+                                                   const I lda,
                                                    const rocblas_stride strideA,
-                                                   rocblas_int* ipiv,
+                                                   I* ipiv_arg,
                                                    const rocblas_stride strideP,
-                                                   U B,
-                                                   const rocblas_int ldb,
+                                                   U B_arg,
+                                                   const I ldb,
                                                    const rocblas_stride strideB,
-                                                   rocblas_int* info,
-                                                   const rocblas_int batch_count)
+                                                   I* info_arg,
+                                                   const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("gesv_strided_batched", "-n", n, "--nrhs", nrhs, "--lda", lda, "--strideA",
                         strideA, "--strideP", strideP, "--ldb", ldb, "--strideB", strideB,
-                        "--batch_count", batch_count);
+                        "--batch_count", batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const ipiv = ipiv_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st
-        = rocsolver_gesv_argCheck(handle, n, nrhs, lda, ldb, A, B, ipiv, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st
+            = rocsolver_gesv_argCheck(handle, n, nrhs, lda, ldb, A, B, ipiv, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftB = 0;
+    I shiftA = 0;
+    I shiftB = 0;
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -73,14 +81,21 @@ try
     size_t size_work, size_work1, size_work2, size_work3, size_work4;
     // extra requirements for calling GETRF
     size_t size_pivotval, size_pivotidx, size_iinfo, size_iipiv;
-    rocsolver_gesv_getMemorySize<false, true, T>(
-        n, nrhs, batch_count, &size_scalars, &size_work, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_pivotval, &size_pivotidx, &size_iipiv, &size_iinfo, &optim_mem);
 
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_work, size_work1, size_work2, size_work3, size_work4,
-            size_pivotval, size_pivotidx, size_iipiv, size_iinfo);
+    I const max_batch_count = 64 * 1024 - 1;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_gesv_getMemorySize<false, true, T>(
+            n, nrhs, batch_count, &size_scalars, &size_work, &size_work1, &size_work2, &size_work3,
+            &size_work4, &size_pivotval, &size_pivotidx, &size_iipiv, &size_iinfo, &optim_mem);
+
+        if(rocblas_is_device_memory_size_query(handle))
+            return rocblas_set_optimal_device_memory_size(
+                handle, size_scalars, size_work, size_work1, size_work2, size_work3, size_work4,
+                size_pivotval, size_pivotidx, size_iipiv, size_iinfo);
+    }
 
     // memory workspace allocation
     void *scalars, *work, *work1, *work2, *work3, *work4, *pivotval, *pivotidx, *iinfo, *iipiv;
@@ -103,11 +118,27 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_gesv_template<false, true, T>(
-        handle, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, B, shiftB, ldb, strideB, info,
-        batch_count, (T*)scalars, (T*)work, work1, work2, work3, work4, (T*)pivotval,
-        (rocblas_int*)pivotidx, (rocblas_int*)iipiv, (rocblas_int*)iinfo, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid * strideB;
+        auto const ipiv = (ipiv_arg == nullptr) ? nullptr : ipiv_arg + bid * strideP;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+        // execution
+        auto const istat = rocsolver_gesv_template<false, true, T>(
+            handle, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, B, shiftB, ldb, strideB, info,
+            batch_count, (T*)scalars, (T*)work, work1, work2, work3, work4, (T*)pivotval,
+            (I*)pivotidx, (I*)iipiv, (I*)iinfo, optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {

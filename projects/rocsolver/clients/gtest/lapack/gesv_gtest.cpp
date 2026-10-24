@@ -78,6 +78,13 @@ const vector<int> large_matrix_sizeB_range = {
     100, 150, 200, 524, 1000,
 };
 
+// for weekly_lapack tests
+// each A_range vector is a {N, lda, ldb/ldx, singular};
+const vector<vector<int>> large_batch_sizeA_range = {
+    {33, 33, 34, 0},
+};
+const vector<int> large_batch_sizeB_range = {34};
+
 Arguments gesv_setup_arguments(gesv_tuple tup, bool outofplace)
 {
     vector<int> matrix_sizeA = std::get<0>(tup);
@@ -101,7 +108,8 @@ Arguments gesv_setup_arguments(gesv_tuple tup, bool outofplace)
     return arg;
 }
 
-class GESV : public ::TestWithParam<gesv_tuple>
+template <int BATCH_COUNT = 3>
+class GESV_BASE : public ::TestWithParam<gesv_tuple>
 {
 protected:
     void TearDown() override
@@ -117,7 +125,7 @@ protected:
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("nrhs") == 0)
             testing_gesv_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         if(arg.singular == 1)
             testing_gesv<BATCHED, STRIDED, T>(arg);
 
@@ -149,6 +157,16 @@ protected:
         arg.singular = 0;
         testing_gesv_outofplace<BATCHED, STRIDED, T>(arg);
     }
+};
+
+int constexpr BCOUNT = 64 * 1024 + 1;
+int constexpr BCOUNT_SMALL = 3;
+
+class GESV_LARGE_BATCH : public GESV_BASE<BCOUNT>
+{
+};
+class GESV : public GESV_BASE<BCOUNT_SMALL>
+{
 };
 
 // non-batch tests
@@ -215,6 +233,28 @@ TEST_P(GESV, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batch
+
+TEST_P(GESV_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESV_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESV_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESV_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(GESV, strided_batched__float)
@@ -237,6 +277,28 @@ TEST_P(GESV, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large batch
+
+TEST_P(GESV_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESV_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESV_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESV_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GESV,
                          Combine(ValuesIn(large_matrix_sizeA_range),
@@ -254,3 +316,9 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GESV_OUTOFPLACE,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+// large batch
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESV_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
