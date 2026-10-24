@@ -493,6 +493,21 @@ class CDNA5ReadyQueue : public ReadyQueue {
                                                       : f.wmmaBarrierCoverCycles;
         return std::min(want, fullQueue);
     }
+    // The WMMAs right before a pending barrier: computeBarrierAfterThresholds counts on them
+    // issuing back to back, so their shadow takes no other work.
+    bool inPreBarrierRun(int wmmaLatency) const {
+        const int cover = wmmaBarrierCover(wmmaLatency);
+        if (cover <= 0) return false;
+        const int lat = std::max(1, wmmaLatency);
+        const int run = (cover + lat - 1) / lat;
+        for (const auto& [barrier, threshold] : barrierWmmaThresholds_) {
+            if (barriersIssuedThisRegion_.count(barrier)) continue;
+            if (wmmaIssuedCountThisRegion_ >= threshold - run &&
+                wmmaIssuedCountThisRegion_ < threshold)
+                return true;
+        }
+        return false;
+    }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
@@ -711,6 +726,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // Per-barrier forced-issue threshold: maps StinkyInstruction* -> N.
     std::unordered_map<StinkyInstruction*, int> barrierWmmaThresholds_;
+    std::unordered_set<const StinkyInstruction*> barriersIssuedThisRegion_;
     // Per-barrier matching ds_load count collected in
     // computeBarrierBeforeThresholds.
     std::unordered_map<StinkyInstruction*, int> barrierDsLoadCounts_;
@@ -2505,6 +2521,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        if (isBarrier(*node->inst)) barriersIssuedThisRegion_.insert(node->inst);
         noteSccChainIssue(node);
         advanceCalibratedTimeline(node);
         return node;
@@ -2577,7 +2594,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                                        !(pickKind == kGlobalRead || pickKind == kPrefetch) &&
                                        outstandingWmmas() < wmmaQueueDepth() &&
                                        calibratedCoverCycles() < 2 * calibratedIssueCycles();
-        const bool preemptForQueue = burstPreempt || calibratedPreempt ||
+        const bool preBarrierRunPreempt =
+            bestLatency <= 0 && inPreBarrierRun(bestWMMA->inst->latencyCycles);
+        const bool preemptForQueue = burstPreempt || calibratedPreempt || preBarrierRunPreempt ||
                                      (refillActive && (!hasPickableNonWmma || pickWait > 0));
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
@@ -2609,6 +2628,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1) << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " credFull=" << dsReadInflight_.full() << " preempt=" << preemptForQueue
+            << " preBarrierRun=" << preBarrierRunPreempt
             << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
             << " calCover=" << (calibratedOn_ ? calibratedCoverCycles() : -1)
             << " burstLeft=" << burstLeft_ << " fills=" << nonWmmaFillsSinceActiveWmma_
@@ -3068,6 +3088,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     fillersIssuedThisRegion_ = 0;
 
     barrierWmmaThresholds_.clear();
+    barriersIssuedThisRegion_.clear();
     barrierDsLoadCounts_.clear();
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):

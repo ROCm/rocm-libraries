@@ -2400,6 +2400,55 @@ std::string wdShape(const std::vector<std::string>& seq) {
 }
 }  // namespace
 
+// WmmaBarrierCoverCycles: the barrier's threshold counts on its last WMMAs (4 at -1, 16 / 8 = 2
+// at 16) issuing back to back, so their shadow takes no other work; the VALU fillers that could
+// go there go before or after them. 0 (off) leaves those WMMAs to the fillers.
+TEST_F(DAGSchedulerPassTest, WmmaBarrierCover_WmmasBeforeBarrierRunBackToBack) {
+    struct Variant {
+        int cover;
+        size_t run;
+    };
+    const Variant variants[3] = {{-1, 4}, {16, 2}, {0, 0}};
+    size_t runs[3];
+    std::string orders[3];
+    for (int v = 0; v < 3; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 16; ++i) createMovableDsLoad(600 + i * 4, 80, /*ldsToken=*/0);
+        createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 64; ++i) createWmmaF32_16x16x16_bf16(8 * (i % 16), 200 + 8 * i);
+        // A dependent VALU chain turns one filler ready at a time, so one is ready in every
+        // WMMA shadow, the ones before the barrier included.
+        for (int i = 0; i < 64; ++i) createVAddInBlock(bb, arch, 1000 + i, 999 + i, 998);
+        const int beforeCount = countStinkyInstructions(*bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = true;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.wmmaBarrierCoverCycles = variants[v].cover;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        EXPECT_EQ(countStinkyInstructions(*bb), beforeCount) << scheduleOrder(*bb);
+        const std::vector<std::string> seq = mnemonicSequence(*bb);
+        orders[v] = scheduleOrder(*bb);
+        const auto signal = std::find_if(seq.begin(), seq.end(), [](const std::string& m) {
+            return m.find("s_barrier_signal") == 0;
+        });
+        ASSERT_NE(signal, seq.end()) << orders[v];
+        size_t run = 0;
+        for (auto it = signal; it != seq.begin() && std::prev(it)->find("wmma") != std::string::npos;
+             --it)
+            ++run;
+        runs[v] = run;
+    }
+    EXPECT_GE(runs[0], variants[0].run) << orders[0];
+    EXPECT_GE(runs[1], variants[1].run) << orders[1];
+    EXPECT_LT(runs[2], variants[0].run) << orders[2];
+}
+
 // The queue model needs depth > 1 and a cover > 0. With either one off the schedule is the
 // original single-window one, whatever the other queue field says.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_OffIsTheOriginalSchedule) {
@@ -2692,7 +2741,7 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_TakesTheLongerBurst) {
         pfc.dagFeatures.queueStartMinWmmaBurst = forced[v];
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
-        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        EXPECT_EQ(countStinkyInstructions(*bb), beforeCount) << scheduleOrder(*bb);
         shapes[v] = wdShape(mnemonicSequence(*bb));
     }
     EXPECT_NE(shapes[0].substr(0, 8), "WWWWWWWW") << shapes[0];
@@ -2902,7 +2951,7 @@ TEST_F(DAGSchedulerPassTest, QueueStartCalibratedIssueCycles_WmmaPreemptsAfterTh
         pfc.dagFeatures.queueStartCalibratedIssueCycles = variants[v].calibrated;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
-        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        EXPECT_EQ(countStinkyInstructions(*bb), beforeCount) << scheduleOrder(*bb);
         shapes[v] = wdShape(mnemonicSequence(*bb));
     }
     auto dsRunAfterBurst = [](const std::string& s) {
