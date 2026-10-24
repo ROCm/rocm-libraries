@@ -113,16 +113,21 @@ batch when `seq_len_q/kv` are set).
   limited to powers of two (Qwen3-Next uses 544/784/1056).
 - **Conversion:** vLLM's caches map to containers by strides alone (NHD strides `{bs*H*D, D, H*D, 1}`); its block
   table becomes both page tables, reshaped `[B, 1, max_blocks, 1]`; `seq_lens` becomes `seq_len_kv`.
-- **hipDNN today:** the CPU forward reference gathers each paged container into a dense tensor, reading only keys
-  below `seq_len_kv`, then runs the padded dense path. Pinned by `TestCpuFpReferenceSdpaPropertyPaged` (block sizes
-  1/3/4, NHD strides, shuffled blocks, NaN in the null block and unused slots).
-- **Frontend:** `SdpaFwdNode` validation no longer compares a paged container's leading dim with Q's batch or its
-  dim 2 with the other side's key length; it requires each page table's first dim to be Q's batch and, when
-  `max_seq_len_kv` is set, a bias's last dim to match it. Paging support (and its padding requirement) is left to
-  the engines. Pinned by `TestSdpaFwdNode.*Paged*` and an end-to-end frontend-built paged graph run on the CPU
-  reference.
-- **Not covered:** no external paged oracle exists (all external references de-page the same way), so paged
-  correctness rests on the gather being an exact rearrangement of the validated dense padded path.
+- **Extent and table width (cuDNN):** an unset `max_seq_len_kv` is inferred in cuDNN's order: a non-paged K's (then
+  V's) sequence length, else the bias's last dim, else `rng_dump`'s last dim, else the smaller `table_size *
+  block_size` of the two sides. Each table has exactly `ceil(max_seq_len_kv / block_size)` entries
+  (`paged_cache_load.h`); a wider table is rejected.
+- **hipDNN today:** the CPU reference gathers each paged container into a dense tensor, reading only keys below
+  `seq_len_kv`, then runs the padded dense path; the GPU kernel reads pages in place. Both plans infer the extent and
+  check the table width as cuDNN does (`sdpaPagedMaxSeqKv`). Pinned by `TestCpuFpReferenceSdpaPropertyPaged` (block
+  sizes 1/3/4, NHD strides, shuffled blocks, NaN in the null block and unused slots), the paged applicability cases,
+  and ragged Q over paged K/V through the dense rewrite (`*RaggedQOverPagedKv*`).
+- **Frontend:** `SdpaFwdNode` applies cuDNN's rules: INT32 `[B, 1, M, 1]` unpacked tables, `M` = ceil(max /
+  block_size) when `max_seq_len_kv` is set, both seq_len tensors, and no `max_seq_len_kv` without paging. K or V may
+  be paged alone, each with its own block size. Pinned by `TestSdpaFwdNode.*Paged*`.
+- **External oracle:** `generate_sdpa_fwd_paged_golden.py` (gather-then-dense PyTorch, checked against a naive
+  per-row loop in its tests); its bundles cover decode, speculative decode, mixed ragged prefill/decode, windows and
+  sinks.
 
 ### SEM-007: Boolean attention masks
 
@@ -313,9 +318,10 @@ batch when `seq_len_q/kv` are set).
   `M = max(max_j s_j, sink)`, denominator `Σ exp(s_j − M) + exp(sink − M)`.
 - **Consequence:** a row with no live key but a finite sink has O = 0 and **LSE = sink**, not -inf. Padded query
   rows stay O = 0, LSE = -inf.
-- **hipDNN today:** CPU forward reference implements it for a FLOAT `[1, H, 1, 1]` sink (other dtypes declined;
-  vLLM's model-dtype sinks are converted by the adapter). Pinned by `SinkWithUniformScores`,
-  `SinkOnFullyMaskedRow` and `SinkEqualsExtraZeroValueKey`.
+- **hipDNN today:** both references implement it for a FLOAT `[1, H, 1, 1]` sink, and the frontend rejects other
+  shapes and dtypes, as cuDNN does (vLLM's model-dtype sinks are converted by the adapter). Pinned by
+  `SinkWithUniformScores`, `SinkOnFullyMaskedRow`, `SinkEqualsExtraZeroValueKey`, CPU/GPU parity and the paged sink
+  golden bundles.
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
 - **Open:** the dSink definition. AITER's test uses an LSE without the sink; do not follow it.
 
