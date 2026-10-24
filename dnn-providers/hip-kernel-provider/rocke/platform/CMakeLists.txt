@@ -730,6 +730,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
