@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,8 @@ namespace rocsparse
                                                                const A*                  csr_val,
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info);
+                                                               rocsparse_csrmv_info* p_csrmv_info,
+                                                               bool* retarget_to_nnzsplit);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_lrb_template_dispatch(rocsparse_handle          handle,

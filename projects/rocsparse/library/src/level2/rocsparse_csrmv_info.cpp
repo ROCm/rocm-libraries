@@ -224,6 +224,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->max_rows           = src->max_rows;
     dest->index_type_I       = src->index_type_I;
     dest->index_type_J       = src->index_type_J;
+    dest->resolved_alg       = src->resolved_alg;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;
