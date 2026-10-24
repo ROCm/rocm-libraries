@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "harness/input-init/FillRecipe.hpp"
 
@@ -50,6 +51,7 @@ public:
     InputFillRecipes& set(int64_t uid, FillRecipe f)
     {
         _fills[uid] = f;
+        _explicitFills.insert(uid);
         return *this;
     }
 
@@ -145,6 +147,11 @@ public:
         return std::nullopt;
     }
 
+    bool hasExplicitFill(int64_t uid) const
+    {
+        return _explicitFills.count(uid) != 0;
+    }
+
     // ── JSON boundary (serialization for capture/load) ──────────────────
 
     nlohmann::json toJson() const
@@ -214,6 +221,7 @@ private:
     std::unordered_map<int64_t, FillRecipe> _fills;
     std::unordered_map<int64_t, FillRecipe> _typeFills;
     std::unordered_map<int64_t, unsigned int> _seeds;
+    std::unordered_set<int64_t> _explicitFills;
     unsigned int _globalSeed = K_DEFAULT_GLOBAL_SEED;
 
     static const char* kindToString(FillRecipe::Kind k)
