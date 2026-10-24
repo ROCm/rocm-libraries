@@ -30,7 +30,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
-import tensilelite.TensileRetuneLibrary as TRL
+import tensilelite.retune_library as TRL
 
 
 pytestmark = pytest.mark.unit
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.unit
 
 def test_working_path_functions():
     """Test pushWorkingPath, popWorkingPath, ensurePath, setWorkingPath (lines 46-67)."""
-    from tensilelite.TensileRetuneLibrary import pushWorkingPath, popWorkingPath, setWorkingPath, ensurePath, globalParameters, workingDirectoryStack
+    from tensilelite.retune_library import pushWorkingPath, popWorkingPath, setWorkingPath, ensurePath, globalParameters, workingDirectoryStack
 
     original_path = globalParameters.get("WorkingPath", "/tmp")
     globalParameters["WorkingPath"] = original_path
@@ -84,7 +84,7 @@ def test_TensileRetuneLibrary_help_arg():
 
 def test_main_function_delegates():
     """Test that main() calls TensileRetuneLibrary (line 236)."""
-    with mock.patch('tensilelite.TensileRetuneLibrary.TensileRetuneLibrary') as mock_trl:
+    with mock.patch('tensilelite.retune_library.TensileRetuneLibrary') as mock_trl:
         orig_argv = sys.argv
         try:
             sys.argv = ["prog", "dummy_lib", "dummy_out"]

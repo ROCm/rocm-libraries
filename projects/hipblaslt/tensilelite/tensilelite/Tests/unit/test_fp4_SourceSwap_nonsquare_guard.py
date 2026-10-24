@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import Tensile
+from tensilelite import tensilelite
 
 _CONFIG = Path(__file__).parent / "test_data" / "fp4_SourceSwap_nonsquare_gfx1250.yaml"
 
@@ -50,7 +50,7 @@ def test_fp4_ss_nonsquare_survives_validation(tensile_args, tmp_path):
     ]
 
     # Regression -> 0 valid solutions -> BenchmarkProblems.printExit -> SystemExit.
-    Tensile.Tensile(args)
+    tensilelite.tensilelite(args)
 
     # Benchmark data proves the group actually ran with surviving solutions, rather
     # than the run being vacuously skipped (e.g. an arch filter dropping the group),

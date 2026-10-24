@@ -51,9 +51,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def validchipid_mod(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from tensilelite.TensileLogic import ValidChipId
+    from tensilelite.tensilelite_logic import valid_chip_id
 
-    return ValidChipId
+    return valid_chip_id
 
 
 @pytest.fixture
