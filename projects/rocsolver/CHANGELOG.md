@@ -18,10 +18,16 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Optimized
 
+* BDSQR (and GESVD) and STEQR (and SYEV/HEEV, SYGV/HEGV) in hybrid mode: the rotations of the QR iteration are applied to the singular vectors or eigenvectors in accumulated blocks with matrix multiplications, instead of one sequence at a time, and GESVD runs the iteration on the host while the vectors are generated on the device (about 7 times faster for GESVD and 10 times for SYEV for matrices of order 4000).
+* BDSQR (and GESVD) on the device: for one problem with more than 512 vectors, the rotations of 64 sweeps of the QR iteration are recorded on the device and applied in accumulated blocks with matrix multiplications.
+* STEQR (and SYEV/HEEV, SYGV/HEGV) on the device: for one problem of order 256 or more, the rotations of the QR iteration are applied in accumulated blocks with matrix multiplications (about 13 times faster for SYEV for matrices of order 2000).
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
 
+* Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD (SYEVJ/HEEVJ, GESVDJ): the plane rotations were slightly biased, which reduced the accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large matrices.
+* Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ and HEEVDJ, when two nearly equal
+  eigenvalues of the merged blocks were not deflated: the deflation criterion is now that of LAPACK.
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
 * Fixed a race condition in SYEVJ GPU kernel.
