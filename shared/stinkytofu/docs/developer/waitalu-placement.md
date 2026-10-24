@@ -16,6 +16,9 @@ this here, will the pass insert a wait?"
 
 The goal is fewer stalls. No wait is best; otherwise the weakest wait.
 
+The DAG keeps no wait model of its own: no cycle counts, no hide thresholds. It only asks the
+scoreboard and decides the final order. Every count below comes from `WaitAluTracker`.
+
 The placement levels stay strictly ordered (barrier location, last ds, WMMA queue, WMMA tail,
 prefetch, ds pacer, fillers). Avoiding a wait never moves a node a higher level placed: it moves
 the VALUs around that node.
@@ -57,22 +60,38 @@ earlier in the VALU order, not to move the ds.
 
 ## Mechanism
 
+### Scoreboard API
+
+`WaitAluTracker` (`InsertWaitAluPass.hpp`) answers three questions, all from the pass's own
+scoreboard:
+
+- `query(inst)`: the wait `inst` needs if it issues next.
+- `untilFree(inst, op)`: how many more `op`s (`Wmma`, `Lds`, `Tex`, `Flat`) must issue before
+  `inst` no longer needs the wait that kind of op hides; -1 if none will. It counts ops that touch
+  no VGPR on a copy of the scoreboard, so it is exact for the hides and an upper bound where an
+  anchored flat op would drain sooner.
+- `requiredGap(producer, consumer, op, formWmma)`: the same count for `consumer` right after
+  `producer` with nothing else in flight. The WMMA form is the one already issued, else
+  `formWmma`'s.
+
 ### Pick: rank the VALU queue by the scoreboard
 
 `pickFreeBest(valuQueue)` already chooses among every ready VALU. Rank by `waitAlu_->query()`
-first: no wait, then the weakest wait, then the existing keys (link urgency below, MSB bank,
+first: no wait, then the one `untilFree` says frees soonest, then the weakest wait, then the
+existing keys (link urgency below, MSB bank,
 elapse, id). A candidate that needs both counters is compared by the sum of its two counts.
 `otherQueue` (SALU) ranks the same way where its picks carry a wait.
 
 ### Init: pre-scan the pairs and link them
 
-In `onInitRegion`, walk the region's def-use chains once and find every pair the table above
-would turn into a wait if the two end up too close. For each, record on the VALU side which way
+In `onInitRegion`, walk the region's def-use chains once and ask `requiredGap` for each
+producer-consumer pair; a non-zero answer is a pair that waits if the two end up too close. For each, record on the VALU side which way
 it should move, as a per-node field set at init (not a DAG edge):
 
 - **VALU feeds a placed consumer** (ds, prefetch, VMEM address or data, WMMA operand): the VALU
-  should issue early enough that the consumer's planned WMMA window is at least the hide distance
-  after it. Store that window as the VALU's need-by window. It does not have to be exact; the
+  should issue at least `requiredGap(..., Wmma)` WMMA windows before the consumer's planned
+  window. A plain VALU feeding a ds address needs about 12, so this moves it whole windows earlier;
+  reordering inside one window only weakens that wait. Store that window as the VALU's need-by window. It does not have to be exact; the
   pick ranks VALUs with an earlier need-by ahead of others that are equally wait-free.
 - **VALU overwrites a ds/VMEM source** (`vm_vsrc`): the VALU should come after enough ops in that
   FIFO. Store the reader's planned position as a not-before hint; the pick's `query()` decides
@@ -94,7 +113,8 @@ The pick path reads these fields; no phase gets its own guard.
 Each step is one commit, checked with the GPU-less A/B on the 21 gfx1250 perf kernels: total and
 strict `s_wait_alu`, `vm_vsrc(0)`, kernels changed, barrier positions.
 
-1. Rank `pickFreeBest(valuQueue)` by `query()`.
+0. `untilFree` and `requiredGap` on `WaitAluTracker`, with unit tests. No asm change.
+1. Rank `pickFreeBest(valuQueue)` by `query()` and `untilFree()`.
 2. Pre-scan need-by windows for VALUs feeding placed consumers, and use them in the rank.
 3. Not-before hints for `vm_vsrc` pairs.
 4. Remove the cycle hazard model and the strict-count hold.
