@@ -24,7 +24,7 @@ instance list is untouched.
 | flydsl_kernels_commit | `89ad52fbbb9e252396829a8a44b12e18b7acd970` |
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | rocm_version | `7.13.0` |
-| inputs_sha256 | `47d4a5864d1bf4680abe3d4833d98a128340a6d69edf1541bd7fc65b30c7c149` |
+| inputs_sha256 | `be341cd9b577ae533d164dfc8f3fb35599785229f7279cc1bedf80d3ff77f4ba` |
 
 ## Instances
 
@@ -33,27 +33,27 @@ changes when the object does. The full record is `gfx90a/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_cdna_decode_bf16_d64_causal0_bm64` | 90 | 194 | 17152 | `ec7c21e196d29bd0` |
-| `sdpa_cdna_decode_bf16_d64_causal1_bm64` | 90 | 157 | 17152 | `8e8d1c7dfaddb4ed` |
-| `sdpa_cdna_decode_bf16_d128_causal0_bm64` | 90 | 290 | 33792 | `f0928becc9f07f99` |
-| `sdpa_cdna_decode_bf16_d128_causal1_bm64` | 90 | 275 | 33792 | `be4a2d4e22328cb8` |
-| `sdpa_cdna_decode_bf16_d256_causal0_bm128` | 90 | 447 | 65536 | `b048041f72bd6841` |
-| `sdpa_cdna_decode_bf16_d256_causal1_bm128` | 90 | 441 | 65536 | `0d87731066e8b523` |
-| `sdpa_cdna_decode_bf16_d64_causal0_bm64_sink1` | 90 | 194 | 17152 | `4badaaa9a7628fdc` |
-| `sdpa_cdna_decode_bf16_d64_causal1_bm64_sink1` | 90 | 157 | 17152 | `0a58d8a77df32a1d` |
-| `sdpa_cdna_decode_bf16_d128_causal0_bm64_sink1` | 90 | 290 | 33792 | `74c57724e5326dbb` |
-| `sdpa_cdna_decode_bf16_d128_causal1_bm64_sink1` | 90 | 275 | 33792 | `04b175d8a40e44cf` |
-| `sdpa_cdna_decode_bf16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 359 | 50176 | `640703346d78fdfa` |
-| `sdpa_cdna_decode_bf16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 331 | 50176 | `0882534e2403620a` |
-| `sdpa_cdna_decode_f16_d64_causal0_bm64` | 90 | 194 | 17152 | `d7f8f9e89778c4ff` |
-| `sdpa_cdna_decode_f16_d64_causal1_bm64` | 90 | 164 | 17152 | `a9570a2487377bd5` |
-| `sdpa_cdna_decode_f16_d128_causal0_bm64` | 90 | 299 | 33792 | `e9ba8be5ce4453ac` |
-| `sdpa_cdna_decode_f16_d128_causal1_bm64` | 90 | 275 | 33792 | `6af3ed26ac891b4f` |
-| `sdpa_cdna_decode_f16_d256_causal0_bm128` | 90 | 429 | 65536 | `79c92226c56aeab1` |
-| `sdpa_cdna_decode_f16_d256_causal1_bm128` | 90 | 423 | 65536 | `cb03223b16b1967e` |
-| `sdpa_cdna_decode_f16_d64_causal0_bm64_sink1` | 90 | 194 | 17152 | `308994c8182e8852` |
-| `sdpa_cdna_decode_f16_d64_causal1_bm64_sink1` | 90 | 164 | 17152 | `91c35dc351375027` |
-| `sdpa_cdna_decode_f16_d128_causal0_bm64_sink1` | 90 | 299 | 33792 | `48c98d9556ff4d56` |
-| `sdpa_cdna_decode_f16_d128_causal1_bm64_sink1` | 90 | 275 | 33792 | `438bc9cb46de8788` |
-| `sdpa_cdna_decode_f16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 359 | 50176 | `cc39308dd7bf0877` |
-| `sdpa_cdna_decode_f16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 331 | 50176 | `6da01b11cd6f443a` |
+| `sdpa_cdna_decode_bf16_d64_causal0_bm64` | 90 | 194 | 17152 | `d13b045a9be6eb07` |
+| `sdpa_cdna_decode_bf16_d64_causal1_bm64` | 90 | 157 | 17152 | `b1c3510dbdff0585` |
+| `sdpa_cdna_decode_bf16_d128_causal0_bm64` | 90 | 290 | 33792 | `e161029ae73045df` |
+| `sdpa_cdna_decode_bf16_d128_causal1_bm64` | 90 | 275 | 33792 | `161599a51e8fa4d9` |
+| `sdpa_cdna_decode_bf16_d256_causal0_bm128` | 90 | 447 | 65536 | `fd5dc63c514c842c` |
+| `sdpa_cdna_decode_bf16_d256_causal1_bm128` | 90 | 441 | 65536 | `f5ede4fe2ccd461f` |
+| `sdpa_cdna_decode_bf16_d64_causal0_bm64_sink1` | 90 | 194 | 17152 | `c3848ab0365304d8` |
+| `sdpa_cdna_decode_bf16_d64_causal1_bm64_sink1` | 90 | 157 | 17152 | `57999abd5df6a952` |
+| `sdpa_cdna_decode_bf16_d128_causal0_bm64_sink1` | 90 | 290 | 33792 | `09831b14b9117b75` |
+| `sdpa_cdna_decode_bf16_d128_causal1_bm64_sink1` | 90 | 275 | 33792 | `3a41eb043b4c017d` |
+| `sdpa_cdna_decode_bf16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 361 | 50176 | `782037d2cd65ea94` |
+| `sdpa_cdna_decode_bf16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 331 | 50176 | `5dd4ac2069dec646` |
+| `sdpa_cdna_decode_f16_d64_causal0_bm64` | 90 | 194 | 17152 | `01baa38f218c0f88` |
+| `sdpa_cdna_decode_f16_d64_causal1_bm64` | 90 | 164 | 17152 | `32572482e5693361` |
+| `sdpa_cdna_decode_f16_d128_causal0_bm64` | 90 | 299 | 33792 | `ec305834612e766d` |
+| `sdpa_cdna_decode_f16_d128_causal1_bm64` | 90 | 275 | 33792 | `e3615e1b46786a74` |
+| `sdpa_cdna_decode_f16_d256_causal0_bm128` | 90 | 431 | 65536 | `26657c919d1b35c5` |
+| `sdpa_cdna_decode_f16_d256_causal1_bm128` | 90 | 421 | 65536 | `ca2fdf79905bff2b` |
+| `sdpa_cdna_decode_f16_d64_causal0_bm64_sink1` | 90 | 194 | 17152 | `84d123be6d789cb7` |
+| `sdpa_cdna_decode_f16_d64_causal1_bm64_sink1` | 90 | 164 | 17152 | `cd85ced1beb9c688` |
+| `sdpa_cdna_decode_f16_d128_causal0_bm64_sink1` | 90 | 299 | 33792 | `accf40341a8c5d58` |
+| `sdpa_cdna_decode_f16_d128_causal1_bm64_sink1` | 90 | 275 | 33792 | `e3f370ec30d57a03` |
+| `sdpa_cdna_decode_f16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 361 | 50176 | `79386a9f8cfbbe57` |
+| `sdpa_cdna_decode_f16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256` | 100 | 331 | 50176 | `9c4aefb0324f0567` |
