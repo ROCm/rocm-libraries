@@ -172,6 +172,12 @@ struct GpuSdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    // cuDNN sdpa_fp8 softmax / output scaling: one-element FLOAT scales and amax outputs.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleOTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxOTensor;
 };
 
 template <typename QDataType,
@@ -289,6 +295,22 @@ public:
             }
         }
 
+        const auto scalar = [&variantPack](const auto& attrs, const char* name) {
+            return attrs.has_value()
+                       ? std::optional<float>(resolveScalarOperand(*attrs, variantPack, name))
+                       : std::nullopt;
+        };
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> amaxS;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> amaxO;
+        for(auto [attr, bound] :
+            {std::pair{&_params.amaxSTensor, &amaxS}, std::pair{&_params.amaxOTensor, &amaxO}})
+        {
+            if(attr->has_value())
+            {
+                bound->emplace(variantPack.at((*attr)->uid), (*attr)->dims, (*attr)->strides);
+            }
+        }
+
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
         {
@@ -320,7 +342,12 @@ public:
                     .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
                     .setDescales(descaleQ.has_value() ? &descaleQ.value() : nullptr,
                                  descaleK.has_value() ? &descaleK.value() : nullptr,
-                                 descaleV.has_value() ? &descaleV.value() : nullptr));
+                                 descaleV.has_value() ? &descaleV.value() : nullptr)
+                    .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
+                                      scalar(_params.descaleSTensor, "SDPA descale_s"))
+                    .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
+                    .setAmax(amaxS.has_value() ? &amaxS.value() : nullptr,
+                             amaxO.has_value() ? &amaxO.value() : nullptr));
     }
 
 private:
@@ -483,12 +510,8 @@ public:
             }
         }
 
-        // Unsupported: softmax / output (de)quantization.
-        if(nodeAttributes->descale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_o_tensor_uid().has_value()
-           || nodeAttributes->amax_s_tensor_uid().has_value()
-           || nodeAttributes->amax_o_tensor_uid().has_value())
+        // cuDNN sdpa_fp8 softmax / output scaling and amax outputs (fp8 inputs only).
+        if(!isSupportedSdpaFp8Scaling(*nodeAttributes, tensorMap, IS_FP8_INPUT))
         {
             return false;
         }
@@ -584,7 +607,12 @@ public:
         for(auto [uid, bound] :
             {std::pair{nodeAttributes->descale_q_tensor_uid(), &params.descaleQTensor},
              std::pair{nodeAttributes->descale_k_tensor_uid(), &params.descaleKTensor},
-             std::pair{nodeAttributes->descale_v_tensor_uid(), &params.descaleVTensor}})
+             std::pair{nodeAttributes->descale_v_tensor_uid(), &params.descaleVTensor},
+             std::pair{nodeAttributes->scale_s_tensor_uid(), &params.scaleSTensor},
+             std::pair{nodeAttributes->descale_s_tensor_uid(), &params.descaleSTensor},
+             std::pair{nodeAttributes->scale_o_tensor_uid(), &params.scaleOTensor},
+             std::pair{nodeAttributes->amax_s_tensor_uid(), &params.amaxSTensor},
+             std::pair{nodeAttributes->amax_o_tensor_uid(), &params.amaxOTensor}})
         {
             if(uid.has_value())
             {

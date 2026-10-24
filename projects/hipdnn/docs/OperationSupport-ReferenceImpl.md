@@ -144,10 +144,11 @@ dimension must be reduced.
 | Block-sparse attention | Not supported | Not supported | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
 
 "Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
-Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output; ragged
+Dense FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output or an
+output in the input's FP8 format; ragged
 FP8 forward for `FP8_E4M3` inputs with `BFP16` output.
 
 The ragged plan matches the GPU reference's ragged plan. It needs RFC-0014 tensors with logical

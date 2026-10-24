@@ -11,10 +11,12 @@
 // projects/hipdnn/docs/SdpaSemanticsRegister.md. Sliding-window left bounds are deliberately not
 // covered while SEM-001 is open.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <limits>
@@ -954,4 +956,111 @@ TEST(TestCpuFpReferenceSdpaProperty, SinkEqualsExtraZeroValueKey)
 
     expectAllNear(withSink.o, extra.o, TOL, "O");
     expectAllNear(withSink.lse, extra.lse, TOL, "LSE");
+}
+
+// cuDNN sdpa_fp8 softmax and output scaling (SEM-024) with one key per row: exp(s - Max) = 1, so
+// P is stored as fp8(scaleS) * descaleS and O = P * V * descaleV exactly. scaleS = 3.3 is not an
+// E4M3 value (it rounds to 3.25), so a reference that skipped the P quantization is caught;
+// O = O_f * scaleO and amaxO = max |O_f| close the loop.
+TEST(TestCpuFpReferenceSdpaClosedForm, Fp8ScalingWithOneKey)
+{
+    using hipdnn_data_sdk::types::fp8_e4m3;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 3;
+    constexpr int64_t D = 4;
+    Tensor<fp8_e4m3> q({1, H, SQ, D});
+    Tensor<fp8_e4m3> k({1, H, 1, D});
+    Tensor<fp8_e4m3> v({1, H, 1, D});
+    float vAbsMax = 0.0F;
+    forEachIndex(q.dims(), [&](const std::vector<int64_t>& i) {
+        q.setHostValue(fp8_e4m3(0.25F * static_cast<float>(i[3] - 1)), i);
+    });
+    forEachIndex(k.dims(),
+                 [&](const std::vector<int64_t>& i) { k.setHostValue(fp8_e4m3(0.5F), i); });
+    forEachIndex(v.dims(), [&](const std::vector<int64_t>& i) {
+        const fp8_e4m3 value(0.375F * static_cast<float>(i[1] + 1)
+                             * (i[3] % 2 == 0 ? 1.0F : -1.0F));
+        v.setHostValue(value, i);
+        vAbsMax = std::max(vAbsMax, std::fabs(static_cast<float>(value)));
+    });
+    Tensor<float> one({1});
+    one.fillWithValue(1.0F);
+    Tensor<float> descaleV({1});
+    descaleV.fillWithValue(2.0F);
+    Tensor<float> o({1, H, SQ, D});
+    Tensor<float> amaxS({1, 1, 1, 1});
+    Tensor<float> amaxO({1, 1, 1, 1});
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+        q,
+        k,
+        v,
+        o,
+        SdpaFwdOptions<float>{}
+            .setDescales(&one, &one, &descaleV)
+            .setSoftmaxScales(3.3F, 0.5F)
+            .setOutputScale(0.25F)
+            .setAmax(&amaxS, &amaxO));
+
+    const float p = 3.25F * 0.5F; // fp8(1 * 3.3) * descaleS
+    forEachIndex(o.dims(), [&](const std::vector<int64_t>& i) {
+        const float value
+            = static_cast<float>(v.getHostValue(std::vector<int64_t>{0, i[1], 0, i[3]}));
+        EXPECT_NEAR(o.getHostValue(i), p * value * 2.0F * 0.25F, TOL);
+    });
+    EXPECT_EQ(amaxS.getHostValue(0, 0, 0, 0), 1.0F);
+    EXPECT_NEAR(amaxO.getHostValue(0, 0, 0, 0), p * vAbsMax * 2.0F, TOL);
+}
+
+// amaxS is max exp(s - Max) over live keys, where Max includes the sink: a sink above every key
+// score leaves it below 1 (exp(score - sink)), and without a sink it is exactly 1.
+TEST(TestCpuFpReferenceSdpaClosedForm, Fp8AmaxSIncludesTheSink)
+{
+    using hipdnn_data_sdk::types::fp8_e4m3;
+    Tensor<fp8_e4m3> q({1, 1, 1, 2});
+    Tensor<fp8_e4m3> k({1, 1, 2, 2});
+    Tensor<fp8_e4m3> v({1, 1, 2, 2});
+    for(int64_t i = 0; i < 2; ++i)
+    {
+        q.setHostValue(fp8_e4m3(1.0F), 0, 0, 0, i);
+        for(int64_t j = 0; j < 2; ++j)
+        {
+            k.setHostValue(fp8_e4m3(0.5F), 0, 0, j, i); // every score is 1
+            v.setHostValue(fp8_e4m3(1.0F), 0, 0, j, i);
+        }
+    }
+    Tensor<float> one({1});
+    one.fillWithValue(1.0F);
+    Tensor<float> sink({1, 1, 1, 1});
+    sink.fillWithValue(3.0F);
+    Tensor<float> o({1, 1, 1, 2});
+    Tensor<float> amaxS({1});
+    const auto base
+        = SdpaFwdOptions<float>{}.setDescales(&one, &one, &one).setAmax(&amaxS, nullptr);
+
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(q, k, v, o, base);
+    EXPECT_EQ(amaxS.getHostValue(0), 1.0F);
+
+    auto withSink = base;
+    withSink.setSink(&sink);
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(q, k, v, o, withSink);
+    EXPECT_NEAR(amaxS.getHostValue(0), std::exp(1.0F - 3.0F), TOL);
+}
+
+// P is stored in Q's fp8 format, so softmax scaling needs fp8 Q.
+TEST(TestCpuFpReferenceSdpaClosedForm, Fp8SoftmaxScalingNeedsFp8Q)
+{
+    Tensor<float> q({1, 1, 1, 2});
+    Tensor<float> k({1, 1, 1, 2});
+    Tensor<float> v({1, 1, 1, 2});
+    Tensor<float> o({1, 1, 1, 2});
+    q.fillWithValue(1.0F);
+    k.fillWithValue(1.0F);
+    v.fillWithValue(1.0F);
+    EXPECT_THROW((CpuFpReferenceSdpa::forward<float, float, float, float>(
+                     q, k, v, o, SdpaFwdOptions<float>{}.setSoftmaxScales(2.0F, 0.5F))),
+                 std::invalid_argument);
+    // Output scaling alone is dtype-independent.
+    EXPECT_NO_THROW((CpuFpReferenceSdpa::forward<float, float, float, float>(
+        q, k, v, o, SdpaFwdOptions<float>{}.setOutputScale(2.0F))));
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0F, TOL);
 }

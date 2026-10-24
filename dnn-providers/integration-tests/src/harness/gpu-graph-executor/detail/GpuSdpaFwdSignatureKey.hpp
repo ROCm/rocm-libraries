@@ -149,6 +149,15 @@ struct GpuSdpaFwdSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        // fp8 output in the input's format (cuDNN sdpa_fp8: O = O_f * scale_o, SEM-024).
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ>(map);
 
         return map;
     }

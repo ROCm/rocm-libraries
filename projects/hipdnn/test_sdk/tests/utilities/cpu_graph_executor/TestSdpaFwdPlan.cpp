@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaFp8TestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
@@ -1698,6 +1699,78 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
         fp8Builder;
     EXPECT_FALSE(fp8Builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
         << "fp8 graphs carrying descale_s (softmax quant) must be rejected";
+}
+
+// The cuDNN sdpa_fp8 scales and amax outputs: one-element FLOAT tensors, scale_s and descale_s
+// together, fp8 inputs only, no dropout (the GPU plan test asserts the same rules). Each case
+// changes one field of an accepted graph.
+TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
+{
+    namespace fp8 = hipdnn_test_sdk::utilities::sdpa_fp8_test;
+    const auto applicable = [](const auto& builder, const fp8::Fp8GraphSpec& spec) {
+        auto graphBuilder = fp8::makeFp8Graph(spec);
+        const GraphWrapper wrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap());
+    };
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::BFLOAT16>
+        ocp;
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3>
+        ocpToFp8;
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3_FNUZ,
+                             DataType::FP8_E4M3_FNUZ,
+                             DataType::FP8_E4M3_FNUZ,
+                             DataType::FP8_E4M3_FNUZ>
+        fnuzToFp8;
+    const SdpaFwdPlanBuilder<DataType::BFLOAT16,
+                             DataType::BFLOAT16,
+                             DataType::BFLOAT16,
+                             DataType::BFLOAT16>
+        bf16;
+
+    fp8::Fp8GraphSpec spec;
+    EXPECT_TRUE(applicable(ocp, spec));
+    spec.withFullScaling();
+    EXPECT_TRUE(applicable(ocp, spec));
+    spec.oType = DataType::FP8_E4M3;
+    EXPECT_TRUE(applicable(ocpToFp8, spec)) << "fp8 output";
+    spec.fp8Type = DataType::FP8_E4M3_FNUZ;
+    spec.oType = DataType::FP8_E4M3_FNUZ;
+    EXPECT_TRUE(applicable(fnuzToFp8, spec)) << "FNUZ output";
+
+    spec = {};
+    spec.withFullScaling().scaleS = false;
+    EXPECT_FALSE(applicable(ocp, spec)) << "descale_s without scale_s";
+    spec = {};
+    spec.withFullScaling().descaleS = false;
+    EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
+    for(auto fp8::Fp8GraphSpec::*field :
+        {&fp8::Fp8GraphSpec::scaleO, &fp8::Fp8GraphSpec::amaxS, &fp8::Fp8GraphSpec::amaxO})
+    {
+        spec = {};
+        spec.*field = true;
+        EXPECT_TRUE(applicable(ocp, spec)) << "each of scale_o / amax_s / amax_o alone";
+    }
+    spec = {};
+    spec.withFullScaling().scalingType = DataType::HALF;
+    EXPECT_FALSE(applicable(ocp, spec)) << "scales are read as float";
+    spec = {};
+    spec.withFullScaling().scalingDims = {1, 2, 1, 1};
+    EXPECT_FALSE(applicable(ocp, spec)) << "scales are single elements";
+    spec = {};
+    spec.withFullScaling().dropout = true;
+    EXPECT_FALSE(applicable(ocp, spec)) << "dropout does not combine with fp8 scaling";
+    spec = {};
+    spec.fp8Type = DataType::BFLOAT16;
+    spec.descales = 0;
+    EXPECT_TRUE(applicable(bf16, spec));
+    spec.scaleO = true;
+    EXPECT_FALSE(applicable(bf16, spec)) << "scale_o on bf16 inputs";
 }
 
 TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
