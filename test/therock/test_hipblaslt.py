@@ -38,6 +38,31 @@ if is_asan():
         environ_vars["HSA_XNACK"] = "1"
     environ_vars["OMP_NUM_THREADS"] = "1"
 
+test_process_options = {}
+diagnostic_ptracer = os.getenv("HIPBLASLT_DIAGNOSTIC_PTRACER_PID")
+if is_asan() and platform == "linux" and diagnostic_ptracer is not None:
+    import ctypes
+
+    ptracer_pid = int(diagnostic_ptracer)
+    if not 0 < ptracer_pid <= 2147483647:
+        raise ValueError("HIPBLASLT_DIAGNOSTIC_PTRACER_PID must be a positive PID")
+    # Prepare ctypes before forking. This driver has no background threads.
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
+    libc.prctl.restype = ctypes.c_int
+
+    def allow_diagnostic_ptrace():
+        # Linux preserves this across exec, but not fork: grant it in each
+        # native test child, only to the collector and its debugger children.
+        if libc.prctl(0x59616D61, ptracer_pid, 0, 0, 0) != 0:  # PR_SET_PTRACER
+            error = ctypes.get_errno()
+            os.write(
+                2, f"PR_SET_PTRACER({ptracer_pid}): {os.strerror(error)}\n".encode()
+            )
+            raise OSError(error, os.strerror(error))
+
+    test_process_options["preexec_fn"] = allow_diagnostic_ptrace
+
 # ---------------------------------------------------------------------------
 # Pre-flight: validate the installed library tree's physical layout BEFORE
 # launching hipblaslt-test. The runtime probe in
@@ -107,9 +132,13 @@ if int(SHARD_INDEX) == 1:
         if name not in ("GTEST_SHARD_INDEX", "GTEST_TOTAL_SHARDS")
     }
     logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(store_cmd)}")
-    subprocess.run(store_cmd, cwd=THEROCK_DIR, check=True, env=store_env)
+    subprocess.run(
+        store_cmd, cwd=THEROCK_DIR, check=True, env=store_env, **test_process_options
+    )
 
 cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test"] + test_filter
 
 logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(cmd)}")
-subprocess.run(cmd, cwd=THEROCK_DIR, check=True, env=environ_vars)
+subprocess.run(
+    cmd, cwd=THEROCK_DIR, check=True, env=environ_vars, **test_process_options
+)
