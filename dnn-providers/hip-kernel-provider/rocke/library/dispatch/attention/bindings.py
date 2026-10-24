@@ -362,6 +362,162 @@ def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
         )
 
 
+def _bind_paged_decode_launch(problem, spec, run):
+    """Prepare one binding's eager pair after the public runner validates it.
+
+    Only the creating host thread reuses scratch. Different layouts, streams,
+    reentrant calls and captures keep the ordinary runner's private allocation.
+    Kernargs are packed and retained by the ordinary pipeline on every call.
+    """
+    from threading import current_thread
+
+    from kernels.common import attention_unified as au
+    from rocke.runtime.torch_interop import resolve_stream
+
+    thread = current_thread()
+    owner = None
+    prepared = None
+    stream_object = None
+    layouts = None
+    device = None
+    segment_defaults = None
+    reduce_defaults = None
+    names = (
+        "q",
+        "k",
+        "v",
+        "out",
+        "cu_seqlens_q",
+        "seqused_k",
+        "block_table",
+        "sinks",
+        "alibi_slopes",
+        "qq_bias",
+    )
+
+    def launch(call):
+        nonlocal owner, prepared, stream_object, layouts, device
+        nonlocal segment_defaults, reduce_defaults
+        requested_stream = call["stream"]
+        call["stream"] = resolve_stream(requested_stream, device=call["q"].device)
+        if current_thread() is not thread or (
+            owner is not None and owner._lock.locked()
+        ):
+            return run(**call)
+        import torch
+
+        if (
+            au._torch_stream_capturing()
+            or au._enable_3d_graph_replay(problem, spec.arch)
+            or torch.cuda.current_device() != call["q"].device.index
+        ):
+            return run(**call)
+        live_layouts = tuple(au._attention_tensor_layout(call[name]) for name in names)
+        if prepared is None:
+            # No extra warmup launch or synchronization at binding creation.
+            # A failed first submission stays on the public path for retry.
+            execution = au.Attention3DExecution()
+            owner = execution
+            try:
+                stream_object = torch.cuda.ExternalStream(
+                    call["stream"], device=call["q"].device
+                )
+                # Capture may belong to an explicit non-current stream.
+                # Check on that stream before giving the public runner an owner.
+                with torch.cuda.stream(stream_object):
+                    if au._torch_stream_capturing():
+                        owner = None
+                        return run(**call)
+                    result = run(**call, execution=execution)
+                prepared = au._get_3d_pipeline(
+                    problem,
+                    spec.cache_key(),
+                    int(spec.kernel_spec.num_segments),
+                    arch=spec.arch,
+                    tuning_spec=spec,
+                )
+                device = call["q"].device
+                layouts = live_layouts
+                output, maximum, expsum = execution._workspace
+                segment_defaults = {
+                    "segm_output_ptr": output,
+                    "segm_max_ptr": maximum,
+                    "segm_expsum_ptr": expsum,
+                    "num_seqs": int(problem.num_seqs),
+                    "block_table_stride": int(call["block_table"].stride(0)),
+                    "qq_bias_stride_0": 0,
+                    "additive_bias_ptr": 0,
+                    "additive_bias_batch_stride": 0,
+                    "additive_bias_head_stride": 0,
+                    "additive_bias_sq_stride": 0,
+                    "k_scale": 1.0,
+                    "v_scale": 1.0,
+                }
+                reduce_defaults = {
+                    "segm_output_ptr": output,
+                    "segm_max_ptr": maximum,
+                    "segm_expsum_ptr": expsum,
+                }
+            except BaseException:
+                owner = None
+                prepared = None
+                raise
+            return result
+        if (
+            call["q"].device != device
+            or call["stream"] != owner._stream
+            or live_layouts != layouts
+        ):
+            return run(**call)
+        # This is the existing execution owner's whole-pair guard, not a
+        # generic runtime submission lock. Reentrant work gets fresh scratch.
+        if not owner._lock.acquire(blocking=False):
+            return run(**call)
+        try:
+            segment = dict(
+                segment_defaults,
+                query_ptr=call["q"],
+                key_cache_ptr=call["k"],
+                value_cache_ptr=call["v"],
+                query_start_len_ptr=call["cu_seqlens_q"],
+                seq_lens_ptr=call["seqused_k"],
+                block_tables_ptr=call["block_table"],
+                sink_ptr=call["sinks"],
+                alibi_slopes_ptr=(
+                    call["alibi_slopes"] if call["alibi_slopes"] is not None else 0
+                ),
+                qq_bias_ptr=call["qq_bias"] if call["qq_bias"] is not None else 0,
+                scale=call["softmax_scale"],
+                softcap=call["softcap"],
+            )
+            reduce = dict(
+                reduce_defaults,
+                output_ptr=call["out"],
+                seq_lens_ptr=call["seqused_k"],
+            )
+            # None/legacy-zero selected the live Torch stream above. An
+            # explicit handle may require entering the cached stream object.
+            matching_stream = requested_stream is None or int(requested_stream) == 0
+            if not matching_stream:
+                matching_stream = (
+                    int(torch.cuda.current_stream(device).cuda_stream) == call["stream"]
+                )
+            if matching_stream:
+                return au._launch_3d_pipeline(
+                    prepared, segment, reduce, call["stream"], capturing=False
+                )
+            with torch.cuda.stream(stream_object):
+                if au._torch_stream_capturing():
+                    return run(**call)
+                return au._launch_3d_pipeline(
+                    prepared, segment, reduce, call["stream"], capturing=False
+                )
+        finally:
+            owner._lock.release()
+
+    return launch
+
+
 def bind_tuning_attention_torch(
     request, spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -372,6 +528,11 @@ def bind_tuning_attention_torch(
     invariants externally may pass
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
     check; structural ABI validation is never skipped.
+
+    Saved gfx942/gfx950 one-token 3D bindings prepare private eager scratch and
+    fixed launch context on their first ordinary launch. Other execution contexts
+    and graph calls use the general runner. None selects Torch's current stream;
+    existing integer stream behavior is preserved.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
@@ -413,16 +574,28 @@ def bind_tuning_attention_torch(
     problem = replace(problem, num_kv_blocks=num_blocks)
     if hasattr(spec, "with_num_kv_blocks"):
         spec = spec.with_num_kv_blocks(num_blocks)
-    stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))
     backend = "tiled" if path == "2d" else path
+    decode = (
+        path == "3d"
+        and spec.arch in ("gfx942", "gfx950")
+        and problem.all_decode
+        and not problem.use_fp8
+    )
+    stream = kwargs.get("stream", None if decode else 0)
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
 
+    prepared_launch = (
+        _bind_paged_decode_launch(problem, spec, run_unified_attention_torch)
+        if decode
+        else None
+    )
+
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
-        return run_unified_attention_torch(
+        call = dict(
             problem=problem,
             q=tensors["q"],
             k=tensors["k"],
@@ -437,10 +610,14 @@ def bind_tuning_attention_torch(
             alibi_slopes=_kw.get("alibi_slopes", tensors.get("alibi_slopes")),
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
-            stream=int(_kw.get("stream", stream)),
+            stream=_kw.get("stream", stream),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
         )
+        if prepared_launch is not None:
+            return prepared_launch(call)
+        call["stream"] = int(call["stream"])
+        return run_unified_attention_torch(**call)
 
     return TorchBinding(
         launch=launch,
