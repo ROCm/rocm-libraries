@@ -7,7 +7,6 @@ import pytest
 import yaml
 from Tensile.Common.Utilities import state
 from test_w4a16_block_dequant import toolchain, GFX1151_LOGIC, needs_logic
-from test_w4a16_decode import SCHEDULES
 
 pytestmark = pytest.mark.unit
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
@@ -40,10 +39,10 @@ def test_q27b_equality_dispatch_keys():
     for row in serialized["table"]:
         solution = logic["Solutions"][row["index"]]
         if row["key"][1] == 1:
-            suffix = {17408: "_W4_U1_A4", 6144: "_W4_NativePerm"}.get(
-                row["key"][3], "_W4")
-            assert solution["W4A16Decode"] == SCHEDULES[suffix]
-            assert solution["CustomKernelName"] == ""
+            # Decode: dot2 WaveSplitK with A and B fed straight from global reads.
+            assert solution["WaveSplitK"]
+            assert solution["DirectToVgprDot2A"] and solution["DirectToVgprDot2B"]
+            assert solution.get("CustomKernelName", "") == ""
         else:
             assert solution["EnableMatrixInstruction"]
             assert solution.get("CustomKernelName", "") == ""
@@ -154,7 +153,6 @@ def test_symmetric_prefill_rounded_query_selects_narrow_tile(m, k, tile_m, n, ti
     assert len(rows) == 1
     selected = solutions[rows[0]["index"]]
     assert (selected["MacroTile0"], selected["MacroTile1"]) == (tile_m, tile_n)
-    assert not selected.get("W4A16Decode")
     assert selected.get("CustomKernelName", "") == ""
 
 

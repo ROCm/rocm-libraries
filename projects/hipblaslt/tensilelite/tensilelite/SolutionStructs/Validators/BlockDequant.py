@@ -12,8 +12,7 @@ element by the scale of its K-group, converts to ``MacDataTypeA`` and writes
 Public entry point: :func:`validateBlockDequantCombination`.
 """
 
-from ..Problem import (INT4_ENCODINGS_A, blockDequantItersPerGroupA, usesBlockDequantA,
-                       usesBlockDequantZeroPointA)
+from ..Problem import INT4_ENCODINGS_A, blockDequantItersPerGroupA, usesBlockDequantA
 from ..Utilities import reject
 
 
@@ -139,14 +138,6 @@ def validateBlockDequantCombination(state, printRejectionReason):
         reject(state, printRejectionReason,
                "UseScaleAB=Block requires ScheduleIterAlg=0 when PrefetchGlobalRead>=2 "
                "(got SIA=%d, PGR=%d)" % (state["ScheduleIterAlg"], state["PrefetchGlobalRead"]))
-        return False
-
-    # Generated kernels use local row bits; custom kernels own their addressing.
-    if (usesBlockDequantZeroPointA(problemType) and not state.get("CustomKernelName")
-            and state["MacroTile0"] % 8 != 0):
-        reject(state, printRejectionReason,
-               "UseScaleAB=Block with zero-points requires MacroTile0 divisible by eight (got %d)"
-               % state["MacroTile0"])
         return False
 
     # One of DepthU and the group size has to divide the other, so that a group

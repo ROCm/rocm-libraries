@@ -1538,8 +1538,6 @@
     'VectorStore',
     'VectorWidthA',
     'VectorWidthB',
-    'W4A16Decode',
-    'W4A16DecodePrefetch',
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
@@ -1671,7 +1669,7 @@
         2,
         4,
       ]),
-      'len': 11,
+      'len': 24,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -1767,7 +1765,7 @@
         2,
         3,
       ]),
-      'len': 1024,
+      'len': 4096,
       'type': 'list',
     }),
     'DirectToLds': dict({
@@ -3077,18 +3075,6 @@
         2,
       ]),
       'len': 7,
-      'type': 'list',
-    }),
-    'W4A16Decode': dict({
-      'type': 'int',
-      'value': -1,
-    }),
-    'W4A16DecodePrefetch': dict({
-      'head': list([
-        1,
-        4,
-      ]),
-      'len': 2,
       'type': 'list',
     }),
     'WaveSeparateGlobalReadA': dict({
