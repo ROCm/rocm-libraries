@@ -2105,8 +2105,8 @@ TEST(TestCpuFpReferenceSdpaFp64, AlibiSlopesMatchCudnn)
 }
 
 // ALiBi closed form: Q = K = 0, so each score is the ALiBi term (skv - sq) * m. With top-left
-// causal masking and one head (m = 2^-8 ... for H = 1 the slope is 2^-8), row 2 weights keys
-// 0, 1, 2 by exp(-2m), exp(-m), 1. V is the key index, so O is the weighted mean index.
+// causal masking and one head (slope m = 2^-8), row 2 weights keys 0, 1, 2 by exp(-2m), exp(-m), 1.
+// V is the key index, so O is the weighted mean index. The pipeline computes in float, hence 1e-6.
 TEST(TestCpuFpReferenceSdpaFp64, AlibiClosedForm)
 {
     Tensor<double> q({1, 1, 3, 2});
@@ -2126,9 +2126,9 @@ TEST(TestCpuFpReferenceSdpaFp64, AlibiClosedForm)
     EXPECT_DOUBLE_EQ(m, std::pow(2.0, -8.0));
     const double w0 = std::exp(-2.0 * m);
     const double w1 = std::exp(-m);
-    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (w1 + 2.0) / (w0 + w1 + 1.0), 1e-12);
-    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0 / (std::exp(-m) + 1.0), 1e-12);
-    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-12);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (w1 + 2.0) / (w0 + w1 + 1.0), 1e-6);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0 / (std::exp(-m) + 1.0), 1e-6);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-6);
 }
 
 // ALiBi has no parameters: the backward is the ordinary one through the shifted probabilities.
