@@ -14,6 +14,20 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
   first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
   one applicable CK instance the enumeration never terminated.
+* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
+  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
+  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
+  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
+  The problem now uses the next recorded solver, `GemmWrwUniversal`.
+
+### Optimized
+* [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
+  Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
+  re-tuned on gfx1200, and the 475 whose config verifies on a fresh-process replay and beats the
+  post-#13697 pick by at least 5 percent are back in the system database, for a geomean 2.64x and
+  up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
+  split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
+  between builds.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
