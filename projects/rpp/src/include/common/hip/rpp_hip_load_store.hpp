@@ -34,6 +34,9 @@ SOFTWARE.
 typedef unsigned char uchar;
 typedef signed char schar;
 typedef struct {
+    uint data[RPPT_MAX_DIMS];
+} d_uint5_s;
+typedef struct {
     uint data[6];
 } d_uint6_s;
 typedef struct {
