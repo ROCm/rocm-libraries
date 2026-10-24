@@ -166,6 +166,7 @@ struct GpuSdpaFwdParams
     // cuDNN Max / Sum_exp row statistics outputs, FLOAT [B, H, Sq, 1].
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
+    bool alibi = false;
 };
 
 template <typename QDataType,
@@ -299,7 +300,8 @@ public:
                 dropoutScale,
                 std::nullopt,
                 maxTensor.has_value() ? &maxTensor.value() : nullptr,
-                sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr);
+                sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr,
+                _params.alibi);
     }
 
 private:
@@ -367,8 +369,7 @@ public:
         // Ragged tensors need the ragged plan; read as dense they would give wrong results.
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
-        // Unsupported mask modes
-        if(nodeAttributes->alibi_mask())
+        if(!isSupportedSdpaAlibi(*nodeAttributes))
         {
             return false;
         }
@@ -522,6 +523,7 @@ public:
             nodeAttributes->sink_token_tensor_uid().has_value()
                 ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
                 : nullptr);
+        params.alibi = nodeAttributes->alibi_mask();
         if(nodeAttributes->max_tensor_uid().has_value())
         {
             params.maxTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
