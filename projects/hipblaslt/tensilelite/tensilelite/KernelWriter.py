@@ -70,8 +70,8 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
-  SW_INSTRUCTION_PREFETCH_AUTO
-from .SolutionStructs.Naming import getKernelNameMin
+  parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -227,6 +227,9 @@ class StateValues:
   invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
+  # The overflow code reopened for register allocation to settle, or 0 once
+  # resolveDeferredRegisterOverflow has ruled on it.
+  overflowPendingRA: int                 = 0
   ## Schedule
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
@@ -5647,6 +5650,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
 
     # TODO: Check what does this do and enable this if needed
@@ -7100,7 +7104,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module.add(Label("ASM_End", "The end of the kernel"))
 
     moduleKernelBody.addBody(module)
+    # Judge, defer, act. The middle step is this path's alone: it runs the
+    # allocation pipeline below and resolves the deferral.
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.deferRegisterOverflowForAllocation(kernel)
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
     # Tensile instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
@@ -7125,10 +7133,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
+    # A code recorded by now is final: the resolver runs only when it is 0.
+    rejected = self.states.overflowedResources != 0
+
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if not rejected and stinky_opt_level is not None \
+       and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
@@ -7164,6 +7176,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
+                               "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
+                               # The rest of StinkyTofuRegisterAllocation, in its shortest
+                               # spelling; the mode above is the one that holds.
+                               "RegisterAllocationConfig": str(
+                                   kernel.get("StinkyTofuRegisterAllocation", 0)),
+                               "RegisterAllocationDump": bool(
+                                   globalParameters.get("StinkyTofuRegisterAllocationDump") or False),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -7258,6 +7277,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
+      # The allocation dump goes to a directory per kernel, named like the
+      # kernel's own files, under StinkyTofuCostOutputDir when that is set.
+      if stinky_module_options["RegisterAllocationDump"]:
+        stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
+        if globalParameters.get("StinkyTofuCostOutputDir"):
+          stModule.setOutputDir(str(globalParameters["StinkyTofuCostOutputDir"]))
+
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
       t1b_start = time.perf_counter()
@@ -7278,7 +7304,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      # Tensile's own assembly, for the comparison ENABLE_DEBUG_STINKYTOFU_ASM
+      # writes below. Taken before the budget is re-judged, because that sets
+      # the kernel body's declared counts to the ones StinkyTofu emitted, which
+      # would leave both files declaring the same registers.
+      debugAsm = os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None
+      if debugAsm:
+        t_str_start = time.perf_counter()
+        orig_asm_str = str(moduleKernelBody)
+        t_str_end = time.perf_counter()
+        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+      # Pay off the deferral, and realign the recorded counts and the occupancy
+      # with them: both now come from what the emitted code declares, not from
+      # the pool estimate. The guard is defensive -- error is always 0 here --
+      # because a resolver that accepts would erase a rejection.
+      if error == 0:
+        error = self.resolveDeferredRegisterOverflow(kernel, moduleKernelBody,
+                                                     stModule.getDeclaredVgprCount(),
+                                                     stModule.getDeclaredSgprCount())
+        if error != 0:
+          # Rejected after all, so the skipped verdict is due: ForceGenerateKernel
+          # builds this source, so replace it with the stubbed rocisa module.
+          self.applyOverflowVerdict(kernel, moduleKernelBody, afterAllocation=True)
+          st_asm = str(moduleKernelBody)
+      else:
+        self.states.overflowPendingRA = 0
+
+      if debugAsm:
         t3_start = time.perf_counter()
         import hashlib, fcntl
         os.makedirs("cmpasm/orig", exist_ok=True)
@@ -7295,11 +7348,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
           st_path = f"cmpasm/st/{base_name}_{suffix}.s"
           suffix += 1
-
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
         with open(orig_path, "w") as f:
           f.write(orig_asm_str)
@@ -7321,6 +7369,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
     else:
+      # Unreachable: the mode gates a deferral on the same two questions the
+      # conversion gate above asks. Kept, and loud, because a deferral nothing
+      # resolves would silently accept an over-budget kernel.
+      if self.states.overflowPendingRA:
+        printWarning("%s: deferred register overflow but no StinkyTofu module; the mode "
+                     "and the conversion gate disagree" % self.states.kernelName)
+        error = self.states.overflowPendingRA
+        self.states.overflowPendingRA = 0
+        self.states.overflowedResources = error
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
@@ -10642,6 +10699,43 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
     using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
+
+  def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
+    """Effective register allocation mode from the kernel parameter: 0 off, 1 shadow,
+    2 apply, 3 force apply -- the mode a config string starts with -- and 0 whenever
+    the StinkyTofu path will not run. The module is built on the same conditions
+    checked here, so mode 3 guarantees the resolver is reached, which is what makes
+    deferring safe.
+
+    Only mode 3 defers, because only it needs to: shadow could not lower a count,
+    and plain apply admits no kernel the pool estimate rejected, since a verdict
+    it reaches was never set aside to begin with.
+
+    Every mode is still re-judged on the counts the emitted code declares, mode 0
+    included -- emitAssembly() rewrites those counts whether or not allocation
+    ran, and raises as well as lowers them. So any mode can newly *reject* a
+    kernel the pool estimate admitted, which is the kernel no longer fitting
+    rather than a policy this mode chose.
+    """
+    if kernel.get("_StinkyTofuOptLevel") is None:
+      return 0
+    if not rocisa.isSupportedByStinkyTofu(self.states.version):
+      return 0
+    # TODO: ask whether the backend's capabilities include the allocation passes
+    return parseStinkyTofuRegisterAllocation(kernel.get("StinkyTofuRegisterAllocation", 0))[1]
+
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Override in KernelWriterAssembly to defer a budget verdict to allocation."""
+    pass
+
+  def applyOverflowVerdict(self, kernel, mkb, afterAllocation: bool = False) -> None:
+    """Override in KernelWriterAssembly to report and act on an overflow."""
+    pass
+
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Override in KernelWriterAssembly to re-judge the budget after allocation."""
+    return 0
 
   ##############################################################################
   # Check Resources

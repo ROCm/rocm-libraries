@@ -23,6 +23,7 @@ __all__ = [
     "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
     "DIRECT_DGRAD_TRANSPOSE_RTC",
+    "DIRECT_DGRAD_WMMA",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
     "DIRECT_MFMA_DGRAD",
@@ -47,6 +48,8 @@ DIRECT_DGRAD_REORGANIZE = "direct_dgrad_reorganize"
 DIRECT_DGRAD_TRANSPOSE_RTC = "direct_dgrad_transpose_rtc"
 DIRECT_DGRAD_REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 DIRECT_MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
+# Wave32 WMMA direct dgrad (stride 1, dense and grouped, channels runtime).
+DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
@@ -90,18 +93,49 @@ _MFMA_PRELOAD_VGPR_BUDGET = 384
 _RTC_WIDE_Q_PRELOAD_VGPR_BUDGET = 216
 
 
-def make_direct_spec(variant: str, problem, knobs: dict):
+# Variants whose kernel is written for any wave size (scalar FMA, one lane per
+# channel or per channel and column): their spec takes the target's wave size,
+# so the binary matches the wave size the identity records (and the tiled and
+# column-streamed validators require it). Every other variant is a wave64 MFMA
+# kernel and keeps its spec default, which its validator checks against the
+# target.
+DIRECT_WAVE_PARAMETRIC = frozenset(
+    {
+        "direct_depthwise",
+        "direct_depthwise_spatial",
+        "direct_depthwise_tiled",
+        "direct_depthwise_col",
+    }
+)
+
+
+def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
     For the MFMA dgrad pipeline this is the spec of its compute pass (a
     forward kernel on the transposed problem); the weight transforms are
-    derived from the original problem separately.
+    derived from the original problem separately. ``wave_size`` is the
+    target's; only the :data:`DIRECT_WAVE_PARAMETRIC` variants take it.
     """
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
 
+    if variant in DIRECT_WAVE_PARAMETRIC:
+        if "wave_size" in knobs and knobs["wave_size"] != wave_size:
+            raise ValueError(
+                f"knob wave_size {knobs['wave_size']!r} conflicts with wave_size "
+                f"{wave_size!r}"
+            )
+        knobs = dict(knobs, wave_size=wave_size)
+
     if variant == "direct_grouped":
         return dc.DirectConvSpec(problem=problem, name="rocke_direct_conv", **knobs)
+    if variant == DIRECT_DGRAD_WMMA:
+        from kernels.common.conv_direct_dgrad_wmma import DirectDgradWmmaSpec
+
+        return DirectDgradWmmaSpec(
+            problem=problem, name="rocke_direct_dgrad_wmma", **knobs
+        )
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
             problem=problem, name="rocke_direct_conv_nongrouped", **knobs
@@ -380,6 +414,10 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
+        if variant == DIRECT_DGRAD_WMMA:
+            from kernels.common.conv_direct_dgrad_wmma import is_valid_dgrad_wmma_spec
+
+            return is_valid_dgrad_wmma_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad_4c":
             spec.validate()
             return dc.is_valid_spec_4c(spec, arch=arch)
@@ -423,6 +461,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     function for the ``(spec, arch)`` builder signature, and this one takes
     an extra ``variant``.
     """
+    from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
@@ -430,6 +469,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_wgrad_tiled as wt
 
     builders = {
+        DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
@@ -459,8 +499,31 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     return builders[variant](spec, arch=arch)
 
 
+def direct_entry_wave_reason(
+    variant: str, identity_wave_size: int, meta: dict
+) -> str | None:
+    """Why a cached binary of ``variant`` cannot launch at its identity's wave
+    size, or ``None`` when it can.
+
+    The launch geometry of a :data:`DIRECT_WAVE_PARAMETRIC` kernel follows the
+    spec's ``wave_size`` (block size, channels per block), so it has to be the
+    one the binary was built with. The build records it as ``spec_wave_size``;
+    an entry without it predates the record and was built at the wave64 spec
+    default, whatever wave size its identity says.
+    """
+    if variant not in DIRECT_WAVE_PARAMETRIC:
+        return None
+    built = meta.get("spec_wave_size", 64)
+    if built != identity_wave_size:
+        return (
+            f"cache entry was built at wave_size {built}, its identity says "
+            f"{identity_wave_size} (rebuild the cache with --compile-all)"
+        )
+    return None
+
+
 def direct_spec_for_problem(
-    variant: str, problem, knobs: dict, arch: str
+    variant: str, problem, knobs: dict, arch: str, wave_size: int = 64
 ) -> tuple[object | None, str]:
     """``(spec, "ok")`` when a binary of ``variant``/``knobs`` serves ``problem``.
 
@@ -471,7 +534,8 @@ def direct_spec_for_problem(
     ...). The spec is rebuilt on the real problem and run through the kernel's
     own validator, so a binary is only offered where a fresh build would accept
     the shape too. The returned spec is the one its launch geometry comes from.
-    Returns ``(None, why)`` otherwise.
+    ``wave_size`` is the binary's (its identity's). Returns ``(None, why)``
+    otherwise.
     """
     if variant in DIRECT_MFMA_DGRAD:
         why = direct_mfma_knobs_reason(problem, knobs)
@@ -481,7 +545,7 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
-    spec = make_direct_spec(variant, problem, knobs)
+    spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why
@@ -506,6 +570,14 @@ def direct_spec_for_problem(
                 f"tile_w={spec.tile_w} does not fit Wo={problem.Wo} "
                 f"(widths tried for it: {widths})"
             )
+    if variant == DIRECT_DGRAD_WMMA:
+        # A binary serves every extent and channel count, but is only offered
+        # where at least half of its padded tile grid is real work.
+        from kernels.common.conv_direct_dgrad_wmma import dgrad_wmma_tile_efficiency
+
+        eff = dgrad_wmma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
     if variant == DIRECT_GROUPED_HALO and spec.tile_k > spec.merged_k:
         return None, (
             f"tile_k={spec.tile_k} exceeds the {spec.merged_k} output channels "
