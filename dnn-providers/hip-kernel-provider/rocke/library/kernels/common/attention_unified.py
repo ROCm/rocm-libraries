@@ -200,9 +200,9 @@ class UnifiedAttentionProblem:
 
     def select_path(self, arch: str | None = None) -> str:
         """2D or 3D route. ``arch`` adds per-arch decode routing on top of the
-        shared selector (``_gfx942_decode_prefers_3d``); None keeps the shared
+        shared selector (``_decode_prefers_3d``); None keeps the shared
         selector alone."""
-        if arch is not None and _gfx942_decode_prefers_3d(self, arch):
+        if arch is not None and _decode_prefers_3d(self, arch):
             return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
@@ -3682,22 +3682,28 @@ def _gfx942_3d_decode_ctas_per_segment(
     return None
 
 
-def _gfx942_decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
-    """gfx942 decode routes to the split-KV 3D kernel even past the 2D grid target.
+# Head sizes per arch for which decode routes to the 3D segment kernel past the
+# shared selector (``_decode_prefers_3d``).
+_DECODE_3D_HEAD_SIZES = {"gfx942": (64, 128), "gfx950": (128, 256)}
 
-    The gfx942 tiled 2D decode body holds one single-wave workgroup per CU (its
-    LDS footprint): a large-batch grid leaves most SIMDs idle, and a small-batch
-    short-KV grid of a few workgroups walks its tiles serially. The 3D segment
-    kernel keeps several waves per CU in both cases. Scope: the decode split
-    rule's measured cohort (fp16/bf16, head size 64/128, 16-token pages, no
-    sliding window) and a cache the 3D kernel's K/V loader can address (it has
-    no i64 path).
+
+def _decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """Decode routes to the split-KV 3D kernel even where the shared selector
+    picks 2D (2D grid past the subscription target, or KV <= 512 tokens).
+
+    The tiled 2D decode bodies run one single-wave workgroup per q-block: a
+    large-batch grid is bound by the workgroups per CU its LDS footprint allows
+    (one on gfx942), and a small-batch short-KV grid of a few workgroups walks
+    its tiles serially. The 3D segment kernel splits KV across several waves per
+    CU in both cases. Scope: gfx942/gfx950 decode split rule cohorts (fp16/bf16,
+    the head sizes in ``_DECODE_3D_HEAD_SIZES``, 16-token pages, no sliding
+    window, no explicit target_ctas) and, on gfx942, a cache the 3D kernel's K/V
+    loader can address (it has no i64 path).
     """
-    if _canonical_arch_for_selection(arch) != "gfx942":
-        return False
+    arch = _canonical_arch_for_selection(arch)
     if not (
         problem.all_decode
-        and problem.head_size in (64, 128)
+        and problem.head_size in _DECODE_3D_HEAD_SIZES.get(arch, ())
         and problem.block_size == 16
         and problem.sliding_window == 0
         and int(problem.target_ctas) <= 0
@@ -3705,14 +3711,15 @@ def _gfx942_decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bo
         and _kv_storage_dtype(problem) is None
     ):
         return False
-    if problem.num_kv_blocks <= 0:
-        problem = replace(
-            problem,
-            num_kv_blocks=problem.num_seqs
-            * -(-problem.max_seqlen_k // problem.block_size),
-        )
-    if _enable_i64_kv_addr_3d(problem, "gfx942"):
-        return False
+    if arch == "gfx942":
+        if problem.num_kv_blocks <= 0:
+            problem = replace(
+                problem,
+                num_kv_blocks=problem.num_seqs
+                * -(-problem.max_seqlen_k // problem.block_size),
+            )
+        if _enable_i64_kv_addr_3d(problem, arch):
+            return False
     return supports_native_unified_attention_3d_tiled(problem, arch)[0]
 
 
