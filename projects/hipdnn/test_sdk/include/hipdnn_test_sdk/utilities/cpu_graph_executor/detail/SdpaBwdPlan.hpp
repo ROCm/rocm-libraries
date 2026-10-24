@@ -209,28 +209,24 @@ public:
                                                 DKDataType,
                                                 DVDataType,
                                                 float,
-                                                Mask>(*shallowQTensor,
-                                                      *shallowKTensor,
-                                                      *shallowVTensor,
-                                                      *shallowOTensor,
-                                                      *shallowDOTensor,
-                                                      *shallowDQTensor,
-                                                      *shallowDKTensor,
-                                                      *shallowDVTensor,
-                                                      effectiveScale,
-                                                      shallowStatsTensor.get(),
-                                                      shallowAttnMaskTensor.get(),
-                                                      _params.leftBound,
-                                                      _params.rightBound,
-                                                      _params.topLeftAlignment,
-                                                      shallowDBiasTensor.get(),
-                                                      shallowSeqLenQ.get(),
-                                                      shallowSeqLenKv.get(),
-                                                      shallowDropoutMask.get(),
-                                                      dropoutScale,
-                                                      dropoutScaleInv,
-                                                      std::nullopt,
-                                                      _params.alibi);
+                                                Mask>(
+            *shallowQTensor,
+            *shallowKTensor,
+            *shallowVTensor,
+            *shallowOTensor,
+            *shallowDOTensor,
+            *shallowDQTensor,
+            *shallowDKTensor,
+            *shallowDVTensor,
+            utilities::SdpaBwdOptions<Mask>{}
+                .setScale(effectiveScale)
+                .setLse(shallowStatsTensor.get())
+                .setMask(shallowAttnMaskTensor.get())
+                .setDBias(shallowDBiasTensor.get())
+                .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                .setSeqLens(shallowSeqLenQ.get(), shallowSeqLenKv.get())
+                .setDropout(shallowDropoutMask.get(), dropoutScale, dropoutScaleInv)
+                .setAlibi(_params.alibi));
     }
 
 private:

@@ -183,7 +183,15 @@ TEST(TestGpuSdpaBwdPlan, GpuExecutorMatchesCpuExecutor)
     vF.fillWithRandomValues(-1.0F, 1.0F, 303);
     biasF.fillWithRandomValues(-1.0F, 1.0F, 304);
     hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
-        qF, kF, vF, oF, 0.35F, &biasF, -1, 0, false, &lse4);
+        qF,
+        kF,
+        vF,
+        oF,
+        hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}
+            .setScale(0.35F)
+            .setMask(&biasF)
+            .setBand(-1, 0, false)
+            .setLse(&lse4));
 
     const auto toBf16 = [](const Tensor<float>& src) {
         Tensor<bfloat16> dst(src.dims());
