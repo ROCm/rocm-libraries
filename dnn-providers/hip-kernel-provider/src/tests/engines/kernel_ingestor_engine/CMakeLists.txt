@@ -43,13 +43,15 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
     )
-    # The architectures each op ships objects for, so a device case that finds none
+    # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
-    # Every op's list, so the SDPA suites and TestContainer can say which engines this
-    # build must serve on the device too.
+    # The content list, not what this build packs: this binary is a host artifact that a
+    # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
+    # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw)
-        string(REPLACE ";" "," _flydsl_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op}}")
+        string(REPLACE ";" "," _flydsl_archs
+                       "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
             HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")

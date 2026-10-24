@@ -30,11 +30,19 @@ set(FLYDSL_CONTENT_DIR "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/FlyDSL")
 # ============================================================================
 # Architecture selection
 # ============================================================================
-# The checked-in object set is the ceiling and GPU_TARGETS is the request; the
-# intersection is what ships. An empty GPU_TARGETS states no preference, so it
-# takes everything checked in. The packer prunes by each pack's own `arch`, so
-# this list does not decide what is packed; it decides whether the native seams
-# and the tests are compiled, which must agree with it.
+# Two lists, for the two kinds of output (TheRock RFC 0008, multi-arch packaging):
+#
+#  * The CONTENT arch set: every architecture FlyDSL has objects for, read from the
+#    git-tracked `<op>/<target>.dvc` pointers (and any pulled directory). It does not
+#    depend on GPU_TARGETS. It decides whether the FlyDSL engines and their tests are
+#    compiled, and the arch lists the tests compile in. Those are host artifacts: a
+#    multi-arch build compiles each architecture separately and ships the generic
+#    (host) half of whichever shard it picks, so anything compiled into them must
+#    come out the same in every shard.
+#  * The SHIPPED arch set: the content set intersected with GPU_TARGETS, restricted
+#    to directories actually pulled. It decides what this build packs, checks and
+#    censuses -- device content, which is per architecture by construction. An empty
+#    GPU_TARGETS states no preference, so it takes everything pulled.
 #
 # A content directory is named for the target its objects were compiled for.
 # An LLVM generic target (gfx11-generic) stands for every member of its family:
@@ -52,44 +60,90 @@ file(READ "${_flydsl_families_json}" _flydsl_families)
 # provider's top-level CMakeLists.txt checks every pointer against what was
 # pulled, as it does rocKE's, and warns -- or with
 # HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS fails -- when one is missing. A
-# directory that was not pulled is simply absent below, so its target ships
-# nothing and, if none was pulled, FlyDSL reports dormant.
+# directory that was not pulled is absent below: it adds to the content set
+# through its pointer but ships nothing.
+
+# The architectures a content target stands for: itself, or every member of an
+# LLVM generic target.
+function(_flydsl_target_members target entry out)
+    if(NOT target MATCHES "-generic$")
+        set(${out} "${target}" PARENT_SCOPE)
+        return()
+    endif()
+    string(JSON _count ERROR_VARIABLE _flydsl_json_error
+           LENGTH "${_flydsl_families}" "${target}" members)
+    if(_flydsl_json_error)
+        message(FATAL_ERROR
+            "flydsl: content '${entry}' names generic target '${target}', which "
+            "generators/arch_families.json does not list")
+    endif()
+    set(_members "")
+    math(EXPR _last "${_count} - 1")
+    # cmake-lint: disable=E1120
+    foreach(_index RANGE ${_last})
+        string(JSON _member GET "${_flydsl_families}" "${target}" members ${_index})
+        list(APPEND _members "${_member}")
+    endforeach()
+    set(${out} "${_members}" PARENT_SCOPE)
+endfunction()
+
+file(GLOB _flydsl_pointers RELATIVE "${FLYDSL_CONTENT_DIR}"
+     CONFIGURE_DEPENDS "${FLYDSL_CONTENT_DIR}/*/gfx*.dvc")
 file(GLOB _flydsl_arch_dirs LIST_DIRECTORIES true RELATIVE "${FLYDSL_CONTENT_DIR}"
      CONFIGURE_DEPENDS "${FLYDSL_CONTENT_DIR}/*/gfx*")
 set(FLYDSL_AVAILABLE_ARCHS "")
 set(_flydsl_ops "")
-foreach(_entry IN LISTS _flydsl_arch_dirs)
-    if(NOT IS_DIRECTORY "${FLYDSL_CONTENT_DIR}/${_entry}")
-        continue()
-    endif()
-    get_filename_component(_target "${_entry}" NAME)
-    get_filename_component(_op "${_entry}" DIRECTORY)
-    list(APPEND _flydsl_ops "${_op}")
-    if(_target MATCHES "-generic$")
-        string(JSON _members ERROR_VARIABLE _flydsl_json_error
-               GET "${_flydsl_families}" "${_target}" members)
-        if(_flydsl_json_error)
-            message(FATAL_ERROR
-                "flydsl: content directory '${_entry}' names generic target "
-                "'${_target}', which generators/arch_families.json does not list")
+foreach(_entry IN LISTS _flydsl_pointers _flydsl_arch_dirs)
+    string(REGEX REPLACE "\\.dvc$" "" _content "${_entry}")
+    set(_pulled FALSE)
+    if(_content STREQUAL _entry)
+        if(NOT IS_DIRECTORY "${FLYDSL_CONTENT_DIR}/${_entry}")
+            continue()
         endif()
-        string(JSON _count LENGTH "${_flydsl_families}" "${_target}" members)
-        math(EXPR _last "${_count} - 1")
-        # cmake-lint: disable=E1120
-        foreach(_index RANGE ${_last})
-            string(JSON _member GET "${_flydsl_families}" "${_target}" members ${_index})
-            list(APPEND FLYDSL_AVAILABLE_ARCHS "${_member}")
+        set(_pulled TRUE)
+    endif()
+    get_filename_component(_target "${_content}" NAME)
+    get_filename_component(_op "${_content}" DIRECTORY)
+    list(APPEND _flydsl_ops "${_op}")
+    _flydsl_target_members("${_target}" "${_entry}" _members)
+    list(APPEND "_flydsl_content_archs_${_op}" ${_members})
+    if(_pulled)
+        list(APPEND FLYDSL_AVAILABLE_ARCHS ${_members})
+        list(APPEND "_flydsl_op_archs_${_op}" ${_members})
+        foreach(_member IN LISTS _members)
             list(APPEND "_flydsl_dirs_for_${_member}" "${_target}")
-            list(APPEND "_flydsl_op_archs_${_op}" "${_member}")
         endforeach()
-    else()
-        list(APPEND FLYDSL_AVAILABLE_ARCHS "${_target}")
-        list(APPEND "_flydsl_dirs_for_${_target}" "${_target}")
-        list(APPEND "_flydsl_op_archs_${_op}" "${_target}")
     endif()
 endforeach()
 list(REMOVE_DUPLICATES FLYDSL_AVAILABLE_ARCHS)
 list(REMOVE_DUPLICATES _flydsl_ops)
+
+if(NOT _flydsl_ops)
+    message(STATUS
+        "flydsl: not built -- the production descriptor root has no FlyDSL content "
+        "(${FLYDSL_CONTENT_DIR})")
+    return()
+endif()
+
+# Past this point the FlyDSL engines and their tests are compiled, whatever
+# GPU_TARGETS asks for: they are host code, the same in every shard of a
+# multi-arch build. src/ and src/tests/ read this rather than the option. INTERNAL
+# implies FORCE, and the root cleared ACTIVE to FALSE before adding this directory.
+set(HIPKERNELPROVIDER_FLYDSL_ACTIVE TRUE CACHE INTERNAL
+    "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
+foreach(_op IN LISTS _flydsl_ops)
+    list(REMOVE_DUPLICATES "_flydsl_content_archs_${_op}")
+    set("HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}" "${_flydsl_content_archs_${_op}}"
+        CACHE INTERNAL "Architectures FlyDSL has ${_op} objects for, independent of GPU_TARGETS")
+endforeach()
+
+# The shipped objects are compiled from Apache-2.0 and MIT sources, whose licenses ask
+# that their notices go with them in object form. Installed by every shard, as generic
+# content, whether or not this shard packs FlyDSL objects.
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/hip-kernel-provider/flydsl"
+)
 
 set(_flydsl_archs "${FLYDSL_AVAILABLE_ARCHS}")
 if(GPU_TARGETS)
@@ -106,25 +160,11 @@ if(GPU_TARGETS)
     endforeach()
 endif()
 
-if(NOT _flydsl_archs OR NOT TARGET hkp_packaging_product)
-    string(REPLACE ";" ", " _flydsl_have "${FLYDSL_AVAILABLE_ARCHS}")
-    string(REPLACE ";" ", " _flydsl_want "${GPU_TARGETS}")
-    message(STATUS
-        "flydsl: dormant -- no FlyDSL kernels for the requested targets in "
-        "the production descriptor root (have: ${_flydsl_have}; GPU_TARGETS: "
-        "${_flydsl_want}). If they were not pulled: dvc pull -r ingestor "
-        "${FLYDSL_CONTENT_DIR}/*/*.dvc")
-    return()
+if(NOT TARGET hkp_packaging_product)
+    set(_flydsl_archs "")
 endif()
-
-# Past the dormant return, so the product pack ships FlyDSL kernels for every
-# arch in the intersection. src/ and src/tests/ read these rather than the
-# option, which says only that FlyDSL was asked for. INTERNAL implies FORCE, and
-# the root cleared ACTIVE to FALSE before adding this directory.
-set(HIPKERNELPROVIDER_FLYDSL_ACTIVE TRUE CACHE INTERNAL
-    "The product pack ships FlyDSL kernels for at least one requested architecture")
 set(HIPKERNELPROVIDER_FLYDSL_ARCHS "${_flydsl_archs}" CACHE INTERNAL
-    "Architectures the product pack ships FlyDSL kernels for")
+    "Architectures this build's product pack ships FlyDSL kernels for")
 # Per op, since ops differ in the architectures they ship for (the RDNA and CDNA
 # attention engines share none): a suite over one op's objects reads only the
 # shards that carry them. Empty for an op with nothing for the requested targets.
@@ -136,8 +176,19 @@ foreach(_op IN LISTS _flydsl_ops)
         endif()
     endforeach()
     set("HIPKERNELPROVIDER_FLYDSL_ARCHS_${_op}" "${_flydsl_op_shipped}" CACHE INTERNAL
-        "Architectures the product pack ships FlyDSL ${_op} kernels for")
+        "Architectures this build's product pack ships FlyDSL ${_op} kernels for")
 endforeach()
+
+if(NOT _flydsl_archs)
+    string(REPLACE ";" ", " _flydsl_have "${FLYDSL_AVAILABLE_ARCHS}")
+    string(REPLACE ";" ", " _flydsl_want "${GPU_TARGETS}")
+    message(STATUS
+        "flydsl: engines built, no objects packed -- no pulled FlyDSL kernels for the "
+        "requested targets in the production descriptor root (pulled: ${_flydsl_have}; "
+        "GPU_TARGETS: ${_flydsl_want}). If they were not pulled: dvc pull -r ingestor "
+        "${FLYDSL_CONTENT_DIR}/*/*.dvc")
+    return()
+endif()
 
 # ============================================================================
 # Descriptors agree with the objects, before the pack reads either
@@ -219,13 +270,6 @@ if(_flydsl_product_root)
         endif()
     endif()
 endif()
-
-# The shipped objects are compiled from Apache-2.0 sources, which asks that a copy
-# of the License go with them in object form.
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
-    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/hip-kernel-provider/flydsl"
-)
 
 string(REPLACE ";" ", " _flydsl_arch_csv "${_flydsl_archs}")
 message(STATUS "flydsl: shipping through the product pack for ${_flydsl_arch_csv}")

@@ -818,7 +818,14 @@ above (§7.6), and repeated as features land.
 | Each engine's shard ships no two objects of one build, one top-ranked serve-all object per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, `TestFlydslSdpaCdnaDualwavePacks`, `TestFlydslSdpaCdnaDecodePacks`, and the shard census that runs them |
 | A generic-kernel companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950, gfx942 and gfx90a |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch` (and `FullTestGpuFlydslSdpaCdnaDispatch`, below), on gfx950, gfx942 and gfx90a |
+
+Every candidate a shape admits runs against one set of inputs and one f64 reference, computed
+once per case. The sweeps and large shapes are `FullTestGpuFlydslSdpaCdnaDispatch`, full tier
+only (§4's tier note): every width inside the non-power-of-two buckets, DeepSeek-V4's head dim
+512 at prefill lengths, the lowest-finite bias rows in every combination, the combinations no
+other case reaches, and the 1024-long sequence. The quick tier keeps one configuration of each
+behavior, so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
 
 ### 7.5 Measured costs, and deferred performance work
 

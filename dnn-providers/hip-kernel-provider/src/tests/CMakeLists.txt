@@ -215,7 +215,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
     # kernels in its inventory that the entry running it never named.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
-        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        if(TARGET hkp_packaging_product)
+            add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        endif()
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
             HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()

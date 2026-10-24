@@ -543,7 +543,7 @@ TEST_P(TestFlydslSdpaObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromItsM
     const auto* staged = findLoadedSet(engine.engine->engineName);
     if(staged == nullptr)
     {
-        if(!flydslShippedArches(engine.op).empty())
+        if(flydslShipsAnywhere(engine.op))
         {
             ADD_FAILURE() << "this build ships " << engine.op << " but loaded no objects for it";
             return;

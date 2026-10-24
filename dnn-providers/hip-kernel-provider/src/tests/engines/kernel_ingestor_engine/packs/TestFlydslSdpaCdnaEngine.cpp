@@ -1389,15 +1389,17 @@ std::vector<T> fillValues(size_t count, uint32_t seed)
 /// the bound.
 constexpr double LSE_TOLERANCE = 2e-3;
 
-/// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
-/// against a double-precision reference, in the memory layout @p spec names: BSHD, BHSD, or
-/// Q, K and V as views into one packed buffer.
+/// Runs each of @p kernels for @p spec through prepare() and launch() and checks every
+/// output element against a double-precision reference, in the memory layout @p spec names:
+/// BSHD, BHSD, or Q, K and V as views into one packed buffer. The inputs and the reference
+/// are computed once and shared by every kernel: the reference is the costly part, and the
+/// kernels a shape admits are often a dozen tile variants.
 template <typename T>
-void expectCandidateMatchesReference(const MatchContext& context,
-                                     const BoundTokens& bound,
-                                     const KernelDefinition& kernel,
-                                     const SdpaGraphSpec& spec,
-                                     double absoluteTolerance)
+void expectCandidatesMatchReference(const MatchContext& context,
+                                    const BoundTokens& bound,
+                                    const std::vector<KernelDefinition>& kernels,
+                                    const SdpaGraphSpec& spec,
+                                    double absoluteTolerance)
 {
     // The deprecated booleans resolved as the reference does: either one alone is causal;
     // causal_mask keeps the stored alignment, and causal_mask_bottom_right is bottom-right.
@@ -1410,10 +1412,6 @@ void expectCandidateMatchesReference(const MatchContext& context,
                                                  ? DiagonalAlignment::BOTTOM_RIGHT
                                                  : DiagonalAlignment::TOP_LEFT)
                  == DiagonalAlignment::BOTTOM_RIGHT;
-    const auto& handler = dispatchHandler(cdnaEngineFor(kernel));
-    const auto prepared = handler.prepare(context, bound, kernel);
-    ASSERT_NE(prepared, nullptr);
-
     const int64_t b = spec.batch;
     const int64_t s = spec.seqLenQ;
     const int64_t skv = spec.seqLenKv;
@@ -1466,13 +1464,32 @@ void expectCandidateMatchesReference(const MatchContext& context,
         }
     }
     std::vector<T> o(oCount, T(0.0F));
+    // Freed on every exit, including a failed ASSERT part-way through a kernel.
+    std::vector<void*> allocations;
+    struct FreeAll
+    {
+        std::vector<void*>& pointers;
+        FreeAll(const FreeAll&) = delete;
+        FreeAll& operator=(const FreeAll&) = delete;
+        FreeAll(FreeAll&&) = delete;
+        FreeAll& operator=(FreeAll&&) = delete;
+        ~FreeAll()
+        {
+            for(auto* pointer : pointers)
+            {
+                static_cast<void>(hipFree(pointer));
+            }
+        }
+    } const freeAll{allocations};
 
     void* qDevice = nullptr;
     void* kDevice = nullptr;
     void* vDevice = nullptr;
     void* oDevice = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&qDevice, qCount * sizeof(T)));
+    allocations.push_back(qDevice);
     ASSERT_EQ(hipSuccess, hipMalloc(&oDevice, oCount * sizeof(T)));
+    allocations.push_back(oDevice);
     ASSERT_EQ(hipSuccess, hipMemcpy(qDevice, q.data(), qCount * sizeof(T), hipMemcpyHostToDevice));
     if(spec.packedQkv)
     {
@@ -1482,15 +1499,14 @@ void expectCandidateMatchesReference(const MatchContext& context,
     else
     {
         ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(T)));
+        allocations.push_back(kDevice);
         ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, vCount * sizeof(T)));
+        allocations.push_back(vDevice);
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(kDevice, k.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(vDevice, v.data(), vCount * sizeof(T), hipMemcpyHostToDevice));
     }
-    // All-ones bytes are NaN in bf16 and f16: an element the kernel never writes fails rather
-    // than reading as a zero.
-    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0xFF, oCount * sizeof(T)));
     // The LSE output, [B, H, Sq] f32, when the graph asks for it.
     const bool withStats = spec.stats == SdpaStats::LSE;
     const auto statsCount = static_cast<size_t>(b * h * s);
@@ -1499,7 +1515,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
     if(withStats)
     {
         ASSERT_EQ(hipSuccess, hipMalloc(&statsDevice, statsCount * sizeof(float)));
-        ASSERT_EQ(hipSuccess, hipMemset(statsDevice, 0xFF, statsCount * sizeof(float)));
+        allocations.push_back(statsDevice);
     }
 
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qDevice},
@@ -1575,6 +1591,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
     if(spec.withBias)
     {
         ASSERT_EQ(hipSuccess, hipMalloc(&biasDevice, biasCount * sizeof(T)));
+        allocations.push_back(biasDevice);
         ASSERT_EQ(
             hipSuccess,
             hipMemcpy(biasDevice, biasValues.data(), biasCount * sizeof(T), hipMemcpyHostToDevice));
@@ -1598,6 +1615,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
     if(spec.withSink)
     {
         ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, static_cast<size_t>(h) * sizeof(T)));
+        allocations.push_back(sinkDevice);
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(sinkDevice,
                             sinkValues.data(),
@@ -1611,38 +1629,6 @@ void expectCandidateMatchesReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
-    // A split object launched with more than one split writes its partials here: exactly the
-    // size the engine reports, so a launch that writes past it fails the case.
-    const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
-    const GuardedWorkspace workspace(workspaceBytes);
-    const Handle handle;
-    handler.launch(
-        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
-    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
-        << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
-    ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
-    static_cast<void>(hipFree(qDevice));
-    if(!spec.packedQkv)
-    {
-        static_cast<void>(hipFree(kDevice));
-        static_cast<void>(hipFree(vDevice));
-    }
-    static_cast<void>(hipFree(oDevice));
-    static_cast<void>(hipFree(sinkDevice));
-    if(spec.withBias)
-    {
-        static_cast<void>(hipFree(biasDevice));
-    }
-    if(withStats)
-    {
-        ASSERT_EQ(
-            hipSuccess,
-            hipMemcpy(
-                stats.data(), statsDevice, statsCount * sizeof(float), hipMemcpyDeviceToHost));
-        static_cast<void>(hipFree(statsDevice));
-    }
-
     // Element (batch, head, token, d) of a buffer laid out by logical (B, H, S, D) strides.
     const auto at = [](const std::vector<T>& t,
                        const std::vector<int64_t>& strides,
@@ -1668,13 +1654,18 @@ void expectCandidateMatchesReference(const MatchContext& context,
     {
         left = 64;
     }
-    double worst = 0.0;
-    int64_t nonFinite = 0;
-    int64_t firstNonFiniteRow = std::numeric_limits<int64_t>::max();
-    int64_t lastNonFiniteRow = -1;
-    std::string where;
-    double worstLse = 0.0;
-    std::string whereLse;
+    // The reference, once: each row's kind and LSE, and O. A row is NaN (NaN in a score it
+    // sees), keyless (no key reaches it) or ordinary.
+    enum class Row : uint8_t
+    {
+        ORDINARY,
+        NAN_ROW,
+        KEYLESS,
+    };
+    const auto rowCount = static_cast<size_t>(b * h * s);
+    std::vector<Row> rowKind(rowCount, Row::ORDINARY);
+    std::vector<double> expectedLse(rowCount, 0.0);
+    std::vector<double> expectedO(rowCount * static_cast<size_t>(dv), 0.0);
     std::vector<double> scores(static_cast<size_t>(skv));
     for(int64_t bi = 0; bi < b; ++bi)
     {
@@ -1724,37 +1715,25 @@ void expectCandidateMatchesReference(const MatchContext& context,
                 {
                     sum += std::exp(sinkLogit - maxScore);
                 }
-                if(withStats)
+                const auto row = static_cast<size_t>((bi * h + hi) * s + si);
+                if(nanRow)
                 {
-                    // Natural log of the row's sum of exp(scaled score).
-                    // [B, H, Sq] packed, or [B, Sq, H] when the graph lays it out so.
-                    const auto statsIndex
-                        = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
-                    const auto lse = static_cast<double>(stats[static_cast<size_t>(statsIndex)]);
-                    // A row no key reaches has LSE -inf.
-                    const bool negativeInfinity = std::isinf(lse) && lse < 0.0;
-                    double lseError = std::abs(lse - (maxScore + std::log(sum)));
-                    if(nanRow)
-                    {
-                        lseError = std::isnan(lse) ? 0.0 : 1e30;
-                    }
-                    else if(keyless && spec.withSink && std::isfinite(sinkLogit))
-                    {
-                        lseError = std::abs(lse - sinkLogit);
-                    }
-                    else if(keyless)
-                    {
-                        // No sink, or a sink of -inf: the LSE is exactly -inf.
-                        lseError = negativeInfinity ? 0.0 : 1e30;
-                    }
-                    if(!(lseError <= LSE_TOLERANCE))
-                    {
-                        worstLse = std::max(worstLse, std::isnan(lseError) ? 1e30 : lseError);
-                        whereLse = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
-                                   + " s=" + std::to_string(si);
-                    }
+                    rowKind[row] = Row::NAN_ROW;
                 }
-                for(int64_t e = 0; e < dv; ++e)
+                else if(keyless)
+                {
+                    rowKind[row] = Row::KEYLESS;
+                }
+                // Natural log of the row's sum of exp(scaled score). A row no key reaches has
+                // LSE -inf, or the sink's logit when it has a finite one.
+                expectedLse[row] = maxScore + std::log(sum);
+                if(keyless)
+                {
+                    expectedLse[row] = spec.withSink && std::isfinite(sinkLogit)
+                                           ? sinkLogit
+                                           : -std::numeric_limits<double>::infinity();
+                }
+                for(int64_t e = 0; e < dv && !keyless && !nanRow; ++e)
                 {
                     double expected = 0.0;
                     for(int64_t j = firstKey; j <= lastKey; ++j)
@@ -1762,40 +1741,136 @@ void expectCandidateMatchesReference(const MatchContext& context,
                         expected += scores[static_cast<size_t>(j)]
                                     * at(v, vStrides, vStart, bi, hi / group, j, e);
                     }
-                    expected = keyless ? 0.0 : expected / sum;
-                    // NaN or inf (an unwritten element reads as NaN) is a full miss, but in a
-                    // NaN row, where anything but NaN is.
-                    const double actual = at(o, oStrides, 0, bi, hi, si, e);
-                    double error = std::isfinite(actual) ? std::abs(actual - expected)
-                                                         : std::numeric_limits<double>::max();
-                    if(nanRow)
-                    {
-                        error = std::isnan(actual) ? 0.0 : std::numeric_limits<double>::max();
-                    }
-                    else if(!std::isfinite(actual))
-                    {
-                        ++nonFinite;
-                        firstNonFiniteRow = std::min(firstNonFiniteRow, si);
-                        lastNonFiniteRow = std::max(lastNonFiniteRow, si);
-                    }
-                    if(error > worst)
-                    {
-                        worst = error;
-                        where = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
-                                + " s=" + std::to_string(si) + " d=" + std::to_string(e) + ": got "
-                                + std::to_string(actual) + ", expected " + std::to_string(expected);
-                    }
+                    expectedO[row * static_cast<size_t>(dv) + static_cast<size_t>(e)]
+                        = expected / sum;
                 }
             }
         }
     }
-    EXPECT_LE(worst, absoluteTolerance)
-        << "worst error at " << where << "; " << nonFinite << " non-finite element(s)"
-        << (nonFinite > 0 ? " in query rows " + std::to_string(firstNonFiniteRow) + "-"
-                                + std::to_string(lastNonFiniteRow)
-                          : std::string())
-        << "; split workspace " << workspaceBytes << " bytes";
-    EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
+
+    for(const auto& kernel : kernels)
+    {
+        SCOPED_TRACE(kernel.name);
+        const auto& handler = dispatchHandler(cdnaEngineFor(kernel));
+        const auto prepared = handler.prepare(context, bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        // All-ones bytes are NaN in bf16 and f16 (and f32): an element the kernel never
+        // writes fails rather than reading as a zero, or as the previous kernel's answer.
+        ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0xFF, oCount * sizeof(T)));
+        if(withStats)
+        {
+            ASSERT_EQ(hipSuccess, hipMemset(statsDevice, 0xFF, statsCount * sizeof(float)));
+        }
+        // A split object launched with more than one split writes its partials here: exactly the
+        // size the engine reports, so a launch that writes past it fails the case.
+        const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
+        const GuardedWorkspace workspace(workspaceBytes);
+        const Handle handle;
+        handler.launch(handle,
+                       *prepared,
+                       buffers.data(),
+                       static_cast<uint32_t>(buffers.size()),
+                       workspace.get());
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
+            << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
+        if(withStats)
+        {
+            ASSERT_EQ(
+                hipSuccess,
+                hipMemcpy(
+                    stats.data(), statsDevice, statsCount * sizeof(float), hipMemcpyDeviceToHost));
+        }
+        double worst = 0.0;
+        int64_t nonFinite = 0;
+        int64_t firstNonFiniteRow = std::numeric_limits<int64_t>::max();
+        int64_t lastNonFiniteRow = -1;
+        std::string where;
+        double worstLse = 0.0;
+        std::string whereLse;
+        for(int64_t bi = 0; bi < b; ++bi)
+        {
+            for(int64_t hi = 0; hi < h; ++hi)
+            {
+                for(int64_t si = 0; si < s; ++si)
+                {
+                    const auto row = static_cast<size_t>((bi * h + hi) * s + si);
+                    if(withStats)
+                    {
+                        // [B, H, Sq] packed, or [B, Sq, H] when the graph lays it out so.
+                        const auto statsIndex = spec.statsSequenceMajor ? (bi * s + si) * h + hi
+                                                                        : (bi * h + hi) * s + si;
+                        const auto lse
+                            = static_cast<double>(stats[static_cast<size_t>(statsIndex)]);
+                        double lseError = std::abs(lse - expectedLse[row]);
+                        if(rowKind[row] == Row::NAN_ROW)
+                        {
+                            lseError = std::isnan(lse) ? 0.0 : 1e30;
+                        }
+                        else if(rowKind[row] == Row::KEYLESS && std::isinf(expectedLse[row]))
+                        {
+                            // No sink, or a sink of -inf: the LSE is exactly -inf.
+                            lseError = std::isinf(lse) && lse < 0.0 ? 0.0 : 1e30;
+                        }
+                        if(!(lseError <= LSE_TOLERANCE))
+                        {
+                            worstLse = std::max(worstLse, std::isnan(lseError) ? 1e30 : lseError);
+                            whereLse = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
+                                       + " s=" + std::to_string(si);
+                        }
+                    }
+                    for(int64_t e = 0; e < dv; ++e)
+                    {
+                        const double expected
+                            = expectedO[row * static_cast<size_t>(dv) + static_cast<size_t>(e)];
+                        // NaN or inf (an unwritten element reads as NaN) is a full miss, but
+                        // in a NaN row, where anything but NaN is.
+                        const double actual = at(o, oStrides, 0, bi, hi, si, e);
+                        double error = std::isfinite(actual) ? std::abs(actual - expected)
+                                                             : std::numeric_limits<double>::max();
+                        if(rowKind[row] == Row::NAN_ROW)
+                        {
+                            error = std::isnan(actual) ? 0.0 : std::numeric_limits<double>::max();
+                        }
+                        else if(!std::isfinite(actual))
+                        {
+                            ++nonFinite;
+                            firstNonFiniteRow = std::min(firstNonFiniteRow, si);
+                            lastNonFiniteRow = std::max(lastNonFiniteRow, si);
+                        }
+                        if(error > worst)
+                        {
+                            worst = error;
+                            where = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
+                                    + " s=" + std::to_string(si) + " d=" + std::to_string(e)
+                                    + ": got " + std::to_string(actual) + ", expected "
+                                    + std::to_string(expected);
+                        }
+                    }
+                }
+            }
+        }
+        EXPECT_LE(worst, absoluteTolerance)
+            << "worst error at " << where << "; " << nonFinite << " non-finite element(s)"
+            << (nonFinite > 0 ? " in query rows " + std::to_string(firstNonFiniteRow) + "-"
+                                    + std::to_string(lastNonFiniteRow)
+                              : std::string())
+            << "; split workspace " << workspaceBytes << " bytes";
+        EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
+    }
+}
+
+/// One kernel: the per-object suite's entry point.
+template <typename T>
+void expectCandidateMatchesReference(const MatchContext& context,
+                                     const BoundTokens& bound,
+                                     const KernelDefinition& kernel,
+                                     const SdpaGraphSpec& spec,
+                                     double absoluteTolerance)
+{
+    expectCandidatesMatchReference<T>(context, bound, {kernel}, spec, absoluteTolerance);
 }
 
 /// Every staged candidate the matcher admits for @p spec must match the reference.
@@ -1828,21 +1903,17 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec,
         ADD_FAILURE() << "this build ships " << shippedOpFor(family)
                       << " for this device, but none of its objects serves the shape";
     }
-    for(const auto& kernel : candidates)
+    if(spec.dataType == DataType::HALF)
     {
-        SCOPED_TRACE(kernel.name);
-        if(spec.dataType == DataType::HALF)
-        {
-            // P is rounded to the input dtype before the second product: f16's 11-bit
-            // mantissa allows about an eighth of bf16's budget.
-            expectCandidateMatchesReference<hipdnn_data_sdk::types::half>(
-                fixture.context(), *bound, kernel, spec, std::min(absoluteTolerance, 4e-3));
-        }
-        else
-        {
-            expectCandidateMatchesReference<Bf16>(
-                fixture.context(), *bound, kernel, spec, absoluteTolerance);
-        }
+        // P is rounded to the input dtype before the second product: f16's 11-bit
+        // mantissa allows about an eighth of bf16's budget.
+        expectCandidatesMatchReference<hipdnn_data_sdk::types::half>(
+            fixture.context(), *bound, candidates, spec, std::min(absoluteTolerance, 4e-3));
+    }
+    else
+    {
+        expectCandidatesMatchReference<Bf16>(
+            fixture.context(), *bound, candidates, spec, absoluteTolerance);
     }
 }
 
@@ -2012,7 +2083,10 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMoreQueriesThanKeysWithRowsNoKeyReache
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesTheCombinationsNoOtherCaseReaches)
+// Suites named Full* are the full tier only (HIP_MLOPS_ENGINE_test_categories.yaml excludes
+// them from quick, standard and comprehensive): sweeps and large shapes whose reference costs
+// tens of seconds on a CDNA runner, beside the quick tier's 300 s budget for the whole binary.
+TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesTheCombinationsNoOtherCaseReaches)
 {
     // f16 objects built with kv_align (they run only at a key length that is a multiple of
     // 64): non-causal at each exact head dim.
@@ -2065,29 +2139,41 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesTheCombinationsNoOtherCaseReaches)
     }
 }
 
+/// DeepSeek-V4's attention: Q/K and V 512 wide, one KV head, causal, with or without a 128-key
+/// sliding window. The decode engine's wide objects serve it (any query length), so it must be
+/// right here too.
+void expectDeepSeekV4Prefill(int64_t seqLen, bool window)
+{
+    SCOPED_TRACE("Sq = Skv = " + std::to_string(seqLen) + (window ? ", window 128" : ""));
+    auto spec = cdnaSpec();
+    spec.headDim = 512;
+    spec.heads = 8;
+    spec.kvHeads = 1;
+    spec.seqLenQ = seqLen;
+    spec.seqLenKv = seqLen;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    if(window)
+    {
+        spec.leftBound = 128;
+    }
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesDeepSeekV4PrefillAtHeadDim512)
 {
-    // DeepSeek-V4's attention: Q/K and V 512 wide, one KV head, causal with a 128-key
-    // sliding window, prefill-sized. The decode engine's wide objects serve it (any query
-    // length), so it must be right here too: with the window, and plain causal.
+    // Long enough for the window to bind; the prefill-sized lengths are in
+    // FullTestGpuFlydslSdpaCdnaDispatch.
+    expectDeepSeekV4Prefill(256, true);
+}
+
+TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesDeepSeekV4PrefillAtHeadDim512)
+{
     for(const int64_t seqLen : {int64_t{1024}, int64_t{2048}})
     {
         for(const bool window : {true, false})
         {
-            SCOPED_TRACE("Sq = Skv = " + std::to_string(seqLen) + (window ? ", window 128" : ""));
-            auto spec = cdnaSpec();
-            spec.headDim = 512;
-            spec.heads = 8;
-            spec.kvHeads = 1;
-            spec.seqLenQ = seqLen;
-            spec.seqLenKv = seqLen;
-            spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
-            if(window)
-            {
-                spec.leftBound = 128;
-            }
-            spec.stats = SdpaStats::LSE;
-            expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+            expectDeepSeekV4Prefill(seqLen, window);
         }
     }
 }
@@ -2294,11 +2380,35 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesEveryWidthInsideTheBucketsThatAreNotPowersOfTwo)
+/// The 96, 160, 192 and 224 buckets (vendored-kernel modification 26), at @p headDim, every
+/// candidate the matcher admits (wider buckets too): causal bf16 with the LSE, then non-causal
+/// f16 BHSD at a ragged length.
+void expectBucketWidth(int64_t headDim)
 {
-    // The 96, 160, 192 and 224 buckets (vendored-kernel modification 26), at each one's
-    // own width and inside it, every candidate the matcher admits (wider buckets too):
-    // causal bf16 with the LSE, then non-causal f16 BHSD at a ragged length.
+    SCOPED_TRACE("head_dim " + std::to_string(headDim));
+    auto spec = cdnaSpec();
+    spec.headDim = headDim;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 333;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::HALF;
+    spec.layout = SdpaLayout::BHSD;
+    spec.mask = SdpaMask::NONE;
+    spec.seqLenQ = 129;
+    spec.seqLenKv = 777;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAWidthInsideABucketThatIsNotAPowerOfTwo)
+{
+    // Inside the 160 bucket; every width of every bucket is in FullTestGpuFlydslSdpaCdnaDispatch.
+    expectBucketWidth(152);
+}
+
+TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesEveryWidthInsideTheBucketsThatAreNotPowersOfTwo)
+{
     for(const int64_t headDim : {int64_t{72},
                                  int64_t{88},
                                  int64_t{96},
@@ -2312,20 +2422,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesEveryWidthInsideTheBucketsThatAreNotPo
                                  int64_t{216},
                                  int64_t{224}})
     {
-        SCOPED_TRACE("head_dim " + std::to_string(headDim));
-        auto spec = cdnaSpec();
-        spec.headDim = headDim;
-        spec.seqLenQ = 200;
-        spec.seqLenKv = 333;
-        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
-        spec.stats = SdpaStats::LSE;
-        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
-        spec.dataType = DataType::HALF;
-        spec.layout = SdpaLayout::BHSD;
-        spec.mask = SdpaMask::NONE;
-        spec.seqLenQ = 129;
-        spec.seqLenKv = 777;
-        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        expectBucketWidth(headDim);
     }
 }
 
@@ -2761,16 +2858,49 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeTilesWithNegativeInfi
     }
 }
 
+/// A padding mask's fully masked rows, as Hugging Face writes them: every third row's bias is
+/// the query dtype's lowest finite value on every key, so its scores are finite and equal and
+/// its softmax is uniform over the keys the causal mask leaves (O the mean of V, LSE that score
+/// plus log(count)), as PyTorch and CpuFpReferenceSdpa give (vendored-kernel modification 28).
+/// With the scale, the first 128 keys of every row are also -inf, leaving such a row the rest,
+/// and in a causal row before them no key at all. The dual-wave kernel's bias (gfx950 at 64
+/// and 128) and the generic one's. Skv 264 ends in a part tile, so the key-padding mask's keys
+/// sit next to the lowest rows' keys.
+void expectLowestFiniteBiasRows(int64_t headDim, int64_t seqLenKv, bool causal, bool scaled)
+{
+    SCOPED_TRACE("head_dim " + std::to_string(headDim) + ", Skv " + std::to_string(seqLenKv)
+                 + (causal ? ", causal" : "") + (scaled ? ", scaled" : ""));
+    auto spec = cdnaSpec();
+    spec.headDim = headDim;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.biasMasksRows = true;
+    spec.seqLenQ = 256;
+    spec.seqLenKv = seqLenKv;
+    spec.stats = SdpaStats::LSE;
+    if(causal)
+    {
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    }
+    if(scaled)
+    {
+        spec.scaleKind = SdpaScale::VALUE;
+        spec.scale = 1.0F / std::sqrt(static_cast<float>(headDim));
+        spec.biasNegativeInfinityLeadingKeys = 128;
+    }
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFiniteValue)
 {
-    // A padding mask's fully masked rows, as Hugging Face writes them: every third row's bias
-    // is the query dtype's lowest finite value on every key, so its scores are finite and
-    // equal and its softmax is uniform over the keys the causal mask leaves (O the mean of V,
-    // LSE that score plus log(count)), as PyTorch and CpuFpReferenceSdpa give
-    // (vendored-kernel modification 28). With the scale, the first 128 keys of every row are
-    // also -inf, leaving such a row the rest, and in a causal row before them no key at all.
-    // The dual-wave kernel's bias (gfx950 at 64 and 128) and the generic one's. Skv 264 ends
-    // in a part tile, so the key-padding mask's keys sit next to the lowest rows' keys.
+    // The configuration that reaches every behavior at once: a part tile, the causal rows
+    // that see no key, and the -inf keys beside the lowest rows. Every combination is in
+    // FullTestGpuFlydslSdpaCdnaDispatch.
+    expectLowestFiniteBiasRows(128, 264, true, true);
+}
+
+TEST(FullTestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFiniteValue)
+{
     for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
     {
         for(const int64_t seqLenKv : {int64_t{384}, int64_t{264}})
@@ -2779,28 +2909,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFinite
             {
                 for(const bool scaled : {false, true})
                 {
-                    SCOPED_TRACE("head_dim " + std::to_string(headDim) + ", Skv "
-                                 + std::to_string(seqLenKv) + (causal ? ", causal" : "")
-                                 + (scaled ? ", scaled" : ""));
-                    auto spec = cdnaSpec();
-                    spec.headDim = headDim;
-                    spec.withBias = true;
-                    spec.biasDataType = spec.dataType;
-                    spec.biasMasksRows = true;
-                    spec.seqLenQ = 256;
-                    spec.seqLenKv = seqLenKv;
-                    spec.stats = SdpaStats::LSE;
-                    if(causal)
-                    {
-                        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
-                    }
-                    if(scaled)
-                    {
-                        spec.scaleKind = SdpaScale::VALUE;
-                        spec.scale = 1.0F / std::sqrt(static_cast<float>(headDim));
-                        spec.biasNegativeInfinityLeadingKeys = 128;
-                    }
-                    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+                    expectLowestFiniteBiasRows(headDim, seqLenKv, causal, scaled);
                 }
             }
         }
@@ -2827,7 +2936,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAt
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, LongerSequenceMatchesTheReference)
+TEST(FullTestGpuFlydslSdpaCdnaDispatch, LongerSequenceMatchesTheReference)
 {
     auto spec = cdnaSpec();
     spec.seqLenQ = 1024;

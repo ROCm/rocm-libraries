@@ -516,14 +516,15 @@ endif()
 # descriptor-packaging resolves the packer separately, from the rocm_kpack Python
 # package. Both halves come from the platform, so nothing here pins a ref.
 
-# What src/ and src/tests/ gate the FlyDSL engine and its suite on, rather than the
-# option above. The option states intent; this states outcome. flydsl/ raises it only
-# when the product pack ships FlyDSL kernels for a requested arch, so an ON option with
-# GPU_TARGETS naming an arch no kernels are built for leaves it FALSE and nothing
-# compiles against kernels that do not ship. INTERNAL implies FORCE, so this resets on
-# every configure and a stale TRUE cannot survive a flag flip.
+# What src/ and src/tests/ gate the FlyDSL engines and their suites on, rather than the
+# option above. flydsl/ raises it when the production root holds FlyDSL content at all,
+# whatever GPU_TARGETS asks for: the engines are host code, and a multi-arch build
+# (TheRock RFC 0008) ships the host half of one architecture's shard to every
+# architecture, so it must not depend on which one was picked. What this build packs is
+# HIPKERNELPROVIDER_FLYDSL_ARCHS. INTERNAL implies FORCE, so this resets on every
+# configure and a stale TRUE cannot survive a flag flip.
 set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
-    "The product pack ships FlyDSL kernels for at least one requested architecture")
+    "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
