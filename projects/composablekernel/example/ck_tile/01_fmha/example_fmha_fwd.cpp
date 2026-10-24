@@ -219,6 +219,40 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         json);
 }
 
+// Diagnostic only, not a fix. When the forward dispatcher selects no kernel, report the device
+// properties the generated dispatcher reads at run time: the arch name it matches against and
+// the CU count its tile constraints use. A missing instance is deterministic for a given set
+// of arguments, so this helps tell it apart from a run where these queries returned
+// unexpected values. It runs once, on the no-kernel path only, after the runner has returned,
+// and only reads device properties.
+void print_no_instance_diagnostic()
+{
+    int device                  = -1;
+    const hipError_t dev_status = hipGetDevice(&device);
+    hipDeviceProp_t props{};
+    const hipError_t prop_status =
+        dev_status == hipSuccess ? hipGetDeviceProperties(&props, device) : dev_status;
+
+    std::cerr << "[fmha_fwd diagnostic] no kernel selected: hipGetDevice="
+              << hipGetErrorName(dev_status) << " device=" << device
+              << " hipGetDeviceProperties=" << hipGetErrorName(prop_status);
+    if(prop_status == hipSuccess)
+    {
+        std::cerr << " gcnArchName=\"" << props.gcnArchName << "\""
+                  << " multiProcessorCount=" << props.multiProcessorCount;
+    }
+    std::cerr << " get_device_name()=\"" << ck_tile::get_device_name() << "\"" << std::endl;
+}
+
+int to_exit_code(fwd_result result)
+{
+    if(result == fwd_result::no_instance)
+    {
+        print_no_instance_diagnostic();
+    }
+    return result == fwd_result::success ? 0 : -2;
+}
+
 int main(int argc, char* argv[])
 {
     try
@@ -230,35 +264,35 @@ int main(int argc, char* argv[])
         const std::string data_type = arg_parser.get_str("prec");
         if(data_type == "fp32")
         {
-            return run<FmhaFwdFp32>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdFp32>(arg_parser));
         }
         else if(data_type == "fp16")
         {
-            return run<FmhaFwdFp16>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdFp16>(arg_parser));
         }
         else if(data_type == "bf16")
         {
-            return run<FmhaFwdBf16>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdBf16>(arg_parser));
         }
         else if(data_type == "fp8")
         {
-            return run<FmhaFwdFp8>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdFp8>(arg_parser));
         }
         else if(data_type == "fp8bf16")
         {
-            return run<FmhaFwdFp8Bf16>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdFp8Bf16>(arg_parser));
         }
         else if(data_type == "fp8fp32")
         {
-            return run<FmhaFwdFp8Fp32>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdFp8Fp32>(arg_parser));
         }
         else if(data_type == "mxfp8")
         {
-            return run<FmhaFwdMxFp8>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdMxFp8>(arg_parser));
         }
         else if(data_type == "mxfp4")
         {
-            return run<FmhaFwdMxFp4>(arg_parser) == fwd_result::success ? 0 : -2;
+            return to_exit_code(run<FmhaFwdMxFp4>(arg_parser));
         }
         std::cerr << "Unsupported precision: " << data_type << std::endl;
         return -1;
