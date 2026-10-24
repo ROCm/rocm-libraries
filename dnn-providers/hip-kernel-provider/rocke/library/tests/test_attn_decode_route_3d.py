@@ -1,12 +1,13 @@
 """gfx942/gfx950 all-decode routes to the split-KV 3D kernel where the shared
 2D/3D selector picks 2D (large-batch grids, short KV); windowed decode, other
 head sizes, prefill, other arches and caches past the gfx942 3D K/V loader keep
-the shared selector."""
+the shared selector. Few-CTA head-size-256 gfx950 decode keeps two pages per
+segment."""
 
 from __future__ import annotations
 
 import pytest
-from kernels.common.attention_unified import UnifiedAttentionProblem
+from kernels.common.attention_unified import UnifiedAttentionProblem, _num_segments
 
 _CUS = {"gfx942": 304, "gfx950": 256}
 
@@ -80,3 +81,9 @@ def test_prefill_unchanged(arch):
         num_cus=_CUS[arch],
     )
     assert p.select_path(arch) == p.select_path()
+
+
+@pytest.mark.parametrize("skv,segments", [(512, 16), (2048, 64), (16384, 128)])
+def test_gfx950_few_cta_d256_decode_keeps_two_pages_per_segment(skv, segments):
+    p = _decode("gfx950", 1, 16, 2, skv, head_size=256)
+    assert _num_segments(p, "gfx950") == segments

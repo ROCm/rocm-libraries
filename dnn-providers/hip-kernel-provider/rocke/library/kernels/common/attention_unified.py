@@ -3547,6 +3547,16 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
                 return max(1, min(segments, kv // 64))
             return max(2, min(4 * cus // ctas, 64 if kv < 8192 else 128))
         pre_bump = _pre_bump_segments(problem)
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Few-CTA head-size-256 decode (outside the split rule above): keep
+            # at least two pages per segment; one-page segments leave the
+            # segment kernel latency-bound and double the reduce input.
+            return max(1, min(segments, pre_bump, problem.max_seqlen_k // 32))
         return min(segments, pre_bump)
     return segments
 
