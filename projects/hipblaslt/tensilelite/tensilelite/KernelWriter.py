@@ -66,7 +66,7 @@ from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
-  swizzleGeometry
+  swizzleGeometry, swizzleBlockLanes
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -10841,6 +10841,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
+      tP["swizzleBlockLanes"]   = swizzleBlockLanes(swz, kernel["MatrixInstM"] if tP["isA"] else kernel["MatrixInstN"])
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B
