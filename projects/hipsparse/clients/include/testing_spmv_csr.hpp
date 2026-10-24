@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -86,15 +87,12 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
     void* dbuf = (void*)dbuf_managed.get();
 
     // SpMV structures
-    hipsparseSpMatDescr_t matA;
     hipsparseDnVecDescr_t x, y;
 
     size_t bsize;
 
     // Create SpMV structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, aType),
-        "success");
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, aType);
     verify_hipsparse_status_success(hipsparseCreateDnVec(&x, n, dx, xType), "success");
     verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, yType), "success");
 
@@ -177,7 +175,6 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
         "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
@@ -272,9 +269,7 @@ void testing_spmv_csr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType);
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
@@ -386,7 +381,6 @@ void testing_spmv_csr(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));

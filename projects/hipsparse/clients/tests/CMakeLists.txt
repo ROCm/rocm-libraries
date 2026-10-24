@@ -22,131 +22,8 @@ endif()
 
 add_executable(hipsparse-test)
 
-target_sources(hipsparse-test PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_axpyi.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gthr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gthrz.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_roti.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sctr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrmv.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrxmv.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrsv2.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrsv2.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrmm.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrsm2.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrsm2.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gemmi.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gemvi.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrgeam2.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrgemm2_a.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrgemm2_b.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsrilu02.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrilu02.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsric02.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csric02.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_nnz.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2dense.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csc2dense.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_prune_dense2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_prune_dense2csr_by_percentage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense2csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2bsr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_bsr2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gebsr2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2csr_compress.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_prune_csr2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_prune_csr2csr_by_percentage.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_coo2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_identity.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrsort.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_cscsort.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_coosort.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csru2csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrilusv.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gebsr2gebsr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2gebsr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gebsr2gebsc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmat_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spvec_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dnmat_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dnvec_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_const_spmat_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_const_spvec_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_const_dnmat_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_const_dnvec_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo_aos.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr_reuse_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_sell.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_axpby.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gather.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_scatter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_rot.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spvv.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell_no_set_pointers.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr_reuse_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bell.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bsr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgeam_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_batched_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr_reuse_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo_aos.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gpsv_interleaved_batch.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv2_strided_batch.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv2_nopivot.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv_interleaved_batch.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_csrcolor.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr_reuse_descr.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
-)
-
-if(HIPSPARSE_ENABLE_HIP)
-    target_sources(hipsparse-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_doti.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_dotci.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2csc.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2csc_ex2.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csrgemm.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csrgeam.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csrmv.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csrmm.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_hybmv.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_csr2hyb.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_hyb2csr.cpp"
-    )
-endif()
-
-# Include sources
+# Each backend CMakeLists sets HIPSPARSE_TEST_SOURCES to the routines that
+# backend can compile, plus the YAML inputs for hipsparse_test.data.
 if(HIPSPARSE_ENABLE_HIP)
   include(rocm/CMakeLists.txt)
 elseif(HIPSPARSE_ENABLE_CUDA)
@@ -160,6 +37,12 @@ elseif(HIPSPARSE_ENABLE_CUDA)
     message(WARNING "Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not explicitly supported; no test data will be generated.")
   endif()
 endif()
+
+set(_hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp")
+foreach(_src IN LISTS HIPSPARSE_TEST_SOURCES)
+  list(APPEND _hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/${_src}")
+endforeach()
+target_sources(hipsparse-test PRIVATE ${_hipsparse_test_sources})
 
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
