@@ -1,19 +1,82 @@
-# Ordinary split-KV decode host submission case study
+# Saved paged split-KV decode binding host overhead case study
 
-This change reduces repeated Python host work for ordinary gfx942/gfx950 split-KV attention calls with stable executable bindings. Kernel computation, segment/reducer geometry and the native provider launch path are preserved.
+This case study concerns host submission from saved explicit gfx942/gfx950
+paged one-token attention bindings. It describes preparation outside the timed
+loop and validation of equivalent segment/reducer kernels. It does not measure
+the native provider or change heuristic attention routing.
 
-An ordinary call previously allocated three scratch tensors and rebuilt both argument buffers. The runtime now caches scratch by resolved executable pipeline, launch geometry, segment count, device, effective stream and submitting host thread. Compatible maximum-KV changes share the same owner when the resolved geometry remains identical. Changed live pointers or scalars rebuild the immutable packed pair; admission and binding checks still run on each call.
+## Caller and preparation
 
-The cache owns scratch and packed addresses. Request storage is snapshotted and retained separately before submission, once per immutable operation per completion batch. The caller submits shared attention work and performs cleanup on one host thread, with submission stopped before completion drains. Failed submission or completion leaves in-flight resources reachable for later cleanup. Ordinary asynchronous calls acquire no new HIP wait or event.
+The measured caller is an executable tuning candidate's saved Torch binding:
+`attention_execution_candidates` → `bind_tuning_attention_torch` →
+`TorchBinding.launch`. The first ordinary eager call goes through the existing
+public runner, validating the launch and initializing an existing
+`Attention3DExecution`. Binding creation neither launches nor drains.
 
-The eight-entry limit is an untuned heuristic matching the existing direct graph-cache default. A small LRU retains recent geometry/device/stream owners while bounding resident entries. Correctness does not depend on the value eight. The current performance validation uses one resident owner and does not tune cache capacity; this is not a byte budget. Each owner uses `4 * total_q * num_query_heads * num_segments * (head_size + 2)` scratch bytes. Explicit eager-cache clearing drains resident streams before releasing scratch. Evicted in-flight owners remain retained until their submitted streams drain. Capture uses private scratch, and prepared executions and internal graphs preserve their separate ownership.
+The binding then holds its compiled pipeline, launch geometry, stream wrapper,
+scalar defaults and three private scratch tensors. Compatible warm calls use
+the existing ordinary pipeline directly. They avoid allocation, repeated
+immutable admission/spec/cache work and redundant Torch context construction.
+Kernargs are still packed and retained on every invocation; live pointers and
+scalar overrides are read on every call.
 
-The device/stream context shortcut applies only when the effective device and stream are already current on gfx942/gfx950. Other contexts are explicitly entered and restored. Existing gfx1250 context and graph-cache behavior is preserved; gfx1250 hardware validation is outside this change's scope.
+The new binding path uses `None` for Torch-current selection. It resolves that
+selection before passing an integer to the existing runner and pipeline.
+Legacy zero inputs and explicit integer handles preserve the current runtime
+API. An explicit stream different from the caller's current stream is entered
+using the cached stream object and restored afterwards.
 
-## Validation contract
+## Ownership and compatibility
 
-Host regression tests exercise the public saved executable-candidate binding, reuse counts, changed pointers/scalars and geometry, capture isolation, cache clearing, failed drains, pair ownership and per-thread default-stream ownership. Adjacent graph/prepared tests verify live storage checks and existing ownership behavior. The numerical suite compares retained runtime paths against independent references on matching hardware.
+Scratch belongs to one saved binding. Separate bindings, including compatible
+maximum-KV bindings, share existing immutable compiled caches but own separate
+scratch. Each binding uses
+`4 * total_q * num_query_heads * num_segments * (head_size + 2)` scratch bytes.
+There is no new global cache, eviction policy, until-drain registry or cleanup
+API. Generic HIP runtime and launcher code are unchanged.
 
-Performance revalidation compares final source against the pinned base with the same executable bindings, compiled work and launch geometry. Setup, compilation and drains stay outside host enqueue timing; HIP-event intervals are measured separately. Numerical checks run before and after timing, and paired repeated trials alternate source-arm order. The validation harness is maintained outside this PR. No new measured result is established by this explanation; report completed evidence and its limits with the final PR validation.
+Only the binding's creating host thread reuses its scratch under the existing
+execution owner's whole-pair guard. Different streams/devices/layouts, foreign
+host threads, reentrant calls, internal graphs and external capture use the
+general runner with its existing ownership. This path does not introduce a
+general concurrent runtime guarantee.
 
-See the [canonical caller and ownership contract](strided-kv-decode.md#streams-and-workspace-ownership), [eager host regressions](../library/tests/test_attention_3d_eager_reuse.py) and [runtime retention contract](../platform/dsl_docs/runtime/comgr_and_hipmodule.md#bound-owner-retention).
+Ordinary per-launch retention keeps submitted tensors and scratch alive after
+the binding is discarded. Fenced calls complete through the ordinary pipeline;
+unfenced calls require the caller's existing finite-batch completion boundary.
+Drains remain outside host enqueue timing and must happen before reading
+results. No context remains entered between binding invocations.
+
+## Validation method
+
+[Host regressions](../library/tests/test_attention_decode_binding.py) cover
+allocation/context reuse, independent bindings, executable-candidate reachability,
+live pointer repacking, scalars, stream selection/overrides, changed layouts,
+foreign/reentrant calls, capture/graph fallback, enqueue failure and ordinary
+retention after discarding a binding. The focused test is installed in the
+attention CPU lane. Tests for the withdrawn global cache and runtime changes
+are removed; pre-existing suites retain their baseline source.
+
+Fresh hardware validation compares the final binding implementation against the
+pinned base using identical executable specs, LLVM/HSACO hashes and geometry.
+The synthetic BF16 cases have B/KV = 1/2048 and 4/4096, Hq/Hkv = 32/4, D = 128
+and page size 16. Stable bindings and a rotating KV/KV+1/KV+2 maximum-length
+series are warmed separately; device lengths stay at KV. Internal and outer
+graphs are disabled for measurements.
+
+Binding, setup, compilation warmup and drains are excluded from
+`perf_counter_ns` host enqueue timing under `no_fence()`. HIP-event intervals
+are measured separately and include host pacing. Three paired trials alternate
+arm order on the same GPU and pinned CPU, using 20 warmups, 100 iterations per
+finite batch and seven samples; the first sample is excluded from medians.
+
+Every measured arm checks outputs against an independent NumPy FP64 reference
+over quantized BF16 inputs before and after timing, with `atol=0.01` and
+`rtol=0.02`. Post-checks poison output before a fresh launch. The validation
+harness and private raw measurements remain outside this PR. gfx1250 hardware
+and a migration of the generic stream API are outside scope.
+
+## Results
+
+Fresh paired measurements are required for this binding implementation. Earlier
+results from the withdrawn runtime/cache design do not establish its savings.

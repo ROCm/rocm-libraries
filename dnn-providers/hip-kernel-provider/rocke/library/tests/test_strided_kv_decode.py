@@ -5,7 +5,6 @@
 
 from dataclasses import fields, make_dataclass, replace
 from importlib import import_module
-from math import prod
 import hashlib
 import json
 import os
@@ -67,51 +66,6 @@ def test_outer_padding_and_large_batch_offsets():
     layout = KvTensorLayout((2, 3, 65, 64), (1 << 32, 65 * 80, 80, 1))
     assert layout.arguments("k")["k_stride_batch_bytes"] == 1 << 33
     assert layout.head_span_bytes == (64 * 80 + 64) * 2
-
-
-def _device_tensor(
-    shape, *, strides=None, offset=0, storage_bytes=None, dtype="torch.bfloat16"
-):
-    return SimpleNamespace(
-        shape=shape,
-        dtype=dtype,
-        device="cuda:0",
-        is_cuda=True,
-        is_contiguous=lambda: True,
-        stride=lambda: strides
-        or tuple(prod(shape[i + 1 :]) for i in range(len(shape))),
-        data_ptr=lambda: 8192 + offset * 2,
-        storage_offset=lambda: offset,
-        untyped_storage=lambda: SimpleNamespace(
-            nbytes=lambda: (
-                prod(shape) * 2 + offset * 2 if storage_bytes is None else storage_bytes
-            )
-        ),
-    )
-
-
-@pytest.mark.parametrize("offset", [0, 8])
-@pytest.mark.parametrize("short", [None, "k", "v"])
-def test_strided_view_backing_storage_boundary(offset, short):
-    # Padded BHSD: last element is at 512 + 256 + 2*80 + 63 = 991.
-    tensors = {
-        name: _device_tensor(
-            (2, 2, 3, 64),
-            strides=(512, 256, 80, 1),
-            offset=offset,
-            storage_bytes=1984 + offset * 2 - (2 if name == short else 0),
-        )
-        for name in ("k", "v")
-    }
-    if short is None:
-        assert KvTensorLayout.from_tensor(tensors["k"]).storage_span_bytes == 1984
-        layout = StridedKvCacheLayout.from_tensors(tensors["k"], tensors["v"])
-        assert layout.key.storage_span_bytes == layout.value.storage_span_bytes == 1984
-    else:
-        with pytest.raises(ValueError, match="view exceeds its backing storage"):
-            KvTensorLayout.from_tensor(tensors[short])
-        with pytest.raises(ValueError, match="view exceeds its backing storage"):
-            StridedKvCacheLayout.from_tensors(tensors["k"], tensors["v"])
 
 
 @pytest.mark.parametrize(
@@ -356,18 +310,6 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert explicit.waves_per_eu == explicit_reduce.waves_per_eu == 3
 
 
-@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_spec_policy_uses_explicit_arch(arch, monkeypatch):
-    from dispatch.attention.common import _problem
-    from kernels.common import attention_unified as au
-
-    problem = _problem(_strided_request(arch))
-    expected = au._strided_3d_specs_from_problem(problem, arch=arch)
-    other = "gfx950" if arch == "gfx942" else "gfx942"
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: other)
-    assert au._strided_3d_specs_from_problem(problem, arch=arch) == expected
-
-
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
 def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import _problem
@@ -388,78 +330,8 @@ def strided_binding_case():
     tensors = {
         name: object() for name in ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k")
     }
-    # The runtime validates additive-bias device agreement before either path.
-    from types import SimpleNamespace
-
-    tensors["q"] = SimpleNamespace(device="cuda:0")
     tensors["problem"] = _problem(req)
     return req, result, tensors
-
-
-@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-@pytest.mark.parametrize("invalid", [None, "capacity", "k_storage", "v_storage"])
-def test_strided_runtime_capacity_and_storage_reject_before_compile_or_enqueue(
-    monkeypatch, arch, invalid
-):
-    from dispatch.attention import dispatch_attention
-    from dispatch.attention.common import _problem
-    from kernels.common import attention_unified as au
-
-    capacity = 65
-    req = replace(_strided_request(arch), seqlen_k=capacity + (invalid == "capacity"))
-    spec = dispatch_attention(req).spec
-    problem = _problem(req)
-    tensors = {
-        "q": _device_tensor((3, 8, 128)),
-        "out": _device_tensor((3, 8, 128)),
-        "cu_seqlens_q": _device_tensor((4,), dtype="torch.int32"),
-        "seqused_k": _device_tensor((3,), dtype="torch.int32"),
-        **{
-            name: _device_tensor(
-                (3, 2, capacity, 128),
-                offset=8,
-                storage_bytes=3 * 2 * capacity * 128 * 2
-                + 16
-                - (2 if invalid == f"{name}_storage" else 0),
-            )
-            for name in ("k", "v")
-        },
-    }
-    calls = []
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
-
-    def compile_sentinel(*args, **kwargs):
-        calls.append("compile")
-        pytest.fail("admission must finish before compilation")
-
-    def enqueue_boundary(**kwargs):
-        calls.append("enqueue")
-        assert kwargs["kv_cache_layout"].key.shape == (3, 2, capacity, 128)
-        return "admitted"
-
-    monkeypatch.setattr(au, "_get_3d_pipeline", compile_sentinel)
-    monkeypatch.setattr(au, "_run_3d_tiled", enqueue_boundary)
-    arguments = dict(
-        problem=problem,
-        **tensors,
-        block_table=None,
-        softmax_scale=0.125,
-        softcap=0,
-        tuning_spec=spec,
-        kv_layout="strided",
-    )
-    if invalid is None:
-        assert au.run_unified_attention_torch(**arguments) == "admitted"
-        assert calls == ["enqueue"]
-    else:
-        reason = (
-            "maximum valid KV length exceeds allocation capacity"
-            if invalid == "capacity"
-            else "view exceeds its backing storage"
-        )
-        with pytest.raises(ValueError, match=reason):
-            au.run_unified_attention_torch(**arguments)
-        assert calls == []
 
 
 def test_strided_binding_scale_stream_and_unknown_options(
@@ -704,8 +576,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     )
     calls = []
 
-    def stop_before_launch(problem, tuning_spec, kind, target_arch):
-        assert target_arch == arch
+    def stop_before_launch(problem, tuning_spec, kind, arch):
         calls.append((tuning_spec.kernel_spec, kind))
         return False, "paged contract reached"
 
@@ -715,7 +586,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     with pytest.raises(NotImplementedError, match="paged contract reached"):
         au.run_unified_attention_torch(
             problem=problem,
-            q=SimpleNamespace(device="cuda:0"),
+            q=object(),
             k=SimpleNamespace(shape=(1,)),
             v=object(),
             out=object(),
@@ -727,23 +598,3 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
-
-
-def test_strided_runtime_rejects_conflicting_tuning_arch(
-    strided_binding_case, monkeypatch
-):
-    from kernels.common import attention_unified as au
-
-    _, result, tensors = strided_binding_case
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx950")
-    with pytest.raises(
-        ValueError, match="tuning spec targets gfx942, running on gfx950"
-    ):
-        au.run_unified_attention_torch(
-            **tensors,
-            block_table=None,
-            softmax_scale=0.125,
-            softcap=0,
-            tuning_spec=result.spec,
-            kv_layout="strided",
-        )

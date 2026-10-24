@@ -78,59 +78,14 @@ structs; strided symbols carry `_stridedkv`.
 
 The shared 3D runtime resolves `stream=0` to Torch's current stream on Q's
 device. Scratch allocation, initialization, and segment/reduce launches all
-use that effective stream. When Q is on the active device and the effective
-stream is already current, the runtime submits directly without rebuilding
-Torch device/stream contexts. Other devices and streams keep the explicit
-context boundary and restore the caller's state. Callers must make input
-production visible to it and wait before consuming outputs on another stream.
+use that effective stream. Callers must make input production visible to it
+and wait before consuming outputs on another stream.
 
-Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
-reuse scratch owned by the resolved pipeline/launch geometry and effective
-device/stream and submitting host thread. The eight-entry limit is an untuned
-heuristic matching the existing direct graph-cache default. A small LRU retains
-recent geometry/device/stream owners while bounding resident entries. Correctness
-does not depend on the value eight. The current performance validation uses one
-resident owner and does not tune cache capacity; this is not a byte budget.
-Each owner requires
-`4 * total_q * num_query_heads * num_segments * (head_size + 2)` bytes.
-A changing maximum KV length reuses an owner when its resolved spec and
-geometry stay identical; a selector bucket or segment-count change uses a
-different owner. Updating device length contents within a fixed validated
-maximum already reuses the same owner.
-
-A whole-pair submission lock protects segment/reducer ordering. Unchanged pointers
-and scalars reuse an immutable packed pair. Changed bindings rebuild it, retaining
-previous input storage and argument buffers until completion.
-
-Submit shared 3D attention calls and perform their completion cleanup on one
-host thread. This applies across ordinary calls, dispatcher bindings, prepared
-execution owners and graph-cache cleanup. Stop submitting before each stream
-or device drain, including an external synchronization followed by retention
-cleanup. Concurrent or reentrant host calls and cross-thread cleanup are
-unsupported as a general caller contract. Retention bookkeeping does not
-serialize submission with drains. PTDS retention and optimized cache identities
-distinguish host threads; this does not synchronize caller-owned tensor updates,
-overlapping host submission or external synchronization.
-Queued asynchronous GPU launches and sequential host
-submission to multiple explicit streams remain supported. Keep preparation,
-launch and close on that same thread.
-
+Compiled kernels are cached. Each eager invocation allocates independent
+scratch, so overlapping calls cannot overwrite each other's partial results.
 The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
-after finite batches, with submission stopped before each drain. Request-local
-input storage is released by that completion drain;
-the eager cache owns only scratch and immutable packed addresses afterward.
-
-`clear_attention_3d_eager_cache()` drains each unique device/stream with an
-eager owner belonging to the calling thread before dropping its scratch and
-packed bindings. Live foreign-thread owners remain resident. Owners from exited
-threads are reclaimed after a device drain, which also completes their PTDS work. Stop
-submission and call it on the submitting host thread, outside capture. A failed
-drain keeps affected owners for retry. Evicted owners remain in the completion
-registry while in flight; drain every submitted stream even if it no longer
-has a resident owner. This helper preserves prepared executions and internal
-graphs, which use `close()` and `clear_attention_3d_graph_cache()` respectively.
-It restores the caller's device/stream and adds no cleanup to ordinary calls.
+periodically. This adds eager allocator work; no performance claim is made.
 
 For a sequential decoding loop, prepare an execution once outside timing. Keep
 permuted K/V view objects stable, and update their storage and the device length
@@ -156,8 +111,8 @@ with prepare_unified_attention_torch(
 
 Prepared eager launches reuse three scratch tensors. The complete segment/reducer
 pair is submitted under one owner; concurrent or reentrant submission is rejected.
-Separate streams need separate execution owners. Close on the submitting host
-thread after capture and replay submission have stopped. Outer graph bindings
+Separate streams need separate execution owners. Do not close an execution while
+another thread is inside an outer capture using its bindings. Outer graph bindings
 and replay completion remain the caller's responsibility; closing the execution
 does not close the caller's graph or drain its capture-stream argument bucket.
 Closing waits for the prepared stream's
@@ -172,17 +127,8 @@ direct calls keep at most eight paired graph/resource entries, and a prepared
 execution keeps at most one. A binding change that evicts an entry waits only for
 that entry's stream before releasing it. Stable replay has no new allocation or
 extra completion wait beyond the requested fence. `clear_attention_3d_graph_cache()`
-explicitly drains and clears the direct cache. Tensor identity and scalar
-parameters select the resident graph; live addresses and normalized
-layout metadata are checked before each replay. Content-only updates reuse the
-graph. Rebinding the same tensor objects to new storage drains and replaces
-the captured graph; it does not recompile the cached kernels. Drain queued work
-before mutating storage metadata. Prepared owners still reject geometry, dtype,
-layout, device or stream changes.
-
-The context shortcut and resident-key optimization apply to gfx942/gfx950.
-gfx1250 retains explicit device/stream contexts and includes live storage
-addresses in its graph key, preserving its existing cache eviction behavior.
+explicitly drains and clears the direct cache. Tensor identity, address, layout,
+scalar parameters and metadata bindings participate in graph identity.
 
 Asynchronous graph replay retains its resource entry until the stream is drained,
 even if the Python execution owner is discarded. Asynchronous eager launches also
@@ -197,9 +143,8 @@ The [numeric tests](../library/tests/test_strided_kv_decode_numeric.py) compare
 the direct runtime and registered binding against an independent CPU FP32
 reference after input quantization. They include batched BHSD/BSHD, different
 K/V strides, padding, unpadded capacity tails, changing valid lengths, empty
-sequences, windows, paged regressions, graph replay, content updates, and
-same-object Q/output storage rebinding for direct and prepared graph calls.
-Concurrency tests cover eager calls, internal graphs, and separate external graphs captured on one
+sequences, windows, paged regressions, and graph replay. Concurrency tests cover
+eager calls, internal graphs, and separate external graphs captured on one
 stream and replayed on different streams. They check scratch isolation and
 replay after temporary launch references are drained. Set
 `ROCKE_REQUIRE_DECODE_GPU=gfx942` or `gfx950` to require the target GPU rather

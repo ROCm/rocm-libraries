@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
-from threading import Thread, current_thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
@@ -35,12 +34,6 @@ HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
 
 hipMemcpyHostToDevice = 1
 hipMemcpyDeviceToHost = 2
-
-
-_HIP_STREAM_DEFAULT = 0
-_HIP_STREAM_LEGACY = 1
-_HIP_STREAM_PER_THREAD = 2
-_HIP_DEFAULT_STREAMS = (_HIP_STREAM_DEFAULT, _HIP_STREAM_LEGACY, _HIP_STREAM_PER_THREAD)
 
 
 class HipError(RuntimeError):
@@ -490,13 +483,7 @@ class Runtime:
     # observes a half-finished kernel. The Python analogue is
     # :meth:`_reap_completed` (eager non-blocking drain) and
     # :meth:`wait_stream` (event-blocking drain per stream).
-    _pending_args: dict[
-        tuple[int, int] | tuple[int, int, Thread],
-        list[tuple[tuple[Any, ...], Event | None]],
-    ] = {}
-    _pending_bound_args: dict[
-        tuple[int, int] | tuple[int, int, Thread], dict[int, Any]
-    ] = {}
+    _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
 
     def load_module(self, blob: bytes) -> Module:
         _ensure_hip_init()
@@ -545,8 +532,7 @@ class Runtime:
         (a non-fenced legacy retain, only droppable by :meth:`sync`).
         """
         s = int(stream)
-        key = self._stream_key(s)
-        bucket = self._pending_args.get(key)
+        bucket = self._pending_args.get(s)
         if not bucket:
             return
         while bucket:
@@ -556,7 +542,7 @@ class Runtime:
             evt.destroy()
             bucket.pop(0)
         if not bucket:
-            self._pending_args.pop(key, None)
+            self._pending_args.pop(s, None)
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
@@ -589,10 +575,15 @@ class Runtime:
         """
         s = int(stream)
         self.stream_sync(s)
-        self._release_for_stream(s)
+        bucket = self._pending_args.pop(s, None)
+        if not bucket:
+            return
+        for _refs, evt in bucket:
+            if evt is not None:
+                evt.destroy()
 
     def sync(self) -> None:
-        """Drain the current device and release its retained resources.
+        """Device-wide drain: ``hipDeviceSynchronize`` + release everything.
 
         Use :meth:`wait_stream` instead when the caller knows the
         target stream; this method is the broad hammer for benchmark
@@ -601,16 +592,11 @@ class Runtime:
         -> CK 3D in the parity harness).
         """
         _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
-        device = current_device()
-        for stream_id in list(self._pending_args):
-            if stream_id[0] != device:
-                continue
-            for _refs, evt in self._pending_args.pop(stream_id):
+        for stream_id in list(self._pending_args.keys()):
+            for _refs, evt in self._pending_args[stream_id]:
                 if evt is not None:
                     evt.destroy()
-        for key in list(self._pending_bound_args):
-            if key[0] == device:
-                self._pending_bound_args.pop(key, None)
+        self._pending_args.clear()
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -622,51 +608,19 @@ class Runtime:
         callers that did their own sync via a different mechanism and
         only need the bookkeeping cleanup.
         """
-        self._release_for_stream(int(stream))
-
-    def _release_for_stream(self, stream: int) -> None:
-        if stream in _HIP_DEFAULT_STREAMS:
-            # HIP default-stream sentinels are shared across devices.
-            keys = (self._stream_key(stream),)
-        else:
-            # Explicit handles identify the stream after the caller restores
-            # its device. Both registries record the device at retention time.
-            keys = {
-                key
-                for registry in (self._pending_args, self._pending_bound_args)
-                for key in registry
-                if key[1] == stream
-            }
-        for key in keys:
-            self._pending_bound_args.pop(key, None)
-            for _refs, evt in self._pending_args.pop(key, ()):
-                if evt is not None:
-                    evt.destroy()
-
-    @staticmethod
-    def _stream_key(stream: int) -> tuple[int, int] | tuple[int, int, Thread]:
-        # The HIP null and per-thread default streams have shared handles
-        # across devices. Thread objects keep PTDS identities distinct even
-        # when Python recycles a numeric thread ID after a thread exits.
-        key = (current_device(), int(stream))
-        return key + (current_thread(),) if stream == _HIP_STREAM_PER_THREAD else key
-
-    def retain_until_drain(self, stream: int, owner: Any, *, resources=None) -> None:
-        """Retain an immutable bound launch owner through an explicit drain.
-
-        Repeated submission retains it once. Earlier completion events cannot
-        release it: its latest submission may be later than those events.
-        Call before enqueue so partial submission failures retain their buffers.
-        """
-        bucket = self._pending_bound_args.setdefault(self._stream_key(stream), {})
-        if id(owner) not in bucket:
-            bucket[id(owner)] = owner if resources is None else (owner, resources())
+        s = int(stream)
+        bucket = self._pending_args.pop(s, None)
+        if not bucket:
+            return
+        for _refs, evt in bucket:
+            if evt is not None:
+                evt.destroy()
 
     def retain_for_stream(self, stream: int, *objects: Any) -> None:
         """Keep ``objects`` alive until the most-recent launch on
         ``stream`` completes.
 
-        Attaches to the latest bucket entry so the retained objects
+        Attaches to the head bucket entry so the retained objects
         share the launch's HIP completion event. If there is no
         prior launch on ``stream``, parks the refs into a new entry
         with ``event=None`` (which only :meth:`sync` will release).
@@ -682,7 +636,7 @@ class Runtime:
         if not keep:
             return
         s = int(stream)
-        bucket = self._pending_args.setdefault(self._stream_key(s), [])
+        bucket = self._pending_args.setdefault(s, [])
         if bucket:
             refs, evt = bucket[-1]
             bucket[-1] = (refs + keep, evt)
@@ -839,7 +793,7 @@ class Runtime:
         # Hold refs (args_buf MUST outlive the kernel for the "extra"
         # path) alongside the completion event. ``retain_for_stream``
         # appends tensors to the same entry.
-        bucket = self._pending_args.setdefault(self._stream_key(s), [])
+        bucket = self._pending_args.setdefault(s, [])
         bucket.append(((args_buf, size_buf, extra) + cluster_refs, evt))
         return evt
 
@@ -1019,6 +973,6 @@ class Runtime:
         # Belt-and-suspenders: keep keep_alive + params alive until the
         # completion event has fired, even though the driver should
         # have copied each parameter at enqueue.
-        bucket = self._pending_args.setdefault(self._stream_key(s), [])
+        bucket = self._pending_args.setdefault(s, [])
         bucket.append(((tuple(keep_alive), params) + cluster_refs, evt))
         return evt

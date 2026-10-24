@@ -21,7 +21,6 @@ from .common.attention_unified import (  # noqa: F401
     prepare_unified_attention_torch,
     Attention3DExecution,
     clear_attention_3d_graph_cache,
-    clear_attention_3d_eager_cache,
     supports_native_unified_attention,
     supports_native_unified_attention_tiled,
     supports_native_unified_attention_3d_tiled,

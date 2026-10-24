@@ -82,7 +82,7 @@ def hip():
         hip_module, "device_supports_cluster_launch", return_value=True
     ):
         yield fake
-    Runtime._pending_args.pop((0, _STREAM), None)
+    Runtime._pending_args.pop(_STREAM, None)
 
 
 def test_struct_layout_matches_hip():
@@ -102,7 +102,7 @@ def test_plain_launch_is_unchanged(hip):
     assert not hip.ex
     (call,) = hip.plain
     assert call["grid"] == (4, 1, 1) and call["stream"] == _STREAM
-    (entry,) = Runtime._pending_args[(0, _STREAM)]
+    (entry,) = Runtime._pending_args[_STREAM]
     assert len(entry[0]) == 3  # args, size, extra: no cluster config
 
 
@@ -128,7 +128,7 @@ def test_cluster_launch_goes_through_launch_kernel_ex(hip):
     assert call["params"] is None and call["extra"] is not None
     # HIP was handed pointers into the config and attribute, so both must
     # live as long as the args buffer.
-    (entry,) = Runtime._pending_args[(0, _STREAM)]
+    (entry,) = Runtime._pending_args[_STREAM]
     assert any(ref is call["cfg"] for ref in entry[0])
     assert any(isinstance(ref, hip_module._HipLaunchAttribute) for ref in entry[0])
 
@@ -139,7 +139,7 @@ def test_blocking_launch_with_cluster(hip):
     )
     (call,) = hip.ex
     assert call["cluster"] == (2, 1, 1)
-    assert (0, _STREAM) not in Runtime._pending_args
+    assert _STREAM not in Runtime._pending_args
 
 
 def test_kernelparams_launch_with_cluster(hip):
@@ -155,7 +155,7 @@ def test_kernelparams_launch_with_cluster(hip):
     (call,) = hip.ex
     assert call["cluster"] == (1, 2, 1)
     assert call["params"] is not None and call["extra"] is None
-    (entry,) = Runtime._pending_args[(0, _STREAM)]
+    (entry,) = Runtime._pending_args[_STREAM]
     assert any(ref is call["cfg"] for ref in entry[0])
 
 
@@ -179,7 +179,7 @@ def test_bad_cluster_is_refused_before_hip(hip, grid, cluster, msg):
             object(), grid, (64, 1, 1), b"\0" * 8, stream=_STREAM, cluster=cluster
         )
     assert not hip.ex and not hip.plain
-    assert (0, _STREAM) not in Runtime._pending_args
+    assert _STREAM not in Runtime._pending_args
 
 
 def test_unsupported_device_is_refused(hip):

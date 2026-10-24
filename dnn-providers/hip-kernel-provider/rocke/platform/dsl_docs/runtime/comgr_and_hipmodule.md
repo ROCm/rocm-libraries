@@ -231,41 +231,6 @@ The per-stream FIFO solves two real correctness problems:
 
 `Runtime.release_pending_for_stream(stream)` drops retained refs after external synchronization; `Runtime.wait_stream(stream)` is the canonical "drain + release" primitive on ROCm (more reliable than `torch.cuda.synchronize()` for raw ctypes launches).
 
-### Bound-owner retention
-
-`Runtime.retain_until_drain(stream, owner, resources=None)` retains an immutable
-bound operation before enqueue. Owners are deduplicated by identity once per
-completion batch; a callable `resources` snapshots storage only on first
-retention. The bound registry is separate from the per-launch FIFO and is not
-released by completion-event polling. `wait_stream` or `sync` releases it only
-after successful completion; a failed drain preserves owners for retry.
-`release_pending_for_stream` requires caller-confirmed external completion.
-
-Graph replay also retains its immutable resource entry here before enqueue,
-including for a fenced call whose enqueue or completion can fail. An earlier
-FIFO event does not cover a later replay. Dropping the Python execution owner
-does not release queued graph resources; successful replay-stream completion
-releases them. FIFO event polling and bound-owner deduplication remain distinct.
-
-The launcher-level `retain_until_drain` resolves the effective stream with the
-same resolver as its cleanup helpers. Resolve and save the handle at a binding
-or batch boundary, then pass that handle through retention, enqueue and cleanup.
-The low-level `Runtime` methods continue to accept raw HIP handles.
-
-Retention bookkeeping does not serialize submission with completion drains.
-Submit shared attention work and perform its cleanup on one host thread, with
-submission stopped before a drain or caller-owned synchronization followed by
-release. Retain before enqueue and drain after submission, including failed
-enqueue. PTDS identity separates owners; it does not make overlapping host
-submission, tensor updates or cleanup safe.
-
-Both registries use the same device/stream ownership key. Explicit stream cleanup
-uses the device recorded at retention and works after the launch wrapper restores
-the caller's device. Default stream handles remain device-scoped, and the per-thread default
-stream additionally uses stable host-thread identity in both retention registries.
-A stream drain releases only that thread's PTDS owners. A device drain releases
-both FIFO and bound owners on the synchronized device, including PTDS owners across threads.
-
 ### Launch Mechanism
 
 `hipModuleLaunchKernel` takes args via the "extra" buffer:

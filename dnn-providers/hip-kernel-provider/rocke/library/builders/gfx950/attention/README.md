@@ -960,4 +960,4 @@ Measured conditions and numbers are intentionally omitted from this repository
 (per `platform/AGENTS.md` §Compliance); they are recorded only in the internal
 perf record.
 
-See [ordinary split-KV host submission](../../../../docs/decode_host_overhead_case_study.md) for scratch and argument reuse and its validation boundaries.
+See the [saved paged decode binding case study](../../../../docs/decode_host_overhead_case_study.md) for private scratch, prepared launch context and host validation.

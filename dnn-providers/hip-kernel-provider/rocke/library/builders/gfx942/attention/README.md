@@ -219,4 +219,4 @@ state of the box, and are **not benchmarked into this folder**. Run
 `final_shapes_check.py` to produce the CK-vs-Torch eager/graph table for your own
 machine; the script prints, and gates on, the correctness result for every shape.
 
-See the [shared host submission explanation](../../../../docs/decode_host_overhead_case_study.md) for ordinary split-KV scratch and argument reuse.
+See the [saved paged decode binding case study](../../../../docs/decode_host_overhead_case_study.md) for private scratch, prepared launch context and host validation.
