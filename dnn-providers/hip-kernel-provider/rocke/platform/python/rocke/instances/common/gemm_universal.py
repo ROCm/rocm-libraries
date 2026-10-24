@@ -303,6 +303,20 @@ class TraitSpec:
     # four waves only. False (default) keeps waves 0 and 1 and byte-identical
     # output.
     tdm_alternate_issuers: bool = False
+    # Refill each LDS half as soon as every wave has finished reading it, instead
+    # of at the top of the next iteration. After its split-barrier signal the
+    # issuer pair of the half just read waits on that barrier and refills the
+    # half with the tile two ahead, so two fills are in flight within the same
+    # two buffers. The wait sits right before the TDM issue, after the descriptor
+    # arithmetic, so that arithmetic overlaps the wait. The loop runs two K-tiles
+    # per iteration with static LDS parity; the last tiles run in a short
+    # range-checked tail. Needs ``split_barrier`` and ``tdm_alternate_issuers``
+    # (each issuer then has one fill outstanding, which keeps the waits exact).
+    # It pays only on long K loops: a short loop spends more on the second
+    # prologue fill and, for an odd tile count, on one zero-filled tile past K
+    # than the early refill saves. False (default) keeps the current loop and
+    # byte-identical output.
+    tdm_early_refill: bool = False
 
 
 @dataclass(frozen=True)
@@ -759,6 +773,16 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             return False, "tdm_alternate_issuers needs tdm=True with tdm_depth == 2"
         if spec.block_size // spec.wave_size < 4:
             return False, "tdm_alternate_issuers needs at least four waves"
+
+    # The early refill pairs every wait with the split-barrier signal and relies on
+    # the alternating issuers to keep one fill per issuer outstanding.
+    if spec.trait.tdm_early_refill:
+        if not (spec.trait.split_barrier and spec.trait.tdm_alternate_issuers):
+            return False, (
+                "tdm_early_refill needs split_barrier and tdm_alternate_issuers"
+            )
+        if spec.trait.tdm_depth != 2:
+            return False, "tdm_early_refill needs tdm_depth == 2"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -1547,7 +1571,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b.readfirstlane(b.div(tid, c_wave)) if _tdm_waves > 1 else b.const_i32(0)
         )
 
-    def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value, lds_parity=0) -> None:
+    def emit_load_phase(
+        A_dst: Value,
+        B_dst: Value,
+        k_off: Value,
+        lds_parity=0,
+        before_issue: Optional[Callable[[], None]] = None,
+    ) -> None:
         """Coalesced global -> LDS copy for one K tile.
 
         Driven by :class:`TileWindow`: the A/B global views carry the
@@ -1616,6 +1646,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     pad_interval=_tdm_pad_interval,
                     pad_amount=_tdm_pad_amount,
                 )
+                if before_issue is not None:
+                    before_issue()
                 b.tensor_load_to_lds(*groups, cachepolicy=0)
 
             # ``tensor_load_to_lds`` is a wave-level instruction that moves the
@@ -2027,6 +2059,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         iter_vars: Sequence[Value],
         lds_parity=0,
         after_last_reads: Optional[Callable[[], None]] = None,
+        after_first_row: Optional[Callable[[], None]] = None,
     ) -> List[Value]:
         """One K-tile of WMMA atoms, fully MMA-contract driven.
 
@@ -2115,6 +2148,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b, op, a_rows[mi], b_cols[ni], new_accs[flat]
                     )
                     flat += 1
+                if after_first_row is not None and kk == k_atoms - 1 and mi == 0:
+                    after_first_row()
         # WMMA intrawave compute schedule (the simple/mem k-loop keeps the LDS
         # store + global load in a separate barrier region, so this region holds
         # only the operand ds_reads + WMMAs). Opt-in via the 'wmma_v1' pipeline.
@@ -2493,6 +2528,104 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         nonlocal _for_results
         _for_results = for_op.results
 
+    def _emit_kloop_tdm_early_refill() -> None:
+        """Depth-2 TDM ping-pong with the early refill (``tdm_early_refill``).
+
+        Waves ``2p``/``2p+1`` own half ``p`` (alternating issuers). For K-tile
+        ``i`` in half ``p``, after the wave's split-barrier signal and the first
+        row of the last k-atom's WMMAs, the pair owning half ``p`` waits on that
+        barrier (every wave has finished reading half ``p``) and refills it with
+        tile ``i + 2``; the wait is issued right before the TDM load so the
+        descriptor arithmetic overlaps it. Every other wave consumes the same
+        barrier phase at the top of tile ``i + 1``, so each wave waits exactly
+        once per phase. The pair's signal for tile ``i + 1`` waits for the tile
+        it refilled two steps earlier, which is what makes tile ``i + 2``
+        visible to the waves that read it.
+
+        The loop runs two tiles per iteration with static parity, so the LDS
+        reads use immediate offsets, over an even tile count (see below).
+        """
+        nonlocal _for_results
+        sig_all, wait_all = 0xFFFFFFFF, 0xFFFF
+        c1 = b.const_i32(1)
+        c2 = b.const_i32(2)
+        bk2 = b.const_i32(2 * block_k)
+        pair = b.div(_tdm_wave_id, c2)
+
+        def _parity(p):
+            return p if isinstance(p, Value) else b.const_i32(p)
+
+        def _other(p):
+            return b.sub(c1, p) if isinstance(p, Value) else b.const_i32(1 - p)
+
+        def _signal() -> None:
+            b.s_waitcnt(lgkmcnt=0)
+            b.s_wait_tensorcnt(0)
+            b.s_barrier_signal(sig_all)
+
+        def _wait() -> None:
+            b.s_barrier_wait(wait_all)
+
+        def _top_wait(p) -> None:
+            # The pair owning the other half already consumed this phase when
+            # it refilled that half.
+            with b.scf_if(b.cmp_ne(pair, _other(p))):
+                _wait()
+
+        def _refill(p, k_cur, refill: bool) -> None:
+            with b.scf_if(b.cmp_eq(pair, _parity(p))):
+                if refill:
+                    emit_load_phase(
+                        A_smem,
+                        B_smem,
+                        b.add(k_cur, bk2),
+                        lds_parity=p,
+                        before_issue=_wait,
+                    )
+                else:
+                    _wait()
+
+        def _tile(p, k_cur, acc, refill: bool) -> List[Value]:
+            _top_wait(p)
+            return _emit_wmma_phase(
+                A_smem,
+                B_smem,
+                acc,
+                lds_parity=p,
+                after_last_reads=_signal,
+                after_first_row=lambda: _refill(p, k_cur, refill),
+            )
+
+        # Prologue: tiles 0 and 1 into halves 0 and 1. Pair 1 consumes the
+        # prologue phase here, as if it had refilled half 1 after tile -1.
+        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
+        emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
+        b.s_wait_tensorcnt(0)
+        b.s_barrier_signal(sig_all)
+        with b.scf_if(b.cmp_eq(pair, c1)):
+            _wait()
+
+        # The loop runs an even number of tiles so every parity is static (a
+        # runtime-parity tail spills the steady state at the 256-VGPR budget).
+        # With an odd tile count the last tile lies past K: its descriptor's
+        # remaining-K extent is zero, the mover fills it with zeros, and its
+        # WMMAs add nothing.
+        n_tiles = b.div(b.sub(_k_upper, k_lo), c_block_k)
+        n_even = b.add(n_tiles, b.mod(n_tiles, c2))
+        n_pairs = b.div(b.sub(n_even, c2), c2)
+        k_pairs_end = b.add(k_lo, b.mul(n_pairs, bk2))
+        pairs = b.scf_for_iter(k_lo, k_pairs_end, bk2, list(accs), iv_name="k0")
+        with pairs as (k0, acc_iter):
+            acc = _tile(0, k0, list(acc_iter), refill=True)
+            acc = _tile(1, b.add(k0, c_block_k), acc, refill=True)
+            b.scf_yield(*acc)
+
+        # Tail: tile T-2 (half 0) has nothing left to refill; tile T-1 (half 1)
+        # raises no signal.
+        acc = _tile(0, k_pairs_end, list(pairs.results), refill=False)
+        _top_wait(1)
+        _for_results = _emit_wmma_phase(A_smem, B_smem, acc, lds_parity=1)
+
     def _emit_kloop_prefetch() -> None:
         """Software-pipelined K-loop with DTLA ping-pong.
 
@@ -2562,6 +2695,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     )
                 acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=i % nbuf)
             _for_results = acc
+            return
+
+        if spec.trait.tdm_early_refill:
+            _emit_kloop_tdm_early_refill()
             return
 
         # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
