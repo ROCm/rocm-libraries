@@ -308,6 +308,9 @@ struct CKArgs
                                   1.0f,
                                   0.0f,
                                   OutElementOp{0, ck::NumericLimits<DataType>::Max()});
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size > 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 

@@ -527,6 +527,7 @@ float launch_and_time_kernel_with_preprocess(const StreamConfig& stream_config,
         return 0;
     }
 #else
+    preprocess();
     kernel<<<grid_dim, block_dim, lds_byte, stream_config.stream_id_>>>(gemm_args, args...);
     hip_check_error(hipGetLastError());
 

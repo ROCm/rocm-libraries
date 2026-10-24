@@ -162,6 +162,9 @@ struct CKArgs
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
         auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
+        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+        if(workspace_size > 0)
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
@@ -340,7 +343,8 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                  false,
                                                  DeviceOpGFwdPtrs<T, TCompute>,
                                                  CKArgs,
-                                                 miopen::conv::DataInvokeParams>(
+                                                 miopen::conv::DataInvokeParams,
+                                                 true>(
                     *ctx, *problem, std::string(kernel_id));
             },
             [&](auto data_type_val, auto compute_type_val) {

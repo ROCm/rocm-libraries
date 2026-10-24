@@ -79,7 +79,7 @@ set(GROUPED_CONV2D_FWD_NHWGC
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
 )
 
-if((GPU_TARGETS MATCHES "gfx1250"))
+if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
 set_source_files_properties(wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
 endif()
 
