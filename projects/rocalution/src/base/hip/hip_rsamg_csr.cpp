@@ -741,6 +741,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::RSExtPIBoundaryNnz(const BaseVector<int>&  boundary,
                                                                 const BaseVector<int>&  CFmap,
@@ -850,6 +851,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::RSExtPIProlongNnz(

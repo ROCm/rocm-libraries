@@ -43,7 +43,7 @@
 #include <sstream>
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_START
+// COVERAGE_EXCL_NO_MPI_START
 #endif
 
 namespace rocalution
@@ -4659,5 +4659,5 @@ namespace rocalution
 } // namespace rocalution
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_STOP
+// COVERAGE_EXCL_NO_MPI_STOP
 #endif

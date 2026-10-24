@@ -8973,7 +8973,7 @@ namespace rocalution
         }
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void LocalMatrix<ValueType>::CompressAdd(const LocalVector<int64_t>&   l2g,
                                              const LocalVector<int64_t>&   global_ghost_col,
@@ -9068,7 +9068,7 @@ namespace rocalution
 #endif
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     void LocalMatrix<ValueType>::RSExtPIProlongNnz(int64_t                     global_column_begin,

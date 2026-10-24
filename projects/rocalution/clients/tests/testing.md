@@ -276,9 +276,11 @@ appears it should be tagged and ticketed.
 
 ## Coverage
 
-**Tool:** gcov/lcov. `-DBUILD_CODE_COVERAGE=ON` compiles with `-fprofile-arcs -ftest-coverage` and
-links `--coverage -lgcov` (via `install.sh --codecoverage`, which also sets `BUILD_SUPPORT_COMPLEX=OFF`
-and requires a Debug or RelWithDebInfo build).
+**Tool:** LLVM source-based coverage, as in rocSPARSE. `-DBUILD_CODE_COVERAGE=ON` requires a clang
+compiler and instruments the host code of `librocalution` and `librocalution_hip` with
+`-fprofile-instr-generate -fcoverage-mapping`; the device code is not instrumented. `install.sh
+--codecoverage` selects `amdclang++`, sets `BUILD_SUPPORT_COMPLEX=OFF` and requires a Debug or
+RelWithDebInfo build.
 
 **How to build and run:**
 
@@ -286,18 +288,22 @@ and requires a Debug or RelWithDebInfo build).
 ./install.sh -cg --codecoverage
 cd build/debug
 make coverage_cleanup coverage GTEST_FILTER='*'
-# targets: coverage_analysis -> coverage_output (lcov capture + filter + genhtml -> lcoverage/) -> coverage
+# targets: coverage_analysis (profraw) -> coverage (llvm-profdata merge, llvm-cov export,
+#          scripts/filter_lcov_exclusions.py, genhtml -> coverage-report/)
 ```
 
 `ROCALUTION_CODE_COVERAGE=1` is set for the coverage run; it enables coverage-specific parameter sets
-and is **required for `test_itersolver`** (skipped otherwise). lcov exclusions cover `src/utils/*`,
-`src/base/host/host_io.*`, `clients/*`, `build/*`, `/opt/*`, `/usr/*`. Jenkins `codecov.groovy`
-uploads `lcoverage/main_coverage.info`.
+and is **required for `test_itersolver`** (skipped otherwise). `scripts/filter_lcov_exclusions.py`
+applies the `LCOV_EXCL_*` markers and drops `src/utils/*`, `src/base/host/host_io.*`, `clients/*`,
+`/opt/*` and `/usr/*`. Code that only runs with more than one process (the global matrix and vector,
+the parallel manager and their backend helpers) is marked with `COVERAGE_EXCL_NO_MPI_START` /
+`COVERAGE_EXCL_NO_MPI_STOP` and only excluded in builds without MPI. Jenkins `codecov.groovy` uploads
+`coverage-report/coverage.info`.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
 * *Test coverage* = fraction of intended functionality exercised (solvers × preconditioners × formats
-  × backends × precisions × MPI). Host-side gcov does not capture the HIP device kernels, so measured
+  × backends × precisions × MPI). Host-only instrumentation does not capture the HIP device kernels, so measured
   code coverage understates GPU-path work; disabling complex under coverage also narrows scope.
 
 **Scope:** measured on Linux; Windows/complex coverage not tracked separately.
@@ -372,7 +378,7 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism | Medium | Medium | None; flaky tests handled ad-hoc |
-| Device-code coverage not captured; complex disabled under coverage | Medium | Medium | Host gcov only |
+| Device-code coverage not captured; complex disabled under coverage | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |
 | No TSAN/UBSAN/MSAN | Low | Medium | ASAN only |
 
