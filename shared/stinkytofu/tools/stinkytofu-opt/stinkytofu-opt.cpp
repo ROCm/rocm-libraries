@@ -346,6 +346,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
@@ -408,6 +414,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
@@ -453,6 +465,8 @@ int main(int argc, char** argv) {
     // triple-based getGfxArchID() first-matches v1. When the user names a stepping, resolve the
     // GfxArchID by identity instead. Empty => no name given, keep the legacy triple behavior.
     std::string resolvedArchName;
+    // Set by a `:xnack-` qualifier on --arch; see the target ID split below.
+    bool xnackReplayOff = false;
     int irFileIdx = 1;
     int passStartIdx = 2;
 
@@ -466,6 +480,28 @@ int main(int argc, char** argv) {
         }
 
         std::string archStr = argv[2];
+        // A target ID may carry qualifiers (gfx1250:xnack-), spelled as TensileLite and the
+        // hipBLASLt/hipSPARSELt builds spell them. A qualifier names a driver configuration, not
+        // a different architecture, so split it off before resolving the arch and let it stand in
+        // for the rocisa archCaps only TensileLite can supply. An unrecognized qualifier is an
+        // error rather than ignored: a typo that quietly left replay protection on would look
+        // exactly like a successful run.
+        const std::string archSpec = archStr;
+        if (const auto colon = archStr.find(':'); colon != std::string::npos) {
+            std::stringstream qualifiers(archStr.substr(colon + 1));
+            archStr = archStr.substr(0, colon);
+            std::string qualifier;
+            while (std::getline(qualifiers, qualifier, ':')) {
+                if (qualifier == "xnack-") {
+                    xnackReplayOff = true;
+                } else if (qualifier != "xnack+" && qualifier != "sramecc+" &&
+                           qualifier != "sramecc-") {
+                    std::cerr << "Error: Unknown target ID qualifier '" << qualifier << "' in '"
+                              << archSpec << "'. Supported: xnack+, xnack-, sramecc+, sramecc-\n";
+                    return 1;
+                }
+            }
+        }
         // Resolve by concrete identity name first so a stepping variant sharing a triple
         // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
         // not registered as an identity in this build (no assert), so a plain triple spelling
@@ -476,13 +512,13 @@ int main(int argc, char** argv) {
                     static_cast<int>(namedInfo->stepping)};
             resolvedArchName = archStr;
         } else if (!BackendRegistry::parseArchKey(archStr, arch)) {
-            std::cerr << "Error: Invalid architecture format '" << archStr
+            std::cerr << "Error: Invalid architecture format '" << archSpec
                       << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
             return 1;
         }
 
         if (!BackendRegistry::getArchPipeline(arch)) {
-            std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
+            std::cerr << "Error: Unsupported architecture '" << archSpec << "'\n";
             std::cerr << "Supported architectures:";
             for (const auto& key : BackendRegistry::getRegisteredArchKeys())
                 std::cerr << " " << key;
@@ -492,7 +528,7 @@ int main(int argc, char** argv) {
 
         irFileIdx = 3;
         passStartIdx = 4;
-        std::cout << "Target architecture: " << archStr << "\n";
+        std::cout << "Target architecture: " << archSpec << "\n";
     }
 
     std::string filename = argv[irFileIdx];
@@ -928,7 +964,7 @@ int main(int argc, char** argv) {
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
-            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0} && !xnackReplayOff;
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 

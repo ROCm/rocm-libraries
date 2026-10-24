@@ -59,7 +59,9 @@ create_device_library(
     TARGET tensilelite-device-libraries
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
-    ARCHES ${GPU_TARGETS}
+    # The unstripped targets: TensileCreateLibrary keys its capability overrides
+    # on the xnack suffix, which GPU_TARGETS has had removed for hip::device.
+    ARCHES ${TENSILELITE_GPU_TARGETS}
     ${_codegen_host_sanitizer_args}
     ${_codegen_product_args}
 )

@@ -510,6 +510,56 @@ def restore_prob_sol_map(logfile):
     return prob_sol_map
 
 
+def archNamesFromConfig(configArchitecture, isaList, archNames):
+    """``archNames`` after reading the config's ``Architecture:``.
+
+    ``Architecture:`` is read for the two things ``ISA:`` cannot express --
+    which stepping, and which target-ID qualifier -- and not for ISA selection.
+    It cannot replace a detected name: that would tune one stepping on the
+    other's hardware. Every entry is validated either way, so a typo is reported
+    rather than ignored.
+
+    Args:
+        configArchitecture: the config's ``Architecture:``, ``;``-separated.
+        isaList: the ISAs this run covers.
+        archNames: the names already settled on -- one, from device detection,
+            or none when only ``ISA:`` was given.
+
+    Raises:
+        ValueError: on an unrecognized name, or on a stepping of an ISA this run
+            does not cover.
+    """
+    nameCameFromDetection = bool(archNames)
+    for arch in str(configArchitecture).split(";"):
+        arch = arch.strip()
+        if not arch:
+            continue
+        isa = gfxToIsa(arch)
+        if isa is None or baseArchName(arch) not in architectureMap \
+                or baseArchName(arch) in ARCH_BUILD_ALIASES:
+            raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+        if nameCameFromDetection:
+            # A qualifier is not a stepping: gfx1250 and gfx1250:xnack- are one
+            # chip under two driver configurations, and the enumerator reads the
+            # hardware, so it reports the bare name either way -- the config is
+            # the only place that mode can be said. Let it qualify the
+            # architecture that was detected, and only that one, so naming a
+            # different architecture or stepping is still passed over rather
+            # than tuning one on the other's hardware.
+            if baseArchName(arch) == baseArchName(archNames[0]):
+                archNames[0] = arch
+            continue
+        if isa in isaList:
+            archNames.append(arch)
+        elif steppingArchOf(arch):
+            raise ValueError(
+                f"Architecture '{arch}' in config requests a stepping of ISA "
+                f"{tuple(isa)}, which this build does not cover ({isaList}); "
+                "align the config's ISA with it or drop the stepping."
+            )
+    return archNames
+
+
 ################################################################################
 # TensileLite
 # - below entry points call here
@@ -731,30 +781,10 @@ def Tensile(userArgs):
         isaList = [gfxToIsa(detected)]
         archNames = [detected]
 
-    # `Architecture:` is read for the one thing `ISA:` cannot express -- which
-    # stepping -- and not for ISA selection. It cannot override a detected name:
-    # that would tune one stepping on the other's hardware. It is still validated
-    # there, so a typo is reported rather than ignored.
     if not args.gpuTargets:
-        nameCameFromDetection = bool(archNames)
-        for arch in str(config["GlobalParameters"].get("Architecture", "")).split(";"):
-            arch = arch.strip()
-            if not arch:
-                continue
-            isa = gfxToIsa(arch)
-            if isa is None or baseArchName(arch) not in architectureMap \
-                    or baseArchName(arch) in ARCH_BUILD_ALIASES:
-                raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
-            if nameCameFromDetection:
-                continue
-            if isa in isaList:
-                archNames.append(arch)
-            elif steppingArchOf(arch):
-                raise ValueError(
-                    f"Architecture '{arch}' in config requests a stepping of ISA "
-                    f"{tuple(isa)}, which this build does not cover ({isaList}); "
-                    "align the config's ISA with it or drop the stepping."
-                )
+        archNames = archNamesFromConfig(
+            config["GlobalParameters"].get("Architecture", ""), isaList, archNames
+        )
 
     if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
         printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")
