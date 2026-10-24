@@ -677,7 +677,7 @@ public:
                    "seq_len tensors must hold one value per batch");
         }
 
-        std::vector<std::string> defines
+        const std::vector<std::string> defines
             = {std::string("-DQ_TYPE=") + detail::HipRtcTypeName<QDataType>::VALUE,
                std::string("-DK_TYPE=") + detail::HipRtcTypeName<KDataType>::VALUE,
                std::string("-DV_TYPE=") + detail::HipRtcTypeName<VDataType>::VALUE,
@@ -1053,7 +1053,7 @@ private:
     // Logit softcap (reference-only extension, SEM-020): finite and > 0 when given.
     static void validateSoftcap(std::optional<float> softcap)
     {
-        if(softcap.has_value() && !(softcap.value() > 0.0F && std::isfinite(softcap.value())))
+        if(softcap.has_value() && (softcap.value() <= 0.0F || !std::isfinite(softcap.value())))
         {
             throw std::invalid_argument("GpuFpReferenceSdpa: softcap must be finite and > 0");
         }

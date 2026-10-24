@@ -763,10 +763,10 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     auto q = makeTensor4D(2, 8, 16, 64);
     auto k = makeTensor4D(2, 2, 32, 64);
     auto v = makeTensor4D(2, 2, 32, 64);
-    const auto validate = [&](std::vector<int64_t> dims, DataType type, DataType io) {
+    const auto validate = [&](const std::vector<int64_t>& dims, DataType type, DataType io) {
         auto attrs = makeMinimalAttrs(q, k, v);
         auto sink = std::make_shared<TensorAttributes>();
-        sink->set_dim(std::move(dims)).set_data_type(type);
+        sink->set_dim(dims).set_data_type(type);
         attrs.set_sink_token(sink);
         GraphAttributes graphAttrs;
         graphAttrs.set_io_data_type(io);

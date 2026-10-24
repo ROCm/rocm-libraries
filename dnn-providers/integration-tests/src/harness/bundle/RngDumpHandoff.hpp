@@ -89,7 +89,7 @@ inline std::string checkRngDump(hipdnn_data_sdk::utilities::ITensor& dump, float
         return {};
     }
     const double keep = 1.0 - static_cast<double>(dropoutProbability);
-    const double n = static_cast<double>(count);
+    const auto n = static_cast<double>(count);
     const double rate = static_cast<double>(kept) / n;
     const double bound = 6.0 * std::sqrt(keep * (1.0 - keep) / n) + 1.0 / n;
     if(std::abs(rate - keep) > bound)

@@ -25,7 +25,6 @@
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
-using hipdnn_test_sdk::utilities::CpuFpReferenceValidation;
 using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
 using hipdnn_test_sdk::utilities::SdpaBwdOptions;
 using hipdnn_test_sdk::utilities::SdpaFwdOptions;
@@ -83,7 +82,7 @@ TEST(TestRaggedSdpaDensify, PackAndUnpackRoundTrip)
     std::vector<uint8_t> denseBytes(hipdnn_test_sdk::detail::raggedDenseBytes(q), 0);
     hipdnn_test_sdk::detail::copyRaggedTokens(
         q, offsets, lengths, reinterpret_cast<uint8_t*>(packed.data()), denseBytes.data(), true);
-    std::vector<float> expected = unpack(packed, Q_TOKENS, SQ, D);
+    const std::vector<float> expected = unpack(packed, Q_TOKENS, SQ, D);
     std::vector<float> got(expected.size());
     std::memcpy(got.data(), denseBytes.data(), denseBytes.size());
     EXPECT_EQ(got, expected);

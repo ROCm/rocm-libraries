@@ -920,7 +920,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
     spec = {};
     spec.withFullScaling().descaleS = false;
     EXPECT_FALSE(applicable(ocp, spec)) << "scale_s without descale_s";
-    for(auto SdpaGraphSpec::*field :
+    for(auto SdpaGraphSpec::*const field :
         {&SdpaGraphSpec::scaleO, &SdpaGraphSpec::amaxS, &SdpaGraphSpec::amaxO})
     {
         spec = {};

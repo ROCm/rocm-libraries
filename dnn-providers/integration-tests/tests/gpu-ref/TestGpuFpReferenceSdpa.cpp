@@ -1835,8 +1835,8 @@ TEST_P(TestGpuSdpaFwdPagedFp32, MatchesCpuReference)
         for(int64_t t = 0; t < tableSize; ++t)
         {
             // Shuffled block ids from 1; unused entries point at the null block 0.
-            const auto id
-                = static_cast<int32_t>(t < used ? ((nextBlock++ * 7) % (numBlocks - 1)) + 1 : 0);
+            const auto id = static_cast<int32_t>(
+                t < used ? ((static_cast<int64_t>(nextBlock++) * 7) % (numBlocks - 1)) + 1 : 0);
             pageTable.setHostValue(id, b, 0, t, 0);
         }
         for(int64_t j = 0; j < lensKv[static_cast<size_t>(b)]; ++j)

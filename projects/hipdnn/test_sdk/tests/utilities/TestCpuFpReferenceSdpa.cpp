@@ -2656,14 +2656,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = -1;
     constexpr int64_t RIGHT_BOUND = 0;
-    constexpr bool TOP_LEFT = false;
+    constexpr bool TOP_ANCHORED = false;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
@@ -2677,7 +2677,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -2685,7 +2685,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2719,14 +2719,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = 1;
     constexpr int64_t RIGHT_BOUND = 1;
-    constexpr bool TOP_LEFT = true;
+    constexpr bool TOP_ANCHORED = true;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
@@ -2740,7 +2740,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -2748,7 +2748,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2782,14 +2782,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = 2;
     constexpr int64_t RIGHT_BOUND = 1;
-    constexpr bool TOP_LEFT = false;
+    constexpr bool TOP_ANCHORED = false;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
@@ -2803,7 +2803,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -2811,7 +2811,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2845,14 +2845,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = 1;
     constexpr int64_t RIGHT_BOUND = 1;
-    constexpr bool TOP_LEFT = false;
+    constexpr bool TOP_ANCHORED = false;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS, SEQ_KV, HEAD_DIM});
@@ -2866,7 +2866,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -2874,7 +2874,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2909,14 +2909,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = -1;
     constexpr int64_t RIGHT_BOUND = 0;
-    constexpr bool TOP_LEFT = false;
+    constexpr bool TOP_ANCHORED = false;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
@@ -2930,7 +2930,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -2938,7 +2938,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -2973,14 +2973,14 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = 1;
     constexpr int64_t RIGHT_BOUND = 2;
-    constexpr bool TOP_LEFT = true;
+    constexpr bool TOP_ANCHORED = true;
 
     CpuFpReferenceSdpa::forward(
         q,
         k,
         v,
         o,
-        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
     Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
@@ -2994,7 +2994,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
         dQ,
         dK,
         dV,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
@@ -3002,7 +3002,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
             k,
             v,
             o,
-            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+            SdpaFwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
         return computeDotProductLoss(dO, o);
     };
 
@@ -3037,7 +3037,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
     const TensorBase<float>* noMask = nullptr;
     constexpr int64_t LEFT_BOUND = 1;
     constexpr int64_t RIGHT_BOUND = 1;
-    constexpr bool TOP_LEFT = true;
+    constexpr bool TOP_ANCHORED = true;
 
     // Forward pass with LSE and window mask
     CpuFpReferenceSdpa::forward(q,
@@ -3046,7 +3046,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
                                 o,
                                 SdpaFwdOptions<float>{}
                                     .setMask(noMask)
-                                    .setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT)
+                                    .setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED)
                                     .setLse(&lse));
 
     // Backward WITH LSE
@@ -3059,7 +3059,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
                                  dKWithLse,
                                  dVWithLse,
                                  SdpaBwdOptions<float>{}.setLse(&lse).setMask(noMask).setBand(
-                                     LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+                                     LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     // Backward WITHOUT LSE (recompute from scratch)
     CpuFpReferenceSdpa::backward(
@@ -3071,7 +3071,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
         dQNoLse,
         dKNoLse,
         dVNoLse,
-        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_LEFT));
+        SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
     const float tol = 1e-5f;
     for(int h = 0; h < 2; ++h)
@@ -3391,7 +3391,7 @@ TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
 {
     // The causalMask-bool convenience overload must forward descale tensors to the
     // primary (bounds) overload. causalMask=false maps to leftBound=-1/rightBound=-1/
-    // TOP_LEFT, so the two entry points must produce bit-identical output.
+    // TOP_ANCHORED, so the two entry points must produce bit-identical output.
     const int64_t batch = 1;
     const int64_t numHeads = 1;
     const int64_t seqQ = 2;

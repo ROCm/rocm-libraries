@@ -160,7 +160,7 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
             attrs.seq_len_kv_tensor_uid = SEQ_KV;
             attrs.padding_mask = true;
         }
-        node->attributes.Set(std::move(attrs));
+        node->attributes.Set(attrs);
     }
     else
     {
@@ -183,7 +183,7 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
             attrs.seq_len_kv_tensor_uid = SEQ_KV;
             attrs.padding_mask = true;
         }
-        node->attributes.Set(std::move(attrs));
+        node->attributes.Set(attrs);
     }
     graph.nodes.push_back(std::move(node));
     flatbuffers::FlatBufferBuilder builder;
@@ -235,7 +235,7 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink)
     auto node = std::make_unique<NodeT>();
     node->name = "sdpa";
     node->compute_data_type = DataType::FLOAT;
-    node->attributes.Set(std::move(attrs));
+    node->attributes.Set(attrs);
     graph.nodes.push_back(std::move(node));
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(Graph::Pack(builder, &graph));
