@@ -206,8 +206,7 @@ namespace rocalution
         }
 
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
 
         if(dev_prop.major < 3)
         {
@@ -290,27 +289,46 @@ namespace rocalution
     void rocalution_info_hip(const struct Rocalution_Backend_Descriptor& backend_descriptor)
     {
         // Print rocblas version
-        char rocblas_ver[64];
-        rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
+        char           rocblas_ver[64] = {};
+        rocblas_status blas_ver_status
+            = rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
 
-        LOG_INFO("rocBLAS ver " << rocblas_ver);
+        if(blas_ver_status == rocblas_status_success)
+        {
+            LOG_INFO("rocBLAS ver " << rocblas_ver);
+        }
+        else
+        {
+            LOG_INFO("rocBLAS ver unknown");
+        }
 
         // Print rocsparse versions
-        int rocsparse_ver;
-        rocsparse_get_version(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              &rocsparse_ver);
+        int              rocsparse_ver     = 0;
+        rocsparse_status sparse_ver_status = rocsparse_get_version(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), &rocsparse_ver);
 
-        char rocsparse_rev[64];
-        rocsparse_get_git_rev(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              rocsparse_rev);
+        char             rocsparse_rev[64] = {};
+        rocsparse_status sparse_rev_status = rocsparse_get_git_rev(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), rocsparse_rev);
 
-        LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
-                                  << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        if(sparse_ver_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver unknown");
+        }
+        else if(sparse_rev_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100);
+        }
+        else
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        }
 
         int num_dev;
 
-        DISCARD_HIP_ERROR(hipGetDeviceCount(&num_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceCount(&num_dev));
 
         if(_get_backend_descriptor()->HIP_dev >= 0)
         {
@@ -319,8 +337,7 @@ namespace rocalution
             LOG_INFO("Selected HIP device: " << backend_descriptor.HIP_dev);
 
             struct hipDeviceProp_t dev_prop;
-            DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
 
             // LOG_INFO("Device number: " << backend_descriptor.HIP_dev);
             LOG_INFO("Device name: " << dev_prop.name);                                        // char name[256];
@@ -390,8 +407,7 @@ namespace rocalution
     std::string rocalution_get_arch_hip(void)
     {
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
         return dev_prop.gcnArchName;
     }
 
@@ -499,32 +515,28 @@ namespace rocalution
 
     void rocalution_hip_sync(void)
     {
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
     }
 
     void rocalution_hip_sync_default(void)
     {
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_default))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
     }
 
     void rocalution_hip_sync_interior(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_interior))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 
     void rocalution_hip_sync_ghost(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_ghost))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 
