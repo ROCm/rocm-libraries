@@ -24,6 +24,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed failure of SYEVD/HEEVD and SYEVDX/HEEVDX for batch_count > 64 * 1024
 * Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
