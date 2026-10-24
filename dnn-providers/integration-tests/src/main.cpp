@@ -666,7 +666,8 @@ int main(int argc, char** argv) noexcept
             {
                 std::cerr << "Verified by: golden " << verifiers.golden << ", gpu_ref "
                           << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
-                          << ", none " << verifiers.none << "\n";
+                          << ", rejected " << verifiers.rejected << ", none " << verifiers.none
+                          << "\n";
             }
         }
 

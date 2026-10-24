@@ -190,13 +190,22 @@ public:
             }
             catch(...)
             {
-                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE, {});
                 throw;
             }
         }();
 
-        if(TestConfig::get().writeSupportClaims())
+        if(_deps.policy.writeSupportClaims)
         {
+            // An expected-rejection bundle carries no claim, so there is nothing to
+            // refresh. Counted as skipped before observation, like the SetUp() skips,
+            // so the run's graphsFound still reconciles against what was observed.
+            if(excludedFromClaims())
+            {
+                noteSkipBeforeObservation();
+                GTEST_SKIP() << "expected_rejection bundle: carries no support claim, so the "
+                                "authoring run (--write-support-claims) leaves it out";
+            }
             observeAndRecordSupport(session);
             GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
         }
@@ -208,12 +217,21 @@ public:
         VerificationOutcome outcome;
         try
         {
-            // Inside the try because a hand-edited sidecar that does not parse
-            // throws, and that is the class of fault the catch exists for.
-            claims = observeClaims(session);
+            if(isExpectedRejection())
+            {
+                // Never queried for claims, filled, executed or compared: the whole
+                // verdict is the engine's refusal.
+                outcome = expectedRejectionOutcome(session);
+            }
+            else
+            {
+                // Inside the try because a hand-edited sidecar that does not parse
+                // throws, and that is the class of fault the catch exists for.
+                claims = observeClaims(session);
 
-            auto claimOutcome = enforcedClaimFailure(claims.observation);
-            outcome = claimOutcome ? *claimOutcome : runComparison(session);
+                auto claimOutcome = enforcedClaimFailure(claims.observation);
+                outcome = claimOutcome ? *claimOutcome : runComparison(session);
+            }
         }
         catch(const std::exception& e)
         {
@@ -232,7 +250,8 @@ public:
                          shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
         // Before the disposition, which returns: a pass must say what it was compared
         // against, or "auto" landing on a reference is indistinguishable from a skip.
-        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
+        _deps.reporter->recordVerifier(
+            _bundlePath.string(), outcome.verifier, outcome.verifierDetail);
         reportOutcome(outcome);
     }
 
@@ -328,7 +347,8 @@ private:
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
     // The single definition of "this graph's claims are this run's business": an engine
-    // was named to check against, this is not an authoring run, and a sidecar exists.
+    // was named to check against, this is not an authoring run, the bundle is not kept
+    // out of claims (excludedFromClaims()), and a sidecar exists.
     // Deliberately free of the claim mode -- what a broken claim costs is
     // enforcedClaimFailure()'s question, and reading it here too would make a run that
     // cannot fail also unable to report.
@@ -336,13 +356,29 @@ private:
     // An authoring run skips every body before the claim check, so counting it would
     // leave bodies reached with none queried -- the shape the summary calls a harness
     // defect. Excluded here rather than at each counter, so the counters cannot drift.
+    // So is an expected-rejection bundle, which is never queried either; a sweep case
+    // shares its sidecar with claimed siblings, so the sidecar alone cannot tell.
+    // Registration's graphsWithClaims applies the same exclusion.
     //
     // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
     // call, a few times per test, and a run that named no engine must not pay.
     bool shouldObserveClaims() const
     {
-        return _engineUnderTest.has_value() && !TestConfig::get().writeSupportClaims()
-               && carriesSidecar();
+        return _engineUnderTest.has_value() && !excludedFromClaims()
+               && !_deps.policy.writeSupportClaims && carriesSidecar();
+    }
+
+    // Null-guarded because SetUp() reaches shouldObserveClaims() before it checks for
+    // a bundle.
+    bool excludedFromClaims() const
+    {
+        return _bundle != nullptr && excludedFromSupportClaims(_bundle->metadata);
+    }
+
+    // This bundle must be refused by the engine under test rather than run.
+    bool isExpectedRejection() const
+    {
+        return _bundle != nullptr && _bundle->metadata.expectedRejection;
     }
 
     // "There is a sidecar here", and nothing more -- no engine.
@@ -366,6 +402,12 @@ private:
     // accepted, not publish support nothing verified.
     VerificationDepth depthOwedByPass() const
     {
+        // An expected rejection is complete when the engine refuses the graph: it never
+        // runs, so owing it any depth would make every correct pass a shallow one.
+        if(isExpectedRejection())
+        {
+            return VerificationDepth::NOT_REACHED;
+        }
         return _deps.policy.skipGraphValidation ? VerificationDepth::APPLICABLE
                                                 : bundleRequiredDepth();
     }
@@ -407,6 +449,20 @@ private:
     // Verifies the bundle at the depth its enforcement_level asks for. Only
     // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
     VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
+
+    // The whole verdict for an expected_rejection bundle (see BundleMetadata): pinned
+    // to --test-engine, the engine must refuse the graph at ranked-list or plan-build
+    // time. Nothing is filled, executed or compared. A PASS says where the engine
+    // refused (VerificationOutcome::verifierDetail); a bundle that never reached an
+    // engine, or an engine that took it, FAILs.
+    VerificationOutcome expectedRejectionOutcome(GraphSession& session);
+
+    // A claim in this bundle's sidecar that names it, when the bundle is an expected
+    // rejection: an authoring error, because no engine may claim a graph every engine
+    // must reject. The sidecar of a sweep case is shared with its siblings, so only a
+    // claim naming this case counts, not the file's mere presence. Throws if the
+    // sidecar does not parse.
+    std::optional<std::string> expectedRejectionClaimError() const;
 
     /// A reference executor whose isApplicable() said it can take this graph.
     struct ResolvedReference
@@ -453,6 +509,14 @@ private:
     };
 
     static OracleChain resolveOracles(VerificationMode mode);
+    // Takes the references this bundle disables out of `chain`, noting each as
+    // declined so a failure message still says why it was not tried.
+    void dropDisabledReferences(OracleChain& chain) const;
+    // The disabled-reference outcomes decided before inputs are filled or the engine
+    // runs: an explicit --verification-mode naming a reference the bundle disables,
+    // and a bundle that disables both whose golden data is not on disk. nullopt when
+    // neither applies.
+    std::optional<VerificationOutcome> disabledReferenceSkip() const;
     // Creates `type`'s executor and asks isApplicable(). If it cannot be used, notes
     // why in the chain and returns nothing.
     std::optional<ResolvedReference> probeReference(OracleChain& chain, ReferenceExecutorType type);

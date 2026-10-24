@@ -56,12 +56,35 @@ struct BundleMetadata
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
+
+    /// The bundle opts out of the CPU / GPU reference executor as an oracle. A
+    /// disabled reference is never created or probed. Disabling both requires
+    /// golden data to be declared: nothing else could ever verify the bundle.
+    bool noCpuReference = false;
+    bool noGpuReference = false;
+
+    /// The bundle is invalid on purpose: the engine under test must reject it, at
+    /// ranked-list or plan-build time. Never executed, never compared, and carries
+    /// no support claim (see excludedFromSupportClaims()).
+    bool expectedRejection = false;
 };
+
+/// An expected-rejection bundle is deliberately kept out of support claims, the
+/// support matrix and coverage: no engine may claim a graph that every engine must
+/// reject. The one definition, read by the harness's claim observation, by
+/// registration's claim counters, and by the authoring run (--write-support-claims),
+/// so the three cannot drift.
+inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
+{
+    return metadata.expectedRejection;
+}
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
-/// a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
-/// valid JSON. An authoring error,
+/// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
+/// a non-numeric `inputs` key, a flag combination that contradicts the bundle's
+/// golden data, or (for a .meta.json file) unreadable or not valid JSON. An
+/// authoring error,
 /// never a "metadata not recorded" case, so it must not degrade to defaults.
 class BundleMetadataError : public std::runtime_error
 {
@@ -74,7 +97,8 @@ public:
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries an unsupported format version, has an invalid
-/// `enforcement_level`, or has an `inputs` key that is not a tensor UID.
+/// `enforcement_level`, has a reference/rejection flag that is not a boolean, or
+/// has an `inputs` key that is not a tensor UID.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -132,6 +156,24 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     meta.notes = readString("notes");
     meta.seed = readInt64("seed");
     meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+    // The three flags are strict booleans. Absent means false; a string, a number
+    // or a null is an authoring error, because "yes" quietly reading as false would
+    // leave the bundle verified by the reference it meant to switch off.
+    auto readFlag = [&](const char* key) -> bool {
+        if(!json.contains(key))
+        {
+            return false;
+        }
+        if(!json[key].is_boolean())
+        {
+            throw BundleMetadataError(where + " has invalid " + key + " (not a boolean)");
+        }
+        return json[key].get<bool>();
+    };
+    meta.noCpuReference = readFlag("no_cpu_reference");
+    meta.noGpuReference = readFlag("no_gpu_reference");
+    meta.expectedRejection = readFlag("expected_rejection");
 
     // enforcement_level: absent leaves the default Full (set above). Present
     // but not one of the three valid tokens throws (like an invalid

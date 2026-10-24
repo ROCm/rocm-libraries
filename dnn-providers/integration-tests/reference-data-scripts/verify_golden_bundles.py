@@ -16,6 +16,8 @@ from typing import Callable
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
+REFERENCE_DISABLE_FLAGS = ("no_cpu_reference", "no_gpu_reference")
+BOOLEAN_METADATA_FLAGS = (*REFERENCE_DISABLE_FLAGS, "expected_rejection")
 
 MIN_TIERED_BUNDLE_SEGMENTS = 6
 
@@ -238,6 +240,73 @@ def validate_metadata_fields(
             result.error(
                 path, f"{prefix}{key} is required and must be a non-empty string"
             )
+    for key in BOOLEAN_METADATA_FLAGS:
+        if key in metadata and not isinstance(metadata[key], bool):
+            result.error(path, f"{prefix}{key} must be a boolean")
+
+
+def validate_reference_flags_require_golden(
+    metadata: dict,
+    golden_declared: bool,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+) -> None:
+    # An expected rejection ignores the reference flags: nothing is ever compared.
+    if metadata.get("expected_rejection") is True:
+        return
+    if (
+        all(metadata.get(key) is True for key in REFERENCE_DISABLE_FLAGS)
+        and not golden_declared
+    ):
+        result.error(
+            path,
+            f"{prefix}disables both references (no_cpu_reference and "
+            "no_gpu_reference) but declares no golden data; add golden data or "
+            "enable a reference",
+        )
+
+
+def validate_expected_rejection_has_no_golden(
+    metadata: dict,
+    golden_declared: bool,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+) -> None:
+    if metadata.get("expected_rejection") is True and golden_declared:
+        result.error(
+            path,
+            f"{prefix}is an expected_rejection bundle but declares golden data; "
+            "it is never executed, so there is nothing to compare against",
+        )
+
+
+def single_graph_golden_declared(directory: Path, stem: str) -> bool:
+    """Mirror the C++ loader: the `.tensors.dvc` pointer, or a blob for every output.
+
+    Input-only or partial output blobs do not declare golden data. A graph that
+    cannot be read declares only through its pointer (the graph check reports it).
+    """
+    if (directory / f"{stem}.tensors.dvc").is_file():
+        return True
+    try:
+        graph = json.loads((directory / f"{stem}.json").read_text())
+        nodes = graph["nodes"]
+        virtual = {
+            tensor["uid"]
+            for tensor in graph["tensors"]
+            if isinstance(tensor, dict) and tensor.get("virtual") is True
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not isinstance(nodes, list):
+        return False
+    output_uids = extract_output_tensor_uids(nodes, directory, VerificationResult())
+    output_uids -= virtual
+    return bool(output_uids) and all(
+        (directory / f"{stem}.tensor{uid}.bin").is_file() for uid in output_uids
+    )
 
 
 def validate_metadata(path: Path, result: VerificationResult) -> None:
@@ -252,6 +321,14 @@ def validate_metadata(path: Path, result: VerificationResult) -> None:
         return
 
     validate_metadata_fields(metadata, path, result)
+
+    if path.name.endswith(".meta.json") and path.name != "meta.json":
+        stem = path.name[: -len(".meta.json")]
+        golden_declared = single_graph_golden_declared(path.parent, stem)
+        validate_reference_flags_require_golden(metadata, golden_declared, path, result)
+        validate_expected_rejection_has_no_golden(
+            metadata, golden_declared, path, result
+        )
 
 
 def is_integer(value: object) -> bool:
@@ -1140,6 +1217,27 @@ def validate_sweep_case(
                     )
                 else:
                     golden_dir = golden_path.parent
+
+    if isinstance(metadata, dict):
+        golden_path_declared = (
+            isinstance(golden, dict)
+            and isinstance(golden.get("path"), str)
+            and bool(golden["path"])
+        )
+        validate_reference_flags_require_golden(
+            metadata,
+            golden_path_declared,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' ",
+        )
+        validate_expected_rejection_has_no_golden(
+            metadata,
+            golden_path_declared,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' ",
+        )
 
     if case_id is not None:
         advisory = derive_sweep_advisory(sweep_path, case_id, result, default_tier)

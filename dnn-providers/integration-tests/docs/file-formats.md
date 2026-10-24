@@ -16,7 +16,7 @@ dnn-providers/integration-tests/
       {Op}/{Layout}/{DataType}/{Name}/      # a single-graph bundle
         {Name}.json                         #   graph
         {Name}.meta.json                    #   metadata sidecar         (required)
-        {Name}.support.json                 #   support-claim sidecar    (required)
+        {Name}.support.json                 #   support-claim sidecar    (required; none for an expected-rejection bundle)
         {Name}.tensors.dvc                  #   golden-data pointer      (optional)
         {Name}.tensor<uid>.bin              #   golden tensors, via DVC  (not in git)
       {Op}/{Topology}/                      # a template-sweep bundle
@@ -44,7 +44,9 @@ Terms (full list in the [index](README.md#terms)):
   one case per `cases[]` entry.
 
 Every bundle carries its graph, its **metadata**, and a **support-claim
-sidecar**. Golden data is the only optional part.
+sidecar**. Golden data is the only optional part. An
+[expected-rejection bundle](#expected-rejection-bundles) is the exception: it
+carries no support claim and no golden data.
 
 ## Discovery and test names
 
@@ -196,7 +198,7 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 | `cases[]` | yes | One test per entry. |
 | `cases[].id` | yes | Non-empty string, unique within the sweep. Becomes the GTest test name. |
 | `cases[].values` | no | Placeholder values; `values.tensors[]` holds per-tensor values keyed by `uid` (each `uid` must exist in the template, once). |
-| `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson). A case without it fails to load. |
+| `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson), including `no_cpu_reference`, `no_gpu_reference` and `expected_rejection`. A case without it fails to load. For rule R4, the `golden` object with a `path` of the same case counts as declared golden data. A case with `expected_rejection: true` must not have a `golden` object: that is a load error ([details](#expected-rejection-bundles)). |
 | `cases[].golden` | no | `{"path": "golden/<CaseId>/tensors.dvc"}`. If absent or `null`, the case is graph-only. If present without a string `path`, it is an error. |
 | `cases[].tensor_patches` | no | Structural per-tensor edits applied after placeholder expansion; see below. |
 
@@ -236,11 +238,14 @@ parses it.
 | Field | Type | Effect |
 |---|---|---|
 | `format_version` | int | **Required, must be `1`.** Otherwise the whole metadata object is rejected. |
-| `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. |
+| `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
 | `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
+| `no_cpu_reference` | bool | Default `false`. `true`: the CPU reference executor is not an oracle for this bundle. A non-boolean value (`"yes"`, `1`, `null`) rejects the metadata. See [Disabling a reference oracle](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference). |
+| `no_gpu_reference` | bool | Default `false`. `true`: the GPU reference executor is not an oracle for this bundle. Same type rule. If both flags are `true`, the bundle must declare golden data (rule R4). |
+| `expected_rejection` | bool | Default `false`. `true`: the graph is invalid on purpose and the engine under test must reject it. The harness never executes or compares it. A non-boolean value rejects the metadata. Overrides `enforcement_level`; `no_cpu_reference`, `no_gpu_reference`, `seed` and `inputs` are ignored. See [Expected-rejection bundles](#expected-rejection-bundles). |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
@@ -253,11 +258,99 @@ A bundle without its metadata is an error. These fields are required:
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
 
+### Disabling a reference oracle — `no_cpu_reference` and `no_gpu_reference`
+
+Set a flag to `true` when the matching reference executor must not grade this
+bundle. The flags are valid in `{Name}.meta.json` and in the `metadata` of a
+sweep case. An absent flag is `false`. A value that is not a JSON boolean is a
+metadata error: the bundle registers as a **failing** test whose message names
+the file or case.
+
+| Run | Effect |
+|---|---|
+| `--verification-mode=auto` | The oracle chain stays golden data → GPU reference → CPU reference. The harness never creates or probes a disabled reference. If no oracle verifies the bundle, the failure message lists the disabled one as `<CPU\|GPU> reference (disabled by bundle metadata)`. |
+| `--verification-mode=cpu` with `no_cpu_reference`, or `gpu` with `no_gpu_reference` | The test **skips** before the engine runs. The message names the flag. |
+| Both flags `true`, golden data declared but not pulled (no `.bin` on disk) | The test **skips** with `golden data not pulled; bundle disables both references`, before it fills inputs or runs the engine. `--verification-mode=golden` still **fails** on missing golden data. |
+
+**Rule R4: if both flags are `true`, the bundle must declare golden data.**
+Otherwise nothing could ever verify it. "Declared" means:
+
+- **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or a golden
+  blob `{Name}.tensor<uid>.bin` exists for every non-virtual output.
+- **Sweep case:** the case has a `golden` object with a `path`.
+
+A violation throws `BundleMetadataError` at load, so the bundle's test is red.
+`reference-data-scripts/verify_golden_bundles.py` reports it as an error. The
+flags affect `hipdnn_integration_tests` and the lanes of
+`hipdnn_golden_data_tests`; see [Running the Tests](running-tests.md#verification-modes)
+and [Disable a reference for a bundle](adding-tests.md#disable-a-reference-for-a-bundle).
+
+### Expected-rejection bundles
+
+Set `expected_rejection` to `true` when the graph is invalid on purpose and the
+engine under test must **reject** it. The field is valid in `{Name}.meta.json`
+and in the `metadata` of a sweep case. An absent field is `false`. A value that
+is not a JSON boolean is a metadata error: the bundle registers as a **failing**
+test whose message names the file or case.
+
+The harness never fills inputs, executes the graph, compares outputs, or needs
+golden data. The outcome depends on the run:
+
+| Run | Outcome |
+|---|---|
+| Lane pinned with `--test-engine X` (every CI lane pins one) | **Pass** when the ranked-engine query resolved (`OK` or `GRAPH_NOT_SUPPORTED`) and X is not in the ranked list, or when X is ranked but plan build (`create_execution_plans`, `check_support`, `build_plans`) declines or fails. **Fail** with `Engine X accepted expected-rejection bundle <path>: it is ranked and its plans build` when the plans build. **Fail** when the ranked query did not resolve (acceptance is unknown, so the bundle cannot pass). **Fail** when graph deserialization (`from_binary`) failed: `expected-rejection bundle never reached an engine`. |
+| No `--test-engine` | **Skip** as unverifiable: `expected_rejection requires --test-engine`. |
+
+Every lane pins its own engine, so the per-lane runs together cover every
+engine. A lane whose engine has no support for the op rejects **vacuously**: the
+graph is absent from its ranked list. The stage that a pass reports is described
+in [Running the Tests](running-tests.md#expected-rejection-bundles).
+
+Rules:
+
+- **Ignored fields.** `enforcement_level`, `no_cpu_reference`, `no_gpu_reference`,
+  `seed` and `inputs` have no effect on such a bundle.
+- **`--skip-graph-validation` does not cap it.** The plans are compiled, never
+  executed, so the flag changes nothing.
+- **No golden data.** Golden data next to an expected-rejection bundle is a load
+  error (`BundleMetadataError`), so its test is red.
+  `reference-data-scripts/verify_golden_bundles.py` reports it as an error.
+  "Next to" means:
+  - **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or a golden
+    blob `{Name}.tensor<uid>.bin` exists for every non-virtual output.
+  - **Sweep case:** the case has a `golden` object.
+- **The invalidity must be engine-visible, not schema-level.** The engine can
+  reject only a bundle that loads. A bundle whose JSON or graph cannot load is a
+  **red** `Failed to load expected_rejection bundle …` test (the message starts
+  with that text, then gives the reason), not a silent skip. A graph that loads
+  but fails `from_binary` also fails. Pick a property that the engine checks
+  (see [Add an expected-rejection bundle](adding-tests.md#add-an-expected-rejection-bundle)).
+- **No support claim.** An expected-rejection bundle carries none. A non-empty
+  claim that names it is an authoring error: any engine claim in
+  `{Name}.support.json` of a single graph, or a claim group in a sweep's
+  `support.json` whose `cases` lists the case id. The C++ test fails, and
+  `scripts/verify_support_claims.py` reports an error. A sidecar that is merely
+  present is not an error for a sweep, because its cases share `support.json`.
+  An unclaimed expected-rejection case inside a claimed sweep is fine. The bundle
+  or case is outside the claim model; see
+  [Support Claim Enforcement](support-claim-enforcement.md#expected-rejection-bundles-are-outside-the-claim-model).
+
+Checked-in example: `integration-test-bundles/quick/Matmul/ncl/fp32/ExpectedRejectionMatmulBatchMismatch/ExpectedRejectionMatmulBatchMismatch.json`
+(with its `.meta.json`; no sidecar, no golden data). It is a rank-3 fp32 Matmul
+copied from a hipBLASLt-claimed `quick/Matmul/Default` case, with the batch
+dimension of B changed from 1 to 2 (A and C have 3), which is invalid per the
+Matmul contract. hipBLASLt refuses it (`Unsupported input matrix batch
+dimensions`), so it drops the graph from its ranked list. The claimed valid twin
+(sweep case `3_16_128_fp32_ncl_6d8970`) passing in the same lane is the positive control. The other
+lanes (MIOpen, hip-kernel) have no Matmul support, so they reject vacuously.
+
 ## Golden data — `.tensors.dvc` and `.bin`
 
 Golden tensors are optional. A bundle without them is **graph-only** and is
 verified against the GPU or CPU reference executor instead. See
-[Verification modes](running-tests.md#verification-modes).
+[Verification modes](running-tests.md#verification-modes). A bundle that disables
+both references must declare golden data
+([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)).
 
 - **Single graph:** `{Name}.tensor<uid>.bin`, one per tensor, all listed in one
   `{Name}.tensors.dvc` pointer.
@@ -554,9 +647,10 @@ execution_settings:
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
 | `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph |
-| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
-| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles, but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |
-| Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode; fails in `golden` mode. A blob that is unreadable or has the wrong size fails the test that needs it, when that test runs |
+| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
+| `expected_rejection` bundle or case | `BundleMetadata.hpp` at load; the harness at run time; `reference-data-scripts/verify_golden_bundles.py`; `scripts/verify_support_claims.py` | `enforcement_level` and the oracle fields do not apply (it overrides them). Golden data next to it is a load error (`BundleMetadataError`) and a verifier error. A support claim that names it fails the C++ test and is a verifier error. A bundle that does not load is a red `FailedLoad` test, not a dropped case. [Details](#expected-rejection-bundles) |
+| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles (not for an expected-rejection bundle), but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |
+| Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode, except one that the bundle metadata disables; fails in `golden` mode. A blob that is unreadable or has the wrong size fails the test that needs it, when that test runs |
 | Engine `.toml` | `TestSettings.hpp` | Binary exits 1 at startup |
 | `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake **warning** at configure; that target's tier suites are not generated, so `ctest -L <tier>` runs fewer tests, with no other notice. Check the configure log or `ctest -N -L <tier>` |
 
