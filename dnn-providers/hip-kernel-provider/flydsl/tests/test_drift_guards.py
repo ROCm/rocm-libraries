@@ -19,6 +19,7 @@ tests read the product pack this build produced, which CMake names through
 
 from __future__ import annotations
 
+import csv
 import functools
 import hashlib
 import json
@@ -45,6 +46,7 @@ sys.path.insert(0, str(PROVIDER / "descriptor-packaging" / "python"))
 from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
+REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
 # ELF64 header offset of e_flags, and its EF_AMDGPU_MACH field.
 E_FLAGS_OFFSET = 48
 EF_AMDGPU_MACH = 0x0FF
@@ -248,6 +250,33 @@ def test_check_refuses_a_descriptor_the_authoring_validator_rejects(
     # the whole content tree, can refuse it.
     (content / "orphan.uhd.json").write_text("{}\n", encoding="utf-8")
     _refused(_check(content), "descriptor validation failed")
+
+
+def test_merged_pins_are_the_reference_pins() -> None:
+    # A re-pinned sha256 under an unchanged Spec does not change the op's inputs digest,
+    # so --check cannot stale the shipped descriptors; this compares them with the reference.
+    manifests = sorted(CONTENT.glob(f"sdpa_bwd_merged/gfx*/{MANIFEST_NAME}"))
+    if not manifests:
+        pytest.skip(f"no sdpa_bwd_merged content under {CONTENT}")
+    with REFERENCE_CSV.open(newline="", encoding="utf-8") as handle:
+        reference = {
+            row["spec"]: row["sha256"]
+            for row in csv.DictReader(handle)
+            if row["spec"].startswith("merged,")
+        }
+    for path in manifests:
+        shipped = {
+            record["spec"]: record["pin_sha256"]
+            for record in json.loads(path.read_text(encoding="utf-8"))["instances"]
+        }
+        stale = [
+            f"{spec}: {path.parent.name} ships pin {sha}, reference {reference.get(spec)}"
+            for spec, sha in shipped.items()
+            if reference.get(spec) != sha
+        ]
+        missing = sorted(set(reference) - set(shipped))
+        assert not stale, "pins differ from the reference:\n" + "\n".join(stale)
+        assert not missing, f"{path.parent.name} ships no pin for: {missing}"
 
 
 # ---------------------------------------------------------------------------
