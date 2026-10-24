@@ -314,8 +314,20 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
+        # The gfx942 3D kernel has no i64 path; its K/V loader sets the cache it
+        # reads. The wide loader reads 2^31 bytes (65536 of these 32 KiB
+        # blocks), the async copies stop at the 0x7FFF0000 buffer range.
+        wide = next(s for s in gfx942_split_specs if s.kernel_spec.use_wide_kv_load)
+        not_wide = next(
+            s for s in gfx942_split_specs if not s.kernel_spec.use_wide_kv_load
+        )
+        for n in (65535, 65536):
+            self.assertFalse(wide.with_num_kv_blocks(n).kernel_spec.use_i64_kv_addr)
         with self.assertRaisesRegex(NotImplementedError, "does not support"):
-            gfx942_split_specs[0].with_num_kv_blocks(65535)
+            wide.with_num_kv_blocks(65537)
+        self.assertFalse(not_wide.with_num_kv_blocks(65534).kernel_spec.use_i64_kv_addr)
+        with self.assertRaisesRegex(NotImplementedError, "does not support"):
+            not_wide.with_num_kv_blocks(65535)
 
         # The 4-warp GQA builder has no i64 path either, but shares its spec
         # class with the default builder. Its i32 element offsets read 2^31
