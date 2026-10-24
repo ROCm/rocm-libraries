@@ -1706,6 +1706,26 @@ hipDataType derive_unset_aux_type(const Arguments& arg)
     return real_aux_type;
 }
 
+// Fills the single scaleC or scaleD value. fnuz fp8 outputs get a small random scale so a scaled
+// D stays inside the narrow fnuz range. Under integer_exact they get exact_value instead, since
+// fast_check needs integer scales; it is small enough not to saturate integer_exact data.
+inline void init_scale_cd(void*            scale,
+                          hipDataType      Talpha,
+                          hipDataType      To,
+                          const Arguments& arg,
+                          int              exact_value)
+{
+    const bool fnuz_out = To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ;
+    if(!fnuz_out)
+        hipblaslt_init(scale, 1, 1, 1, Talpha);
+    else if(arg.initialization == hipblaslt_initialization::integer_exact && Talpha == HIP_R_32F)
+        *static_cast<float*>(scale) = float(exact_value);
+    else if(arg.initialization == hipblaslt_initialization::integer_exact && Talpha == HIP_R_64F)
+        *static_cast<double*>(scale) = double(exact_value);
+    else
+        hipblaslt_init_small(scale, 1, 1, 1, Talpha);
+}
+
 // A function to determine the default compute_input_type
 std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg)
 {
@@ -3548,28 +3568,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             if(arg.scaleC)
-            {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-            }
+                init_scale_cd(hScaleC[i].buf(), Talpha, To, arg, 2);
 
             if(arg.scaleD)
-            {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-            }
+                init_scale_cd(hScaleD[i].buf(), Talpha, To, arg, 1);
 
             if(arg.amaxD)
                 hipblaslt_init_zero(hAmaxD_gold[i].buf(), 1, 1, 1, Talpha);
@@ -4032,28 +4034,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
             }
             if(arg.scaleC)
-            {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleC[i].buf(), 1, 1, 1, Talpha);
-                }
-            }
+                init_scale_cd(hScaleC[i].buf(), Talpha, To, arg, 2);
 
             if(arg.scaleD)
-            {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
-                {
-                    hipblaslt_init_small(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-                else
-                {
-                    hipblaslt_init(hScaleD[i].buf(), 1, 1, 1, Talpha);
-                }
-            }
+                init_scale_cd(hScaleD[i].buf(), Talpha, To, arg, 1);
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
                 if(arg.amaxScaleA && (arg.a_type == HIP_R_32F || arg.a_type == HIP_R_16F))

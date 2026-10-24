@@ -359,7 +359,7 @@ reference with an exact probe check of every element of D (see
 | A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
 | B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
 | bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
-| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`). The exception is scaleC and scaleD for fnuz fp8 and bf8 outputs, which other initializations fill with 0.1 to 1.0 to keep D in the narrow fnuz range; under integer_exact they are 2 and 1, so fast_check can check them |
 | E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
 
 Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
@@ -376,6 +376,23 @@ host, so the large-K cases pick the pattern by output type:
 | bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
 | fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
 | int8 | saturates; each saturated result is recomputed | `sparse_k` |
+
+A configuration fast_check cannot check exactly, such as complex data or a result past the exact
+range, is reported by `hipblaslt-test` as a failure with the reason, not as a skip. Tools that run
+many fast_check cases, such as the kernel corpus tester below, set those apart from wrong answers.
+
+**Testing every shipped kernel (kernel corpus).** The client suite reaches kernels only through the
+selection heuristic, usually its first pick, so most of the kernels in a shipped library never run
+in any test. Libraries hold from about 2,100 solutions (gfx1100) to about 360,000 (gfx942). The
+kernel corpus tester in [`clients/scripts/kernel_corpus/`](clients/scripts/kernel_corpus/) reads
+every solution from an installed library, builds up to four small problems from each solution's tile
+sizes, and runs each one through `hipblaslt-test` with that solution pinned by index and fast_check
+as the oracle. It tests installed binaries, such as a TheRock CI run's artifacts, with nothing
+rebuilt. A crash, GPU memory fault or hang ends only the case that caused it. Today it runs by hand
+on a GPU cluster and not in CI; the plan for CI lanes is tracked in
+[AIHPBLAS-3894](https://amd-hub.atlassian.net/browse/AIHPBLAS-3894). Its first pass found kernels
+that fault the GPU on gfx90a (ROCM-33314) and kernels that return wrong answers on gfx942 and
+gfx950.
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
@@ -1299,6 +1316,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates, at the cost of slow feedback | AIHPBLAS-5033 |
+| Most shipped kernels never run in CI: the client suite reaches them only through the selection heuristic, so a kernel the heuristic seldom picks can be wrong for months, and a retune can expose it to users | Medium | High | The kernel corpus tester runs each kernel it can build problems for (epilogue, grouped and MX kernels are deferred), by hand on a GPU cluster; it is not in CI yet | AIHPBLAS-3894 |
 | Address, index, and launch-size arithmetic past 32-bit thresholds is not tested systematically. Several defects of this kind returned success with wrong or partly unwritten output | Medium | High | Targeted large-size regression tests for individual past defects | AIHPBLAS-4988 |
 | Nothing tests the public API itself: no test compiles the public headers from a C translation unit or with more than one toolchain, or checks public macro and type names, so several API breaks were found by users first | Medium | Medium | The client suite exercises the API through C++ only | AIHPBLAS-3579 |
 | No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
