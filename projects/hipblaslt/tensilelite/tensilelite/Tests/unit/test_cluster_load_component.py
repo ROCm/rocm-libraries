@@ -205,7 +205,8 @@ class TestDeclareUndeclare:
 
     @pytest.mark.parametrize("sparse", [1, 2])
     @pytest.mark.parametrize("strategy,cluster_dim", [
-        ("DataParallel", (4, 1)), ("DataParallel", (2, 2)), ("StreamK", (2, 2))])
+        ("DataParallel", (4, 1)), ("DataParallel", (2, 2)),
+        ("StreamK", (4, 1)), ("StreamK", (2, 2))])
     def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim, strategy):
         # Sparse metadata descriptors are rebuilt for each persistent tile just
         # like A/B descriptors. A freed mask can be overwritten by store scratch
@@ -228,12 +229,8 @@ class TestDeclareUndeclare:
         assert w.undefined == []
 
     def test_undeclare_keeps_maskB_live_frees_selfonly_maskA_under_pap(self):
-        # The broadcast mask (MulticastMaskB) is re-applied on every
-        # persistent-loop TDM refresh, so it must stay live past the prologue;
-        # freeing it makes those reuses reference an undeclared SGPR (assembly
-        # failure). With Ck == 1 the A mask is self-only and is still freed so the
-        # kernel stays within the 106-SGPR budget (at 107 SGPRs the kernel is
-        # replaced by an s_endpgm stub and the output is left unwritten).
+        # Keep B live for descriptor refresh; free self-only A to stay within
+        # the SGPR budget and avoid replacement by an s_endpgm stub.
         w = _StubWriter()
         _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA"]
@@ -247,12 +244,17 @@ class TestDeclareUndeclare:
             w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
         assert w.undefined == []
 
-    def test_undeclare_keeps_maskB_live_without_pap(self):
-        # PAP off: every persistent tile still re-emits the TDM descriptor setup,
-        # so the broadcast mask stays live and only the self-only A mask is freed.
-        w = _StubWriter()
-        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)))
-        assert w.undefined == ["MulticastMaskA"]
+    def test_streamk_refresh_keeps_b_masks_and_omits_freed_a_masks(self):
+        w, component = _StubWriter(), _c()
+        kernel = _kernel(streamKMulticast=True, clusterDim=(2, 1), mx=True)
+        kernel["StreamKForceDPOnly"] = 0
+        component.declareSgprs(w, kernel)
+        component.undeclareSgprs(w, kernel)
+        assert {name for name, _ in w.defined} - set(w.undefined) == {"MulticastMaskB"}
+        for tc in ("A", "B", "MXSA", "MXSB"):
+            refresh = str(component.applyToDescriptor(w, kernel, f"tdm{tc}Group1", tc))
+            assert ("s[sgprMulticastMaskB]" in refresh) == tc.endswith("B")
+            assert "s[sgprMulticastMaskA]" not in refresh
 
 
 # --- computeMasks emitted asm ----------------------------------------------
