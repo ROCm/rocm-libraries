@@ -90,6 +90,9 @@ _SWA_COHORT = [
     ("bf16", 64, 16, 4, True, 128, None),
     ("bf16", 128, 16, 4, False, 128, 1.0),
     ("bf16", 64, 16, 4, True, 128, 1.0),
+    # W well past block_m: non-empty mask-free middle phase of the band loop.
+    ("bf16", 128, 16, 4, False, 512, None),
+    ("fp16", 128, 16, 4, True, 512, None),
 ]
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal): full-sink

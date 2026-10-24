@@ -2002,8 +2002,13 @@ def _build_attention_dense_single_buffer(
             # causal path (where it is the causal bound); the arg is kept for
             # signature parity with the gfx950 do_mask, which does use upper=False.
             # masked=False only for below-diagonal tiles of the diagonal split.
-            if masked:
+            if masked is True:
                 do_mask(s, j, lower=(SW > 0), upper=True)
+            elif masked:
+                # (lower, upper) pair from the sliding-window phase split.
+                lower, upper = masked
+                if lower or upper:
+                    do_mask(s, j, lower=lower, upper=upper)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
@@ -2122,6 +2127,47 @@ def _build_attention_dense_single_buffer(
             )
             with loop as (j, carry):
                 tile_body(j, carry, masked=True)
+        elif causal and SW and SWt >= n_per:
+            # Sliding-window band loop split in three phases when the window spans
+            # the query block (SWt >= n_per):
+            #   L: [start_tile, mid_lo)  window-edge tiles: window bound only (every
+            #                            key is below the block's first query)
+            #   M: [mid_lo, mid_hi)      interior: mask-free
+            #   R: [mid_hi, n_up)        diagonal tiles: causal bound only (every key
+            #                            is at or past the block's first query, so
+            #                            inside every row's window)
+            # A narrower window keeps the single loop with both bounds: its M phase
+            # is empty and both edges need both bounds, so a split only adds code.
+            diag_start = b.mul(qb, b.const_i32(n_per))
+            left_end = b.add(diag_start, b.const_i32(n_per - SWt))
+
+            def _clamp(x, lo, hi):
+                x = b.select(b.cmp_lt(x, lo), lo, x)  # max(x, lo)
+                return b.select(b.cmp_lt(x, hi), x, hi)  # min(x, hi)
+
+            mid_lo = _clamp(left_end, start_tile, n_up)
+            mid_hi = _clamp(diag_start, mid_lo, n_up)
+            phases = (
+                ("kl", start_tile, mid_lo, True, False),
+                ("km", mid_lo, mid_hi, False, False),
+                ("kt", mid_hi, n_up, False, True),
+            )
+            args = iter_args
+            for iv, lo, hi, lower, upper in phases:
+                loop = b.scf_for_iter(
+                    lo,
+                    hi,
+                    b.const_i32(1),
+                    args,
+                    iv_name=iv,
+                    elide_trailing_barrier=False,
+                )
+                with loop as (j, carry):
+                    tile_body(j, carry, masked=(lower, upper))
+                args = [
+                    (f"{name}_{iv}", val)
+                    for (name, _), val in zip(iter_args, loop.results)
+                ]
         else:
             loop = b.scf_for_iter(
                 start_tile if SW else b.const_i32(0),

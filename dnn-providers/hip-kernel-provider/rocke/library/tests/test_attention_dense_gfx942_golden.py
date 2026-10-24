@@ -204,6 +204,18 @@ def _cases():
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
             sliding_window=128
         ),
+        # Window spanning the query block (W >= block_m): three-phase band loop
+        # (window-bound / mask-free / causal-bound) on the persistent grid, and the
+        # narrow-band dispatch geometry for D64 bf16 (64-row blocks).
+        "attention_dense_gfx942/persist_swa_d128_bf16_w256": mk(
+            sliding_window=256,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_sink_d64_bf16_w128": mk_dispatch(
+            head_size=64, sliding_window=128, use_sinks=True
+        ),
         # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
         "attention_dense_gfx942/swa_d64_bf16_w128": mk(

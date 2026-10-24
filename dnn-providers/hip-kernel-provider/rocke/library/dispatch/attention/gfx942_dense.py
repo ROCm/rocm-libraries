@@ -40,6 +40,33 @@ _DENSE_BLOCK_N = 64
 _GFX942_NUM_PERSISTENT = 304
 
 
+# Sliding-window geometry. A causal band of width W visits about block_m + W keys
+# per query row, so a block_m well above W spends most of its tiles on masked
+# work, and a short sequence leaves the 256-row grid below one CTA per CU.
+# Window widths up to this many keys count as narrow.
+_NARROW_WINDOW = 256
+
+
+def _window_geometry(window, sq, heads, head_size, dtype, bm, persistent):
+    """``(block_m, persistent)`` for a sliding-window request.
+
+    Narrow band (``window <= _NARROW_WINDOW``): 128-row query blocks on the
+    one-CTA-per-block grid; bf16 D64 goes to 64 rows (its waves-per-eu 4 build
+    is small enough in VGPRs and LDS to keep several CTAs resident per CU). Wide
+    band whose default grid has fewer query blocks than CUs: 128-row blocks, grid
+    choice unchanged. Otherwise, or when Sq is not a multiple of the smaller block,
+    the default geometry stands.
+    """
+    if window <= _NARROW_WINDOW:
+        narrow_bm = 64 if (head_size == 64 and dtype == "bf16") else 128
+        if sq % narrow_bm == 0:
+            return narrow_bm, False
+        return bm, persistent
+    if sq % 128 == 0 and (sq // bm) * heads < _GFX942_NUM_PERSISTENT:
+        return 128, persistent
+    return bm, persistent
+
+
 def _base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
@@ -77,6 +104,17 @@ def _base_spec(req: AttentionRequest):
     # The persistent grid measured ahead at D128 for every batch and mask; at
     # D64 the non-persistent grid did.
     persistent = head_size == 128
+    if int(req.sliding_window) > 0:
+        bm, persistent = _window_geometry(
+            int(req.sliding_window),
+            sq,
+            int(req.nhead_q) * int(req.batch),
+            head_size,
+            dtype,
+            bm,
+            persistent,
+        )
+        ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
