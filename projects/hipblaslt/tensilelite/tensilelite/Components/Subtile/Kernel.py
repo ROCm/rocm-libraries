@@ -463,7 +463,15 @@ class TileInfo:
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["DepthU"]
+        # The MX scale tile spans one scale epoch in K.  In the legacy
+        # (single-period) paths that epoch is the loop DepthU.  In the
+        # dual-period MXFP8 path the data loop is finer (DepthU=128) than the
+        # fixed 256-K scale swizzle epoch, so the scale tile tracks
+        # _ScalePeriodU* (256) rather than the data DepthU.
+        if kernel.get("_DualPeriodMXFP8"):
+          self.depthU = kernel["_ScalePeriodU%s" % ('A' if isA else 'B')]
+        else:
+          self.depthU = kernel["DepthU"]
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]
@@ -1372,12 +1380,64 @@ def mainLoop(writer, kernel):
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
   schedulerPgr = pgr
+  # PrefetchLocalRead selects operand VGPR double-buffering (plr=1) vs a single
+  # operand set (plr=0). plr=0 uses the single-partition LR placement, so it
+  # pins a single partition (like pgr=0). This enables PGR2+PLR0 (prefetch
+  # global reads two DUs deep into LDS with one operand set), matching the
+  # non-subtile F8 MT256x256 register profile so large MTs fit in 256 VGPRs.
+  #
+  # Only the dual-period path reads it. Every other subtile kernel keeps the
+  # legacy derivation (plr = 0 if pgr == 0 else 1, selected by plr=-1): honouring
+  # an explicit PrefetchLocalRead=1 on a pgr=0 kernel would double-buffer operands
+  # that used to share one set, which overflows the VGPR budget on wide tiles
+  # (e.g. BBS MT496x64 MIWaveTile [31,1] needs 256).
+  schedulerPlr = -1
+  if kernel.get("_DualPeriodMXFP8"):
+      schedulerPlr = int(kernel["PrefetchLocalRead"]) \
+          if kernel["PrefetchLocalRead"] in (0, 1) else -1
+
+  M = tiA.localMMATileGrid[0]
+  N = tiB.localMMATileGrid[0]
+
+  # Partition-directed PLR for the MT256x256 DU128 dual-period MXFP8 subtile
+  # kernel.  Each compute partition local-reads the operands needed by the NEXT
+  # partition (rather than the next K slot), with the A/B operand VGPRs
+  # double-buffered and an n-major (c00,c01,c10,c11) partition traversal.
+  #
+  # This is selected purely from the solution parameters: the dual-period MXFP8
+  # path (gfx950, MXFP8, PGR2, HostPreSwizzle scales, DepthU=128 -> ScaleReuse>=2)
+  # on a plr=0 base.  No other subtile configuration enables it, so the behavior
+  # of every non-MXFP8 / non-dual-period subtile kernel is unchanged.
+  schedulerDoubleBuffer = ()
+  schedulerPartitionPrefetch = bool(kernel.get("_DualPeriodMXFP8"))
+  schedulerPartitionOrder = "m-major"
+  forcedPartition = None
+  if schedulerPartitionPrefetch:
+      assert schedulerPlr == 0, \
+          "dual-period MXFP8 subtile kernel requires PrefetchLocalRead=0"
+      schedulerPartitionOrder = "n-major"
+      schedulerDoubleBuffer = ('A', 'B')
+      # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
+      # grid (8x4 -> 4x2 for the 8-wave MI, 8x8 -> 4x4 for the 4-wave MI).
+      #
+      # The half is rounded UP to the local-read granularity mn so that the
+      # split is always into an EVEN number of partitions -- the prefetch cycle
+      # is 2-coloured by partition-index parity and an odd cycle would make the
+      # last partition prefetch into the set it is still reading.  See
+      # MFMASchedulerConfig._even_split_size.
+      mnM = max(1, int(lrSAGran.mn) if lrSAGran else 1)
+      mnN = max(1, int(lrSBGran.mn) if lrSBGran else 1)
+      forcedPartition = (MFMASchedulerConfig._even_split_size(M, mnM),
+                         MFMASchedulerConfig._even_split_size(N, mnN))
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
-  M = tiA.localMMATileGrid[0]
-  N = tiB.localMMATileGrid[0]
-  candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  singlePartition = ((pgr == 0) or (schedulerPlr == 0)) \
+      and not schedulerPartitionPrefetch
+  if forcedPartition is not None:
+      candidates = [forcedPartition]
+  else:
+      candidates = [(M, N)] if singlePartition else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1397,8 +1457,14 @@ def mainLoop(writer, kernel):
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
           pgr=schedulerPgr,
+          plr=schedulerPlr,
+          doubleBufferTensors=schedulerDoubleBuffer,
+          prefetchNextPartition=schedulerPartitionPrefetch,
+          partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          scaleReuse=(kernel.get("_ScaleReuseA", 1)
+                      if kernel.get("_DualPeriodMXFP8") else 1),
       )
 
       scheduler = LogicalScheduler(cfg)

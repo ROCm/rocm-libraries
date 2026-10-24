@@ -5148,6 +5148,9 @@ class KernelWriterAssembly(KernelWriter):
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
+            # "+DepthU" (one K step) for the data A/B path and the legacy
+            # MX-swizzled scale path.  The dual-period MXFP8 scale path overrides
+            # this below with full-tile (numLine+1)*span coverage (see comment there).
             extra_bytes = swizzleBlockSize * (kernel["DepthU"] // swizzleSize1)
 
             for i in range(0, numDim):
@@ -5166,7 +5169,22 @@ class KernelWriterAssembly(KernelWriter):
                 module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1, comment="numLine = min - 1 (0-based index)"))
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), \
                           strideF, comment="numLine * stride"))
-                if isMxSwizzledScaleLayout:
+                if isMxSwizzledScaleLayout and kernel.get("_DualPeriodMXFP8"):
+                  # Dual-period MXFP8 only.  Full-tile coverage (numLine+1)*span
+                  # rather than numLine*span + extra_bytes.  The scale GR base
+                  # advances one full ScaleGroupSpan over the K-loop (sum of
+                  # per-epoch +inc == K == one span) while emitScaleGRPtrUpdate
+                  # shrinks Srd+2 by that same inc each epoch.  Starting one
+                  # swizzle-group high (strideF == span of headroom) means the
+                  # shrink never clamps a real top-group read yet tightens to
+                  # exactly the tile end by the last real epoch, so the trailing
+                  # phantom PGR prefetch (base one span past tile start on the final
+                  # M/N-tile) is bounds-clamped to 0 instead of reading past the
+                  # scale allocation and page-faulting at deep K.
+                  module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=strideF, comment="(numLine+1)*span buffer_load limit for %s"%tc))
+                elif isMxSwizzledScaleLayout:
+                  # Legacy swizzled-scale limit (e.g. MXFP4, non-dual-period):
+                  # numLine*span + one DepthU K-step.  Unchanged from before.
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure

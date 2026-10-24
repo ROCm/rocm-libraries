@@ -379,6 +379,7 @@
       '_DepthUB',
       '_DepthULds',
       '_DepthUMetadata',
+      '_DualPeriodMXFP8',
       '_GlobalAccumulation',
       '_HasTemporalHint',
       '_PersistentLoop',
