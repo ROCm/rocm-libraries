@@ -36,43 +36,62 @@ rocblas_status rocsolver_syevj_heevj_strided_batched_impl(rocblas_handle handle,
                                                           const rocblas_evect evect,
                                                           const rocblas_fill uplo,
                                                           const rocblas_int n,
-                                                          U A,
+                                                          U A_arg,
                                                           const rocblas_int lda,
                                                           const rocblas_stride strideA,
                                                           const S abstol,
-                                                          S* residual,
+                                                          S* residual_arg,
                                                           const rocblas_int max_sweeps,
-                                                          rocblas_int* n_sweeps,
-                                                          S* W,
+                                                          rocblas_int* n_sweeps_arg,
+                                                          S* W_arg,
                                                           const rocblas_stride strideW,
-                                                          rocblas_int* info,
-                                                          const rocblas_int batch_count)
+                                                          rocblas_int* info_arg,
+                                                          const rocblas_int batch_count_arg)
 try
 {
     const char* name = (!rocblas_is_complex<T> ? "syevj_strided_batched" : "heevj_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "--esort", esort, "--evect", evect, "--uplo", uplo, "-n", n, "--lda",
                         lda, "--strideA", strideA, "--abstol", abstol, "--max_sweeps", max_sweeps,
-                        "--strideW", strideW, "--batch_count", batch_count);
+                        "--strideW", strideW, "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const residual = residual_arg;
+        auto const n_sweeps = n_sweeps_arg;
+        auto const W = W_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_syevj_heevj_argCheck(
-        handle, esort, evect, uplo, n, A, lda, residual, max_sweeps, n_sweeps, W, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st
+            = rocsolver_syevj_heevj_argCheck(handle, esort, evect, uplo, n, A, lda, residual,
+                                             max_sweeps, n_sweeps, W, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
+
+    // break up large batch_count into multiple invocations, each with
+    // batch_count no larger than max_batch_count
+    rocblas_int const max_batch_count = 64 * 1024 - 1;
+    rocblas_int const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size of temporary workspace
     size_t size_Acpy, size_J, size_norms, size_top, size_bottom, size_completed;
 
-    rocsolver_syevj_heevj_getMemorySize<false, T, S>(evect, uplo, n, batch_count, &size_Acpy,
-                                                     &size_J, &size_norms, &size_top, &size_bottom,
-                                                     &size_completed);
+    {
+        rocblas_int const batch_count = bid_inc;
+        rocsolver_syevj_heevj_getMemorySize<false, T, S>(evect, uplo, n, batch_count, &size_Acpy,
+                                                         &size_J, &size_norms, &size_top,
+                                                         &size_bottom, &size_completed);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_Acpy, size_J, size_norms,
@@ -93,11 +112,29 @@ try
     bottom = mem[4];
     completed = mem[5];
 
-    // execution
-    return rocsolver_syevj_heevj_template<false, true, T>(
-        handle, esort, evect, uplo, n, A, shiftA, lda, strideA, abstol, residual, max_sweeps,
-        n_sweeps, W, strideW, info, batch_count, (T*)Acpy, (T*)J, (S*)norms, (rocblas_int*)top,
-        (rocblas_int*)bottom, (rocblas_int*)completed);
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * bid_inc;
+        rocblas_int const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        rocblas_int const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const residual = (residual_arg == nullptr) ? nullptr : residual_arg + bid;
+        auto const n_sweeps = (n_sweeps_arg == nullptr) ? nullptr : n_sweeps_arg + bid;
+        auto const W = (W_arg == nullptr) ? nullptr : W_arg + bid * strideW;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        rocblas_status const istat = rocsolver_syevj_heevj_template<false, true, T>(
+            handle, esort, evect, uplo, n, A, shiftA, lda, strideA, abstol, residual, max_sweeps,
+            n_sweeps, W, strideW, info, batch_count, (T*)Acpy, (T*)J, (S*)norms, (rocblas_int*)top,
+            (rocblas_int*)bottom, (rocblas_int*)completed);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for isweep
+    return (rocblas_status_success);
 }
 catch(...)
 {
