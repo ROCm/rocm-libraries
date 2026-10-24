@@ -88,6 +88,7 @@ constexpr const char* FLYDSL_SDPA_RDNA_SEQ_LEN_KV_TOKEN = "flydsl_sdpa_rdna.seq_
 constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_P_TOKEN = "flydsl_sdpa_rdna.dropout_p";
 constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_SEED_TOKEN = "flydsl_sdpa_rdna.dropout_seed.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_rdna.dropout_offset.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_RNG_DUMP_TOKEN = "flydsl_sdpa_rdna.rng_dump.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_TOKEN
     = "flydsl_sdpa_rdna.ragged_offset_q.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_TOKEN
@@ -139,6 +140,8 @@ constexpr int64_t FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID = 155;
 /// The ragged-offset tables a packed (THD) graph's Q/O and K/V go through.
 constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID = 166;
 constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID = 177;
+/// The RNG dump (the keep mask) a dropping graph writes out.
+constexpr int64_t FLYDSL_SDPA_RDNA_RNG_DUMP_UID = 188;
 
 /// Physical arrangement of a (B, H, S, D) logical tensor.
 enum class SdpaLayout
@@ -292,6 +295,13 @@ struct SdpaGraphSpec
     /// The seed's and offset's values (device values, or the host value given at execute).
     uint64_t dropoutSeed = 0;
     uint64_t dropoutOffset = 0;
+    /// The RNG dump: FLOAT [B, Hq, Sq, Skv] packed unless overridden below, named by
+    /// rng_dump_tensor_uid (rngDumpUid when set, to name another tensor or none).
+    bool withRngDump = false;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> rngDumpDataType;
+    std::vector<int64_t> rngDumpDims;
+    std::vector<int64_t> rngDumpStrides;
+    std::optional<int64_t> rngDumpUid;
     /// Device values only: V the identity on its first head_dim keys (V[j][e] = 1 iff j == e)
     /// and Q zero, so each O element is one probability: the dropout mask, read off O.
     bool exposeDropoutMask = false;
@@ -398,6 +408,25 @@ inline void setDropout(SdpaGraphSpec& spec, float p, uint64_t seed = 1234, uint6
     spec.withDropoutOffset = true;
     spec.dropoutSeed = seed;
     spec.dropoutOffset = offset;
+}
+
+/// @p spec dropping with @p p and writing its keep mask to an RNG dump.
+inline void
+    setDropoutWithRngDump(SdpaGraphSpec& spec, float p, uint64_t seed = 1234, uint64_t offset = 77)
+{
+    setDropout(spec, p, seed, offset);
+    spec.withRngDump = true;
+}
+
+/// Packed row-major strides over @p dims, the RNG dump's layout.
+inline std::vector<int64_t> rowMajorStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t axis = dims.size(); axis-- > 1;)
+    {
+        strides[axis - 1] = strides[axis] * dims[axis];
+    }
+    return strides;
 }
 
 /// The bias's dims and strides as @p spec declares them to the graph.
@@ -693,6 +722,22 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                        &philoxDims,
                        &philoxDims));
     }
+    const auto rngDumpDims
+        = spec.rngDumpDims.empty()
+              ? std::vector<int64_t>{spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv}
+              : spec.rngDumpDims;
+    const auto rngDumpStrides
+        = spec.rngDumpStrides.empty() ? rowMajorStrides(rngDumpDims) : spec.rngDumpStrides;
+    if(spec.withRngDump)
+    {
+        tensors.push_back(sdpaTensor(spec,
+                                     builder,
+                                     FLYDSL_SDPA_RDNA_RNG_DUMP_UID,
+                                     "rng_dump",
+                                     spec.rngDumpDataType.value_or(data_objects::DataType::FLOAT),
+                                     &rngDumpStrides,
+                                     &rngDumpDims));
+    }
 
     const auto [biasDims, biasStrides] = sdpaBiasLayout(spec);
     if(spec.withBias)
@@ -862,6 +907,11 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     {
         attributesBuilder.add_offset_tensor_uid(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
     }
+    if(spec.withRngDump || spec.rngDumpUid.has_value())
+    {
+        attributesBuilder.add_rng_dump_tensor_uid(
+            spec.rngDumpUid.value_or(FLYDSL_SDPA_RDNA_RNG_DUMP_UID));
+    }
 
     attributesBuilder.add_alibi_mask(spec.alibiMask);
     attributesBuilder.add_padding_mask(spec.paddingMask);
@@ -940,8 +990,9 @@ inline std::vector<SdpaFieldDecline> sdpaVarlenFieldDeclines()
 }
 
 /// The dropout fields every FlyDSL SDPA engine declines (FlydslSdpaDropout.hpp): a probability
-/// with no seed or offset, a seed or offset with no probability, the mask and scale form, and the
-/// RNG dump. (A probability of 0 is the undropped result, accepted by the RDNA/aiw matcher.)
+/// with no seed or offset, a seed or offset with no probability, the mask and scale form, and an
+/// RNG dump with no drop (sdpaRngDumpDeclines() has the dumps of a dropping graph). (A
+/// probability of 0 is the undropped result, accepted by the RDNA/aiw matcher.)
 inline std::vector<SdpaFieldDecline> sdpaDropoutFieldDeclines()
 {
     using Builder = hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder;
@@ -958,6 +1009,93 @@ inline std::vector<SdpaFieldDecline> sdpaDropoutFieldDeclines()
     cases.push_back(
         sdpaAttributeField("RngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); }));
     cases.push_back({"Dropout", [](SdpaGraphSpec& s) { s.withDropout = true; }, {}});
+    return cases;
+}
+
+/// The RNG dumps of a dropping graph every FlyDSL SDPA engine declines (FlydslSdpaRngDump.hpp
+/// servableRngDump), one case per gate, each with the dropping graph and its well-formed dump as
+/// the control. The dump with packed operands is servableRngDump's own test: no family serves
+/// packed dropout, so no graph reaches that gate.
+inline std::vector<SdpaFieldDecline> sdpaRngDumpDeclines()
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    std::vector<SdpaFieldDecline> cases;
+    const auto dropsWithDump = [](SdpaGraphSpec& s) { setDropoutWithRngDump(s, 0.2F); };
+    const auto dump
+        = [&cases, dropsWithDump](std::string name, std::function<void(SdpaGraphSpec&)> defect) {
+              cases.push_back({"RngDump" + std::move(name),
+                               [dropsWithDump, defect = std::move(defect)](SdpaGraphSpec& s) {
+                                   dropsWithDump(s);
+                                   defect(s);
+                               },
+                               dropsWithDump});
+          };
+    // The uid names no tensor, or one of the node's other tensors.
+    dump("NamesNoTensor", [](SdpaGraphSpec& s) {
+        s.withRngDump = false;
+        s.rngDumpUid = 999;
+    });
+    // The tensor itself.
+    dump("Half", [](SdpaGraphSpec& s) { s.rngDumpDataType = data_objects::DataType::HALF; });
+    dump("Virtual",
+         [](SdpaGraphSpec& s) { s.virtualTensors.insert(FLYDSL_SDPA_RDNA_RNG_DUMP_UID); });
+    dump("PassByValue",
+         [](SdpaGraphSpec& s) { s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_RNG_DUMP_UID); });
+    dump("Ragged", [](SdpaGraphSpec& s) { s.raggedTensors.insert(FLYDSL_SDPA_RDNA_RNG_DUMP_UID); });
+    dump("AlignedTo2", [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_RNG_DUMP_UID] = 2; });
+    dump("Rank3",
+         [](SdpaGraphSpec& s) { s.rngDumpDims = {s.batch, s.heads, s.seqLenQ * s.seqLenKv}; });
+    // Each extent, [B, Hq, Sq, Skv].
+    dump("BatchExtent",
+         [](SdpaGraphSpec& s) { s.rngDumpDims = {s.batch + 1, s.heads, s.seqLenQ, s.seqLenKv}; });
+    dump("HeadExtent",
+         [](SdpaGraphSpec& s) { s.rngDumpDims = {s.batch, s.heads + 1, s.seqLenQ, s.seqLenKv}; });
+    dump("RowExtent",
+         [](SdpaGraphSpec& s) { s.rngDumpDims = {s.batch, s.heads, s.seqLenQ + 1, s.seqLenKv}; });
+    dump("KeyExtent",
+         [](SdpaGraphSpec& s) { s.rngDumpDims = {s.batch, s.heads, s.seqLenQ, s.seqLenKv + 1}; });
+    // Strides other than packed row-major: keys apart, and query-major ([B, Sq, Hq, Skv]).
+    dump("KeyStride2", [](SdpaGraphSpec& s) {
+        s.rngDumpStrides
+            = {2 * s.heads * s.seqLenQ * s.seqLenKv, 2 * s.seqLenQ * s.seqLenKv, 2 * s.seqLenKv, 2};
+    });
+    dump("QueryMajor", [](SdpaGraphSpec& s) {
+        s.rngDumpStrides = {s.heads * s.seqLenQ * s.seqLenKv, s.seqLenKv, s.heads * s.seqLenKv, 1};
+    });
+    // No drop: a probability of 0 runs the undropping objects, which apply no mask.
+    dump("WithoutADrop", [](SdpaGraphSpec& s) { s.dropoutProbability = 0.0F; });
+    // The dump is the LSE: with one key per row, [B, Hq, Sq, 1] in f32 is a dump's shape.
+    cases.push_back({"RngDumpIsTheLse",
+                     [](SdpaGraphSpec& s) {
+                         setDropout(s, 0.2F);
+                         s.seqLenKv = 1;
+                         s.stats = SdpaStats::LSE;
+                         s.rngDumpUid = FLYDSL_SDPA_RDNA_STATS_UID;
+                     },
+                     [](SdpaGraphSpec& s) {
+                         setDropoutWithRngDump(s, 0.2F);
+                         s.seqLenKv = 1;
+                         s.stats = SdpaStats::LSE;
+                     }});
+    // More draws than the writer's 32-bit grid: 2 x 65536 x 65536 / 4 = 2^31; the control,
+    // 4 keys fewer, is 2^31 - 2^17.
+    cases.push_back({"RngDumpOverTheWritersGrid",
+                     [](SdpaGraphSpec& s) {
+                         setDropoutWithRngDump(s, 0.2F);
+                         s.batch = 1;
+                         s.heads = 2;
+                         s.kvHeads = 2;
+                         s.seqLenQ = 65536;
+                         s.seqLenKv = 65536;
+                     },
+                     [](SdpaGraphSpec& s) {
+                         setDropoutWithRngDump(s, 0.2F);
+                         s.batch = 1;
+                         s.heads = 2;
+                         s.kvHeads = 2;
+                         s.seqLenQ = 65536;
+                         s.seqLenKv = 65532;
+                     }});
     return cases;
 }
 

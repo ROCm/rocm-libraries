@@ -40,6 +40,8 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaPhiloxOracle.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
 
 /**
  * @file TestFlydslSdpaRdnaEngine.cpp
@@ -2069,6 +2071,17 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
+    // The RNG dump, FLOAT [B, Hq, Sq, Skv] packed, NaN until written: an element the writer
+    // skips fails the 0/1 check.
+    const RngDumpExtents dumpExtents{spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv};
+    std::optional<DeviceTensor<float>> rngDump;
+    if(spec.withRngDump)
+    {
+        const std::vector<int64_t> dims{spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv};
+        rngDump.emplace(dims, rowMajorStrides(dims), 0U, false);
+        rngDump->fillWith(std::numeric_limits<float>::quiet_NaN());
+        buffers.push_back({FLYDSL_SDPA_RDNA_RNG_DUMP_UID, rngDump->device()});
+    }
     // The per-batch lengths, as INT32 [B, 1, 1, 1] device arrays.
     DeviceTensor<int32_t> seqLensQ({spec.batch, 1, 1, 1}, {1, 1, 1, 1}, 0U, false);
     DeviceTensor<int32_t> seqLensKv({spec.batch, 1, 1, 1}, {1, 1, 1, 1}, 0U, false);
@@ -2159,6 +2172,48 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 
     const double scale
         = spec.scaleKind == SdpaScale::ABSENT ? 1.0 : static_cast<double>(spec.scale);
+    // The RNG dump: the oracle's mask bit for bit with hipDNN's keep-rate check, and O as
+    // hipDNN's CPU reference computes it with the dump as its explicit mask.
+    if(rngDump.has_value())
+    {
+        ASSERT_FALSE(packed || spec.withBias || spec.withSink || padded);
+        rngDump->readBack();
+        std::vector<float> dumped(dumpExtents.elements());
+        for(int64_t b = 0; b < spec.batch; ++b)
+        {
+            for(int64_t h = 0; h < spec.heads; ++h)
+            {
+                for(int64_t i = 0; i < spec.seqLenQ; ++i)
+                {
+                    for(int64_t j = 0; j < spec.seqLenKv; ++j)
+                    {
+                        dumped[dumpExtents.index(b, h, i, j)]
+                            = static_cast<float>(rngDump->at(b, h, i, j));
+                    }
+                }
+            }
+        }
+        const float p = spec.dropoutProbability.value_or(0.0F);
+        expectRngDumpIsTheOracleMask(dumped, dumpExtents, p, spec.dropoutSeed, spec.dropoutOffset);
+        RngDumpReferenceProblem reference;
+        reference.extents = dumpExtents;
+        reference.kvHeads = spec.kvHeads;
+        reference.headDim = d;
+        reference.headDimV = dv;
+        reference.scale = static_cast<float>(scale);
+        reference.p = p;
+        reference.leftBound = left;
+        reference.rightBound = right;
+        reference.topLeft = spec.mask != SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        expectOutputIsTheReferenceUnderTheDump(
+            reference,
+            dumped,
+            qAt,
+            kAt,
+            vAt,
+            [&o](int64_t b, int64_t h, int64_t s, int64_t e) { return o.at(b, h, s, e); },
+            absoluteTolerance);
+    }
     const int64_t group = spec.heads / spec.kvHeads;
     // Dropout (TEST-LOCAL ORACLE, FlydslSdpaPhiloxOracle.hpp, until hipDNN's reference serves
     // it): a key's probability is kept with its Philox bit and scaled by 1 / (1 - p) in O;
@@ -4410,6 +4465,7 @@ std::vector<SdpaFieldDecline> dropoutDeclines()
     constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
     field("WithADropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); });
     field("WithADropoutScale", [](Builder& b) { b.add_dropout_scale_tensor_uid(AUX); });
+    // A one-element dump no writer fills; a well-formed one is served (sdpaRngDumpDeclines).
     field("WithAnRngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); });
     for(const auto& [name, p] :
         {std::pair{"ProbabilityOne", 1.0F},
@@ -4788,6 +4844,278 @@ TEST(TestFlydslSdpaDropoutDispatch, NeedsWorkspaceOnlyForASeedGivenByValue)
     auto zero = seedByValue;
     zero.dropoutProbability = 0.0F;
     EXPECT_EQ(workspace(zero), 0U) << "nothing is drawn at probability 0";
+}
+
+// ---------------------------------------------------------------------------
+// RNG dump: the keep mask a dropping launch applied, written out by the mask writer
+// (FlydslSdpaRngDump.hpp)
+// ---------------------------------------------------------------------------
+
+INSTANTIATE_TEST_SUITE_P(RngDump,
+                         TestFlydslSdpaRdnaFieldDeclines,
+                         ::testing::ValuesIn(sdpaRngDumpDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
+/// The writer's own engine, which serves no graph.
+const PackSymbols FLYDSL_SDPA_DROPOUT_MASK{"hipkernel:flydsl_sdpa_dropout_mask",
+                                           "hipkernel.flydsl_sdpa_dropout_mask.graph_match",
+                                           "",
+                                           "hipkernel.flydsl_sdpa_dropout_mask.kernel_match",
+                                           "hipkernel.flydsl_sdpa_dropout_mask.score",
+                                           "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+                                           "",
+                                           "",
+                                           ""};
+
+/// Every staged object of @p engine built with dropout.
+std::vector<KernelDefinition> stagedDropoutKernels(const PackSymbols& engine)
+{
+    std::vector<KernelDefinition> kernels;
+    const auto* staged = findLoadedSet(engine.engineName);
+    for(const auto& pack : staged == nullptr ? decltype(staged->packs){} : staged->packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto* dropout
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_AIW_HAS_DROPOUT_FIELD);
+            if(dropout == nullptr || *dropout != 1)
+            {
+                continue;
+            }
+            kernels.push_back(KernelDefinition{kernel.id,
+                                               pack.id,
+                                               pack.dispatchId,
+                                               kernel.source,
+                                               kernel.metadata,
+                                               kernel.priority,
+                                               kernel.arch.empty() ? pack.arch : kernel.arch,
+                                               kernel.originDirectory,
+                                               kernel.name,
+                                               kernel.treeRoot,
+                                               kernel.sources});
+        }
+    }
+    return kernels;
+}
+
+TEST(TestFlydslSdpaRngDumpGraph, BindsTheDumpOrNone)
+{
+    SdpaGraphSpec withDump;
+    setDropoutWithRngDump(withDump, 0.2F);
+    const GraphFixture dumping(buildFlydslSdpaRdnaGraph(withDump));
+    const GraphFixture dropping(buildFlydslSdpaRdnaGraph(droppingSpec()));
+    const GraphFixture dense(buildFlydslSdpaRdnaGraph());
+    for(const auto* engine : {&FLYDSL_SDPA_RDNA, &FLYDSL_SDPA_RDNA_DECODE, &FLYDSL_SDPA_AIW})
+    {
+        const auto bound = matchesGraph(*engine, dumping.context());
+        ASSERT_TRUE(bound.has_value()) << engine->engineName;
+        EXPECT_EQ(boundInt(*bound, FLYDSL_SDPA_RDNA_RNG_DUMP_TOKEN), FLYDSL_SDPA_RDNA_RNG_DUMP_UID);
+        for(const auto* fixture : {&dropping, &dense})
+        {
+            const auto none = matchesGraph(*engine, fixture->context());
+            ASSERT_TRUE(none.has_value()) << engine->engineName;
+            EXPECT_EQ(boundInt(*none, FLYDSL_SDPA_RDNA_RNG_DUMP_TOKEN), -1);
+        }
+    }
+}
+
+// An axis of one element: no index multiplies its stride, so any stride is the packed layout.
+TEST(TestFlydslSdpaRngDumpGraph, TakesAnyStrideOnAUnitAxis)
+{
+    SdpaGraphSpec spec;
+    setDropoutWithRngDump(spec, 0.2F);
+    spec.batch = 1;
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.rngDumpStrides = {7, 3, spec.seqLenKv, 1};
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundInt(*bound, FLYDSL_SDPA_RDNA_RNG_DUMP_TOKEN), FLYDSL_SDPA_RDNA_RNG_DUMP_UID);
+}
+
+// No family serves packed dropout, so no graph reaches servableRngDump's packed gate: it is
+// tested on the function, with a dense and a packed binding for the same dropping graph.
+TEST(TestFlydslSdpaRngDump, DeclinesADumpOverPackedOperands)
+{
+    SdpaGraphSpec spec;
+    setDropoutWithRngDump(spec, 0.2F);
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto* attributes = flydsl_sdpa::sdpaNode(fixture.context());
+    ASSERT_NE(attributes, nullptr);
+    const flydsl_sdpa::SdpaDropout dropout{
+        0.2F, FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID, FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID};
+    flydsl_sdpa::SdpaVarlen packed;
+    packed.raggedOffsetQ = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    packed.raggedOffsetKv = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID;
+    const auto serve = [&](const flydsl_sdpa::SdpaVarlen& varlen) {
+        return flydsl_sdpa::servableRngDump(fixture.context(),
+                                            *attributes,
+                                            dropout,
+                                            varlen,
+                                            spec.batch,
+                                            spec.heads,
+                                            spec.seqLenQ,
+                                            spec.seqLenKv);
+    };
+    EXPECT_EQ(serve(flydsl_sdpa::SdpaVarlen{}),
+              std::optional<int64_t>(FLYDSL_SDPA_RDNA_RNG_DUMP_UID));
+    EXPECT_FALSE(serve(packed).has_value());
+}
+
+// A dump is written by the writer beside the dropout object: an object whose shard does not
+// ship it (its directory moved) declines the dump but still serves the dropping graph.
+TEST(TestFlydslSdpaRngDumpKernelMatch, NeedsTheWriterInTheObjectsShard)
+{
+    SdpaGraphSpec withDump;
+    setDropoutWithRngDump(withDump, 0.2F);
+    const GraphFixture dumping(buildFlydslSdpaRdnaGraph(withDump));
+    const GraphFixture dropping(buildFlydslSdpaRdnaGraph(droppingSpec()));
+    size_t checked = 0;
+    for(const auto* engine : {&FLYDSL_SDPA_RDNA, &FLYDSL_SDPA_AIW})
+    {
+        const auto dumpBound = matchesGraph(*engine, dumping.context());
+        const auto dropBound = matchesGraph(*engine, dropping.context());
+        ASSERT_TRUE(dumpBound.has_value() && dropBound.has_value());
+        for(const auto& kernel : stagedDropoutKernels(*engine))
+        {
+            if(!matchesKernel(*engine, dropping.context(), kernel, *dropBound))
+            {
+                continue;
+            }
+            EXPECT_TRUE(matchesKernel(*engine, dumping.context(), kernel, *dumpBound))
+                << kernel.name;
+            auto moved = kernel;
+            moved.originDirectory = std::filesystem::path("/nonexistent") / "FlyDSL"
+                                    / kernel.originDirectory.parent_path().filename()
+                                    / kernel.originDirectory.filename();
+            EXPECT_FALSE(matchesKernel(*engine, dumping.context(), moved, *dumpBound))
+                << kernel.name;
+            EXPECT_TRUE(matchesKernel(*engine, dropping.context(), moved, *dropBound))
+                << kernel.name;
+            ++checked;
+        }
+    }
+    if(!flydslShippedArches("sdpa_rdna").empty() || !flydslShippedArches("sdpa_aiw").empty())
+    {
+        EXPECT_GT(checked, 0U) << "no staged dropout object serves the bf16 d64 dropping graph";
+    }
+}
+
+// Every staged dropout object's shard ships the writer, as the packer wrote it: a kpack object
+// with the argument list the natives launch and its workgroup size.
+TEST(TestFlydslSdpaRngDumpKernel, EveryDroppingShardShipsTheWriter)
+{
+    size_t checked = 0;
+    for(const auto* engine : {&FLYDSL_SDPA_RDNA, &FLYDSL_SDPA_AIW})
+    {
+        for(const auto& kernel : stagedDropoutKernels(*engine))
+        {
+            ASSERT_TRUE(flydsl_sdpa::hasDropoutMaskWriter(kernel)) << kernel.name;
+            for(const auto& arch : kernel.arch)
+            {
+                const auto mask = flydsl_sdpa::dropoutMaskKernel(kernel, arch);
+                EXPECT_EQ(mask.source.kind, KernelSourceKind::KPACK) << arch;
+                EXPECT_EQ(mask.source.symbol, "sdpa_dropout_mask_kernel_0") << arch;
+                EXPECT_EQ(mask.getIntMetadata("block_threads"), 256) << arch;
+                const auto& expected = flydsl_sdpa::dropoutMaskSignature();
+                ASSERT_EQ(mask.source.signature.size(), expected.size()) << arch;
+                for(size_t i = 0; i < expected.size(); ++i)
+                {
+                    EXPECT_EQ(mask.source.signature[i].kind, expected[i].kind) << arch << " " << i;
+                    EXPECT_EQ(mask.source.signature[i].size, expected[i].size) << arch << " " << i;
+                    EXPECT_EQ(mask.source.signature[i].offset, expected[i].offset)
+                        << arch << " " << i;
+                }
+                ++checked;
+            }
+        }
+    }
+    if(!flydslShippedArches("sdpa_rdna").empty() || !flydslShippedArches("sdpa_aiw").empty())
+    {
+        EXPECT_GT(checked, 0U);
+    }
+}
+
+// The writer's engine serves no graph: no graph asks for a keep mask alone.
+TEST(TestFlydslSdpaDropoutMaskEngine, ServesNoGraph)
+{
+    SdpaGraphSpec spec;
+    setDropoutWithRngDump(spec, 0.2F);
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    EXPECT_FALSE(matchesGraph(FLYDSL_SDPA_DROPOUT_MASK, fixture.context()).has_value());
+    const auto* staged = findLoadedSet(FLYDSL_SDPA_DROPOUT_MASK.engineName);
+    if(staged == nullptr)
+    {
+        EXPECT_TRUE(flydslShippedArches("sdpa_dropout_mask").empty());
+        return;
+    }
+    for(const auto& pack : staged->packs)
+    {
+        ASSERT_EQ(pack.kernels.size(), 1U);
+        const auto& kernel = pack.kernels.front();
+        const KernelDefinition definition{kernel.id,
+                                          pack.id,
+                                          pack.dispatchId,
+                                          kernel.source,
+                                          kernel.metadata,
+                                          kernel.priority,
+                                          pack.arch,
+                                          kernel.originDirectory,
+                                          kernel.name,
+                                          kernel.treeRoot,
+                                          kernel.sources};
+        EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_DROPOUT_MASK, fixture.context(), definition, {}));
+        EXPECT_THROW(static_cast<void>(dispatchHandler(FLYDSL_SDPA_DROPOUT_MASK)
+                                           .prepare(fixture.context(), {}, definition)),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, WritesTheRngDumpItApplied)
+{
+    SKIP_IF_NO_DEVICES();
+    // The RDNA dropout objects are gfx11-generic; gfx12 drops on the aiw objects.
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
+    {
+        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+    }
+    struct Case
+    {
+        int64_t headDim;
+        SdpaMask mask;
+        int64_t seqLenKv;
+        float p;
+    };
+    // Keys not a multiple of 4 (a draw past the last key), masked keys (causal both ways),
+    // GQA, and a seed past 32 bits with an offset that carries into the counter's high word.
+    for(const auto& c : {Case{64, SdpaMask::NONE, 70, 0.25F},
+                         Case{128, SdpaMask::TOP_LEFT_CAUSAL, 96, 0.1F},
+                         Case{64, SdpaMask::BOTTOM_RIGHT_CAUSAL, 53, 0.5F}})
+    {
+        SdpaGraphSpec spec;
+        spec.dataType = DataType::HALF;
+        spec.batch = 2;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.headDim = c.headDim;
+        spec.seqLenQ = 40;
+        spec.seqLenKv = c.seqLenKv;
+        spec.mask = c.mask;
+        spec.stats = SdpaStats::LSE;
+        setDropoutWithRngDump(spec, c.p, 0x0123456789ABCDEFULL, (uint64_t{1} << 32) - 7);
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+    }
+    // The seed and the offset given by value: the seed through the engine's workspace, the
+    // offset as offset2 with no offset1 pointer.
+    SdpaGraphSpec byValue;
+    byValue.seqLenQ = 33;
+    byValue.seqLenKv = 77;
+    byValue.stats = SdpaStats::LSE;
+    setDropoutWithRngDump(byValue, 0.3F, 42U, 5U);
+    byValue.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    byValue.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(byValue, BF16_TOLERANCE);
 }
 
 TEST(TestFlydslSdpaAiwDispatch, ResolvesFromTheDispatchRegistry)
@@ -5869,6 +6197,47 @@ TEST(TestGpuFlydslSdpaAiwDispatch, DropsTheOraclesMaskBitForBit)
         expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
             spec, F16_TOLERANCE, RdnaFamily::AIW);
     }
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, WritesTheRngDumpItApplied)
+{
+    SKIP_IF_NO_DEVICES();
+    struct Case
+    {
+        int64_t headDim;
+        SdpaMask mask;
+        int64_t seqLenKv;
+        float p;
+    };
+    // Keys not a multiple of 4, masked keys, GQA, a seed past 32 bits and an offset that
+    // carries into the counter's high word.
+    for(const auto& c :
+        {Case{64, SdpaMask::NONE, 70, 0.25F}, Case{128, SdpaMask::TOP_LEFT_CAUSAL, 96, 0.1F}})
+    {
+        SdpaGraphSpec spec;
+        spec.dataType = DataType::HALF;
+        spec.batch = 2;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.headDim = c.headDim;
+        spec.seqLenQ = 40;
+        spec.seqLenKv = c.seqLenKv;
+        spec.mask = c.mask;
+        spec.stats = SdpaStats::LSE;
+        setDropoutWithRngDump(spec, c.p, 0x0123456789ABCDEFULL, (uint64_t{1} << 32) - 7);
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+            spec, F16_TOLERANCE, RdnaFamily::AIW);
+    }
+    // The seed and the offset given by value.
+    SdpaGraphSpec byValue;
+    byValue.seqLenQ = 33;
+    byValue.seqLenKv = 77;
+    byValue.stats = SdpaStats::LSE;
+    setDropoutWithRngDump(byValue, 0.3F, 42U, 5U);
+    byValue.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    byValue.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        byValue, BF16_TOLERANCE, RdnaFamily::AIW);
 }
 
 TEST(TestGpuFlydslSdpaAiwDispatch, DropsWithTheUndroppedLse)
