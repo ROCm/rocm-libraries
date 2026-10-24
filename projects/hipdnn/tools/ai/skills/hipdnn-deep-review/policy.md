@@ -61,13 +61,16 @@ diff; reformat churn mixed into a functional change.
   test-excluded) is at least `IMPORTANT` unless the author reports verification. A change
   whose files are all documentation is exempt.
 - A host output of a `target-specific` TheRock artifact (source list, compile definitions, host header, installed file or CTest
-  entry) that varies with the GPU targets is `BLOCKING` when a two-arch configure confirms it behind a flag that is ON at the TheRock
-  pin or on TheRock main (the next pin bump builds it), `IMPORTANT` when only a static trace shows it or the flag is OFF at both.
-- A CTest entry whose projected per-shard time (CI baseline plus the change's measured delta) exceeds its tier timeout is `BLOCKING`
-  when presubmit runs the entry (run-all `quick`, scoped `standard`) on a presubmit family, a case behind a flag that main turns ON
-  included; `IMPORTANT` with only nightly (`comprehensive`) or dispatch exposure.
+  entry) that varies with the GPU targets is `BLOCKING` when a two-arch configure confirms it and TheRock builds it: unguarded, or behind
+  a flag that is ON at the TheRock pin or on TheRock main (the next pin bump builds it). It is `IMPORTANT` when only a static trace
+  shows it or the flag is OFF at both. An install into a component the artifact does not request (hipkernelprovider `share/doc`) is
+  `SUGGESTION`.
+- A CTest entry whose projected per-shard time (CI baseline plus the change's measured delta) exceeds its tier timeout, or a job whose
+  summed entry times plus the delta share exceed its `timeout_minutes`, is `BLOCKING` when presubmit runs the entry (run-all `quick`,
+  scoped `standard`) on a presubmit family, a case behind a flag that main turns ON included; `IMPORTANT` with only nightly
+  (`comprehensive`) exposure.
 - A Windows path over 259 characters that a test or loader passes to a file API is `BLOCKING` when a required set provably fails to
-  load, else `IMPORTANT`.
+  load, else `IMPORTANT`; a caller that uses a `\\?\` path is exempt.
 - Documentation is prose that no tool, build, install, packaging or CI step reads:
   markdown, reStructuredText, plain-text docs, license files (`LICENSE`, `CONTRIBUTING`,
   `SECURITY`, `README`) and skill prompt text. Config files (`.gitignore`,

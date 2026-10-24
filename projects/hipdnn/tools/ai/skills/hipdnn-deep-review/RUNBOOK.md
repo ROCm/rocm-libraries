@@ -256,7 +256,7 @@ When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` a
 `RUN`'s regression-test runs ([lanes/test-quality.md](lanes/test-quality.md)). When `ROCK` wrote a `Timing-base:` line, also dispatch
 `ROCK-f1` with the `ROCK` and `RUN` report paths: it projects each entry's per-shard time from `ROCK`'s CI baselines and `RUN`'s case
 times ([lanes/therock.md](lanes/therock.md) section 6). A lane's newest follow-up report wins when
-`ledger.py mlines` reads an `M<n>:` line. Re-dispatch all three follow-ups (`AUTH-f1`, `TESTQ-f1`, `ROCK-f1`) when `RUN` is re-dispatched with an approval.
+`ledger.py mlines` reads an `M<n>:` line. Re-dispatch each follow-up that ran (`AUTH-f1`, `TESTQ-f1`, `ROCK-f1`) when `RUN` is re-dispatched with an approval.
 
 An agent that fails, times out or returns a non-conforming report twice is `FAILED
 (<reason>)` in the Lanes table; split an over-large lane by area before the second attempt.
