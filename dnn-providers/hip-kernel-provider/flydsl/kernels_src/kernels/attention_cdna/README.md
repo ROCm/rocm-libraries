@@ -211,6 +211,9 @@ diff against upstream plus the modifications below.
       LSE includes it, against the max over the scores and the sink (modification 29).
     - **A row that reaches none:** O = 0, LSE = the sink.
     - **Split launches:** the partials carry no sink; the merge kernel adds it once.
+    - **With a bias:** a `has_sink` build may be a `has_bias` one too; a bias build's
+      max and LSE are already in natural units (modification 28), as the fold takes
+      them.
     - **Unchanged:** builds without `has_sink` never read the arguments and compile
       to the same instructions.
 
@@ -383,6 +386,183 @@ diff against upstream plus the modifications below.
       needs `l > 0`); the sink objects also gain the max and two exponentials per fold;
       the decode objects' split store selects on the class test. No VGPR count or spill
       changed. Not yet upstream.
+30. **A diagonal that passes the keys** (`flash_attn_utils.py`). The generic kernel's
+    causal mask hid key `j` from row `i` when `j > i + offset`, and masked the last KV
+    tile's padding with the same compare, so a row whose diagonal passed the last key
+    (top-left with more queries than keys, a band wider than `Skv - Sq`) let the padded
+    keys into its softmax. `apply_kv_mask` now clamps the block's first row's diagonal
+    (which decides whether a tile is masked at all) to `Skv - 1`, and, in a tile that
+    holds padding, each row's limit to `Skv - 1` too: a scalar select gives the tile's
+    key cap (`Skv - 1` there, INT32_MAX elsewhere) and a vector min applies it, so the
+    per-score compare is unchanged and nothing new stays live across the KV loop. Such
+    a row sees every key and none of the padding, as PyTorch's and the reference's rule
+    gives. Clamping each row's limit once per workgroup instead, or OR-ing a compare
+    against the last key into every score's mask, cost 2-4 VGPRs and pushed gfx942's
+    `head_dim` 128 causal 256-row tile from 2 spilled VGPRs to 4; this form leaves it
+    at 2.
+    - **Objects:** every generic causal prefill object gains the clamps (a few scalar
+      instructions and one vector min per masked KV tile). Most are within 4 VGPRs of
+      before; gfx950's `head_dim` 128 causal 64-row tile spills 4 VGPRs where it spilled 2
+      (its allowance is 6), and some gfx90a tiles move by 15-50 VGPRs either way. Measured
+      against the objects before it (COVERAGE.md section 7.5): none slower by more than
+      1.5% on gfx950 and gfx942 (gfx950's `head_dim` 128 causal 64-row tile 7-8% faster
+      at one query row); on gfx90a a few tiles by 2-5% either way, the `head_dim` 64
+      causal bias tile by -11% to +5% across shapes. The non-causal objects are unchanged.
+    - **Split decode builds:** keep the plain compare and compile to the same
+      instructions: the provider runs them only on diagonals inside the keys, and serves
+      the rest on the prefill objects at any query length.
+    - **Dual-wave kernel:** unchanged; its software pipeline masks the padding with the
+      diagonal too, and the provider runs it only on diagonals inside the keys.
+    - Not yet upstream.
+31. **A bias read one key at a time, at a runtime key stride and element type**
+    (`flash_attn_utils.py`, `flash_attn_generic.py`). Every generic object takes
+    trailing `stride_bias_k, bias_f32`; a `bias_kstrided` build (builder argument,
+    cache key; a bias build) reads them, the others never do and compile to the same
+    instructions.
+    - **Loads:** each of a lane's 32 scores loads its own key's bias, at
+      `row * bias_stride0 + key * stride_bias_k` in the slice: the lane's first key's
+      offset in a register, each other key's distance from it a scalar the load takes as
+      its scalar offset. So a key stride of 0 (a bias broadcast along the keys), any key
+      length and any row pitch are read exactly. The slice's view ends at
+      `(seq_len - 1) * bias_stride0 + (seq_len_kv - 1) * stride_bias_k + 1` elements.
+    - **Element type:** `bias_f32` picks f32 (4-byte loads) or the query's dtype (2-byte
+      loads, widened) by a uniform branch around the tile's loads, so one object serves
+      both and runs only the loads its launch needs.
+    - **Halved scores:** the build keeps its scores halved, `fma(q.k, scale / 2,
+      bias / 2)`, with the floor at `-FLT_MAX / 2` and the exponent's and the LSE's
+      factor 2 (`c_sm_scale` 2, `c_sm_scale_log2e` 2 log2(e)). An f32 bias reaches
+      -FLT_MAX, which is modification 28's masked-score value: unhalved, a row an f32
+      padding mask sets to its lowest finite value fell under the floor and came out
+      O = 0, LSE -inf, where PyTorch averages V. Halving is exact in binary, so every
+      exponent, sum and LSE is bit-for-bit the unhalved one's; a row of -FLT_MAX now
+      gets O = mean of V and LSE -FLT_MAX.
+    - Not yet upstream.
+32. **Per-batch sequence lengths (padding), and one argument change for what follows**
+    (`flash_attn_utils.py`, `flash_attn_generic.py`; generic kernel and its merge only).
+    - **Slots:** a dense build reads upstream's `CuSeqQ`/`CuSeqKv` slots (renamed
+      `SeqLenQ`/`SeqLenKv`; only a VARLEN build reads them as cu_seqlens, and VARLEN
+      refuses runtime strides) as a padded launch's per-batch lengths, INT32 `[B]`, and
+      the page-table stride slot (only a PAGED build's; renamed `varlen_flags`) as
+      flags: bit 0 per-batch lengths, bit 1 a bottom-right diagonal.
+    - **Reads:** under a real branch on bit 0, once per workgroup after the batch
+      index (`_load_seq_lens`), so a dense launch loads nothing and waits on nothing;
+      each length clamped to `[0, the launch's length]`, as hipDNN's GPU reference
+      clamps them. They replace the launch's lengths for everything past the grid: the Q,
+      K and V views (so keys past a batch's length are never read and no neighbouring
+      batch leaks in), the KV loop's bounds, the pad and causal compares (modification
+      30's key cap is the general pad compare), the bias's view. The batch and head
+      bases keep the launch's strides. A view of 0 rows has 0 records (`_rows_bytes`).
+    - **Diagonal:** under bit 1 the diagonal and the window's edge move by each batch's
+      `(Skv_b - Skv) - (Sq_b - Sq)`, so a bottom-right mask sits at its own
+      `Skv_b - Sq_b`; a top-left one is the same literal for every batch.
+    - **Padded query rows** (rows at or past `Sq_b`) are stored as O = 0, LSE = -inf, on
+      sink builds too (padding is not a row no key reached): O's view and the LSE
+      writer's guard span the launch's rows. Never by a select on f32 values: fast math
+      merged such a select with the no-keys test (`_no_keys`) into a class test without
+      NaN and lost a NaN row's NaN (modification 29's rule; measured on gfx942). Instead
+      a padded row's O words are zeroed after they are packed to the output dtype, and
+      its -inf LSE is written by its bits through a second store whose offset is
+      redirected for real rows (the real rows' store redirected for padded ones). A
+      workgroup-uniform branch around the O stores (dense tiles storing as before) was
+      tried and cost registers: one more spill reloaded inside the KV loop of gfx942's
+      `head_dim` 128 256-row tile. A query tile wholly past its batch's length runs no
+      KV iteration (not on the packed decode builds, whose tiles mix heads). The merge
+      kernel, one row per workgroup, branches on its row.
+    - **No-mask builds:** a padded batch may have no keys, so a row of a build with no
+      mask and no bias can sum to 0; its `1 / l` is now selected by `_no_keys` (O = 0,
+      not 0 * inf = NaN; a NaN row stays NaN).
+    - **Appended for the changes that follow** (so the argument list moves once): the
+      main kernel takes `RowOffQ`, `RowOffKv` (packed sequences' row offsets),
+      `DropoutSeed`, `DropoutOffset` (tensors), `dropout_offset2_lo`,
+      `dropout_offset2_hi`, `idropout_p` (i32) and `dropout_scale` (f32); the merge
+      kernel `SeqLenQ`, `RowOffQ` and `varlen_flags`. Modification 33 reads the dropout
+      arguments and modification 34 the main kernel's row offsets; the merge kernel's
+      `RowOffQ` stays unread.
+    - **Objects:** every generic prefill and decode object rebuilt: no VGPR or spill
+      change on the probed objects; a few scalar instructions in the prologue and one
+      select per O element in the epilogue. Measured against the objects before it in
+      COVERAGE.md section 7.5. The dual-wave kernel is unchanged.
+    - Not yet upstream.
+33. **Dropout** (`flash_attn_utils.py`, `flash_attn_generic.py`; generic prefill builds).
+    A `has_dropout` build (builder argument, cache key) drops attention probabilities
+    with AOTriton's mask (>= 0.15), bit for bit, through modification 32's appended
+    arguments; every other build takes them unread and compiles as before.
+    - **Philox4x32-10** (`_philox4x32`): the aiw kernel's `attention_rdna4/philox.py`
+      round (Triton's), restated here so these objects digest only this directory; the
+      provider's tests pin the mask to a host oracle and to AOTriton's own masks.
+    - **The stream:** key (seed low, seed high), the 8-byte seed read at `DropoutSeed`'s
+      base; each run of 4 keys of a row draws one counter, `offset1 + offset2 + ((b * Hq +
+      h) * Sq + i) * cdiv(Skv, 4) + j / 4` (`offset1` the 8 bytes at `DropoutOffset`'s base,
+      `offset2` the two words, `Sq`/`Skv` the launch's lengths, so a padded batch's mask
+      is the dense one's); key `j` takes word `j % 4`, kept iff that word as an int32
+      exceeds `idropout_p`, the f32 threshold the host computes.
+    - **Lanes:** a lane's 32 scores are 8 runs of 4 consecutive keys starting at a
+      multiple of 4 (`_kv_mask_lane_off`), so it draws 8 counters per 64-key tile, one per
+      run, from its row's first counter (`ph_row_base`, set once per workgroup).
+    - **Where:** after the row's sum is formed (`online_softmax`, or inside the gfx942
+      bf16 fused PV loop), so `l` and the LSE stay undropped; a dropped probability is 0
+      before the P packs. `dropout_scale` (`1 / (1 - p)`) folds into O's `1 / l`.
+    - **Objects:** 12 per arch (bf16/f16, causal or not, `head_dim` 64, 128, 256; no bias,
+      no sink), each its class's first generic tier but where the Philox draws spill
+      it: the kernel's default occupancy at 64 on gfx942/gfx90a, 128-row tiles at 128 on
+      gfx90a, one wave per SIMD at 128 causal on gfx950. No spill on any. Objects without
+      dropout are byte-identical to modification 32's.
+    - Not yet upstream.
+34. **Packed (THD) sequences** (`flash_attn_utils.py`, `flash_attn_generic.py`; generic
+    prefill builds).
+    - **Flag:** `varlen_flags` bit 2 (`VARLEN_PACKED`): Q/O and K/V are packed through
+      modification 32's `RowOffQ`/`RowOffKv`, INT32 `[B + 1]` cumulative token counts.
+      Sequence `b` starts at token `off[b]` and has `off[b + 1] - off[b]` tokens, clamped
+      to `[0, the launch's length]`.
+    - **Reads:** `_load_varlen` replaces `_load_seq_lens` on the prefill builds: one real
+      branch on bit 2 loads the two tables' entries, then one on bit 0 loads the padded
+      lengths (clamped to the sequence's tokens, so per-batch lengths inside a packed
+      sequence need no new kernel code). A dense launch loads nothing.
+    - **Bases and views:** each sequence's Q, O, K, V and LSE views start at its first
+      token: `tok * stride_n` is added to the batch base, and the host passes a packed
+      operand's batch stride as 0. Q, K and V span the sequence's tokens. O spans them
+      too, and so does the LSE writer's guard (`rows_b`). The rows past a sequence belong
+      to the next one, so no store reaches them: padded-row fills land only on rows in
+      `[len, view)`, which is empty when packed. Diagonals move per sequence under bit 1,
+      as under padding.
+    - **Keyless views (a fix to modification 32 too):** a batch or sequence with no keys
+      runs no KV iteration, but the builds that load the first K tile before the loop
+      (gfx942's global prefetch) still read its clamped row, -1. For a view at the
+      tensor's start (batch 0, head 0 under padding; the first sequence when packed),
+      that row lies before K's base. A keyless view at token 0 now starts one token on,
+      so the read stays in the tensor; the values are never used. This is on every build
+      with per-batch lengths, decode included.
+    - **Builds:** the split and packed-GQA (decode) builds read no row offsets. Their
+      packing (and the merge kernel's) is later work; the matcher declines packed graphs
+      on them and on the dual-wave kernel.
+    - **Objects:** every generic prefill and decode object rebuilt. No VGPR or spill
+      change. A few scalar instructions in the prologue. The KV loop is
+      instruction-identical to modification 33's.
+    - Not yet upstream.
+35. **Exact f32 operands** (`flash_attn_utils.py`, `flash_attn_generic.py`; generic
+    builds, `dtype_str="f32"`).
+    - **MMA:** each 16-bit K-step (a 4-element pack per lane along K) becomes four
+      `v_mfma_f32_32x32x2f32`, the j-th taking element j of the same pack from A and B.
+      Both operands name the same K index on every lane, so the contraction is exact
+      fp32 (AOTriton's `TRITON_F32_DEFAULT=ieee` class), and the accumulator layout, the
+      softmax, masks, LSE, sink and dropout are the 16-bit path's unchanged. P stays f32.
+    - **Path:** f32 takes the gfx942-class path on every arch: no hardware transpose
+      read, no K16 MFMA, no permlane O store, no DMA and no KV global prefetch (all
+      16-bit only). gfx950 runs it as gfx942 does. The K tile keeps its +4 row pad on
+      every arch.
+    - **Widths and bytes:** global K/V loads are 8 f32 per lane (32 bytes, the 16-bit
+      path's 16 elements); `ELEM_BYTES` (4) sizes the Q/O/K/V descriptor spans and bases
+      and the O and zero-O stores. O is stored as one dwordx4 per lane group, by its
+      bits, so modification 32's padded-row zeros stay an integer select.
+    - **Q:** re-read per K-step from head dim 256 (16-bit: past 256), its packs being
+      twice as wide.
+    - **Denormals:** f32 builds keep f32 denormal inputs (no DAZ attribute;
+      `.amdhsa_float_denorm_mode_32` 3), as PyTorch and hipDNN's reference do.
+    - **Fix (K chunks with Q in registers):** a K-chunked build that holds Q indexed
+      Q's packs past the first chunk; Q now loads every chunk's packs. Upstream chunks
+      K only with Q re-read, so no existing object takes this path.
+    - **Objects:** every bf16/f16 object is byte-identical to modification 34's.
+    - Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
