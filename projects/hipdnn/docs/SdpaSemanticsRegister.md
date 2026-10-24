@@ -263,12 +263,15 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-021: ALiBi
 
-- **Status:** Diverges by convention.
+- **Status:** Matches cuDNN (FA/TE differ by convention).
 - **cuDNN:** adds `(j - i) * slope`, and requires causal.
 - **FlashAttention and TransformerEngine:** `-slope * |i + Skv - Sq - j|`. Under BOTTOM_RIGHT with
   Skv > Sq the output O is the same but the LSE differs.
-- **hipDNN today:** no reference. CPU backward silently ignores it.
-- **Contract:** cuDNN.
+- **hipDNN:** the references implement cuDNN's form: `(skv - sq) * slope(h)` added after the bias, with cuDNN's
+  per-query-head slopes (`get_alibi_slope`: 2^(-8 (h+1)/n) for the closest power of two n <= H, then
+  2^(-4 (2j+1)/n)). The plans accept `alibi_mask` only with top-left causal masking, as cuDNN does; bottom-right or
+  non-causal ALiBi is declined. The backward has no extra term.
+- **Contract:** cuDNN. Adapters for FA/TE-style ALiBi must convert to cuDNN's form or use an explicit bias.
 
 ### SEM-022: Attention sinks
 
