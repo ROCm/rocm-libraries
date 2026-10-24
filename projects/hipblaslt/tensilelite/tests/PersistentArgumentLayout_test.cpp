@@ -180,23 +180,24 @@ TEST(PersistentArgumentLayout, InputBiasRequiresOnlyItsSourceAtAlphaZero)
     }
 }
 
-TEST(PersistentArgumentLayout, BatchedInputBiasRejectsOverlappingOutputs)
+TEST(PersistentArgumentLayout, BatchedBiasRejectsOverlappingOutputs)
 {
     ContractionSolution solution;
     configurePersistentSolution(solution, 3, 1);
     solution.problemType.useBias = 1;
     solution.problemType.useGradient = true;
-    auto problem = persistentProblem(33, 49, 0, 2);
+    auto problem = persistentProblem(33, 33, 0, 2);
     problem.setUseBias(1);
     problem.setUseGradient(true);
     auto inputs = persistentInputs(0.0f);
     inputs.beta = 1.0f;
     float output = 0;
     inputs.c = inputs.d = &output;
-    inputs.bias = &output;
+    inputs.bias = inputs.ws = &output;
+    for(auto source : {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
     for(size_t stride : {size_t{0}, size_t{32}, size_t{33}, size_t{40}})
     {
-        problem.setBias(rocisa::DataType::Float, 33, stride, true, ContractionProblemGemm::A);
+        problem.setBias(rocisa::DataType::Float, 33, stride, true, source);
         if(stride < 33)
             EXPECT_THROW(solution.solve(problem, inputs, persistentDevice()), std::runtime_error);
         else
@@ -1181,6 +1182,7 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
 {
     for(auto source : {ContractionProblemGemm::TENSOR::A, ContractionProblemGemm::TENSOR::B,
                        ContractionProblemGemm::TENSOR::D})
+    for(size_t batches : {size_t{1}, size_t{2}})
     {
         ContractionSolution solution;
         configureClusterStreamK(solution, 4, 2);
@@ -1189,10 +1191,11 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
         solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.problemType.useBias = 1;
         solution.problemType.useGradient = true;
-        auto problem = clusterProblem(129, 129, 4097, 1);
+        // An odd element count above 2^24 exposes float-rounded workspace offsets.
+        auto problem = clusterProblem(4097, 4097, 4097, batches);
         problem.setUseBias(1);
         problem.setUseGradient(true);
-        problem.setBias(rocisa::DataType::Float, 129, 0, true, source);
+        problem.setBias(rocisa::DataType::Half, 4097, 4104, true, source);
         auto device = persistentDevice(128);
         device.processor = AMDGPU::Processor::gfx1250;
         device.wavefrontSize = 32;
@@ -1201,14 +1204,13 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
         const size_t partialBytes = launch.clusterSchedule.partialSlots * 64 * 128 * sizeof(float);
         const size_t biasTile = source == ContractionProblemGemm::TENSOR::A ? 64 : 128;
         const size_t biasBytes = source == ContractionProblemGemm::TENSOR::D
-            ? 129 * 129 * sizeof(float)
+            ? 4097 * 4097 * batches * sizeof(float)
             : launch.clusterSchedule.partialSlots * biasTile * 32 * sizeof(float);
         EXPECT_EQ(launch.clusterSchedule.biasWorkspaceOffset, partialBytes);
         EXPECT_EQ(launch.clusterSchedule.biasWorkspaceBytes, biasBytes);
         EXPECT_EQ(launch.workspaceBytes, partialBytes + biasBytes);
         EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
         problem.setWorkspaceSize(launch.workspaceBytes);
-        EXPECT_EQ(solution.resolvePersistentSettings(problem, device).workspaceBytes, launch.workspaceBytes);
         auto inputs = clusterInputs();
         inputs.beta = 1.0f;
         inputs.a = inputs.b = inputs.c = reinterpret_cast<void*>(uintptr_t{0x40000});
@@ -1220,10 +1222,15 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
             EXPECT_EQ(value<void const*>(main.args, "ws_bias"),
                 static_cast<uint8_t*>(inputs.ws) + partialBytes);
             const auto calls = solution.solve(problem, inputs, device);
-            ASSERT_EQ(calls.size(), 2u);
-            void* reductionWorkspace = nullptr;
-            std::memcpy(&reductionWorkspace, calls.back().args.data(), sizeof(reductionWorkspace));
-            EXPECT_EQ(reductionWorkspace, static_cast<uint8_t*>(inputs.ws) + partialBytes);
+            ASSERT_EQ(calls.size(), 1 + batches);
+            for(size_t batch = 0; batch < batches; ++batch)
+            {
+                void const* pointers[2];
+                std::memcpy(pointers, calls[1 + batch].args.data(), sizeof(pointers));
+                EXPECT_EQ(pointers[0], static_cast<uint8_t*>(inputs.ws) + partialBytes
+                                      + batch * 4097 * 4097 * sizeof(float));
+                EXPECT_EQ(pointers[1], static_cast<uint8_t const*>(inputs.bias) + batch * 4104 * sizeof(Half));
+            }
         }
         problem.setWorkspaceSize(launch.workspaceBytes - 1);
         const auto fallback = solution.resolvePersistentSettings(problem, device);

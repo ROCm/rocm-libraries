@@ -1871,9 +1871,12 @@ namespace TensileLite
                 boundSize[i] = problem.boundSize(i);
 
             auto boundCount = CoordCount(boundSize.begin() + 1, boundSize.end());
+            const bool computeProduct = std::all_of(boundSize.begin(), boundSize.end(),
+                                                   [](size_t size) { return size != 0; })
+                && std::get<typename Inputs::AlphaType>(inputs.alpha)
+                       != static_cast<typename Inputs::AlphaType>(0);
 
-            if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-               != static_cast<typename Inputs::AlphaType>(0))
+            if(computeProduct)
             {
                 if(inputs.a == nullptr || inputs.b == nullptr)
                 {
@@ -1952,9 +1955,8 @@ namespace TensileLite
 
                 Accumulator value(0);
 
-                // Check short-circuit for alpha = 0
-                if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-                   != static_cast<typename Inputs::AlphaType>(0))
+                // Empty summation dimensions have no valid input coordinates.
+                if(computeProduct)
                 {
                     for(size_t boundNum = 0; boundNum < boundCount; boundNum++)
                     {

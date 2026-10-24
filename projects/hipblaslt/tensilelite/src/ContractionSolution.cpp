@@ -5009,7 +5009,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        // FIXME: Need to check the formula for batch > 1
+        // The caller selects one packed workspace matrix and one output bias vector.
         rv.args.append<void*>("WS", inputs.ws);
         rv.args.append<void const*>("bias", inputs.bias);
         for(size_t i = 0; i < 2; i++)
@@ -5397,10 +5397,8 @@ namespace TensileLite
         bool hasBoundElements = true;
         for(size_t i = 0; i < problem.boundIndices().size(); i++)
             hasBoundElements &= problem.boundSize(i) != 0;
-        bool inputBias = problem.useGradient() && problem.useBias() && (inputs.bias || inputs.batchBias)
-                         && problem.getParams().biasEnum() != rocisa::DataType::None
-                         && (problem.biasSrc() == ContractionProblemGemm::A
-                             || problem.biasSrc() == ContractionProblemGemm::B);
+        bool biasGradient = problem.useGradient() && problem.useBias() && (inputs.bias || inputs.batchBias)
+                            && problem.getParams().biasEnum() != rocisa::DataType::None;
         // Disabling the output does not disable reads in a compiled gradient
         // kernel. Its serialized source, rather than runtime BiasType, governs
         // the pointer requirement. Legacy hand-built solutions may omit it.
@@ -5425,11 +5423,11 @@ namespace TensileLite
             throw std::runtime_error("Unsupported nullptr for " + matrixID
                                      + " required by GEMM or input bias gradient when K != 0");
         }
-        if(inputBias)
+        if(biasGradient)
         {
             auto const& bias = problem.tensor(ContractionProblemGemm::BIAS);
             if(bias.sizes().at(2) > 1 && bias.strides().at(2) < bias.sizes().at(0))
-                throw std::runtime_error("Batched input bias gradients require non-overlapping output vectors");
+                throw std::runtime_error("Batched bias gradients require non-overlapping output vectors");
         }
 
         // Check if alpha matches problem definition
@@ -5641,14 +5639,26 @@ namespace TensileLite
             // Skip if output is null
             if(inputs.bias != nullptr)
             {
-                auto reductionInputs = inputs;
-                if(usesStreamKSpatialCluster())
+                // Preserve the helper ABI: each call reduces one packed M x N
+                // workspace matrix into the corresponding strided bias vector.
+                const size_t workspaceBatchBytes = multiplyElementSize(
+                    checkedMultiply(problem.d().sizes()[0], problem.d().sizes()[1]),
+                    problem.computeTypeElementSize());
+                const size_t biasBatchBytes = multiplyElementSize(
+                    problem.bias().strides()[2], problem.bias().elementBytes());
+                for(size_t batch = 0; batch < problem.d().sizes()[2]; ++batch)
+                {
+                    auto reductionInputs = inputs;
                     reductionInputs.ws = static_cast<uint8_t*>(inputs.ws)
-                                         + launch.clusterSchedule.biasWorkspaceOffset;
-                if(debug)
-                    rv.push_back(generateReductionCall<true>(problem, reductionInputs));
-                else
-                    rv.push_back(generateReductionCall<false>(problem, reductionInputs));
+                                         + checkedAdd(launch.clusterSchedule.biasWorkspaceOffset,
+                                                      checkedMultiply(batch, workspaceBatchBytes));
+                    reductionInputs.bias = static_cast<uint8_t const*>(inputs.bias)
+                                           + checkedMultiply(batch, biasBatchBytes);
+                    if(debug)
+                        rv.push_back(generateReductionCall<true>(problem, reductionInputs));
+                    else
+                        rv.push_back(generateReductionCall<false>(problem, reductionInputs));
+                }
             }
         }
 
