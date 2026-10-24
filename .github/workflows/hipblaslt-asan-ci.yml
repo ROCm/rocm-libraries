@@ -46,7 +46,7 @@ jobs:
 
       - name: Select locked TheRock revision
         id: therock-ref
-        run: echo "ref=3c4ec014374d4d32243334ef229093fe7b38c5b2" >> "$GITHUB_OUTPUT"
+        run: echo "ref=b0958085a97cb03a2c38931b8e2ec86ac78d1563" >> "$GITHUB_OUTPUT"
 
       - name: Compute arch matrix
         id: matrix
