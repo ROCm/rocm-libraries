@@ -716,6 +716,7 @@ endif()
 function(unpack_db db_bzip2_file)
     get_filename_component(__fname ${db_bzip2_file} NAME_WLE)
     add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}
+                       DEPENDS ${db_bzip2_file}
                        COMMAND ${UNZIPPER} -dc -k ${db_bzip2_file} > ${KERNELS_BINARY_DIR}/${__fname})
     string(REPLACE "." "_" __tname ${__fname})
     add_custom_target(generate_${__tname} ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname})
@@ -724,7 +725,7 @@ function(unpack_db db_bzip2_file)
 
     if(NOT MIOPEN_USE_SQLITE_PERFDB AND __extension STREQUAL ".db")
         add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}.txt
-                           DEPENDS sqlite2txt generate_${__tname}
+                           DEPENDS sqlite2txt generate_${__tname} ${KERNELS_BINARY_DIR}/${__fname}
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
