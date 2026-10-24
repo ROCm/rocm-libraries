@@ -3432,6 +3432,18 @@ def cases():
             "persist_swa_w128_sq512",
             {"persistent": True, "num_persistent": 256, "sliding_window": 128},
         ),
+        # Window >= block_m: one mask bound per boundary phase, both grids.
+        ("swa_w256_sq512", {"sliding_window": 256}),
+        (
+            "persist_swa_w128_bm128_sinks_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "sliding_window": 128,
+                "use_sinks": True,
+                "geometry": "bm128",
+            },
+        ),
         (
             "persist_wdma_gqapair_fp16_sq512",
             {

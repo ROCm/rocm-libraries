@@ -291,7 +291,10 @@ class TestDenseNumeric:
     @pytest.mark.parametrize(
         "d,scale", [(64, 1.0 / math.sqrt(64)), (128, 0.5), (128, 1.0), (128, 2.0**4)]
     )
-    def test_bf16_sliding_window_no_sinks(self, d, scale, persistent):
+    # 128 < block_m keeps both bounds on the boundary phases; 256 (== block_m) and
+    # 320 (> block_m, not a tile multiple) take the one-bound-per-phase path.
+    @pytest.mark.parametrize("window", [128, 256, 320])
+    def test_bf16_sliding_window_no_sinks(self, d, scale, persistent, window):
         """Causal sliding window without sinks, where whole query rows of the
         first visited KV tile are masked.
 
@@ -305,7 +308,7 @@ class TestDenseNumeric:
         """
         import torch
 
-        dtype, hq, hkv, window = "bf16", 16, 4, 128
+        dtype, hq, hkv = "bf16", 16, 4
         tol = _tolerance(dtype)
         B, S = 1, 512
         torch.manual_seed(0)

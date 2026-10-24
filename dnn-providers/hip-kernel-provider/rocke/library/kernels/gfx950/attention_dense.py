@@ -1504,8 +1504,13 @@ def build_attention_dense(
         #   L: [start+1, mid_lo)  window-edge tiles (masked)
         #   M: [mid_lo, mid_hi)   interior (mask-free: both bounds hold for all rows)
         #   R: [mid_hi, n_upper)  causal-edge tiles (masked)
-        # Boundary phases apply BOTH bounds (robust for W<block_m overlap); the
-        # redundant bound is a no-op compare. M is provably mask-free by geometry.
+        # When the window spans at least one query block (Wt >= n_per) and the
+        # diagonal is unshifted, each boundary phase needs only one bound: every L
+        # tile ends below the block's first query (the causal bound always holds)
+        # and every R tile starts at or past it (the window bound always holds).
+        # Otherwise both bounds are applied (W < block_m lets the phases overlap).
+        # M is provably mask-free by geometry.
+        one_bound = Wt >= n_per and DIAG_OFF == 0 and RIGHT == 0
         diag_start = b.mul(qb, b.const_i32(n_per))
         a = b.add(start_tile, b.const_i32(1))
         left_end = b.add(diag_start, b.const_i32(n_per - Wt))  # start of mask-free M
@@ -1523,7 +1528,7 @@ def build_attention_dense(
 
         phL = b.scf_for_iter(a, mid_lo, b.const_i32(1), iter_args, iv_name="swl")
         with phL as (j, carry):
-            emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+            emit_loop_body(j, carry, mask_lower=True, mask_upper=not one_bound)
         mid_args = [
             (name + "_m", val) for (name, _), val in zip(iter_args, phL.results)
         ]
@@ -1535,7 +1540,7 @@ def build_attention_dense(
         ]
         loop = b.scf_for_iter(mid_hi, n_upper, b.const_i32(1), rgt_args, iv_name="swr")
         with loop as (j, carry):
-            emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+            emit_loop_body(j, carry, mask_lower=not one_bound, mask_upper=True)
     elif causal and spec.causal_diag_split:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
         diag_start = b.mul(qb, b.const_i32(n_per))
@@ -2456,6 +2461,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 emit_loop_body(j, carry)
         elif causal and SW > 0:
             # Sliding-window three-phase band loop (prologue did start_tile).
+            # One bound per boundary phase when the window spans a query block
+            # and the diagonal is unshifted (see the default builder).
+            one_bound = SWt >= n_per and RIGHT == 0
             diag_start = b.mul(qb, b.const_i32(n_per))
             a = b.add(start_tile, b.const_i32(1))
             left_end = b.add(diag_start, b.const_i32(n_per - SWt))
@@ -2472,7 +2480,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
             phL = b.scf_for_iter(a, mid_lo, b.const_i32(1), iter_args, iv_name="swl")
             with phL as (j, carry):
-                emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+                emit_loop_body(j, carry, mask_lower=True, mask_upper=not one_bound)
             mid_args = [
                 (name + "_m", val) for (name, _), val in zip(iter_args, phL.results)
             ]
@@ -2488,7 +2496,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 mid_hi, n_upper, b.const_i32(1), rgt_args, iv_name="swr"
             )
             with loop as (j, carry):
-                emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+                emit_loop_body(j, carry, mask_lower=not one_bound, mask_upper=True)
         elif causal and spec.causal_diag_split:
             diag_start = b.mul(qb, b.const_i32(n_per))
             if RIGHT // BN:
