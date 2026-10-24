@@ -196,7 +196,6 @@ void testing_local_matrix_bad_args(void)
 
     // AMG
     {
-        int                   val;
         LocalVector<bool>*    bool_null_vec  = nullptr;
         LocalVector<int64_t>* int64_null_vec = nullptr;
         ASSERT_DEATH(mat1.AMGGreedyAggregate(0.1, bool_null_vec, &int641, &int641),
@@ -524,13 +523,10 @@ bool testing_local_matrix_allocations(Arguments argus)
 template <typename T>
 bool testing_local_matrix_zero(Arguments argus)
 {
-    int size     = argus.size;
-    int blockdim = argus.blockdim;
+    int size = argus.size;
 
-    int m  = size;
-    int n  = size;
-    int mb = (m + blockdim - 1) / blockdim;
-    int nb = (n + blockdim - 1) / blockdim;
+    int m = size;
+    int n = size;
 
     int nnz = 0.05 * m * n;
     if(nnz == 0)
@@ -583,10 +579,8 @@ bool testing_local_matrix_set_data_ptr(Arguments argus)
     set_device_rocalution(device);
     init_rocalution();
 
-    int ndiag       = 5;
     int ell_max_row = 6;
     int ell_nnz     = ell_max_row * m;
-    int coo_nnz     = (nnz - ell_nnz) < 0 ? 0 : nnz - ell_nnz;
 
     // Testing allocating matrix types
     {
@@ -734,7 +728,6 @@ template <typename T>
 void getTestMatrix(Arguments argus, LocalMatrix<T>& matrix, bool& is_invertible)
 {
     int         size        = argus.size;
-    int         blockdim    = argus.blockdim;
     std::string matrix_type = argus.matrix_type;
 
     // Generate A
@@ -2730,7 +2723,6 @@ void testing_local_compress(Arguments argus)
     // Extract values after compression
     int64_t new_nnz     = matrix.GetNnz();
     int     m           = matrix.GetM();
-    int     n           = matrix.GetN();
     int*    row_offsets = new int[m + 1];
     int*    col_indices = new int[new_nnz];
     T*      new_values  = new T[new_nnz];

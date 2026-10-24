@@ -9579,8 +9579,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregates);
         const HIPAcceleratorVector<int64_t>* cast_agg_nodes
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorVector<int>* cast_f2c = dynamic_cast<HIPAcceleratorVector<int>*>(f2c);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
@@ -9608,7 +9606,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
 
             // Start with fresh P ghost
@@ -9680,8 +9678,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
         const HIPAcceleratorVector<int>* cast_f2c
             = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2c);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pg
@@ -9742,7 +9738,7 @@ namespace rocalution
 
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
 
