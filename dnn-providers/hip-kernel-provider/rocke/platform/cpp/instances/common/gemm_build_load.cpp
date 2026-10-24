@@ -340,7 +340,7 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
         ctx->dtl_zero_soff = rocke_b_const_i32(b, 0);
         ctx->dtl_chunks_per_row = ctx->block_k / ctx->dtl_halves;
         ctx->dtl_c_chunks_per_row = rocke_b_const_i32(b, ctx->dtl_chunks_per_row);
-        ctx->dtl_c_halves_per_chunk = rocke_b_const_i32(b, ctx->dtl_halves);
+        ctx->dtl_c_cols_per_chunk = rocke_b_const_i32(b, ctx->dtl_halves);
         ctx->dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
     }
 
@@ -378,6 +378,37 @@ rocke_value_t*
         rocke_b_shl(b, rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod), ctx->c_swl));
 }
 
+/* _dtl_off_bytes(batch_off, blk_off, row, col): byte offset of one DTL chunk's
+ * global source. A chunk smaller than an element (f64 on a 1-dword target)
+ * addresses `col` in bytes; otherwise in elements. Operand order is pinned with
+ * temporaries so the SSA order matches the Python closure. */
+static rocke_value_t* rocke_gemm_dtl_off_bytes(rocke_gemm_build_ctx_t* ctx,
+                                               rocke_value_t* c_eb,
+                                               rocke_value_t* batch_off,
+                                               rocke_value_t* blk_off,
+                                               rocke_value_t* row,
+                                               rocke_value_t* col,
+                                               rocke_value_t* k_off)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* row_term = rocke_b_mul(b, rocke_b_add(b, blk_off, row), ctx->K);
+    if(ctx->dtl_sub_elem)
+    {
+        rocke_value_t* off_elems = rocke_b_add(b, batch_off, rocke_b_add(b, row_term, k_off));
+        rocke_value_t* col_b = col;
+        if(ctx->swz)
+        {
+            rocke_value_t* mask = rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod);
+            rocke_value_t* shift = rocke_b_const_i32(b, ctx->swz_l + ctx->dtl_elem_log2);
+            col_b = rocke_b_xor(b, col, rocke_b_shl(b, mask, shift));
+        }
+        return rocke_b_add(b, rocke_b_mul(b, off_elems, c_eb), col_b);
+    }
+    rocke_value_t* k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
+    rocke_value_t* off_elems = rocke_b_add(b, batch_off, rocke_b_add(b, row_term, k_term));
+    return rocke_b_mul(b, off_elems, c_eb);
+}
+
 /* ===================================================================== *
  *  emit_load_phase -- one K-tile's coalesced global->LDS copy.
  *
@@ -403,8 +434,8 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     if(spec->trait.direct_to_lds)
     {
         bool parity_is_value = (parity_v != NULL);
-        int a_half_bytes = ctx->block_m * ctx->block_k * 2;
-        int b_half_bytes = ctx->block_n * ctx->block_k * 2;
+        int a_half_bytes = ctx->block_m * ctx->block_k * ctx->dtl_elem_bytes;
+        int b_half_bytes = ctx->block_n * ctx->block_k * ctx->dtl_elem_bytes;
         rocke_value_t* a_lds_par_base;
         rocke_value_t* b_lds_par_base;
         if(ctx->prefetch && parity_is_value)
@@ -425,7 +456,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             = (ctx->prefetch && !parity_is_value) ? parity_imm * a_half_bytes : 0;
         int b_parity_bytes_static
             = (ctx->prefetch && !parity_is_value) ? parity_imm * b_half_bytes : 0;
-        rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+        rocke_value_t* c_eb = rocke_b_const_i32(b, ctx->dtl_elem_bytes);
 
         /* Per-wave LDS offset (multi-wave WG). */
         int wave_bytes = spec->wave_size * ctx->dtl_bytes_per_lane;
@@ -459,18 +490,9 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                 = rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, p * spec->block_size));
             rocke_value_t* row = rocke_b_div(b, chunk_idx, ctx->dtl_c_chunks_per_row);
             rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_halves_per_chunk);
-            /* Python: b.add(batch_off_a, b.add(b.mul(b.add(block_m_off, row), K),
-             *                                   b.add(k_off, _swz_col(col, row))))
-             * Python evaluates the inner add's first arg (the mul subtree) before
-             * its second (the k_off add). C arg eval order is unspecified -- pin
-             * with temporaries so the SSA order matches. */
-            rocke_value_t* a_row_term
-                = rocke_b_mul(b, rocke_b_add(b, ctx->block_m_off, row), ctx->K);
-            rocke_value_t* a_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
-            rocke_value_t* off_elems
-                = rocke_b_add(b, ctx->batch_off_a, rocke_b_add(b, a_row_term, a_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
+            rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
+                ctx, c_eb, ctx->batch_off_a, ctx->block_m_off, row, col, k_off);
             rocke_b_async_buffer_load_lds_addr(b,
                                                ctx->dtl_a_rsrc,
                                                pass_lds_a,
@@ -493,14 +515,9 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                 = rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, p * spec->block_size));
             rocke_value_t* row = rocke_b_div(b, chunk_idx, ctx->dtl_c_chunks_per_row);
             rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_halves_per_chunk);
-            /* Same operand-order pinning as the A path above. */
-            rocke_value_t* b_row_term
-                = rocke_b_mul(b, rocke_b_add(b, ctx->block_n_off, row), ctx->K);
-            rocke_value_t* b_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
-            rocke_value_t* off_elems
-                = rocke_b_add(b, ctx->batch_off_b, rocke_b_add(b, b_row_term, b_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+            rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
+            rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
+                ctx, c_eb, ctx->batch_off_b, ctx->block_n_off, row, col, k_off);
             rocke_b_async_buffer_load_lds_addr(b,
                                                ctx->dtl_b_rsrc,
                                                pass_lds_b,
@@ -548,7 +565,10 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                               : (rvar))))
 
 #define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
-#define STORAGE_ZERO() rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype)
+#define STORAGE_ZERO()                              \
+    (rocke_type_eq(ctx->storage_dtype, rocke_f64()) \
+         ? rocke_b_const_f64(b, 0.0)                \
+         : rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype))
 #define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
 
     /* A-load loop. */
