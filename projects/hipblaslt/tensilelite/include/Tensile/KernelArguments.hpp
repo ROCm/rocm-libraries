@@ -28,6 +28,7 @@
 
 #include <cstring>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -64,16 +65,14 @@ namespace TensileLite
                 m_currentLocation = m_vec_data.size();
                 return;
             }
-            else if(startPos + size < m_dataSize)
-            {
-                // We don't insert 0 here because we'll copy data later.
-                // Adding this API is to compatible with vector insert.
-                // for(size_t i = startPos; i < startPos + size; i++)
-                // {
-                //     m_data[i] = value;
-                // }
-                m_currentLocation += size;
-            }
+
+            // An insert ending exactly at m_dataSize is valid: grouped GEMM sizes
+            // its buffer to exactly the argument bytes.
+            if(startPos + size > m_dataSize)
+                throw std::runtime_error("KernelArguments external buffer overflow.");
+
+            // We don't insert 0 here because we'll copy data later.
+            m_currentLocation += size;
         }
 
         size_t size() const
