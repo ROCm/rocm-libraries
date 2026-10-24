@@ -6058,6 +6058,17 @@ def run_unified_attention_torch(
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    # FP8 K/V prefill that no tiled 2D kernel serves (gfx942 has no FP8 2D
+    # path) runs on the 3D split-KV kernel, which handles multi-token query
+    # blocks, instead of the scalar fallback. use_fp8 is checked first so other
+    # launches skip the support walk.
+    if (
+        prefer_2d
+        and problem.use_fp8
+        and tuning_spec is None
+        and not _explicit_path_supported(problem, None, "2d", _launch_arch)[0]
+    ):
+        prefer_2d = False
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch
