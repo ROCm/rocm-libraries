@@ -50,9 +50,7 @@ def test_production_modules_do_not_import_the_legacy_tensile_package():
 def test_unit_modules_do_not_import_the_legacy_tensile_package():
     """Canonical unit tests must exercise the package name shipped by the wheel."""
     unit_root = _PACKAGE_ROOT / "Tests/unit"
-    unit_modules = (
-        path for path in unit_root.rglob("*.py") if path.name != "test_namespace_bridge.py"
-    )
+    unit_modules = unit_root.rglob("*.py")
     assert _legacy_imports(unit_modules) == []
 
 
@@ -64,18 +62,24 @@ def test_installed_artifacts_exclude_source_only_tests():
 
     assert 'PATTERN "source_only" EXCLUDE' in package_install
 
+def test_legacy_namespace_bridge_files_are_absent():
+    project_root = _PACKAGE_ROOT.parent
+
+    assert not (project_root / "Tensile/__init__.py").exists()
+    assert not (_PACKAGE_ROOT / "_namespace_bridge.py").exists()
+    assert not (_PACKAGE_ROOT / "Tests/unit/test_namespace_bridge.py").exists()
+
 
 def test_wheel_excludes_source_only_tests(tmp_path):
     """Build the wheel and check its contents independently of discovery settings."""
     project_root = _PACKAGE_ROOT.parent
     build_source = tmp_path / "wheel-source"
     build_source.mkdir()
-    for package in ("tensilelite", "Tensile"):
-        shutil.copytree(
-            project_root / package,
-            build_source / package,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
+    shutil.copytree(
+        project_root / "tensilelite",
+        build_source / "tensilelite",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     for filename in ("pyproject.toml", "MANIFEST.in", "requirements.txt"):
         shutil.copyfile(project_root / filename, build_source / filename)
     result = subprocess.run(
@@ -88,6 +92,5 @@ def test_wheel_excludes_source_only_tests(tmp_path):
     wheel = next((build_source / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
-    assert "Tensile/__init__.py" in names
     assert "tensilelite/resources.py" in names
     assert not any(name.startswith("tensilelite/Tests/unit/source_only/") for name in names)
