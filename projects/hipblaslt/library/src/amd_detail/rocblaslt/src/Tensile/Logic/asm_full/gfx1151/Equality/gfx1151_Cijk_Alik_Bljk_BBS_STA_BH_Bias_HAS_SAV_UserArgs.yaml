@@ -289,7 +289,7 @@
     SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1567,7 +1567,7 @@
     tailLoopOptB: false
 - [2, 3, 0, 1]
 - - - [151680, 289, 1, 2048, 151680, 151680, 2048, 2048]
-    - [0, 34804.8]
+    - [0, 34820.0]
   - - [2048, 551, 1, 6144, 2048, 2048, 6144, 6144]
     - [1, 34428.2]
   - - [2048, 289, 1, 6144, 2048, 2048, 6144, 6144]
