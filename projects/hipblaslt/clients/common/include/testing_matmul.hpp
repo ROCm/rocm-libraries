@@ -2078,7 +2078,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
-    bool mx_use_rocroller = MXUseRocroller();
+    // The Tensile host also pads gfx950 scale tensors when legacy rocRoller is disabled.
+    bool mx_pad_scale_free_dim = MXUseRocroller() || hipblaslt_get_arch() == 950;
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -2222,7 +2223,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
                 size_scaleAVec[i] = blockScaleBufferSize(
-                    A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_use_rocroller);
+                    A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_pad_scale_free_dim);
             else
                 size_scaleAVec[i] = 0;
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -2231,7 +2232,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
                 size_scaleBVec[i] = blockScaleBufferSize(
-                    B_row[i], B_col[i], arg.scaleB, transB == HIPBLAS_OP_N, mx_use_rocroller);
+                    B_row[i], B_col[i], arg.scaleB, transB == HIPBLAS_OP_N, mx_pad_scale_free_dim);
             else
                 size_scaleBVec[i] = 0;
         }
@@ -3197,6 +3198,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
+                if(mx_pad_scale_free_dim && scaleLayoutA == MXScaleLayout::None)
+                    padNaturalMXScaleBufferForGfx950(scalePtrA,
+                                                     A_col[i],
+                                                     (A_row[i] + blockSize(arg.scaleA) - 1)
+                                                         / blockSize(arg.scaleA),
+                                                     sizeof(*scalePtrA));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -3310,6 +3317,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
+                if(mx_pad_scale_free_dim && scaleLayoutB == MXScaleLayout::None)
+                    padNaturalMXScaleBufferForGfx950(scalePtrB,
+                                                     B_col[i],
+                                                     (B_row[i] + blockSize(arg.scaleB) - 1)
+                                                         / blockSize(arg.scaleB),
+                                                     sizeof(*scalePtrB));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));

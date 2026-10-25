@@ -710,6 +710,20 @@ void restrideMXScaleBufferKFast(uint8_t* buffer,
     std::memset(buffer + compactRow, 0x00, padTail);
 }
 
+void padNaturalMXScaleBufferForGfx950(uint8_t* buffer,
+                                      size_t   freeDim,
+                                      size_t   kBlocks,
+                                      size_t   elemBytes)
+{
+    size_t const paddedKBlocks = (kBlocks + 7) / 8 * 8;
+    size_t const paddedFreeDim = (freeDim + 31) / 32 * 32;
+    restrideMXScaleBufferKFast(buffer, freeDim, kBlocks, paddedKBlocks, elemBytes);
+    if(paddedFreeDim > freeDim && paddedKBlocks != 0)
+        std::memset(buffer + freeDim * paddedKBlocks * elemBytes,
+                    0,
+                    (paddedFreeDim - freeDim) * paddedKBlocks * elemBytes);
+}
+
 void applyMXScaleLayoutInPlace(uint8_t*      scale,
                                size_t        scaleElemCount,
                                MXScaleLayout scaleLayout,

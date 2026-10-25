@@ -59,6 +59,13 @@ void restrideMXScaleBufferKFast(uint8_t* buffer,
                                 size_t   paddedKBlocks,
                                 size_t   elemBytes);
 
+// Expand natural K-fast scales to the gfx950 tensor strides before copying to the GPU.
+// The caller allocates ceil(freeDim/32)*32 rows and ceil(kBlocks/8)*8 entries per row.
+void padNaturalMXScaleBufferForGfx950(uint8_t* buffer,
+                                      size_t   freeDim,
+                                      size_t   kBlocks,
+                                      size_t   elemBytes);
+
 void applyMXScaleLayoutInPlace(uint8_t*      scale,
                                size_t        scaleElemCount,
                                MXScaleLayout scaleLayout,
