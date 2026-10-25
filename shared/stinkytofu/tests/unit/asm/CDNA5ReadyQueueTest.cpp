@@ -145,9 +145,6 @@ struct CDNA5ReadyQueueTestPeer {
     static void advance(CDNA5ReadyQueue& q, int cycles, TimeKind kind) {
         q.advanceTime(cycles, kind);
     }
-    static void setDsCap(CDNA5ReadyQueue& q, DsIssueCap::Mode mode, int depth) {
-        q.dsIssueCap_ = DsIssueCap(mode, depth);
-    }
     static void carry(CDNA5ReadyQueue& q) {
         q.carryQueuedWar();
     }
@@ -430,24 +427,18 @@ TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn
     EXPECT_GE(elapsed[1], 40) << "queue model on: the source stall elapses";
 }
 
-// Periodic cap: at most A ds_loads per X-cycle period. With only ds_loads to issue nothing else
-// supplies elapsed time, so the cap wait itself must elapse; otherwise the period never ends and
-// the ds_loads are all counted into the same full period, exceeding A.
-TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod) {
-    constexpr int kCap = 4, kSpan = 32, kLoads = 10;
+// A full ds credit queue delays ds_loads but never stalls the scheduler: every ds_load issues
+// and the timeline never runs backwards.
+TEST_F(CDNA5ReadyQueueTest, FullDsCreditQueueStillIssuesEveryDsLoad) {
+    constexpr int kLoads = 10;
     PassContext ctx;
     GemmTileConfig config;
     config.arch = {12, 5, 0};
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
-    pfc.dagFeatures.dsReadPerCap = kCap;
-    pfc.dagFeatures.dsIssueCapSpanCycles = kSpan;
-    pfc.dagFeatures.dsIssueCapMode = PassFeatureConfig::DsIssueCapMode::Periodic;
-    pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.dsReadThrottleLatency = 1;  // the LDS throttle is out of the way
+    pfc.dagFeatures.dsReadQueueDepth = 2;
     ctx.setPassFeatureConfig(pfc);
     CDNA5ReadyQueue queue(ctx);
-    CDNA5ReadyQueueTestPeer::setDsCap(queue, DsIssueCap::Mode::Periodic, kCap);
 
     std::vector<DAGNode> nodes;
     nodes.reserve(kLoads);
@@ -459,17 +450,10 @@ TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod)
     }
     for (DAGNode& n : nodes) queue.push(&n);
 
-    std::vector<int> issuedAt;  // timeline clock once each ds_load has issued (after any wait)
+    int lastClock = 0;
     for (int i = 0; i < kLoads; ++i) {
         ASSERT_NE(queue.pickOne(), nullptr);
-        issuedAt.push_back(CDNA5ReadyQueueTestPeer::clock(queue));
-    }
-    std::string times;
-    for (int t : issuedAt) times += std::to_string(t) + " ";
-    // No window of kSpan cycles opened by a ds_load holds more than kCap of them.
-    for (int i = 0; i < kLoads; ++i) {
-        int inPeriod = 0;
-        for (int j = i; j < kLoads; ++j) inPeriod += issuedAt[j] < issuedAt[i] + kSpan;
-        EXPECT_LE(inPeriod, kCap) << "period opened by ds_load " << i << ", issue times: " << times;
+        EXPECT_GE(CDNA5ReadyQueueTestPeer::clock(queue), lastClock);
+        lastClock = CDNA5ReadyQueueTestPeer::clock(queue);
     }
 }

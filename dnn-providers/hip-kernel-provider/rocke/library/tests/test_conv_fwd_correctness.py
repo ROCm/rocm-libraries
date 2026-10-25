@@ -558,11 +558,9 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
 
     def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
         ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
-        _assert_case_ran(self, ok, f"{shape.id} {dtype} {epilogue} gm={gm}: {why}")
+        _assert_case_ran(self, ok, why)
 
     def test_merged_matches_reference(self):
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         ran = 0
         for shape in _DW_SHAPES:
             for gm in (2, 4, 8, 16):
@@ -577,8 +575,6 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
     def test_unmerged_baseline_still_passes(self):
         # Pins the comparison: if the depthwise shapes themselves were broken,
         # the merged test above would be comparing two wrongs.
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         for shape in _DW_SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(shape, _DTYPES[0], "cshuffle", 1)
@@ -589,7 +585,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
         # merged tile count (Y*X*Gm = 9*Gm over tile_k = 32 at Gm = 2) leaves
         # the trailing phase past it, which must read zero.
         if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+            self.skipTest("unroll_k is MFMA-only (WMMA conv rejects it)")
         shape = _DW_SHAPES[0]
         for gm in (2, 8):
             with self.subTest(gm=gm):
@@ -602,15 +598,13 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                     group_merge=gm,
                     unroll_k=True,
                 )
-                _assert_case_ran(self, ok, f"{shape.id} unroll_k gm={gm}: {why}")
+                _assert_case_ran(self, ok, why)
 
     def test_merged_direct_epilogue(self):
         # Every case above stores through cshuffle, because merged kpg derives
         # vec_c > 1. _run_one pins vector_size_c=1 for the default epilogue,
         # which reaches the direct epilogue -- its store bound and group base
         # are merge-routed too.
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         for shape in _DW_SHAPES:
             for gm in (4, 8):
                 if shape.groups % gm:
@@ -624,7 +618,28 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                         "default",
                         group_merge=gm,
                     )
-                    _assert_case_ran(self, ok, f"{shape.id} default gm={gm}: {why}")
+                    _assert_case_ran(self, ok, why)
+
+    def test_merged_wavelet(self):
+        # The wavelet load waves fetch B through their own loader; it must
+        # take the merged (diagonal-masked) B descriptor like the sync path.
+        if not _IS_WMMA:
+            self.skipTest("wavelet is WMMA/gfx1250 only")
+        for shape in _DW_SHAPES:
+            for gm in (4, 16):
+                if shape.groups % gm:
+                    continue
+                for epilogue in _EPILOGUES:
+                    with self.subTest(shape=shape.id, gm=gm, epilogue=epilogue):
+                        ok, why = _run_one(
+                            GPU_ARCH,
+                            shape,
+                            _DTYPES[0],
+                            "wavelet",
+                            epilogue,
+                            group_merge=gm,
+                        )
+                        _assert_case_ran(self, ok, why)
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())

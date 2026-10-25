@@ -32,22 +32,39 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Orthonormal/Unitary matrix generator routines from Hessenberg reduction
     * ORGHR and UNGHR
 
-* Hessenberg reduction routines
-    * GEHD2
-    * GEHRD
-
-* Support added for the gfx1250-strict architecture.
-
 ### Changed
-
-* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
-
 ### Removed
 ### Optimized
 
 * Improved the performance of GEHRD for large matrices (LAHR2).
 * Improved the performance of LARFT with forward direction and column-wise storage for tall
   matrices, and of ORGQR/UNGQR and ORGQL/UNGQL for large matrices.
+
+### Resolved issues
+### Known issues
+
+* HSEQR (when it uses the multishift QR algorithm), GEBAL (for n >= 256) and GEEV synchronize
+  the stream, so they cannot be captured in a HIP graph.
+
+### Upcoming changes
+
+
+
+## rocSOLVER 3.38.0 for ROCm 10.2.0
+
+### Added
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+* Support added for the gfx1250-strict architecture.
+
+### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
+### Optimized
+
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
@@ -57,13 +74,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
-
-### Known issues
-
-* HSEQR (when it uses the multishift QR algorithm), GEBAL (for n >= 256) and GEEV synchronize
-  the stream, so they cannot be captured in a HIP graph.
-
-### Upcoming changes
 
 
 

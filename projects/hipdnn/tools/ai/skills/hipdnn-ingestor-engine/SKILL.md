@@ -42,7 +42,7 @@ AMDGPU code object resolved relative to the descriptor that names it (inside the
 root, no root-relative fallback) and `symbol` is authored. The packer copies the bytes
 as-is into the arch's archive with no compile step, reads the signature from the
 object's metadata, and declares `metadata_fields: []`. It does not check the object's
-format or target processor; `arch` follows [hsaco kernels and `arch`](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch). `hsaco_file` (direct load) remains unsupported.
+format or target processor; `arch` follows "hsaco kernels and `arch`" in `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`. `hsaco_file` (direct load) remains unsupported.
 
 Both dialects are packed and staged per architecture, and **neither registers a
 descriptor in CMake**: the authored subpath is the whole mechanism. Only

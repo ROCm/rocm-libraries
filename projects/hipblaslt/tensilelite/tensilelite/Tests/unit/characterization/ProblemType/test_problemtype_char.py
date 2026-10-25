@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.Problem.ProblemType`` —
+"""Characterization tests for ``tensilelite.SolutionStructs.Problem.ProblemType`` —
 its construction (`__init__` dtype-defaulting + HPA conversions + GEMM type
 check + `initGEMM` + `assignDerivedParameters`), the very branchy `__str__`
 naming, the ``Mapping`` interface, equality/hash, ``FromDefaultConfig``, and the
@@ -36,7 +36,7 @@ snapshot is ``{str, normalized state}`` (state rendered object-free by the
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.Problem import ProblemType
 
 pytestmark = pytest.mark.unit
 

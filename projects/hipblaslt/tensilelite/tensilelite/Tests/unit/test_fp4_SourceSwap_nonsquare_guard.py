@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile import Tensile
+from tensilelite import Tensile
 
 _CONFIG = Path(__file__).parent / "test_data" / "fp4_SourceSwap_nonsquare_gfx1250.yaml"
 

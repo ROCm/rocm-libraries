@@ -21,10 +21,10 @@ thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
-// Workspace sizes for AutotunePluginEngineWorkspaceGrows: the pre-compile
-// estimate fits a modest budget, but the compiled (execution-plan) workspace is
-// larger. A test sets a budget between the two so EXHAUSTIVE priming is skipped
-// for this engine while the normal benchmark still runs.
+// Workspace sizes for AutotunePluginEngineWorkspaceGrows: with the benchmarking knob on, both
+// the pre-compile estimate and the compiled (execution-plan) workspace are larger than without
+// it. A test sets a budget between the two so EXHAUSTIVE priming is skipped for this engine
+// while the normal benchmark still runs.
 namespace
 {
 constexpr size_t WORKSPACE_DEFAULT_SIZE = 1024;
@@ -282,22 +282,8 @@ public:
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
             context->engineId = engineConfigWrapper.engineId();
 
-            // Parse knob settings to detect benchmarking mode (global.benchmarking = 1)
-            if(engineConfigWrapper.hasKnobSetting("global.benchmarking"))
-            {
-                const auto& knobSetting
-                    = engineConfigWrapper.getKnobSettingByName("global.benchmarking");
-                if(knobSetting.valueType()
-                   == hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
-                {
-                    const auto& intValue
-                        = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
-                    if(intValue.value() == 1)
-                    {
-                        context->hasBenchmarkingKnobEnabled = true;
-                    }
-                }
-            }
+            // Detect benchmarking mode (global.benchmarking = 1)
+            context->hasBenchmarkingKnobEnabled = benchmarkingKnobEnabled(engineConfigWrapper);
 
             *executionContext = context.release();
 
@@ -387,6 +373,19 @@ public:
             handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
     }
 
+    static bool benchmarkingKnobEnabled(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper& engineConfig)
+    {
+        if(!engineConfig.hasKnobSetting("global.benchmarking"))
+        {
+            return false;
+        }
+        const auto& knobSetting = engineConfig.getKnobSettingByName("global.benchmarking");
+        return knobSetting.valueType() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue
+               && knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value()
+                      == 1;
+    }
+
     static hipdnnPluginStatus_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                                  const hipdnnPluginConstData_t* engineConfig,
                                                  const hipdnnPluginConstData_t* opGraph,
@@ -403,7 +402,15 @@ public:
             hipdnn_plugin_sdk::throwIfNull(opGraph);
             hipdnn_plugin_sdk::throwIfNull(workspaceSize);
 
-            *workspaceSize = WORKSPACE_DEFAULT_SIZE;
+            // Like a provider whose estimate covers the benchmarking configuration, the
+            // WorkspaceGrows engine reports its larger workspace when asked with the knob on.
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+                engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+            const bool grows = engineConfigWrapper.engineId()
+                                   == hipdnn_tests::plugin_constants::engineId<
+                                       AutotunePluginEngineWorkspaceGrows>()
+                               && benchmarkingKnobEnabled(engineConfigWrapper);
+            *workspaceSize = grows ? WORKSPACE_LARGE_COMPILED_SIZE : WORKSPACE_DEFAULT_SIZE;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });

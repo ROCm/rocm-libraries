@@ -3,8 +3,8 @@
 
 import pytest
 
-from Tensile.ductile.algorithm import GeneticAlgorithm
-from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from tensilelite.ductile.algorithm import GeneticAlgorithm
+from tensilelite.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
 
 pytestmark = pytest.mark.unit
 

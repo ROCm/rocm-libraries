@@ -119,7 +119,6 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
             dict(group_merge=3),  # not a power-of-two degree
             dict(group_merge=128),  # not a supported degree
             dict(group_merge=8, tile_n=4),  # Gm > tile_n
-            dict(group_merge=8, wave_size=32),  # MFMA-only
             dict(group_merge=8, async_dma=True),  # chunk-granular predicate
             dict(group_merge=8, vector_size_b=8),  # B must stay scalar
         ]
@@ -129,6 +128,34 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
             self.assertFalse(ok, f"{kw} should be rejected")
             with self.assertRaises(ValueError, msg=f"{kw} must raise"):
                 spec.validate()
+
+    def test_wmma_is_admitted(self):
+        # The merge is family-neutral (addressing, the B-load diagonal mask and
+        # the epilogue's N bound), so WMMA (wave32) targets take it too.
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        for arch, wtk in (("gfx1250", 32), ("gfx1151", 16)):
+            for pipeline in ("mem", "wavelet"):
+                spec = self._spec(
+                    group_merge=8,
+                    tile_m=32,
+                    tile_n=32,
+                    tile_k=32,
+                    warp_m=1,
+                    warp_n=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=wtk,
+                    wave_size=32,
+                    pipeline=pipeline,
+                    num_load_waves=1,
+                )
+                if pipeline == "wavelet" and arch != "gfx1250":
+                    continue
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    ok, why = is_valid_spec(spec, arch=arch)
+                    self.assertTrue(ok, why)
+                    spec.validate()
 
     def test_non_depthwise_is_gated_off(self):
         from kernels.common._conv_implicit_gemm_common import ConvProblem
