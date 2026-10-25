@@ -5,9 +5,9 @@
 
 namespace scalar_codec_test {
 void testIntegerCodecPolicies() {
-    const ScalarConversionOptions rejectNearestEven{
+    const ScalarConversionOptions identityNearestEven{
         IntegerRounding::NearestEven,
-        IntegerOverflow::Reject,
+        IntegerOverflow::Identity,
     };
     const ScalarConversionOptions saturateNearestEven{
         IntegerRounding::NearestEven,
@@ -57,11 +57,11 @@ void testIntegerCodecPolicies() {
             "Packed integer policy conversion mismatch.");
 
     const Tensor zeroImaginary(std::complex<double>{3.5, 0.0});
-    require(zeroImaginary.item<int32_t>(rejectNearestEven) == 4,
+    require(zeroImaginary.item<int32_t>(identityNearestEven) == 4,
             "Rank-zero tensor zero-imaginary conversion mismatch.");
 
     Tensor realTensor(ScalarType::Float32, Shape{1});
-    realTensor.storeFrom({0}, std::complex<double>{1.25, 0.0}, rejectNearestEven);
+    realTensor.storeFrom({0}, std::complex<double>{1.25, 0.0}, identityNearestEven);
     require(realTensor.loadAs<float>({0}) == 1.25f, "Zero-imaginary complex store mismatch.");
 
     Tensor floatingCodec(ScalarType::Float8E4M3, Shape{1});

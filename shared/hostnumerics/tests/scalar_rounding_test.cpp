@@ -6,9 +6,9 @@
 namespace scalar_codec_test {
 void testNearestEvenIgnoresHostRoundingMode() {
     const RoundingModeRestore restore;
-    const ScalarConversionOptions nearestEvenReject{
+    const ScalarConversionOptions nearestEvenIdentity{
         IntegerRounding::NearestEven,
-        IntegerOverflow::Reject,
+        IntegerOverflow::Identity,
     };
     const ScalarConversionOptions nearestEvenSaturate{
         IntegerRounding::NearestEven,
@@ -37,7 +37,7 @@ void testNearestEvenIgnoresHostRoundingMode() {
         require(std::fesetround(mode) == 0, "Host did not accept a standard rounding mode.");
         for (const auto& test : cases) {
             volatile double value = test.value;
-            require(convertScalar<int32_t>(value, nearestEvenReject) == test.expected,
+            require(convertScalar<int32_t>(value, nearestEvenIdentity) == test.expected,
                     "Nearest-even conversion depended on the host rounding mode.");
         }
 
@@ -45,7 +45,7 @@ void testNearestEvenIgnoresHostRoundingMode() {
         volatile double negativeBoundaryTie = -128.5;
         require(convertScalar<int8_t>(positiveBoundaryTie, nearestEvenSaturate) == 127 &&
                     convertScalar<int8_t>(positiveBoundaryTie, nearestEvenWrap) == -128 &&
-                    convertScalar<int8_t>(negativeBoundaryTie, nearestEvenReject) == -128,
+                    convertScalar<int8_t>(negativeBoundaryTie, nearestEvenIdentity) == -128,
                 "Boundary tie conversion depended on the host rounding mode.");
     }
 }

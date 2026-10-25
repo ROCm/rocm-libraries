@@ -7,28 +7,33 @@
 
 namespace scalar_codec_test {
 TEST(ScalarConversionTutorial, Rounding) {
-    // Both integer policies are explicit. Reject requires the rounded result to fit;
-    // it does not check the input or report an error.
+    // Integer conversion is cast<T>(f_T(g(x))). Both policies are explicit:
+    // g rounds TowardZero or NearestEven; f_T applies Identity, Saturate, or
+    // ModuloWrap. Identity leaves g(x) unchanged, so it must already fit in T.
 
     // TowardZero drops the fractional part; negative values move toward zero too.
-    EXPECT_EQ(convertScalar<int32_t>(3.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              3);
-    EXPECT_EQ(convertScalar<int32_t>(-3.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              -3);
-
-    EXPECT_EQ(convertScalar<int32_t>(2.75, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              3);
     EXPECT_EQ(
-        convertScalar<int32_t>(-2.75, {IntegerRounding::NearestEven, IntegerOverflow::Reject}), -3);
+        convertScalar<int32_t>(3.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}), 3);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-3.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}),
+        -3);
+
+    EXPECT_EQ(
+        convertScalar<int32_t>(2.75, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 3);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-2.75, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -3);
     // Halfway values choose the even integer, including on the negative side.
-    EXPECT_EQ(convertScalar<int32_t>(2.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              2);
-    EXPECT_EQ(convertScalar<int32_t>(3.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              4);
-    EXPECT_EQ(convertScalar<int32_t>(-2.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              -2);
-    EXPECT_EQ(convertScalar<int32_t>(-3.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              -4);
+    EXPECT_EQ(
+        convertScalar<int32_t>(2.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 2);
+    EXPECT_EQ(
+        convertScalar<int32_t>(3.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 4);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-2.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -2);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-3.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -4);
 }
 
 TEST(ScalarConversionTutorial, Overflow) {
@@ -48,8 +53,9 @@ TEST(ScalarConversionTutorial, Overflow) {
 
     // Rounding happens first: 127.5 truncates to 127 but rounds to 128 with
     // NearestEven. The latter needs Saturate or ModuloWrap to satisfy the contract.
-    EXPECT_EQ(convertScalar<int8_t>(127.5, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              127);
+    EXPECT_EQ(
+        convertScalar<int8_t>(127.5, {IntegerRounding::TowardZero, IntegerOverflow::Identity}),
+        127);
     EXPECT_EQ(
         convertScalar<int8_t>(127.5, {IntegerRounding::NearestEven, IntegerOverflow::Saturate}),
         127);
@@ -57,10 +63,10 @@ TEST(ScalarConversionTutorial, Overflow) {
         convertScalar<int8_t>(127.5, {IntegerRounding::NearestEven, IntegerOverflow::ModuloWrap}),
         -128);
 
-    // A negative fraction can still satisfy Reject for an unsigned destination:
+    // A negative fraction can still use Identity for an unsigned destination:
     // TowardZero produces zero before representability matters.
-    EXPECT_EQ(convertScalar<uint8_t>(-0.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              0);
+    EXPECT_EQ(
+        convertScalar<uint8_t>(-0.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}), 0);
 }
 
 TEST(ScalarConversionTutorial, FloatingAndBooleanDestinations) {
@@ -110,23 +116,23 @@ TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
     // Real-to-complex supplies a zero imaginary part. Complex-to-complex converts
     // both components; integer rounding policies do not round floating components.
     EXPECT_EQ(convertScalar<std::complex<double>>(
-                  1.25f, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                  1.25f, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               std::complex<double>(1.25, 0.0));
-    EXPECT_EQ(
-        convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5},
-                                           {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-        std::complex<float>(1.25f, -2.5f));
+    EXPECT_EQ(convertScalar<std::complex<float>>(
+                  std::complex<double>{1.25, -2.5},
+                  {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+              std::complex<float>(1.25f, -2.5f));
 
     // Complex-to-real requires a zero imaginary part, then converts the real part.
     // A nonzero imaginary part violates an unchecked caller precondition.
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0},
-                                     {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                                     {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               4);
 
     // A C++ enum source converts using its underlying numeric value.
     enum class Sample : int16_t { Negative = -3 };
     EXPECT_EQ(convertScalar<int32_t>(Sample::Negative,
-                                     {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                                     {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               -3);
 }
 
@@ -138,7 +144,7 @@ void testIntegerConversionPrimitives() {
     static_assert(!std::is_constructible_v<ScalarConversionOptions, IntegerRounding>);
     static_assert(!ConvertsWithoutPolicies<double>);
     const ScalarConversionOptions nearestBFloat16{
-        IntegerRounding::TowardZero, IntegerOverflow::Reject, BFloat16Rounding::NearestEven};
+        IntegerRounding::TowardZero, IntegerOverflow::Identity, BFloat16Rounding::NearestEven};
 
     constexpr float bfloat16RoundingBoundary = 1.005859375f;
     Tensor nearestEven(ScalarType::BFloat16, Shape{1});
@@ -147,19 +153,19 @@ void testIntegerConversionPrimitives() {
             "Explicit BFloat16 conversion did not round to nearest even.");
 
     const ScalarConversionOptions truncateBFloat16{
-        IntegerRounding::TowardZero, IntegerOverflow::Reject, BFloat16Rounding::Truncate};
+        IntegerRounding::TowardZero, IntegerOverflow::Identity, BFloat16Rounding::Truncate};
     Tensor truncated(ScalarType::BFloat16, Shape{1});
     truncated.storeFrom({0}, bfloat16RoundingBoundary, truncateBFloat16);
     require(tensorRaw(truncated) == 0x3f80,
             "Explicit BFloat16 truncation did not discard the low bits.");
 
-    const ScalarConversionOptions rejectTowardZero{
+    const ScalarConversionOptions identityTowardZero{
         IntegerRounding::TowardZero,
-        IntegerOverflow::Reject,
+        IntegerOverflow::Identity,
     };
-    const ScalarConversionOptions rejectNearestEven{
+    const ScalarConversionOptions identityNearestEven{
         IntegerRounding::NearestEven,
-        IntegerOverflow::Reject,
+        IntegerOverflow::Identity,
     };
     const ScalarConversionOptions saturateNearestEven{
         IntegerRounding::NearestEven,
@@ -170,8 +176,8 @@ void testIntegerConversionPrimitives() {
         IntegerOverflow::ModuloWrap,
     };
 
-    require(convertScalar<int32_t>(3.75, rejectTowardZero) == 3 &&
-                convertScalar<int32_t>(-3.75, rejectTowardZero) == -3,
+    require(convertScalar<int32_t>(3.75, identityTowardZero) == 3 &&
+                convertScalar<int32_t>(-3.75, identityTowardZero) == -3,
             "Toward-zero integer rounding mismatch.");
     require(convertScalar<int8_t>(
                 128.0, {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap}) == -128,
@@ -199,22 +205,22 @@ void testIntegerConversionPrimitives() {
         {-2.5, -2},
     }};
     for (const auto& tie : ties)
-        require(convertScalar<int32_t>(tie.value, rejectNearestEven) == tie.expected,
+        require(convertScalar<int32_t>(tie.value, identityNearestEven) == tie.expected,
                 "Nearest-even tie rounding mismatch.");
 
-    require(convertScalar<int8_t>(int16_t{-128}, rejectTowardZero) == -128 &&
-                convertScalar<int8_t>(int16_t{127}, rejectTowardZero) == 127,
+    require(convertScalar<int8_t>(int16_t{-128}, identityTowardZero) == -128 &&
+                convertScalar<int8_t>(int16_t{127}, identityTowardZero) == 127,
             "Signed integer boundary conversion mismatch.");
 
-    require(convertScalar<uint8_t>(uint16_t{0}, rejectTowardZero) == 0 &&
-                convertScalar<uint8_t>(uint16_t{255}, rejectTowardZero) == 255,
+    require(convertScalar<uint8_t>(uint16_t{0}, identityTowardZero) == 0 &&
+                convertScalar<uint8_t>(uint16_t{255}, identityTowardZero) == 255,
             "Unsigned integer boundary conversion mismatch.");
 
-    require(convertScalar<int64_t>(std::numeric_limits<int64_t>::min(), rejectTowardZero) ==
+    require(convertScalar<int64_t>(std::numeric_limits<int64_t>::min(), identityTowardZero) ==
                     std::numeric_limits<int64_t>::min() &&
-                convertScalar<int64_t>(std::numeric_limits<int64_t>::max(), rejectTowardZero) ==
+                convertScalar<int64_t>(std::numeric_limits<int64_t>::max(), identityTowardZero) ==
                     std::numeric_limits<int64_t>::max() &&
-                convertScalar<uint64_t>(std::numeric_limits<uint64_t>::max(), rejectTowardZero) ==
+                convertScalar<uint64_t>(std::numeric_limits<uint64_t>::max(), identityTowardZero) ==
                     std::numeric_limits<uint64_t>::max(),
             "Wide integer boundary conversion mismatch.");
 
@@ -222,9 +228,9 @@ void testIntegerConversionPrimitives() {
     const double twoTo64 = std::ldexp(1.0, 64);
     const double belowTwoTo64 = std::nextafter(twoTo64, 0.0);
     require(
-        convertScalar<int64_t>(-twoTo63, rejectTowardZero) == std::numeric_limits<int64_t>::min(),
+        convertScalar<int64_t>(-twoTo63, identityTowardZero) == std::numeric_limits<int64_t>::min(),
         "Float-to-Int64 minimum conversion mismatch.");
-    require(convertScalar<uint64_t>(belowTwoTo64, rejectTowardZero) ==
+    require(convertScalar<uint64_t>(belowTwoTo64, identityTowardZero) ==
                 std::numeric_limits<uint64_t>::max() - uint64_t{2047},
             "Float-to-UInt64 maximum representable value mismatch.");
 
@@ -260,9 +266,10 @@ void testIntegerConversionPrimitives() {
                     wrapNearestEven) == 4096,
             "Wide modulo-wrap conversion mismatch.");
 
-    require(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, rejectNearestEven) == 4 &&
-                convertScalar<double>(std::complex<double>{-2.25, -0.0}, rejectTowardZero) == -2.25,
-            "Zero-imaginary complex-to-real conversion mismatch.");
+    require(
+        convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, identityNearestEven) == 4 &&
+            convertScalar<double>(std::complex<double>{-2.25, -0.0}, identityTowardZero) == -2.25,
+        "Zero-imaginary complex-to-real conversion mismatch.");
 }
 
 }  // namespace scalar_codec_test
