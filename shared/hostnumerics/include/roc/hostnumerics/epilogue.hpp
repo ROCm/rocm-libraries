@@ -37,7 +37,7 @@ struct EpilogueOptions {
     OutputConversion outputConversion = OutputConversion::Default;
     ActivationFunction activation;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    OutputSelection outputSelection = OutputSelection::all({});
+    IndexSelection outputSelection = IndexSelection::allLastDimensionFastest();
     bool accumulateAmax = false;
 };
 

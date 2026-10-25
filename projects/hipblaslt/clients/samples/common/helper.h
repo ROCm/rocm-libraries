@@ -93,9 +93,8 @@ namespace hipblaslt_sample_detail
     {
         const std::uint64_t recipeSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
             hipblaslt::hostnumerics::defaultInitializationSeed, sequence);
-        const auto recipe = roc::hostnumerics::GenerationRecipe::realOnly(
-            roc::hostnumerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
-            {.seed = recipeSeed});
+        const auto recipe = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            roc::hostnumerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}), recipeSeed);
         auto generated = hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
             values,
             elements,

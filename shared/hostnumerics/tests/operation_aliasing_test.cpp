@@ -12,9 +12,9 @@ void testReferenceOperationAliasing() {
     const Tensor arithmeticY =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{3.0f, 4.0f});
     multiplyInto(arithmeticInPlace, Tensor(2.0f), arithmeticInPlace, ScalarType::Float32,
-                 OutputSelection::all({}));
+                 IndexSelection::allLastDimensionFastest());
     addInto(arithmeticInPlace, arithmeticY, arithmeticInPlace, ScalarType::Float32,
-            OutputSelection::all({}));
+            IndexSelection::allLastDimensionFastest());
     require(arithmeticInPlace.loadAs<float>({0}) == 5.0f &&
                 arithmeticInPlace.loadAs<float>({1}) == 8.0f,
             "Tensor arithmetic rejected or corrupted an exact in-place mapping.");
@@ -28,7 +28,7 @@ void testReferenceOperationAliasing() {
     requireError(
         [&] {
             multiplyInto(arithmeticOverlap, Tensor(1.0f), arithmeticReversedOutput,
-                         ScalarType::Float32, OutputSelection::all({}));
+                         ScalarType::Float32, IndexSelection::allLastDimensionFastest());
         },
         "Tensor multiplication accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
@@ -45,7 +45,7 @@ void testReferenceOperationAliasing() {
         [&] {
             multiplyInto(distinctLinearCombinationInput, Tensor(1.0f),
                          selfCollidingLinearCombinationOutput, ScalarType::Float32,
-                         OutputSelection::all({}));
+                         IndexSelection::allLastDimensionFastest());
         },
         "Tensor multiplication accepted a self-colliding destination.");
     requireRawEncodedBackingStorageEquals(

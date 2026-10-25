@@ -236,7 +236,8 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
         if (complexCompute != isComplexScalarType(factor.type()))
             throw std::runtime_error("Reference epilogue input scale factor complexity mismatch.");
     }
-    (void)resolvedIndexOrder(problem.input.shape(), problem.outputSelection.indexOrder());
+    (void)validatedIndexOrder(problem.input.shape().rank(),
+                              problem.outputSelection.indexOrder(problem.input.shape().rank()));
     return {
         .selectedElements =
             problem.outputSelection.selectedCount(problem.input.shape().elementCount()),
@@ -438,8 +439,8 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
         }
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
-        const IndexIteration iteration(problem.output.shape(),
-                                       problem.outputSelection.indexOrder());
+        const IndexIteration iteration(problem.output.shape(), problem.outputSelection.indexOrder(
+                                                                   problem.output.shape().rank()));
         const auto computeSelectedOutput = [&](size_t selectedIndex) {
             std::array<size_t, 2> coordinates{};
             iteration.coordinates(selected[selectedIndex], coordinates);

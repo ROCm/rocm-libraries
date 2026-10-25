@@ -129,7 +129,7 @@ bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
     };
 
     for (size_t position = shape.rank(); position > 0; --position) {
-        const size_t axis = order.empty() ? position - 1 : order[position - 1];
+        const size_t axis = order[position - 1];
         if (advanceDimension(axis)) return true;
     }
     return false;

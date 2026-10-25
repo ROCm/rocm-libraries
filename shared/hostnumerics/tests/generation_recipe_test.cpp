@@ -45,10 +45,10 @@ void testValueSemanticsAndExamples() {
     const GenerationRecipe::Component constant = GenerationRecipe::constant({.value = 2.0});
     const GenerationRecipe::Component mapped =
         constant.withAffineValueMapping({.scale = 3.0, .offset = 1.0});
-    const Tensor constantValues =
-        generate(ScalarType::Float64, Shape{6}, GenerationRecipe::realOnly(constant, {}));
-    const Tensor mappedValues =
-        generate(ScalarType::Float64, Shape{6}, GenerationRecipe::realOnly(mapped, {}));
+    const Tensor constantValues = generate(
+        ScalarType::Float64, Shape{6}, GenerationRecipe::realOnlyLastDimensionFastest(constant, 0));
+    const Tensor mappedValues = generate(ScalarType::Float64, Shape{6},
+                                         GenerationRecipe::realOnlyLastDimensionFastest(mapped, 0));
     for (size_t index = 0; index < 6; ++index) {
         require(constantValues.loadAs<double>({index}) == 2.0,
                 "A component modifier changed the source component.");
@@ -56,44 +56,45 @@ void testValueSemanticsAndExamples() {
                 "Affine value mapping produced an incorrect value.");
     }
 
-    const Tensor serial = generate(ScalarType::Int32, Shape{6},
-                                   GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), {}));
+    const Tensor serial = generate(
+        ScalarType::Int32, Shape{6},
+        GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0));
     for (size_t index = 0; index < 6; ++index)
         require(serial.loadAs<int32_t>({index}) == static_cast<int32_t>(index),
                 "Serial-index generation did not produce [0, 1, 2, 3, 4, 5].");
 
     const Tensor affine =
         generate(ScalarType::Int32, Shape{6},
-                 GenerationRecipe::realOnly(
+                 GenerationRecipe::realOnlyLastDimensionFastest(
                      GenerationRecipe::affineIndexRemainder(
                          {.dimensionCoefficients = {2}, .offset = 1, .positiveDivisor = 5}),
-                     {}));
+                     0));
     constexpr std::array<int32_t, 6> expected{1, 3, 0, 2, 4, 1};
     for (size_t index = 0; index < expected.size(); ++index)
         require(affine.loadAs<int32_t>({index}) == expected[index],
                 "Affine-index remainder generation produced an incorrect six-element sample.");
 
-    const Tensor diagonal = generate(
-        ScalarType::Int32, Shape{2, 3},
-        GenerationRecipe::realOnly(GenerationRecipe::serialDimension({.dimension = 0})
-                                       .withAffineValueMapping({.scale = 1.0, .offset = 1.0})
-                                       .withZeroOutsideMainDiagonal(),
-                                   {}));
+    const Tensor diagonal = generate(ScalarType::Int32, Shape{2, 3},
+                                     GenerationRecipe::realOnlyLastDimensionFastest(
+                                         GenerationRecipe::serialDimension({.dimension = 0})
+                                             .withAffineValueMapping({.scale = 1.0, .offset = 1.0})
+                                             .withZeroOutsideMainDiagonal(),
+                                         0));
     constexpr std::array<int32_t, 6> expectedDiagonal{1, 0, 0, 0, 2, 0};
     for (size_t index = 0; index < expectedDiagonal.size(); ++index)
         require(diagonal.loadAs<int32_t>({index / 3, index % 3}) == expectedDiagonal[index],
                 "Main-diagonal generation modifier produced an incorrect value.");
 
     constexpr uint64_t rawBits = 0xfedcba9876543210ULL;
-    const Tensor rawTyped =
-        generate(ScalarType::UInt64, Shape{2},
-                 GenerationRecipe::realOnly(GenerationRecipe::rawConstant({.bits = rawBits}), {}));
+    const Tensor rawTyped = generate(ScalarType::UInt64, Shape{2},
+                                     GenerationRecipe::realOnlyLastDimensionFastest(
+                                         GenerationRecipe::rawConstant({.bits = rawBits}), 0));
     for (size_t index = 0; index < 2; ++index)
         require(rawTyped.loadAs<uint64_t>({index}) == rawBits,
                 "Typed raw-constant generation changed the requested bits.");
 
-    const GenerationRecipe finiteEncodedRecipe =
-        GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(), {.seed = 91});
+    const GenerationRecipe finiteEncodedRecipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::uniformFiniteEncodedValue(), 91);
     const Tensor finiteEncoded = generate(ScalarType::Float8E5M2, Shape{1024}, finiteEncodedRecipe);
     const Tensor finiteEncodedRepeat =
         generate(ScalarType::Float8E5M2, Shape{1024}, finiteEncodedRecipe);
@@ -108,11 +109,12 @@ void testValueSemanticsAndExamples() {
         require(std::isfinite(finiteEncoded.loadAs<double>({index})),
                 "Uniform finite encoded generation produced a non-finite value.");
 
-    const Tensor e8ZeroExponents = generate(
-        ScalarType::E8M0Zero, Shape{64},
-        GenerationRecipe::realOnly(GenerationRecipe::randomEncodedExponent(
-                                       {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3}),
-                                   {.seed = 19}));
+    const Tensor e8ZeroExponents =
+        generate(ScalarType::E8M0Zero, Shape{64},
+                 GenerationRecipe::realOnlyLastDimensionFastest(
+                     GenerationRecipe::randomEncodedExponent(
+                         {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3}),
+                     19));
     for (size_t index = 0; index < e8ZeroExponents.elementCount(); ++index) {
         const float value = e8ZeroExponents.loadAs<float>({index});
         require(std::isfinite(value) && value >= 0.125f && value <= 8.0f,
@@ -122,12 +124,12 @@ void testValueSemanticsAndExamples() {
 
 void testUnsignedFloatingPointRecipes() {
     const std::array recipes{
-        GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}),
-                                   {.seed = 19}),
-        GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}),
-                                   {.seed = 19}),
-        GenerationRecipe::realOnly(GenerationRecipe::uniformReal({.lower = 1.0, .upper = 4.0}),
-                                   {.seed = 19}),
+        GenerationRecipe::realOnlyLastDimensionFastest(
+            GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}), 19),
+        GenerationRecipe::realOnlyLastDimensionFastest(
+            GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}), 19),
+        GenerationRecipe::realOnlyLastDimensionFastest(
+            GenerationRecipe::uniformReal({.lower = 1.0, .upper = 4.0}), 19),
     };
     for (ScalarType type :
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
@@ -145,10 +147,10 @@ void testUnsignedFloatingPointRecipes() {
         }
     }
 
-    const auto alternating = GenerationRecipe::realOnly(
+    const auto alternating = GenerationRecipe::realOnlyLastDimensionFastest(
         GenerationRecipe::uniformInteger({.lower = 2, .upper = 2})
             .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}),
-        {});
+        0);
     for (ScalarType type : {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0}) {
         requireThrows<std::runtime_error>([&] { (void)generate(type, Shape{2}, alternating); },
                                           "Unsigned floating-point generation accepted negatives.");
@@ -164,10 +166,12 @@ void testSeedAndComplexPolicies() {
     constexpr UniformIntegerGenerationParameters parameters{.lower = -100, .upper = 100};
     const GenerationRecipe::Component component = GenerationRecipe::uniformInteger(parameters);
 
-    const GenerationRecipe realOnly = GenerationRecipe::realOnly(component, {.seed = seed});
-    const GenerationRecipe replicated = GenerationRecipe::replicated(component, {.seed = seed});
+    const GenerationRecipe realOnly =
+        GenerationRecipe::realOnlyLastDimensionFastest(component, seed);
+    const GenerationRecipe replicated =
+        GenerationRecipe::replicatedLastDimensionFastest(component, seed);
     const GenerationRecipe cartesian =
-        GenerationRecipe::cartesian(component, component, {.seed = seed});
+        GenerationRecipe::cartesianLastDimensionFastest(component, component, seed);
 
     const Tensor realOnlyValues = generate(ScalarType::ComplexFloat64, Shape{16}, realOnly);
     const Tensor replicatedValues = generate(ScalarType::ComplexFloat64, Shape{16}, replicated);
@@ -257,7 +261,10 @@ void testValidationFailures() {
         },
         "An encoded-exponent source without an exponent field was accepted.");
     requireThrows<std::runtime_error>(
-        [] { (void)GenerationRecipe::replicated(GenerationRecipe::rawConstant({.bits = 1}), {}); },
+        [] {
+            (void)GenerationRecipe::replicatedLastDimensionFastest(
+                GenerationRecipe::rawConstant({.bits = 1}), 0);
+        },
         "A raw replicated component was accepted.");
     requireThrows<std::runtime_error>(
         [] {
@@ -268,8 +275,8 @@ void testValidationFailures() {
         [] { (void)GenerationRecipe::constant({.value = 1.0}).withAlternatingSign({}); },
         "An empty alternating-sign dimension list was accepted.");
 
-    const GenerationRecipe invalidDimension =
-        GenerationRecipe::realOnly(GenerationRecipe::serialDimension({.dimension = 1}), {});
+    const GenerationRecipe invalidDimension = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::serialDimension({.dimension = 1}), 0);
     requireThrows<std::runtime_error>(
         [&] {
             Tensor destination(ScalarType::Float32, Shape{4});
@@ -277,10 +284,10 @@ void testValidationFailures() {
         },
         "A generation dimension outside the tensor rank was accepted.");
 
-    const GenerationRecipe invalidCoefficientCount =
-        GenerationRecipe::realOnly(GenerationRecipe::affineIndexRemainder(
-                                       {.dimensionCoefficients = {1}, .positiveDivisor = 3}),
-                                   {});
+    const GenerationRecipe invalidCoefficientCount = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::affineIndexRemainder(
+            {.dimensionCoefficients = {1}, .positiveDivisor = 3}),
+        0);
     requireThrows<std::runtime_error>(
         [&] {
             Tensor destination(ScalarType::Float32, Shape{2, 2});
@@ -291,22 +298,23 @@ void testValidationFailures() {
     requireThrows<std::runtime_error>(
         [] {
             Tensor destination(ScalarType::Float32, Shape{4});
-            generateAt(destination, 4, GenerationRecipe::realOnly(GenerationRecipe::zero(), {}));
+            generateAt(destination, 4,
+                       GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
         },
         "generateAt accepted a logical index equal to the element count.");
 
     requireThrows<std::runtime_error>(
         [] {
             Tensor destination(ScalarType::ComplexFloat32, Shape{1});
-            generate(destination,
-                     GenerationRecipe::realOnly(GenerationRecipe::rawConstant({.bits = 1}), {}));
+            generate(destination, GenerationRecipe::realOnlyLastDimensionFastest(
+                                      GenerationRecipe::rawConstant({.bits = 1}), 0));
         },
         "Raw generation accepted a complex destination.");
     requireThrows<std::runtime_error>(
         [] {
             Tensor destination(ScalarType::Float32, Shape{1});
-            generate(destination,
-                     GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(), {}));
+            generate(destination, GenerationRecipe::realOnlyLastDimensionFastest(
+                                      GenerationRecipe::uniformFiniteEncodedValue(), 0));
         },
         "Uniform finite encoded generation accepted a format wider than eight bits.");
     requireThrows<std::runtime_error>(
@@ -314,8 +322,8 @@ void testValidationFailures() {
             Tensor destination(ScalarType::Float32, Shape{1});
             generate(
                 destination,
-                GenerationRecipe::realOnly(
-                    GenerationRecipe::constant({.value = 1.0}).withZeroOutsideMainDiagonal(), {}));
+                GenerationRecipe::realOnlyLastDimensionFastest(
+                    GenerationRecipe::constant({.value = 1.0}).withZeroOutsideMainDiagonal(), 0));
         },
         "Main-diagonal generation accepted a rank-one destination.");
 }

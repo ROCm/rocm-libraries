@@ -11,6 +11,7 @@
 
 #include "detail/generation_primitives.hpp"
 #include "detail/generation_recipe_access.hpp"
+#include "detail/index_iteration.hpp"
 
 namespace roc::hostnumerics {
 namespace {
@@ -241,7 +242,9 @@ GenerationRecipe::Component GenerationRecipe::rawSerialDimension(
 }
 
 GenerationRecipe::GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy)
-    : settings_(settings), complexPolicy_(std::move(complexPolicy)) {}
+    : settings_(std::move(settings)), complexPolicy_(std::move(complexPolicy)) {
+    (void)detail::validatedIndexOrder(settings_.indexOrder.size(), settings_.indexOrder);
+}
 
 GenerationRecipe GenerationRecipe::realOnly(Component component,
                                             GenerationRecipeSettings settings) {
@@ -289,7 +292,27 @@ uint64_t GenerationRecipe::seed() const noexcept {
     return settings_.seed;
 }
 
-std::span<const size_t> GenerationRecipe::indexOrder() const noexcept {
+GenerationRecipe GenerationRecipe::realOnlyLastDimensionFastest(Component component,
+                                                                uint64_t seed) {
+    return realOnly(std::move(component), {.seed = seed}).withLastDimensionFastestIndexOrder();
+}
+
+GenerationRecipe GenerationRecipe::replicatedLastDimensionFastest(Component component,
+                                                                  uint64_t seed) {
+    return replicated(std::move(component), {.seed = seed}).withLastDimensionFastestIndexOrder();
+}
+
+GenerationRecipe GenerationRecipe::cartesianLastDimensionFastest(Component real,
+                                                                 Component imaginary,
+                                                                 uint64_t seed) {
+    return cartesian(std::move(real), std::move(imaginary), {.seed = seed})
+        .withLastDimensionFastestIndexOrder();
+}
+
+std::vector<size_t> GenerationRecipe::indexOrder(size_t rank) const {
+    if (lastDimensionFastest_) return detail::ascendingIndexOrder(rank);
+    if (settings_.indexOrder.size() != rank)
+        throw std::runtime_error("Generation index order rank does not match tensor rank.");
     return settings_.indexOrder;
 }
 
@@ -300,8 +323,17 @@ GenerationRecipe GenerationRecipe::withSeed(uint64_t seed) const {
 }
 
 GenerationRecipe GenerationRecipe::withIndexOrder(std::span<const size_t> order) const {
+    (void)detail::validatedIndexOrder(order.size(), order);
     GenerationRecipe result = *this;
+    result.lastDimensionFastest_ = false;
     result.settings_.indexOrder.assign(order.begin(), order.end());
+    return result;
+}
+
+GenerationRecipe GenerationRecipe::withLastDimensionFastestIndexOrder() const {
+    GenerationRecipe result = *this;
+    result.lastDimensionFastest_ = true;
+    result.settings_.indexOrder.clear();
     return result;
 }
 
@@ -320,10 +352,8 @@ Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe) {
 }
 
 void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe& recipe) {
-    const std::vector<size_t> indices =
-        recipe.indexOrder().empty()
-            ? destination.shape().coordinates(logicalIndex)
-            : destination.shape().coordinates(logicalIndex, recipe.indexOrder());
+    const std::vector<size_t> indices = destination.shape().coordinates(
+        logicalIndex, recipe.indexOrder(destination.shape().rank()));
     detail::generateElement(destination, recipe, indices, logicalIndex);
 }
 }  // namespace roc::hostnumerics

@@ -29,7 +29,7 @@ Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> 
 
 void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
     addInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-            OutputSelection::all({}));
+            IndexSelection::allLastDimensionFastest());
 }
 
 Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -44,7 +44,7 @@ Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 OutputSelection::all({}));
+                 IndexSelection::allLastDimensionFastest());
 }
 
 Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -59,7 +59,7 @@ Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 OutputSelection::all({}));
+                 IndexSelection::allLastDimensionFastest());
 }
 
 ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
@@ -127,7 +127,7 @@ EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, Scal
                                        nb::object auxiliaryScale, nb::object activationParameter0,
                                        nb::object activationParameter1,
                                        OutputConversion outputConversion, bool includeRawOutput,
-                                       bool includeAmax, OutputSelection outputSelection) {
+                                       bool includeAmax, IndexSelection outputSelection) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
@@ -155,7 +155,7 @@ void referenceEpilogueIntoBound(
     std::optional<Tensor> auxiliaryOutput, std::optional<Tensor> gateResidual,
     nb::object outputScale, nb::object auxiliaryScale, nb::object activationParameter0,
     nb::object activationParameter1, OutputConversion outputConversion, std::optional<Tensor> amax,
-    bool accumulateAmax, OutputSelection outputSelection) {
+    bool accumulateAmax, IndexSelection outputSelection) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);

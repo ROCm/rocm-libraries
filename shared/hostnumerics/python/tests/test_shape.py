@@ -44,6 +44,15 @@ class ShapeTests(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 setattr(shape, attribute, value)
 
+    def test_index_conversions_require_order_or_named_choice(self):
+        shape = hn.Shape([2, 3])
+        with self.assertRaises(TypeError):
+            shape.coordinates(1)
+        with self.assertRaises(TypeError):
+            shape.linear_index([0, 1])
+        self.assertEqual(shape.coordinates_last_dimension_fastest(1), [0, 1])
+        self.assertEqual(shape.linear_index_last_dimension_fastest([0, 1]), 1)
+
     def test_products_and_dimension_selection(self):
         shape = hn.Shape([2, 3, 5])
         self.assertEqual(shape.element_count, 30)
@@ -130,9 +139,14 @@ class ShapeTests(unittest.TestCase):
             for index in range(shape.element_count):
                 self.assertEqual(
                     shape.coordinates_last_dimension_fastest(index),
-                    shape.coordinates(index, hn.Permutation.identity(shape.rank)),
+                    shape.coordinates(index, list(range(shape.rank))),
                 )
-                self.assertEqual(shape.linear_index(shape.coordinates(index)), index)
+                self.assertEqual(
+                    shape.linear_index_last_dimension_fastest(
+                        shape.coordinates_last_dimension_fastest(index)
+                    ),
+                    index,
+                )
         example = hn.Shape([2, 3, 5])
         self.assertEqual(example.linear_index([1, 2, 3], hn.Permutation([1, 2, 0])), 27)
         self.assertEqual(example.coordinates(27, hn.Permutation([1, 2, 0])), [1, 2, 3])
@@ -278,7 +292,7 @@ class ShapeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
                 empty.from_dimensions(nonzero)
             with self.assertRaises(RuntimeError):
-                empty.coordinates(0)
+                empty.coordinates_last_dimension_fastest(0)
         empty = hn.Shape([SIZE_MAX, 2, 0])
         with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
             empty.from_dimensions([0, 1])

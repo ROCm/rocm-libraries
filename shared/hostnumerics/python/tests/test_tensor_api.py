@@ -187,10 +187,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
     def test_tensor_clone_is_independent(self):
         tensor = hv.from_numpy(np.arange(6, dtype=np.float32))
         cloned = tensor.clone()
-        recipe = real_generation_recipe(
+        recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
             seed=0,
-            index_order=(),
         )
         hv.generate_at(cloned, 5, recipe)
         np.testing.assert_array_equal(
@@ -352,10 +351,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         values = np.arange(120, dtype=np.float32).reshape(2, 5, 3, 4)
         tensor = hv.from_numpy(values)
         view = tensor[:, ::2, -1, :]
-        recipe = real_generation_recipe(
+        recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
             seed=0,
-            index_order=(),
         )
         hv.generate_at(view, 5, recipe)
         values[0, 2, 2, 1] = -17.0
@@ -381,10 +379,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         iterator = iter(tensor)
         first = next(iterator)
         np.testing.assert_array_equal(hv.to_numpy(first, dtype=None), values[0])
-        recipe = real_generation_recipe(
+        recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
             seed=0,
-            index_order=(),
         )
         hv.generate_at(first, 0, recipe)
         self.assertEqual(tensor[0, 0].item(), -17.0)
@@ -452,12 +449,11 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
                 np.testing.assert_array_equal(
                     hv.to_numpy(view, dtype=None), expected[:, ::2, -1, :]
                 )
-                recipe = real_generation_recipe(
+                recipe = real_generation_recipe_last_dimension_fastest(
                     hv.GenerationRecipe.constant(
                         hv.ConstantGenerationParameters(value=2.0)
                     ),
                     seed=0,
-                    index_order=(),
                 )
                 hv.generate_at(view, 0, recipe)
                 expected[0, 0, 1, 0] = 2
@@ -562,10 +558,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         scalar = tensor[0, 0, 0]
         self.assertEqual(scalar[...].item(), 0)
         self.assertEqual(scalar[None, ..., None].shape, [1, 1])
-        recipe = real_generation_recipe(
+        recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
             seed=0,
-            index_order=(),
         )
         hv.generate_at(tensor[None, ..., None], 23, recipe)
         self.assertEqual(tensor[-1, -1, -1].item(), -17.0)

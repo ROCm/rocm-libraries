@@ -159,7 +159,7 @@ CopyConvertedRangeFunction copyConvertedRangeFunction(ScalarType sourceType,
 }
 
 std::vector<size_t> preferredTraversalOrder(const Layout& source, const Layout& destination) {
-    std::vector<size_t> axes = detail::resolvedIndexOrder(source.shape(), {});
+    std::vector<size_t> axes = detail::ascendingIndexOrder(source.shape().rank());
     std::stable_sort(axes.begin(), axes.end(), [&](size_t left, size_t right) {
         const auto a = detail::strideMagnitude(source.strides()[left]);
         const auto b = detail::strideMagnitude(source.strides()[right]);
@@ -192,11 +192,12 @@ detail::TensorConversion::TensorConversion(const Tensor& source, Tensor destinat
 
     const bool sourceFirst =
         detail::isContiguous(m_source.layout(), detail::reverseIndexOrder(m_source.shape().rank()));
-    const bool sourceLast = detail::isContiguous(m_source.layout(), std::vector<size_t>{});
+    const bool sourceLast = detail::isContiguous(
+        m_source.layout(), detail::ascendingIndexOrder(m_source.shape().rank()));
     const bool destinationFirst = detail::isContiguous(
         m_destination.layout(), detail::reverseIndexOrder(m_destination.shape().rank()));
-    const bool destinationLast =
-        detail::isContiguous(m_destination.layout(), std::vector<size_t>{});
+    const bool destinationLast = detail::isContiguous(
+        m_destination.layout(), detail::ascendingIndexOrder(m_destination.shape().rank()));
     // Matching dense orders are one physical range even when their logical index order differs.
     if ((sourceFirst && destinationFirst) || (sourceLast && destinationLast)) {
         m_traversal = Traversal::Linear;
@@ -447,7 +448,8 @@ Tensor Tensor::copyConvertedTo(ScalarType destinationType, Layout destinationLay
         !scalarTypeInfo(destinationType).isPacked() && destinationLayout.offset() == 0 &&
         (detail::isContiguous(destinationLayout,
                               detail::reverseIndexOrder(destinationLayout.shape().rank())) ||
-         detail::isContiguous(destinationLayout, std::vector<size_t>{}));
+         detail::isContiguous(destinationLayout,
+                              detail::ascendingIndexOrder(destinationLayout.shape().rank())));
     Tensor result =
         fullyWritesBackingStorage
             ? Tensor::allocateUninitialized(destinationType, std::move(destinationLayout))

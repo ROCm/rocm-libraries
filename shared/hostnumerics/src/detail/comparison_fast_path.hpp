@@ -152,7 +152,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
         ComparisonReport result;
         result.allCloseEvaluated = true;
         const bool selectsContiguousPrefix =
-            options.selection.kind() == OutputSelectionKind::Strided &&
+            options.selection.kind() == IndexSelectionKind::Strided &&
             options.selection.first() == 0 && options.selection.stride() == 1;
         if ((options.selection.selectsAll() || selectsContiguousPrefix) &&
             observed.shape().rank() != 0) {
@@ -172,8 +172,9 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                     const auto [first, pastLast] =
                         evenlyPartitionedRange(selectedTotal, partitionCount, partition);
                     forEachLayoutOffsetPairRange(
-                        observed.layout(), expected.layout(), options.selection.indexOrder(), first,
-                        pastLast, [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                        observed.layout(), expected.layout(),
+                        options.selection.indexOrder(observed.shape().rank()), first, pastLast,
+                        [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                             bool close = false;
                             if constexpr (scalarTypeInfo(Tag::type).category ==
                                           ScalarCategory::Complex) {

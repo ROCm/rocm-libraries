@@ -13,7 +13,7 @@
 
 namespace roc::hostnumerics {
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                OutputSelection selection, GemmBackend backend) {
+                IndexSelection selection, GemmBackend backend) {
     (void)detail::executeGemm(
         GemmInvocation(a, b, std::move(output), options, std::move(selection)), backend);
 }
@@ -33,7 +33,7 @@ Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const Mat
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulInto(a, b, output, options, OutputSelection::all({}), backend);
+    matmulInto(a, b, output, options, IndexSelection::allLastDimensionFastest(), backend);
     return output;
 }
 

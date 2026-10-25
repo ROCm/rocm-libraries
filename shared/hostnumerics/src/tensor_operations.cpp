@@ -15,12 +15,13 @@ Tensor binary(detail::BinaryOperation operation, const Tensor& left, const Tenso
     if (layout.shape() != outputShape)
         throw std::runtime_error("Elementwise output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runBinary({left, right, output, computeType, OutputSelection::all({})}, operation);
+    detail::runBinary({left, right, output, computeType, IndexSelection::allLastDimensionFastest()},
+                      operation);
     return output;
 }
 
 void binaryInto(detail::BinaryOperation operation, const Tensor& left, const Tensor& right,
-                Tensor output, ScalarType computeType, OutputSelection selection) {
+                Tensor output, ScalarType computeType, IndexSelection selection) {
     detail::runBinary({left, right, std::move(output), computeType, std::move(selection)},
                       operation);
 }
@@ -46,7 +47,7 @@ Tensor add(const Tensor& left, const Tensor& right, ScalarType outputType, Scala
 }
 
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             OutputSelection selection) {
+             IndexSelection selection) {
     binaryInto(detail::BinaryOperation::Add, left, right, std::move(output), computeType,
                std::move(selection));
 }
@@ -62,7 +63,7 @@ Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
 }
 
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection) {
+                  IndexSelection selection) {
     binaryInto(detail::BinaryOperation::Subtract, left, right, std::move(output), computeType,
                std::move(selection));
 }
@@ -78,7 +79,7 @@ Tensor multiply(const Tensor& left, const Tensor& right, ScalarType outputType,
 }
 
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection) {
+                  IndexSelection selection) {
     binaryInto(detail::BinaryOperation::Multiply, left, right, std::move(output), computeType,
                std::move(selection));
 }
@@ -96,13 +97,13 @@ Tensor activate(const Tensor& input, ActivationFunction function, ScalarType out
     if (layout.shape() != input.shape())
         throw std::runtime_error("Activation output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runActivation(
-        {input, output, std::move(function), computeType, OutputSelection::all({})});
+    detail::runActivation({input, output, std::move(function), computeType,
+                           IndexSelection::allLastDimensionFastest()});
     return output;
 }
 
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
-                  ScalarType computeType, OutputSelection selection) {
+                  ScalarType computeType, IndexSelection selection) {
     detail::runActivation(
         {input, std::move(output), std::move(function), computeType, std::move(selection)});
 }

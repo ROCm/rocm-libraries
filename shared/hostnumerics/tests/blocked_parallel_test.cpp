@@ -19,8 +19,8 @@ void testParallelSparseSelection() {
     const std::vector<float> b(reductionElements * columns, 1.0f);
     Tensor output = makeOutput(rows, columns, sentinel);
     GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
-    problem.outputSelection =
-        OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128, {});
+    problem.outputSelection = IndexSelection::primeStrideLastDimensionFastest(
+        output.elementCount(), output.elementCount(), 128);
 
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 

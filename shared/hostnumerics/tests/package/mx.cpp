@@ -9,8 +9,8 @@ TEST(Package, Mx) {
     using namespace roc::hostnumerics;
     const Shape shape{32, 1};
     const MxDataGeneration generation = MxDataGeneration::preserveRange(
-        GenerationRecipe::realOnly(GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}),
-                                   {}),
+        GenerationRecipe::realOnlyLastDimensionFastest(
+            GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 0),
         {.lower = -1.0, .upper = 1.0});
     MxGenerationOptions options;
     options.dataType = ScalarType::Float4E2M1;

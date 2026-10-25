@@ -68,7 +68,7 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
     if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
         problem.pattern.selection != StructuredSparsitySelection::Random)
         throw std::runtime_error("Structured sparsity selection is invalid.");
-    (void)resolvedIndexOrder(inputShape, problem.pattern.indexOrder);
+    (void)validatedIndexOrder(inputShape.rank(), problem.pattern.indexOrder);
 
     std::vector<size_t> compressedDimensions(inputShape.dimensions().begin(),
                                              inputShape.dimensions().end());
@@ -202,7 +202,7 @@ void coordinatesForLine(size_t line, const Shape& shape, size_t excludedAxis,
                         std::span<const size_t> order, std::vector<size_t>& coordinates) {
     coordinates.assign(shape.rank(), 0);
     for (size_t position = shape.rank(); position > 0; --position) {
-        const size_t axis = order.empty() ? position - 1 : order[position - 1];
+        const size_t axis = order[position - 1];
         if (axis == excludedAxis) continue;
         coordinates[axis] = line % shape.dimensions()[axis];
         line /= shape.dimensions()[axis];

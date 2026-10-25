@@ -14,14 +14,8 @@ import numpy as np
 import hostnumerics as hn
 
 
-def real_recipe(component, seed):
-    return hn.GenerationRecipe.real_only(
-        component,
-        hn.GenerationRecipeSettings(
-            seed=seed,
-            index_order=[],
-        ),
-    )
+def real_recipe_last_dimension_fastest(component, seed):
+    return hn.GenerationRecipe.real_only_last_dimension_fastest(component, seed)
 
 
 class HostNumericsTutorial(unittest.TestCase):
@@ -43,7 +37,7 @@ class HostNumericsTutorial(unittest.TestCase):
         )
 
     def test_02_generate_reproducible_tensors(self):
-        real = real_recipe(
+        real = real_recipe_last_dimension_fastest(
             hn.GenerationRecipe.uniform_real(
                 hn.UniformRealGenerationParameters(lower=-1.0, upper=1.0)
             ),
@@ -56,7 +50,7 @@ class HostNumericsTutorial(unittest.TestCase):
         integers = hn.generate_tensor(
             hn.ScalarType.Int32,
             [8],
-            real_recipe(
+            real_recipe_last_dimension_fastest(
                 hn.GenerationRecipe.uniform_integer(
                     hn.UniformIntegerGenerationParameters(lower=1, upper=4)
                 ),
@@ -75,7 +69,7 @@ class HostNumericsTutorial(unittest.TestCase):
                 hn.GenerationRecipe.uniform_integer(
                     hn.UniformIntegerGenerationParameters(lower=-4, upper=-1)
                 ),
-                hn.GenerationRecipeSettings(seed=37, index_order=[]),
+                hn.GenerationRecipeSettings(seed=37, index_order=[0]),
             ),
         )
         self.assertTrue(np.all(hn.to_numpy(complex_values, dtype=None).imag != 0))
@@ -172,7 +166,7 @@ class HostNumericsTutorial(unittest.TestCase):
         )
 
     def test_05_generate_mxfp4_data_and_scales(self):
-        recipe = real_recipe(
+        recipe = real_recipe_last_dimension_fastest(
             hn.GenerationRecipe.uniform_real(
                 hn.UniformRealGenerationParameters(lower=-1.0, upper=1.0)
             ),
@@ -229,6 +223,7 @@ class HostNumericsTutorial(unittest.TestCase):
         self.assertEqual(normalized.mean.shape, [2])
 
         pattern = hn.StructuredSparsityPattern()
+        pattern.index_order = [0, 1]
         pattern.axis = 1
         pattern.fixed_positions = [0, 2]
         sparse = hn.apply_structured_sparsity(

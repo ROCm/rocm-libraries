@@ -13,7 +13,7 @@ namespace roc::hostnumerics {
 struct GemmTestOptions : MatmulOptions {
     explicit GemmTestOptions(ScalarType accumulator) : MatmulOptions(accumulator) {}
 
-    OutputSelection outputSelection = OutputSelection::all({});
+    IndexSelection outputSelection = IndexSelection::allLastDimensionFastest();
 };
 
 struct GemmTestCase : GemmTestOptions {

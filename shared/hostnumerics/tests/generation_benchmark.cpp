@@ -91,7 +91,7 @@ GenerationRecipe generationRecipe(std::string_view name) {
             "Recipe must be zero, constant, choice, uniform-integer, alternating-integer, "
             "absolute-uniform-integer, uniform-real, uniform-encoded, normal, sine, or serial.");
     }();
-    return GenerationRecipe::realOnly(std::move(component), {.seed = 17});
+    return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), 17);
 }
 
 double median(std::vector<double> values) {

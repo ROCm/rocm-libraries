@@ -43,9 +43,8 @@ int main(int argc, char** argv) {
                                             ? Layout::contiguousFirstDimensionFastest(shape)
                                             : Layout::contiguousLastDimensionFastest(shape);
             Tensor source = Tensor::allocateUninitialized(sourceType, sourceLayout);
-            generate(source,
-                     GenerationRecipe::realOnly(
-                         GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = 1}));
+            generate(source, GenerationRecipe::realOnlyLastDimensionFastest(
+                                 GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), 1));
 
             Tensor converted = source.copyConvertedTo(ScalarType::Float32, destinationLayout);
             const double seconds = bestSeconds([&] {

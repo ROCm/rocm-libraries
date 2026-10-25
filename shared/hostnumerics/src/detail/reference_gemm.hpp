@@ -178,10 +178,12 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         return {.reason = "Reference GEMM destination must not overlap the A block scale."};
     if (problem.blockScaleB && storageOverlaps(problem.d, *problem.blockScaleB))
         return {.reason = "Reference GEMM destination must not overlap the B block scale."};
-    if (!ShapeAccess::isValidIndexOrder(problem.d.shape().rank(),
-                                        problem.outputSelection.indexOrder()))
-        return {.reason = "Tensor index order must contain each dimension once."};
-    if (auto error = outputSelectionError(problem.outputSelection, outputCount))
+    try {
+        (void)problem.outputSelection.indexOrder(problem.d.shape().rank());
+    } catch (const std::runtime_error& error) {
+        return {.reason = error.what()};
+    }
+    if (auto error = indexSelectionError(problem.outputSelection, outputCount))
         return {.reason = std::string(message(*error))};
     return {.supported = true};
 }

@@ -89,7 +89,7 @@ class LayoutTests(unittest.TestCase):
         for dimensions in ([], [7], [2, 3], [2, 3, 5], [2, 1, 3, 2]):
             shape = hn.Shape(dimensions)
             self.assertEqual(
-                hn.Layout.contiguous(shape),
+                hn.Layout.contiguous_last_dimension_fastest(shape),
                 hn.Layout.contiguous_last_dimension_fastest(shape),
             )
             for order in itertools.permutations(range(len(dimensions))):

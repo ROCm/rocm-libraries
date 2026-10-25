@@ -103,14 +103,14 @@ namespace TensileLite
             bool validate(ContractionProblemGemm const&             problem,
                           ContractionInputs const&                  reference,
                           ContractionInputs const&                  result,
-                          const roc::hostnumerics::OutputSelection& outputSelection);
+                          const roc::hostnumerics::IndexSelection& outputSelection);
 
             bool checkResults(TensorDescriptor const&                   tensor,
                               void const*                               refPtr,
                               void const*                               resPtr,
                               size_t                                    maxElements,
                               bool                                      isgpu,
-                              const roc::hostnumerics::OutputSelection& outputSelection,
+                              const roc::hostnumerics::IndexSelection& outputSelection,
                               double                                    threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
@@ -138,7 +138,7 @@ namespace TensileLite
 
             std::shared_ptr<DataInitialization>             m_dataInit;
             std::shared_ptr<ProblemInputs>                  m_referenceInputs;
-            std::vector<roc::hostnumerics::OutputSelection> m_outputSelections;
+            std::vector<roc::hostnumerics::IndexSelection> m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;

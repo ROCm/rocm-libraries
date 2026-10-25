@@ -17,7 +17,7 @@
 
 namespace roc::hostnumerics::detail {
 inline bool isContiguous(const Layout& layout, std::span<const size_t> order) {
-    const auto axes = resolvedIndexOrder(layout.shape(), order);
+    const auto axes = validatedIndexOrder(layout.shape().rank(), order);
     uint64_t expectedStride = 1;
     const auto matchesDimension = [&](size_t dimension) {
         const size_t extent = layout.shape().dimensions()[dimension];
@@ -45,7 +45,7 @@ void forEachLayoutOffsetPairRunRange(const Layout& firstLayout, const Layout& se
     const size_t total = shape.elementCount();
     if (first > pastLast || pastLast > total)
         throw std::runtime_error("Tensor offset traversal range exceeds shape.");
-    const auto axes = resolvedIndexOrder(shape, indexOrder);
+    const auto axes = validatedIndexOrder(shape.rank(), indexOrder);
     if (first == pastLast) return;
     if (shape.rank() == 0) {
         function(0, firstLayout.offset(), ptrdiff_t{0}, secondLayout.offset(), ptrdiff_t{0},

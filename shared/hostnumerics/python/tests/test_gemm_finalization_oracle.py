@@ -40,8 +40,10 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 include_amax=False,
             )
 
-        full = run(hv.OutputSelection.all(index_order=[]))
-        partial = run(hv.OutputSelection.explicit_indices(selected, index_order=[]))
+        full = run(hv.IndexSelection.all_last_dimension_fastest())
+        partial = run(
+            hv.IndexSelection.explicit_indices_last_dimension_fastest(selected)
+        )
 
         self.assertIsNotNone(full.raw_output)
         np.testing.assert_array_equal(
@@ -96,7 +98,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             backend=hv.GemmBackend.Automatic,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -143,7 +145,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                output_selection=hv.OutputSelection.all([]),
+                output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
                 conjugate_a=False,
@@ -159,8 +161,8 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 hv.ScalarType.Float32,
                 alpha=float(alpha),
                 beta=float(beta),
-                output_selection=hv.OutputSelection.explicit_indices(
-                    selected, index_order=[]
+                output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
+                    selected
                 ),
                 backend=hv.GemmBackend.Blocked,
                 compute_type_a=None,

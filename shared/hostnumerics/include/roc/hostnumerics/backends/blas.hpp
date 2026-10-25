@@ -7,7 +7,7 @@
 
 namespace roc::hostnumerics {
 void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
-                               const MatmulOptions& options, OutputSelection selection);
+                               const MatmulOptions& options, IndexSelection selection);
 Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType outputType,
                              const MatmulOptions& options, std::optional<Layout> outputLayout);
 }  // namespace roc::hostnumerics
