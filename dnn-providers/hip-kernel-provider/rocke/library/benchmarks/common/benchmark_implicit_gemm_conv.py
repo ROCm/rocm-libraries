@@ -4838,25 +4838,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # so it is freed as the sweep goes rather than per case.
             live_extras: list = []
 
-            # --fast-rank takes every kernel whose scratch it can account for.
-            # A stream-K binary allocates and zeroes per launch config through
-            # its own contract (_cached_streamk_run returns the free), so it
-            # stays on the serial path below whichever way the flag is set.
+            # --fast-rank takes every kernel of the case, stream-K included:
+            # its workspace is accounted like any other launch config's, and
+            # its per-launch zeroing is queued rather than drained for.
             if args.fast_rank:
-                streamk = [
-                    c
-                    for c in candidates
-                    if direction == "wgrad" and c[0].streamk != "off"
-                ]
-                fast = [
-                    c
-                    for c in candidates
-                    if not (direction == "wgrad" and c[0].streamk != "off")
-                ]
-                if fast:
+                if candidates:
                     failed, stopped = _fast_rank_candidates(
                         args=args,
-                        candidates=fast,
+                        candidates=candidates,
                         modules=modules,
                         direction=direction,
                         problem=problem,
@@ -4883,7 +4872,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         for buf in (A_dev, B_dev, D_dev):
                             rt.free(buf)
                         return 1
-                candidates = streamk
+                candidates = []
 
             n_cand = len(candidates)
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
@@ -4909,10 +4898,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # kernarg) and has its own ABI, workspace and zeroing
                 # contract per reduction, so it gets its own launch setup and
                 # one launch; its workspace is released after the loop.
-                sk_bound = sk_free = None
+                sk_bound = None
+                sk_live: list = []
                 if direction == "wgrad" and ident.streamk != "off":
                     try:
-                        sk_run, sk_free, sk_label = _cached_streamk_run(
+                        sk_run, sk_extras, sk_label = _cached_streamk_run(
                             args,
                             problem,
                             ident,
@@ -4928,6 +4918,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     except ValueError as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
                         continue
+                    sk_live.append(sk_extras)
                     sk_bound = (sk_run, sk_label)
 
                 # A split-K wgrad binary is one kernel for every degree > 1
@@ -5025,8 +5016,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             stopped, passed = False, False
                         if stopped:
                             _free_extras(rt, live_extras)
-                            if sk_free is not None:
-                                sk_free()
+                            _free_extras(rt, sk_live)
                             for buf in (A_dev, B_dev, D_dev):
                                 rt.free(buf)
                             return 1
@@ -5076,8 +5066,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
 
-                if sk_free is not None:
-                    sk_free()
+                _free_extras(rt, sk_live)
 
             synchronize_and_release()
             _free_extras(rt, live_extras)
@@ -5173,13 +5162,19 @@ def _fast_rank_candidates(
     probe rules out gives its scratch back at the end of the chunk that
     measured it.
 
-    Three differences from the serial path, all of them the point of the flag:
-    ``--verify`` checks the finalists rather than every kernel,
+    Stream-K kernels rank here too. Their workspace is per launch config, as
+    the two-stage one is, so it is accounted and released the same way; what
+    kept them out was the zeroing their reduction needs before every launch,
+    which used to drain the device and so serialised the batch around them.
+    It is queued on the launch stream now (see :func:`_streamk_launch`), and
+    same-stream FIFO is what makes it safe for the ``atomic`` reduction to
+    clear the shared dW while the previous candidate's launches are still in
+    flight.
+
+    Two differences from the serial path, both of them the point of the flag:
+    ``--verify`` checks the finalists rather than every kernel, and
     ``--split-k-prune`` does not apply (a kernel's degrees are ranked like any
-    other candidates, and a probe launch costs about what the prune saved),
-    and stream-K kernels are not handled here at all -- their workspace and
-    zeroing contract is per launch config, so the caller leaves them on the
-    serial path.
+    other candidates, and a probe launch costs about what the prune saved).
 
     Returns ``(n_failed, stopped)``; ``stopped`` is a ``--dump-fail`` dump,
     which ends the sweep as it does on the serial path.
@@ -5200,7 +5195,11 @@ def _fast_rank_candidates(
                 flush=True,
             )
             continue
-        if direction == "wgrad" and ident.split_k > 1:
+        if direction == "wgrad" and ident.streamk != "off":
+            # A stream-K binary partitions K over its CTA pool itself; the
+            # split-K kernarg is not its knob, so it ranks once.
+            degrees = (None,)
+        elif direction == "wgrad" and ident.split_k > 1:
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
@@ -5246,24 +5245,48 @@ def _fast_rank_candidates(
             print(f"  [skip] {ident.label()}: {e}", flush=True)
             return None
         mine: list = []
-        bound = _cached_bind_batch(
-            batch_chunks,
-            direction,
-            run_problem,
-            ident,
-            meta,
-            rt,
-            launcher,
-            case_dtype,
-            split_k,
-            ptrs,
-            sizes,
-            arch,
-            stage2_kernels,
-            KernelLauncher,
-            LaunchConfig,
-            mine,
-        )
+        if direction == "wgrad" and ident.streamk != "off":
+            # Its own ABI, workspace and zeroing contract; one launch, on the
+            # case's problem rather than a batch slice, as the serial path
+            # runs it.
+            try:
+                sk_run, sk_extras, sk_label = _cached_streamk_run(
+                    args,
+                    problem,
+                    ident,
+                    rt,
+                    arch,
+                    launcher,
+                    ptrs,
+                    sizes,
+                    stage2_kernels,
+                    KernelLauncher,
+                    LaunchConfig,
+                )
+            except ValueError as e:
+                print(f"  [skip] {ident.label()}: {e}", flush=True)
+                return None
+            mine.append(sk_extras)
+            bound = (sk_run, sk_label)
+        else:
+            bound = _cached_bind_batch(
+                batch_chunks,
+                direction,
+                run_problem,
+                ident,
+                meta,
+                rt,
+                launcher,
+                case_dtype,
+                split_k,
+                ptrs,
+                sizes,
+                arch,
+                stage2_kernels,
+                KernelLauncher,
+                LaunchConfig,
+                mine,
+            )
         if bound is None:
             _release(mine)
             return None
@@ -5574,12 +5597,22 @@ def _streamk_launch(
     ``spec`` is the stream-K :class:`WgradConvSpec` (its ``streamk_ctas`` is
     the CTA pool, -1 = the arch default); ``problem`` the launch shape;
     ``ptrs`` / ``sizes`` the dY, X, dW buffers. Allocates the reduction's
-    workspace and returns ``(run, free, pool)``: ``run()`` zeroes what the
+    workspace and returns ``(run, extras, pool)``: ``run()`` zeroes what the
     reduction accumulates into -- dW for ``atomic``, the f32 scratch for
     ``workspace``, only the flag table for ``linear``/``tree`` -- launches the
-    kernel and, for ``workspace``, the Stage 2 reduce into dW; ``free()``
-    releases the workspace; ``pool`` is the resolved CTA pool.
+    kernel and, for ``workspace``, the Stage 2 reduce into dW; ``extras``
+    carries the workspace in the shape :func:`_free_extras` frees and
+    :func:`_extras_bytes` accounts, as the other legs' scratch is; ``pool`` is
+    the resolved CTA pool.
+
+    The zeroing is queued on the launch stream, not drained for: see
+    :meth:`rocke.runtime.hip_module.Runtime.memset_async`. Same-stream FIFO
+    orders it against this kernel's launches, and against those of any other
+    kernel queued in the same batch -- which is what lets the probe time
+    stream-K kernels back to back on one shared dW.
     """
+    from rocke.runtime import resolve_stream
+
     from kernels.common.conv_implicit_gemm_wgrad import (
         wgrad_streamk_grid,
         wgrad_streamk_launch,
@@ -5596,7 +5629,9 @@ def _streamk_launch(
     # An all-data-parallel partition (no stream-K CTAs) needs no workspace,
     # but the kernargs still carry the pointers, so a 4-byte stub stands in
     # for the empty allocation.
-    ws = rt.alloc(max(ws_bytes, 4))
+    alloc_bytes = max(ws_bytes, 4)
+    ws = rt.alloc(alloc_bytes)
+    stream = resolve_stream(0)
     try:
         extra = {}
         if reduction == "workspace":
@@ -5633,19 +5668,16 @@ def _streamk_launch(
 
     def run():
         if reduction == "atomic":
-            rt.memset(ptrs[2], 0, sizes[2])
+            rt.memset_async(ptrs[2], 0, sizes[2], stream)
         elif reduction == "workspace":
-            rt.memset(ws, 0, ws_bytes)
+            rt.memset_async(ws, 0, ws_bytes, stream)
         elif flags_bytes:
-            rt.memset(ws, 0, flags_bytes)
+            rt.memset_async(ws, 0, flags_bytes, stream)
         launcher(values, config=cfg)
         if s2 is not None:
             s2[0](s2[1], config=s2[2])
 
-    def free():
-        rt.free(ws)
-
-    return run, free, pool
+    return run, {"ws_ptr": ws, "ws_bytes": alloc_bytes}, pool
 
 
 def _streamk_mode_label(mode: str, reduction: str) -> str:
@@ -5668,7 +5700,7 @@ def _cached_streamk_run(
     KernelLauncher,
     LaunchConfig,
 ):
-    """``(run, free, label)`` for a cached stream-K wgrad binary.
+    """``(run, extras, label)`` for a cached stream-K wgrad binary.
 
     The launch helpers take a spec; this one describes the cached binary on
     the launch shape. Nothing is built from it -- the partition, workspace and
@@ -5699,7 +5731,7 @@ def _cached_streamk_run(
         streamk_ctas=args.streamk_ctas,
         ws_replicas=_ws_replicas_of(ident),
     )
-    run, free, pool = _streamk_launch(
+    run, extras, pool = _streamk_launch(
         rt=rt,
         launcher=launcher,
         spec=spec,
@@ -5711,7 +5743,7 @@ def _cached_streamk_run(
         KernelLauncher=KernelLauncher,
         LaunchConfig=LaunchConfig,
     )
-    return run, free, f"{ident.label()} @streamk_ctas={pool}"
+    return run, extras, f"{ident.label()} @streamk_ctas={pool}"
 
 
 def _split_k_degrees(
@@ -5931,6 +5963,8 @@ def _cached_bind(
     :func:`_free_extras`). Returns None, after saying why, when the binary
     cannot launch ``problem``.
     """
+    from rocke.runtime import resolve_stream
+
     from benchmarks.common.kernel_sweep import _launch_values_for
 
     try:
@@ -5952,6 +5986,9 @@ def _cached_bind(
         stream=0,
     )
     run = launcher.bind(values, config=cfg)
+    # The stream ``bind`` resolved ``cfg.stream`` to, so a zeroing step below
+    # queues ahead of this kernel's launches rather than draining for them.
+    stream = resolve_stream(cfg.stream)
     if (
         direction == "wgrad"
         and ident.split_k > 1
@@ -5961,11 +5998,13 @@ def _cached_bind(
         # The packed-atomic split-K epilogue accumulates into dW, so every
         # launch needs dW zeroed first -- part of the algorithm's cost, as the
         # JIT sweep times it and as the two-stage leg below times its scratch
-        # clear.
+        # clear. Queued on the launch stream: dW is shared by every candidate
+        # of the case, and FIFO is what keeps one candidate's clear behind the
+        # previous one's launches when the probe batches them.
         _launch = run
 
-        def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2]):
-            rt.memset(dw_ptr, 0, dw_bytes)
+        def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2], stream=stream):
+            rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
     elif direction == "wgrad" and ident.two_stage:
@@ -5995,8 +6034,9 @@ def _cached_bind(
             s2_launcher=s2_launcher,
             s2_values=s2_values,
             s2_cfg=s2_cfg,
+            stream=stream,
         ):
-            rt.memset(extras["ws_ptr"], 0, extras["ws_bytes"])
+            rt.memset_async(extras["ws_ptr"], 0, extras["ws_bytes"], stream)
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
