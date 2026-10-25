@@ -138,12 +138,14 @@ def rig(tmp_path, monkeypatch):
     }
     rig.shipped_gates = []
 
-    def compile_specs(specs, arch, reference_dir=None):
+    def compile_specs(specs, arch, reference_dir=None, reference_csv=None):
         assert reference_dir == rig.reference_dir
         by_hash = {to_spec(i).hash(): i.name for i in (plain, bias, bias_no_db)}
         return [rig.outcomes[by_hash[s.hash()]] for s in specs]
 
-    def run_gate(obj, greedy, spec, reduce_symbol="", reference_dir=None):
+    def run_gate(
+        obj, greedy, spec, reduce_symbol="", reference_dir=None, reference_csv=None
+    ):
         assert greedy is None
         rig.shipped_gates.append(obj.name)
         return _gate(obj.read_bytes(), verdict="not scanned")
@@ -159,7 +161,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "compile_specs", compile_specs)
     monkeypatch.setattr(build, "_run_gate", run_gate)
     monkeypatch.setattr(build, "verify", verify)
-    monkeypatch.setattr(build, "read_reference", lambda: reference)
+    monkeypatch.setattr(build, "read_reference", lambda path=None: reference)
     monkeypatch.setattr(
         build, "instances_for", lambda op, arch: [plain, bias, bias_no_db]
     )

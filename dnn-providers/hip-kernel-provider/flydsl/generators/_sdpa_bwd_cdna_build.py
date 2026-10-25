@@ -59,11 +59,14 @@ import argparse
 import contextlib
 import csv
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,7 +82,7 @@ from ._codeobject import (
 from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
 from ._instances import SDPA_BWD_REDUCE_SYMBOL, instances_for
 from ._manifest import FLYDSL_DIR, refresh_source_md, sha256, write_op_manifest
-from ._parallel import compile_all
+from . import _parallel
 from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's surface)
     FP32,
     KERNELS,
@@ -1011,6 +1014,45 @@ def _gate(
     return _run_gate(obj, greedy, spec, reduce_symbol, reference_dir, reference_csv)
 
 
+def _compile_all(compile_one, tasks, arch: str, label) -> list:
+    """``compile_one(task)`` for every task, in order, each in a worker process of its own.
+
+    ``_parallel.compile_all`` with one compile per worker: FlyDSL restores a scoped LLVM option to its default value, which
+    LLVM reads as an explicit setting, so a reused worker would carry the previous compile's options (the fp32 dQ module's
+    ``unroll-max-count``) into the next object. ``FLYDSL_GEN_JOBS`` sets the worker count; 1 compiles in this process.
+    """
+    jobs = _parallel._jobs(len(tasks))
+    if jobs == 1:
+        return _parallel.compile_all(compile_one, tasks, arch, label)
+    print(f"compiling {len(tasks)} object(s) on {jobs} worker(s)", flush=True)
+    results: list = [None] * len(tasks)
+    with ProcessPoolExecutor(
+        max_workers=jobs,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_parallel._prepare_worker,
+        initargs=(arch,),
+        max_tasks_per_child=1,
+    ) as pool:
+        futures = {
+            pool.submit(compile_one, task): index for index, task in enumerate(tasks)
+        }
+        try:
+            for done, future in enumerate(as_completed(futures), start=1):
+                index = futures[future]
+                try:
+                    results[index] = future.result()
+                except BrokenProcessPool as exc:
+                    raise GeneratorError(
+                        f"{label(tasks[index])}: a compile worker died ({exc}); "
+                        "retry with fewer workers (FLYDSL_GEN_JOBS)"
+                    ) from exc
+                print(f"[{done}/{len(tasks)}] {label(tasks[index])}", flush=True)
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+    return results
+
+
 # A compile task: (spec key, spec hash, reference dir, reference CSV, fp32 reduce reference dir, hints kernel). The empty string is none.
 # A non-empty hints kernel names the module of the spec's dtype whose compile hints replace the spec's own: the one object of
 # ``_fp32_reduce_reference``, a standalone fp32 reduce built under the dQ module's options.
@@ -1076,7 +1118,7 @@ def _fp32_reduce_reference(arch: str, out: Path) -> Path:
     resource row are those of this object, not of the standalone fp32 reduce pin.
     """
     reduce_spec = dbias_reduce_spec(FP32)
-    (outcome,) = compile_all(
+    (outcome,) = _compile_all(
         _compile_one,
         [(reduce_spec.key(), reduce_spec.hash(), "", "", "", "dq")],
         arch,
@@ -1132,7 +1174,7 @@ def compile_specs(
                 for spec in specs
             ]
 
-        outcomes = compile_all(_compile_one, tasks(entries), arch, lambda t: t[1])
+        outcomes = _compile_all(_compile_one, tasks(entries), arch, lambda t: t[1])
         for attempt in range(2, _COMBINED_ATTEMPTS + 1):
             again = [
                 i
@@ -1144,7 +1186,7 @@ def compile_specs(
             if not again:
                 break
             print(f"attempt {attempt}: rebuilding {len(again)} combined row(s)")
-            rebuilt = compile_all(
+            rebuilt = _compile_all(
                 _compile_one,
                 tasks([entries[i] for i in again]),
                 arch,
