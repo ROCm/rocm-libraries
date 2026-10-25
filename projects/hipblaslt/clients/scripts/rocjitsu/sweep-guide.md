@@ -8,7 +8,7 @@ kernel-dispatch evidence. Every race or emulator warning fails the run.
 
 The advisory GitHub Actions sidecar invokes both backends independently against
 the current run's installed artifacts. Each reconstructs its own inventory, runs up to
-eight workers and keeps separate reports; CI uses four. A failure in the first backend does
+sixteen workers and keeps separate reports; CI uses four. A failure in the first backend does
 not prevent the second. CI setup, invocation and report publication belong in
 `.github`; inventory, case generation, execution and result checking live here.
 The Tensile metadata reader and client-option mapping are shared with existing
@@ -219,13 +219,13 @@ not a hard process-memory limit.
 
 Each backend writes into a fresh report directory:
 
-- `summary.md`: solution index, PASS/FAIL/BATCH FAILED/SKIPPED/PASS WITH SKIPS, numerical passes, dispatch counts,
+- `summary.md`: solution index, individual outcome, numerical passes, dispatch counts,
   elapsed time and reasons. Updated atomically after each result and published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
 - `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
   detector revision and known-failure matches.
 - `known_failures.yaml`: the exact list used for this run, hashed in the manifest.
-- `settings.json`, `rocjitsu.json`: CPU assignment, environment and emulator settings.
+- `settings.json`, `rocjitsu.json` or `profile-*.json`: CPU assignment, environment and emulator settings.
 - `batch-*`: per-process INI/YAML, binary bench input, command, combined log,
   timing breakdown and classified native results.
 - `solution-*.result.json`: per-index evidence and the corresponding `batch_id`.
@@ -239,25 +239,19 @@ planned-case denominator; expected dispatch counts exclude skipped cases. Final
 accounting includes all observed statuses, skipped cases, missing records and
 unstarted cases. Skips do not establish numerical or race coverage.
 
-The console reports each solution when its batch finishes. The parser checks
-numerics, index, solution name, kernel name and dispatch count separately for
-each input record, including aliases that share a kernel name and shape.
-A process failure, timeout, race, warning or inconsistent batch record/dispatch
-count prevents the affected batch from passing. Its rows report `BATCH FAILED`,
-and the report counts failed batches, not failed member indices. The structured
-summary lists `failed_batch_ids`; a per-index `failed` flag includes these shared
-batch checks and must not be counted as an index that produced a race or bad numerics.
-Diagnostics before the first
-record and during shutdown count too; they cannot reliably be attributed to
-one index. Completed numerical records remain visible even when the batch fails.
-Missing output in a claimed batch is reported as missing; unclaimed batches are
-reported as unstarted. No automatic retry replaces the original result.
+The console reports each index when its batch finishes. Completed numerical records retain the norm error, tolerances, solution identity and target dispatch counts. `VALIDATED_IN_FAILED_PROCESS` means those per-index checks completed, while the native process failed a shared check. `LAUNCHED_NO_RESULT` means the target ran without producing a numerical record; `UNEXECUTED` means an aborted process never launched that input. Explicit native selection rejection reports `NATIVE_REJECTED`. Planning reports hardware exclusions, unsupported features, invalid inputs and missing code objects separately.
 
-Replay the saved batch command and input to preserve the original process context.
-To isolate a failure, repeat the same tool/library/configuration arguments with
-`--batch-size 1 --solution-index N` and a fresh reports directory. A successful
-isolated replay does not erase the original batch failure. Distinguish emulator
-findings, native rejection, packaging problems and possible kernel races.
+Race headers naming a unique selected kernel appear with that index. All race headers, warnings and process errors are also retained as process diagnostics; ambiguous or shutdown diagnostics are not assigned to a member index. `summary.json` has one `index_outcomes` entry per requested index, including unstarted work, plus separate `processes` and `failed_process_ids`. Its `outcome_counts` must not be replaced by a count of per-row `failed` flags: those flags retain process failures for the run's exit status.
+
+Use `--recover-unexecuted` to replay each wholly unexecuted index once in its own native process. Recovery keeps the selected profile, exact YAML and checks, records both attempts, and uses the remaining suite deadline. It runs only when ordered dispatch and record evidence establishes that the original input never launched. Launched failures, native rejections and ambiguous logs are not retried automatically. The original process failure still makes the run exit unsuccessfully, even if every replay passes. Use `--continue-on-failure` as well to complete the remaining selected batches.
+
+Replay the saved batch command and input to preserve the original process context. To investigate a launched failure, repeat the same tool/library/profile arguments with `--batch-size 1 --solution-index N` and a fresh reports directory. A successful isolated replay does not erase the original batch failure.
+
+## Hardware profiles
+
+`--config` retains the existing single-profile invocation. For profile selection, supply one or more complete emulator JSON configurations using repeated `--hardware-profile PATH` options. These replace `--config` as the candidate device profiles. The planner chooses the first compatible profile per solution, then orders metadata shards within each profile before batching. Profiles remain fixed within a native process, including recovery processes. A batch may cross shard boundaries within that profile.
+
+Profile selection checks the architecture, positive integral CU resources, shader resources and the topology's total CU count. Supply configurations describing the intended device; the runner does not derive a PCI ID or change device resources from a solution predicate. Existing single-profile configurations retain their current behavior. The matcher uses the native directed chip fallback table: for example, gfx950 PCI 0x75a3 can use 0x75a0 solutions, while 0x75a0 cannot use 0x75a3 solutions. A single compatible profile can therefore cover several chip predicates. All supplied profiles and their hashes, normalized execution configurations and per-index assignments are recorded in the manifest.
 
 ## Running locally
 
