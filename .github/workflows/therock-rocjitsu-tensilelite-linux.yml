@@ -1,11 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Run TensileLite common GEMM tests under rocjitsu CPU emulation.
-# Advisory (continue-on-error) sidecar job following the same pattern as
-# therock-rocjitsu-race-check-linux.yml. The emulator comes from this run's
-# TheRock artifacts (rocjitsu + mirage), so its version follows therock_ref,
-# unless that rocjitsu predates ROCJITSU_MIN_REF (see below).
+# Run a gated shape queue under serial rocjitsu CPU emulation, reusing an
+# existing TheRock artifact set. The minimum emulator ref is checked below.
 
 name: TheRock rocjitsu tensilelite test Linux
 
@@ -23,22 +20,28 @@ on:
         required: true
       artifact_run_id:
         type: string
-        default: ""
+        required: true
       workers:
         type: number
-        default: 0
+        default: 96
       dispatch_threads:
         type: number
-        default: 0
+        default: 1
+      max_work:
+        type: number
+        default: 68719476736
+      per_job_seconds:
+        type: number
+        default: 600
       case_filter:
         type: string
         default: ""
       job_minutes:
         type: number
-        default: 400
+        default: 35
       suite_seconds:
         type: number
-        default: 19800
+        default: 1200
 
 permissions:
   contents: read
@@ -46,7 +49,6 @@ permissions:
 jobs:
   rocjitsu-tensilelite-linux:
     name: rocjitsu tensilelite (${{ inputs.amdgpu_families }})
-    continue-on-error: true
     runs-on: ${{ inputs.build_runs_on }}
     timeout-minutes: ${{ inputs.job_minutes }}
     container:
@@ -60,19 +62,18 @@ jobs:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
-      # Some configs need well over an hour under emulation.
-      PER_TEST_TIMEOUT: "10800"
-      # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: ${{ inputs.suite_seconds }}
       REQUESTED_WORKERS: ${{ inputs.workers }}
       REQUESTED_DISPATCH_THREADS: ${{ inputs.dispatch_threads }}
       CASE_FILTER: ${{ inputs.case_filter }}
+      MAX_WORK: ${{ inputs.max_work }}
+      PER_JOB_SECONDS: ${{ inputs.per_job_seconds }}
       # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
       # engine wakeup behind the hipMemcpy hangs, and #13538, the aliased TDM
       # operand behind the gsuaad hang). If therock_ref's rocjitsu predates it,
@@ -80,11 +81,14 @@ jobs:
       ROCJITSU_MIN_REF: f52ec1d75506bbde7510257e25141e7e3c3db68d
     steps:
       - name: Validate experiment inputs
-        if: ${{ inputs.artifact_run_id != '' }}
         run: |
+          [[ "${ARTIFACT_RUN_ID}" =~ ^[0-9]+$ ]] || { echo "::error::artifact_run_id must identify an existing run"; exit 1; }
           [[ -n "${CASE_FILTER}" ]] || { echo "::error::case_filter must explicitly select the workload"; exit 1; }
           [[ "${SUITE_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || { echo "::error::suite_seconds must be an integer"; exit 1; }
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
+          [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
+          [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
+          [[ "${REQUESTED_DISPATCH_THREADS}" == 1 ]] || { echo "::error::shape queue experiments require serial dispatch"; exit 1; }
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -96,6 +100,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: rocm-libraries
+          ref: ${{ github.sha }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
 
@@ -193,19 +198,19 @@ jobs:
           rocjitsu_lib="${ROCJITSU_LIB:-${ROCM_PATH}/lib/librocjitsu.so}"
           config="${ROCJITSU_CONFIG_DIR:-${ROCM_PATH}/share/rocjitsu/configs}/${config}"
           for required in "${ROCM_PATH}/bin/mirage" "${rocjitsu_lib}" \
-              "${config}" "${tensilelite_root}" "${client}"; do
+              "${config}" "${tensilelite_root}" "${tensilelite_root}/pytest.ini" "${client}"; do
             [[ -e "${required}" ]] || { echo "::error::Missing from artifacts: ${required}"; exit 1; }
           done
 
-          # Each xdist worker's clients run their own in-process emulator, so
-          # split the host between workers instead of oversubscribing it.
+          # Each queue task owns its emulator. Keep generation, references and
+          # emulation serial and vary only the number of independent clients.
           cores="$(nproc)"
           workers="${REQUESTED_WORKERS}"
           [[ "${workers}" =~ ^[0-9]+$ ]] || { echo "::error::workers must be an integer"; exit 1; }
           [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[0-9]+$ ]] || { echo "::error::dispatch_threads must be an integer"; exit 1; }
           (( workers > 0 )) || workers=$(( cores < 16 ? cores : 16 ))
           (( workers <= cores )) || { echo "::error::workers exceeds host CPU count"; exit 1; }
-          budget=$(( cores / workers ))
+          budget=1
           mkdir -p "${REPORT_DIR}/junit"
           python - "${config}" \
               "${REPORT_DIR}/rocjitsu-config.json" "${budget}" "${REQUESTED_DISPATCH_THREADS}" <<'PY'
@@ -234,10 +239,11 @@ jobs:
             echo "ROCJITSU_TARGET=${target}"
             echo "MIRAGE_PROFILE=${profile}"
             echo "PYTEST_WORKERS=${workers}"
-            # The client's CPU reference asks OpenMP for 64 threads per process;
-            # the limit holds it to the same per-worker share as the emulator.
+            # The CPU reference explicitly requests threads; enforce the limit.
             echo "OMP_NUM_THREADS=${budget}"
             echo "OMP_THREAD_LIMIT=${budget}"
+            echo "OPENBLAS_NUM_THREADS=1"
+            echo "MKL_NUM_THREADS=1"
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
             echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
@@ -247,7 +253,7 @@ jobs:
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
           echo "target=${target} profile=${profile} config=${config}"
-          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
+          echo "host_cores=${cores} queue_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
           grep MemTotal /proc/meminfo
           "${ROCM_PATH}/bin/mirage" --version
           echo "rocjitsu library: ${rocjitsu_lib}"
@@ -266,12 +272,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gdb
 
-      - name: Run rocjitsu tensilelite tests
+      - name: Prepare gated shape queue
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          cd "${REPORT_DIR}"
+          mirage run --profile "${MIRAGE_PROFILE}" --in-process \
+              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
+            python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
+              -p rocjitsu_shape_plan --collect-only -q -p no:cacheprovider \
+              --rocjitsu-shape-plan="${REPORT_DIR}/shape-plan.json" \
+              --rocjitsu-max-work="${MAX_WORK}" \
+              -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
+              -k "${CASE_FILTER}" \
+            2>&1 | tee "${REPORT_DIR}/shape-plan.log"
+
+      - name: Run rocjitsu shape queue
         id: tests
-        # The suite supervisor stops earlier, leaving time to reap and report.
-        # Recorded durations start the longest tests first; refresh them from
-        # a run's uploaded durations.json. Tests still running 5 minutes before
-        # their timeout leave process states and stacks in stalls/.
+        # The supervisor owns all descendant processes and preserves partial
+        # reports if the suite limit is reached.
         timeout-minutes: 345
         run: |
           set -o pipefail
@@ -279,20 +298,20 @@ jobs:
           TIMEFORMAT='wall_seconds=%R user_seconds=%U system_seconds=%S'
           { time python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
             --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
+            python "${SCRIPTS_DIR}/rocjitsu_shape_queue.py" \
+              --plan "${REPORT_DIR}/shape-plan.json" --report-dir "${REPORT_DIR}" \
+              --workers "${PYTEST_WORKERS}" --per-job-seconds "${PER_JOB_SECONDS}" -- \
             mirage run --profile "${MIRAGE_PROFILE}" --in-process \
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
-            python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
-              -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
-              --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
-              --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \
-              -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
-              -k "${CASE_FILTER}" \
-              -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
-              --timeout="${PER_TEST_TIMEOUT}" \
-              --junit-xml="${REPORT_DIR}/junit/tensilelite.xml" \
+            python -m pytest "${SCRIPTS_DIR}/rocjitsu_shape_test.py" \
+              -c "${TENSILELITE_ROOT}/pytest.ini" \
+              -p rocjitsu_shape_case -p rocjitsu_pytest -p no:cacheprovider \
+              --gpu-targets="${ROCJITSU_TARGET}" \
+              -v -s -n 0 --client-lock-scope=worker \
+              --timeout="${PER_JOB_SECONDS}" \
               --prebuilt-client="${TENSILELITE_CLIENT}" \
               --global-parameters="LibraryFormat='msgpack'" \
-              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
+              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET},--global-parameters,CpuThreads=1" \
             2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"; } \
             2> "${REPORT_DIR}/suite-resource-time.txt"
 
