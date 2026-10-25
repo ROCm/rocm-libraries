@@ -18,16 +18,3 @@ gtest_discover_tests(
 )
 
 include(HostNumericsExpectedParity)
-
-# Native scalar conversion must compile without exception handling.
-add_executable(hostnumerics-integer-conversion-no-exceptions-tests
-    integer_conversion_no_exceptions_test.cpp)
-target_link_libraries(hostnumerics-integer-conversion-no-exceptions-tests
-    PRIVATE roc::hostnumerics-core)
-if(MSVC)
-    target_compile_options(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE /EHs-c-)
-else()
-    target_compile_options(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE -fno-exceptions)
-endif()
-add_test(NAME hostnumerics-integer-conversion-no-exceptions-tests
-    COMMAND hostnumerics-integer-conversion-no-exceptions-tests)

@@ -12,8 +12,6 @@ installed and fetched dependency options.
 Test numerical behavior primarily through the Python API, using independent
 expected results. Native tests cover contracts that Python cannot exercise,
 such as C++ construction, ownership, and native scalar conversion templates.
-The integer conversion leaf also has a test compiled without exceptions that
-aborts on allocation attempts.
 
 ## Standalone build
 

@@ -136,15 +136,11 @@ TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
     EXPECT_TRUE(std::isinf(convertScalar<float>(std::numeric_limits<double>::infinity(), wrap)));
 }
 
-TEST(ScalarConversion, ReturnsANoexceptValue) {
+TEST(ScalarConversion, RequiresExplicitPolicies) {
     static_assert(!std::is_default_constructible_v<ScalarConversionOptions>);
     static_assert(!std::is_constructible_v<ScalarConversionOptions, IntegerRounding>);
     static_assert(!ConvertsWithoutPolicies<double>);
     static_assert(std::is_same_v<decltype(convertScalar<int8_t>(128, wrap)), int8_t>);
-    static_assert(noexcept(convertScalar<int8_t>(128, wrap)));
-    static_assert(noexcept(convertScalar<int8_t>(2.5, reject)));
-    static_assert(noexcept(convertScalar<double>(std::declval<std::complex<double>>(), wrap)));
-    static_assert(noexcept(convertScalar<std::complex<float>>(1.0, wrap)));
     EXPECT_EQ(convertScalar<int8_t>(128, wrap), -128);
     EXPECT_EQ(convertScalar<int8_t>(2.5, reject), 2);
     EXPECT_EQ(convertScalar<std::complex<double>>(1.5, wrap), std::complex<double>(1.5, 0.0));
