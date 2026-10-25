@@ -132,6 +132,16 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    that VGPR cut occupancy, 19% slower. An INDIVIDUAL length (a padded sequence's) is
    clamped to `[0, max_seqlen]`, as hipDNN's GPU reference clamps it; every main kernel
    keeps its VGPR and spill counts.
+11. **An f32 sink** (`flash_attn_func_gfx1201_aiw.py`). cuDNN and hipDNN's reference take
+   the attention sink as FLOAT `[1, Hq, 1, 1]`; upstream reads it in the query's dtype.
+   Bit 32 of `sink_stride` (`SINK_F32_BIT`) now says the sink is f32 (clear: the query's
+   dtype, as before); the low 32 bits stay the head stride in elements. `_load_sink_logit`
+   reads either without a branch, as two 16-bit loads at the element (an f32 sink's two
+   halves, a 16-bit sink's one element twice, so no load reaches past a 16-bit sink), and
+   widens it exactly: a query-dtype sink gives the same logit as before, an f32 one its
+   full value. The launch wrapper sets the bit for a 4-byte `sink`. Sink builds only (the
+   24 sink objects); the argument list is unchanged and every other object is
+   byte-identical.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and

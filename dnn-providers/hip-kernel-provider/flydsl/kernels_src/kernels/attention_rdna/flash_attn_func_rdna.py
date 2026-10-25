@@ -194,6 +194,15 @@
 #      count. The lengths read moves into one branch on the flags word (load_sequence;
 #      load_lengths stays the decode kernel's), which yields the batch index as the row
 #      for a dense launch, so a dense launch still loads nothing.
+#  30. (The decode kernel's generic tier up to 512: flash_attn_decode_rdna.py.)
+#  31. An f32 sink, in this kernel and the decode kernel and its merge: cuDNN and
+#      hipDNN's reference take the sink as FLOAT. Bit 32 of sink_stride (SINK_F32_BIT)
+#      says the sink is f32, clear it is in the query's dtype as before; the low 32
+#      bits stay the head stride in elements. load_sink_logit reads either without a
+#      branch, as two 16-bit loads at the element (the same one twice for a 16-bit
+#      sink), and widens it exactly, so a query-dtype sink gives the same logit as
+#      before and an f32 one its full value. Sink objects only: the argument list is
+#      unchanged, and objects without a sink build as before.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -398,6 +407,38 @@ def load_u64_or_zero(ptr):
     return fx.Int64(if_op.results[0])
 
 
+# The sink_stride argument's bit that marks an f32 sink (modification 31): set, the sink is
+# f32 (cuDNN's and hipDNN's reference's dtype); clear, it is in the query's dtype. The low 32
+# bits are the head stride in elements.
+SINK_F32_BIT = 32
+
+
+def load_sink_logit(sink, sink_stride, head, elem_dtype):
+    """Query head ``head``'s attention-sink logit, as f32 (modification 31).
+
+    ``sink_stride`` packs the head stride in elements (bits 0-31) and the sink's dtype
+    (``SINK_F32_BIT``: f32, else the query's). The logit is read as two 16-bit halves at
+    16-bit index ``head * stride`` scaled to the dtype's width: an f32 sink's low and high
+    halves, a 16-bit sink's one element twice. Neither load reaches past the element, so a
+    16-bit sink is never over-read as f32, and there is no branch. Both widen exactly.
+    """
+    packed = fx.Int64(sink_stride)
+    wide = fx.Int32(packed >> fx.Int64(SINK_F32_BIT)) & fx.Int32(1)
+    stride = packed & fx.Int64(0xFFFFFFFF)
+    first = fx.Int32(fx.Int64(head) * stride) << wide
+    half_ptr = fx.recast_iter(
+        fx.PointerType.get(fx.Int16.ir_type, sink.address_space), sink
+    )
+    elem_ptr = fx.recast_iter(
+        fx.PointerType.get(elem_dtype.ir_type, sink.address_space), sink
+    )
+    low = fx.ptr_load(elem_ptr + first)
+    high = fx.Int32(fx.ptr_load(half_ptr + (first + wide), fx.Int16)) & fx.Int32(0xFFFF)
+    low_bits = fx.Int32(low.bitcast(fx.Int16)) & fx.Int32(0xFFFF)
+    as_f32 = ((high << fx.Int32(16)) | low_bits).bitcast(fx.Float32)
+    return (wide != fx.Int32(0)).select(as_f32, fx.Float32(low.to(fx.Float32)))
+
+
 def build_flash_attn_func_module(
     head_dim,
     causal=True,
@@ -428,8 +469,8 @@ def build_flash_attn_func_module(
     of Q, K, V, O and LSE (Int64), the ``BIAS`` pointer and its four element
     strides ``(batch, head, query, key)`` (Int64), the runtime ``head_dim``
     (Int32; read only by a ``generic_head_dim`` build), ``v_group`` (Int32: query
-    heads per V head), the ``SINK`` pointer and its head stride (Int64; read only
-    by a ``has_sink`` build), the per-batch length pointers ``SEQLEN_Q``/``SEQLEN_KV`` and
+    heads per V head), the ``SINK`` pointer and its head stride (Int64, with the sink's
+    dtype in bit ``SINK_F32_BIT``; read only by a ``has_sink`` build), the per-batch length pointers ``SEQLEN_Q``/``SEQLEN_KV`` and
     the packed-sequence offset pointers ``ROW_OFF_Q``/``ROW_OFF_KV``, the dropout seed and
     offset1 pointers, offset2 (Int64), the keep threshold (Int32) and the scale (Float32)
     (read only by a ``has_dropout`` build), then the stream. The kernel itself takes the
@@ -446,8 +487,8 @@ def build_flash_attn_func_module(
     # The bias in the query's dtype rather than f32 (bias_query_dtype): read as such and
     # widened to f32 as it is added.
     BIAS_Q = bool(bias_query_dtype)
-    # An attention sink (has_sink): a per-head logit in the query's dtype that joins
-    # every row's softmax as a key with no value.
+    # An attention sink (has_sink): a per-head logit, f32 or in the query's dtype
+    # (modification 31), that joins every row's softmax as a key with no value.
     HAS_SINK = bool(has_sink)
     # Dropout (has_dropout, modification 27): a Philox draw per score, so baked.
     HAS_DROPOUT = bool(has_dropout)
@@ -1542,12 +1583,8 @@ def build_flash_attn_func_module(
             )
             # The sink joins the sum as one more key with no value, against the
             # larger of it and the row's max; a row with no keys keeps only it.
-            sink_ptr = fx.recast_iter(
-                fx.PointerType.get(elem_dtype.ir_type, SINK.address_space), SINK
-            )
-            sink_val = fx.Float32(
-                fx.ptr_load(sink_ptr + fx.Int32(head_idx * sink_stride)).to(fx.Float32)
-            )
+            # In f32 or the query's dtype (modification 31).
+            sink_val = load_sink_logit(SINK, sink_stride, head_idx, elem_dtype)
             # A sink of -inf on a row with no keys: m_top floored at -FLT_MAX so the
             # sink's term is exp(-inf) = 0 rather than exp(-inf - -inf) = NaN; then
             # l_total is 0, O is 0 and the LSE -inf (modification 23).

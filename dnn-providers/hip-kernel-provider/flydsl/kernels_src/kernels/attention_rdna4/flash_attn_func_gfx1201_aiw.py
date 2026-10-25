@@ -168,6 +168,43 @@ def _pointer_store(value: ir.Value, ptr: ir.Value):
     return _llvm.StoreOp(fmha.llvm_value(value), fmha.llvm_value(ptr))
 
 
+# Modification 11: the sink_stride argument's bit that marks an f32 sink. Set, the sink is
+# f32 (cuDNN's and hipDNN's reference's dtype); clear, it is in the query's dtype. The low
+# 32 bits are the head stride in elements.
+SINK_F32_BIT = 32
+
+
+def _load_sink_logit(sink, sink_stride, head, elem_numeric_cls):
+    """Query head ``head``'s attention-sink logit, as f32 (modification 11): two 16-bit
+    loads at the element -- an f32 sink's low and high halves, a 16-bit sink's one element
+    twice -- so neither dtype's load reaches past it, without a branch; both widen
+    exactly."""
+    packed = fx.Int64(sink_stride)
+    wide = fx.Int32(packed >> fx.Int64(SINK_F32_BIT)) & fx.Int32(1)
+    stride = packed & fx.Int64(0xFFFFFFFF)
+    first = fx.Int64(fx.Int64(head) * stride) << fx.Int64(wide)
+    base = fmha.pointer_to_llvm_ptr(sink)
+    low = elem_numeric_cls(
+        _pointer_load(
+            elem_numeric_cls.ir_type,
+            buffer_ops.get_element_ptr(base, first, elem_type=elem_numeric_cls.ir_type),
+        )
+    )
+    high = fx.Int32(
+        fx.Int16(
+            _pointer_load(
+                fx.Int16.ir_type,
+                buffer_ops.get_element_ptr(
+                    base, first + fx.Int64(wide), elem_type=fx.Int16.ir_type
+                ),
+            )
+        )
+    ) & fx.Int32(0xFFFF)
+    low_bits = fx.Int32(low.bitcast(fx.Int16)) & fx.Int32(0xFFFF)
+    as_f32 = ((high << fx.Int32(16)) | low_bits).bitcast(fx.Float32)
+    return (wide != fx.Int32(0)).select(as_f32, fx.Float32(low.to(fx.Float32)))
+
+
 # Causal alignment as a *window* sentinel, AOTriton's `WindowValue`. These
 # occupy two values a real bound never takes, so `Window_left`/`Window_right`
 # stay plain signed integers rather than gaining a discriminant.
@@ -2198,18 +2235,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         _f32_ty_sink = ir.F32Type.get()
         _o_keep = [None] * ROW_SUBTILES
         if const_expr(HAS_SINK):
-            _sink_raw = fx.Float32(
-                fx.as_dsl_value(
-                    _pointer_load(
-                        elem_type,
-                        buffer_ops.get_element_ptr(
-                            fmha.pointer_to_llvm_ptr(SINK),
-                            fx.Int64(head_q) * fx.Int64(sink_stride),
-                            elem_type=elem_type,
-                        ),
-                    )
-                ).to(fx.Float32)
-            )
+            # In f32 or the query's dtype (modification 11).
+            _sink_raw = _load_sink_logit(SINK, sink_stride, head_q, elem_numeric_cls)
             _c_log2e_sink = fx.Float32(_LOG2E)
             loop_results = list(loop_results)
             for qt in range_constexpr(ROW_SUBTILES):
@@ -2870,7 +2897,12 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _sb1,
                 _sb2,
                 abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
-                int(sink.stride(0)) if sink is not None else 0,
+                (
+                    int(sink.stride(0))
+                    | (int(sink.element_size() == 4) << SINK_F32_BIT)
+                    if sink is not None
+                    else 0
+                ),
                 _sb3,
                 int(V.shape[1]),
                 *_lse_st,

@@ -45,7 +45,8 @@ multi-head latent attention; head dims past 256 (absorbed MLA's 576/512, and 512
 generic object up to 512: kernel modification 30, numbered with flash_attn_func_rdna.py's
 list, which lifted the generic objects' cap from 256) split the output columns into 128-wide
 workgroups. An attention sink (``has_sink``, a
-compile-time variant: one logit per query head in the query's dtype) joins each row's softmax
+compile-time variant: one logit per query head, f32 or in the query's dtype, modification 31
+in flash_attn_func_rdna.py's list) joins each row's softmax
 as a key with no value; with one split the main kernel adds it, with more the partials leave
 it out and the merge adds it.
 
@@ -66,7 +67,7 @@ from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 
 from flydsl.runtime.device import get_rocm_arch
-from kernels.attention_rdna.flash_attn_func_rdna import load_lengths
+from kernels.attention_rdna.flash_attn_func_rdna import load_lengths, load_sink_logit
 from kernels.common.kernels_common import LOG2E as _LOG2E
 
 _NO_WINDOW = -(1 << 30)
@@ -739,12 +740,9 @@ def build_flash_attn_decode_module(
                 # With one split the sink joins here, as one more key with no value,
                 # against the larger of it and the row's max. With more, each partial
                 # leaves it out and the merge adds it.
-                sink_ptr = _as_ptr(SINK, elem)
-                sink_val = fx.Float32(
-                    fx.ptr_load(
-                        sink_ptr
-                        + fx.Int32(row_ok.select(hq, fx.Int64(0)) * sink_stride)
-                    ).to(fx.Float32)
+                # In f32 or the query's dtype (modification 31).
+                sink_val = load_sink_logit(
+                    SINK, sink_stride, row_ok.select(hq, fx.Int64(0)), elem
                 )
                 m_natural = c_lse_scale * m_all
                 # A sink of -inf on a row with no keys: floored so its term is
@@ -944,11 +942,7 @@ def build_flash_attn_decode_module(
         has = l_all != c_zero
         if const_expr(HAS_SINK):
             # The partials leave the sink out; it joins here, as in the main kernel.
-            sink_val = fx.Float32(
-                fx.ptr_load(_as_ptr(SINK, elem_cls) + fx.Int32(h * sink_stride)).to(
-                    fx.Float32
-                )
-            )
+            sink_val = load_sink_logit(SINK, sink_stride, h, elem_cls)
             m_top = has.select(
                 fx.Float32(m_all).maximumf(sink_val),
                 sink_val.maximumf(fx.Float32(-3.4028234663852886e38)),
