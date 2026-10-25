@@ -1087,6 +1087,44 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SeedWordsAndPointersEqualTheMergedEnginesAndO
     EXPECT_FALSE(dumpOf(Slot::PREP, baseSpec(), plainRow()).seedUploaded);
 }
 
+TEST(TestFlydslSdpaBwdSplitLaunch, ARankOneSeedAndOffsetAreReadAsTheRankFourOnesAre)
+{
+    // The frontend's constant form has dims [1].
+    const auto rankOne = [](const SdpaBwdSpec& spec) {
+        return spec.withEdit([](SdpaBwdGraph& g) {
+            for(const char* name : {"seed", "offset"})
+            {
+                g.tensor(name).dims = {1};
+                g.tensor(name).strides = {1};
+            }
+        });
+    };
+    RowSpec dropout = plainRow();
+    dropout.dropout = 1;
+    for(const auto& spec : {withDropout(baseSpec(), DataType::INT64, true),
+                            withDropout(baseSpec(), DataType::INT32, true),
+                            withDropout(baseSpec(), DataType::INT32),
+                            withDropout(baseSpec(), DataType::INT64)})
+    {
+        const auto expected = dumpOf(Slot::PREP, spec, dropout);
+        const auto actual = dumpOf(Slot::PREP, rankOne(spec), dropout);
+        EXPECT_EQ(actual.seedUploaded, expected.seedUploaded);
+        EXPECT_EQ(actual.seedCopiedFromDevice, expected.seedCopiedFromDevice);
+        EXPECT_EQ(actual.seedWords, expected.seedWords);
+        EXPECT_EQ(actual.seedSource, expected.seedSource);
+        EXPECT_EQ(actual.offsetSource, expected.offsetSource);
+        for(const Slot slot : {Slot::DKDV, Slot::DQ})
+        {
+            EXPECT_EQ(valuesOf(slot, dumpOf(slot, rankOne(spec), dropout)),
+                      valuesOf(slot, dumpOf(slot, spec, dropout)));
+        }
+    }
+    // The constant 7 is the value uploaded.
+    const auto uploaded
+        = dumpOf(Slot::PREP, rankOne(withDropout(baseSpec(), DataType::INT64, true)), dropout);
+    EXPECT_EQ(uploaded.seedWords, (std::vector<uint32_t>{7, 0, 7, 0}));
+}
+
 TEST(TestFlydslSdpaBwdSplitLaunch, RowStatisticsAreAddressedThroughTheWorkspaceTokens)
 {
     const auto spec = withDropout(baseSpec(), DataType::INT32);

@@ -1609,6 +1609,35 @@ TEST(TestFlydslSdpaBwdMergedSeed, A32BitDeviceTensorIsCopiedIntoTheLowHalfOfAZer
     EXPECT_TRUE(dump.seedWords.empty());
 }
 
+TEST(TestFlydslSdpaBwdMergedSeed, ARankOneSeedAndOffsetAreReadAsTheRankFourOnesAre)
+{
+    // The frontend's constant form has dims [1].
+    const auto rankOne = [](const SdpaBwdSpec& spec) {
+        return spec.withEdit([](SdpaBwdGraph& g) {
+            for(const char* name : {"seed", "offset"})
+            {
+                g.tensor(name).dims = {1};
+                g.tensor(name).strides = {1};
+            }
+        });
+    };
+    for(const auto& spec : {withDropout(baseSpec(), 0.2F, DataType::INT64, true),
+                            withDropout(baseSpec(), 0.2F, DataType::INT32, true),
+                            withDropout(baseSpec(), 0.2F, DataType::INT32, false),
+                            withDropout(baseSpec(), 0.2F, DataType::INT64, false)})
+    {
+        const auto expected = dumpOf(spec, dropoutRow(), WORKSPACE);
+        const auto actual = dumpOf(rankOne(spec), dropoutRow(), WORKSPACE);
+        EXPECT_EQ(actual.kernarg, expected.kernarg);
+        EXPECT_EQ(actual.seedUploaded, expected.seedUploaded);
+        EXPECT_EQ(actual.seedCopiedFromDevice, expected.seedCopiedFromDevice);
+        EXPECT_EQ(actual.seedWords, expected.seedWords);
+    }
+    const auto uploaded = dumpOf(
+        rankOne(withDropout(baseSpec(), 0.2F, DataType::INT64, true)), dropoutRow(), WORKSPACE);
+    EXPECT_EQ(uploaded.seedWords, (std::vector<uint32_t>{7, 0, 7, 0}));
+}
+
 TEST(TestFlydslSdpaBwdMergedSeed, APassByValueSeedIsWrittenAsFourWords)
 {
     const auto bakedWords = [](DataType type, SdpaBwdTensorValue seed, SdpaBwdTensorValue offset) {

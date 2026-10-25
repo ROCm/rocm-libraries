@@ -1299,7 +1299,7 @@ private:
     }
 
     /// DR-4: INT32 and INT64 seed and offset tensors are accepted; the width is recorded. DR-6:
-    /// a device tensor or a pass-by-value one is accepted. DR-8: a device tensor is dense and
+    /// a device tensor or a pass-by-value one is accepted, of any rank whose every extent is 1. DR-8: a device tensor is dense and
     /// declares an alignment of at least its element size; a pass-by-value one has no memory.
     Verdict checkSeedTensor(Operand& operand, SeedWidth& width, SeedForm& form)
     {
@@ -1312,13 +1312,14 @@ private:
             return Decline{"varlen", describe(operand) + " has a ragged offset tensor"};
         }
         const auto* dims = operand.tensor->dims();
-        if(dims == nullptr || dims->size() != SDPA_RANK
+        // A scalar of any rank: every extent is 1 (the frontend's constant form is [1]).
+        if(dims == nullptr || dims->empty()
            || std::any_of(dims->begin(), dims->end(), [](int64_t extent) { return extent != 1; }))
         {
             return Decline{"dropout",
                            describe(operand) + " dims "
                                + (dims == nullptr ? std::string("[]") : listOf(*dims))
-                               + " != [1,1,1,1]"};
+                               + " are not a scalar (every extent 1)"};
         }
         switch(operand.tensor->data_type())
         {
