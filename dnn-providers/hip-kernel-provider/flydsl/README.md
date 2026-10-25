@@ -123,7 +123,7 @@ compute it.
 additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
 that serves every other `head_dim` that is a multiple of 8 up to 256, with or without a bias, and a
 decode path (split-KV, the GQA group packed into 16-row tiles, with and without a bias, and a generic tier
-up to 512 without one) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode objects at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss) at `head_dim` 64 and 128, prefill and decode, with or without a bias. Batch, both sequence lengths,
+up to 512 without one) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode objects at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss), FLOAT or in the query's dtype, at `head_dim` 64 and 128, prefill and decode, with or without a bias. Batch, both sequence lengths,
 head counts (MHA, GQA, MQA), every stride, the scale, the mask bounds (causal at
 either corner, right-side bands, sliding windows) and the LSE output are runtime
 arguments, so each object serves every shape and layout of its class. Inference
@@ -141,8 +141,8 @@ objects): AOTriton's FlyDSL gfx1201 forward, vendored under
 [`kernels_src/kernels/attention_rdna4/`](kernels_src/kernels/attention_rdna4/README.md) with the
 modifications that bring it to the RDNA kernel's coverage (sinks, an additive mask with a
 causal mask or window, f32 masks, V's own head count, a strided LSE). bf16 and f16 × exact
-`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks at 64 and
-128 (alone or with either mask), MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224, 256, 384 and 512 for any other
+`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks (FLOAT or the
+query's dtype) at 64 and 128 (alone or with either mask), MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224, 256, 384 and 512 for any other
 `head_dim` that is a multiple of 8 (so up to 512, which no other RDNA engine serves at a prefill
 tile past 256), each plain or with either additive mask, and each with and
 without a causal mask or window. Every object also serves padding (`padding_mask` with
@@ -164,7 +164,7 @@ softmax scale, the causal diagonal (top-left or bottom-right, with a band of any
 sliding windows and the LSE output are runtime
 arguments. A bias in the query's dtype is served at `head_dim` 64, 128 and 256 by the
 generic kernel on all three arches, and at 64 and 128 by gfx950's dual-wave kernel;
-attention sinks at 64 and 128 (prefill and decode), with or without a bias; every other
+attention sinks (FLOAT or the query's dtype) at 64 and 128 (prefill and decode), with or without a bias; every other
 `head_dim` that is a multiple of 8 up to 256 by bucket objects, with or without a bias
 (gfx90a adds 96, 160, 192 and 224 buckets); an f32 bias, or one broadcast along the keys
 or laid out off the 16-byte rows, by bucket objects that read it one key at a time;
