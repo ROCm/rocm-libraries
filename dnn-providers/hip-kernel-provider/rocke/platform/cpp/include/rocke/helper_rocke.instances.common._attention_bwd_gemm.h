@@ -41,10 +41,11 @@
  * the frag header (rocke_i_set_err raises ckc::Error; run under
  * ckc::guard_builder).
  *
- * Not ported yet: nothing of _attention_bwd_gemm.py's public surface. The
- * caps answers are inputs (above) until the caps unit ports
- * select_bwd_atom / bwd_arch_caps / mfma_asm_mnemonic; then add a helper that
- * fills rocke_attn_bwd_gemm_caps_t for (arch, dtype, atom_k).
+ * rocke_attn_bwd_gemm_caps_fill asks the caps port
+ * (helper_rocke.instances.common._attention_bwd_caps.h) those answers for
+ * (arch, dtype, atom_k), as Python's BlockGemm does.
+ *
+ * Not ported yet: nothing of _attention_bwd_gemm.py's public surface.
  */
 #ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_GEMM_H
 #define ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_GEMM_H
@@ -53,6 +54,7 @@
 #include <stdint.h>
 
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.instances.common._attention_bwd_caps.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_frag.h"
 #include "rocke/ir.h"
 
@@ -72,6 +74,18 @@ typedef struct rocke_attn_bwd_gemm_caps
     int asm_lead_wait; /* ASM_MFMA_VALU_LEAD_WAIT_STATES          */
     bool has_tr_read_b64; /* check_transpose_read(arch, 64) passes   */
 } rocke_attn_bwd_gemm_caps_t;
+
+/* The caps answers of (arch, dtype, atom_k) from the caps port: op is
+ * select_bwd_atom's atom (NULL where it raises: block_gemm_init refuses it),
+ * asm_mnemonic mfma_asm_mnemonic's (NULL where it raises: the asm route
+ * refuses it), asm_tail_nop AGPR_ASM_TAIL_NOP[atom_k] (-1 when absent),
+ * legal_waves points to static storage. An arch outside BWD_ARCHES is
+ * bwd_arch_caps' ValueError (the only error; *out is zeroed then). */
+rocke_status_t rocke_attn_bwd_gemm_caps_fill(const char* arch,
+                                             const char* dtype,
+                                             int atom_k,
+                                             rocke_attn_bwd_gemm_caps_t* out,
+                                             rocke_attn_bwd_err_t* err);
 
 /* A [rows][cols] list of lists of fragments, row-major. */
 typedef struct rocke_attn_bwd_frags

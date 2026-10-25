@@ -3,7 +3,9 @@
 
 """Q / dO prefetch ring of the attention backward q loop.
 
-Family glue for the backward main kernel (Python-only, no C++ twin; packs pin
+Family glue for the backward main kernel (C++ twin:
+``helper_rocke.instances.common._attention_bwd_ring.h``, byte-identical by
+``tests/parity/attention_bwd_body_emit``; the packs still pin
 ``ROCKE_BACKEND=python``). Two knobs of the spec select it:
 
 * ``ring_depth`` ``R`` in ``{1, 2, 3}``: Q, dO and the lse2 / Dsum rows of a

@@ -258,6 +258,13 @@ bool rocke_attn_bwd_counted_waits_end_step(rocke_attn_bwd_counted_waits_t* w, ro
 
 void rocke_attn_bwd_counted_waits_barrier(rocke_attn_bwd_counted_waits_t* w, rocke_ir_builder_t* b)
 {
+    rocke_attn_bwd_counted_waits_barrier_fence(w, b, NULL);
+}
+
+void rocke_attn_bwd_counted_waits_barrier_fence(rocke_attn_bwd_counted_waits_t* w,
+                                                rocke_ir_builder_t* b,
+                                                const char* fence)
+{
     const int n = w->since_load;
     if(w->n_waits == w->cap_waits)
     {
@@ -273,7 +280,7 @@ void rocke_attn_bwd_counted_waits_barrier(rocke_attn_bwd_counted_waits_t* w, roc
     }
     w->waits[w->n_waits++] = n;
     rocke_b_s_waitcnt(b, n, 0, -1);
-    rocke_b_s_barrier_bare(b);
+    rocke_b_s_barrier_bare_fence(b, fence);
 }
 
 void rocke_attn_bwd_counted_waits_free(rocke_attn_bwd_counted_waits_t* w)
