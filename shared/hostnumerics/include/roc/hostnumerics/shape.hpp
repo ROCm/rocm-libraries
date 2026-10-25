@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <roc/hostnumerics/detail/index_order.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -168,13 +169,9 @@ class Shape {
             throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
 
-        std::vector<bool> seen(rank(), false);
-        for (size_t axis : order) {
-            if (axis >= rank() || seen[axis])
-                throw std::runtime_error("Tensor index order must be a permutation of [0, " +
-                                         std::to_string(rank()) + ").");
-            seen[axis] = true;
-        }
+        if (detail::getInvalidOrderPosition(order, rank()))
+            throw std::runtime_error("Tensor index order must be a permutation of [0, " +
+                                     std::to_string(rank()) + ").");
     }
 
     void validateLinearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
