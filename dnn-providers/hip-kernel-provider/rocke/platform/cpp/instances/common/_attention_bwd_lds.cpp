@@ -48,9 +48,13 @@ static const char* static_swizzle(const std::string& s)
     return NULL;
 }
 
-static int align_up(long long n, int a = ALIGN)
+/* A 64-bit size or offset stored in an int field: raise, never wrap. */
+static int to_int(long long v, const char* what)
 {
-    return (int)((n + a - 1) / a * a);
+    if(v < INT32_MIN || v > INT32_MAX)
+        throw ckc::ValueError(std::string(what) + " " + std::to_string(v)
+                              + " does not fit the C int field");
+    return (int)v;
 }
 
 static int pad_bytes(const std::string& swizzle)
@@ -537,27 +541,29 @@ std::string planner_xt_swizzle(
 
 static const int DMA_CHUNK = 16;
 
-static int dma_row_bytes(const rocke_attn_bwd_dma_slab_layout_t& l)
+/* Sizes and offsets in 64 bits: rows * row_bytes passes 2^31 well before
+ * rows and cols do (Python's ints never wrap). */
+static int64_t dma_row_bytes(const rocke_attn_bwd_dma_slab_layout_t& l)
 {
-    return l.cols * l.elem_bytes;
+    return (int64_t)l.cols * l.elem_bytes;
 }
 static int dma_fold(const rocke_attn_bwd_dma_slab_layout_t& l)
 {
-    return std::max(1, LINE / dma_row_bytes(l));
+    return (int)std::max<int64_t>(1, LINE / dma_row_bytes(l));
 }
 static int dma_slabs(const rocke_attn_bwd_dma_slab_layout_t& l)
 {
-    return std::max(1, dma_row_bytes(l) / LINE);
+    return (int)std::max<int64_t>(1, dma_row_bytes(l) / LINE);
 }
-static int dma_size(const rocke_attn_bwd_dma_slab_layout_t& l)
+static int64_t dma_size(const rocke_attn_bwd_dma_slab_layout_t& l)
 {
-    return l.rows * dma_row_bytes(l);
+    return (int64_t)l.rows * dma_row_bytes(l);
 }
 
 static rocke_attn_bwd_dma_slab_layout_t dma_slab_layout(int rows, int cols, int elem_bytes)
 {
     rocke_attn_bwd_dma_slab_layout_t l{rows, cols, elem_bytes};
-    int r = dma_row_bytes(l);
+    int64_t r = dma_row_bytes(l);
     if(rows <= 0 || r <= 0)
         throw ckc::ValueError("DmaSlabLayout rows and cols must be positive");
     if(r % DMA_CHUNK)
@@ -569,29 +575,29 @@ static rocke_attn_bwd_dma_slab_layout_t dma_slab_layout(int rows, int cols, int 
     return l;
 }
 
-static int dma_offset(const rocke_attn_bwd_dma_slab_layout_t& l, int row, int col)
+static int64_t dma_offset(const rocke_attn_bwd_dma_slab_layout_t& l, int row, int col)
 {
     if(!(0 <= row && row < l.rows && 0 <= col && col < l.cols))
         throw ckc::ValueError("(" + std::to_string(row) + ", " + std::to_string(col)
                               + ") outside the " + std::to_string(l.rows) + "x"
                               + std::to_string(l.cols) + " tile");
-    int b = col * l.elem_bytes;
-    int line_row, within, base;
+    int64_t b = (int64_t)col * l.elem_bytes;
+    int64_t line_row, within, base;
     if(dma_row_bytes(l) >= LINE)
     {
-        int s = b / LINE;
+        int64_t s = b / LINE;
         within = b % LINE;
         line_row = row;
-        base = s * l.rows * LINE + row * LINE;
+        base = s * l.rows * LINE + (int64_t)row * LINE;
     }
     else
     {
         line_row = row / dma_fold(l);
-        int sub = row % dma_fold(l);
+        int64_t sub = row % dma_fold(l);
         within = sub * dma_row_bytes(l) + b;
         base = line_row * LINE;
     }
-    int chunk = within / DMA_CHUNK, inner = within % DMA_CHUNK;
+    int64_t chunk = within / DMA_CHUNK, inner = within % DMA_CHUNK;
     return base + (chunk ^ (line_row % 8)) * DMA_CHUNK + inner;
 }
 
@@ -602,17 +608,17 @@ static void dma_source(const rocke_attn_bwd_dma_slab_layout_t& l, int slot, int*
         throw ckc::ValueError("slot " + std::to_string(slot) + " outside the buffer");
     if(dma_row_bytes(l) >= LINE)
     {
-        int per_slab = l.rows * LINE;
-        int s = (int)(p / per_slab), rem = (int)(p % per_slab);
-        int r = rem / LINE, w = rem % LINE;
-        int chunk = (w / DMA_CHUNK) ^ (r % 8);
-        *row = r;
-        *col = (s * LINE + chunk * DMA_CHUNK) / l.elem_bytes;
+        int64_t per_slab = (int64_t)l.rows * LINE;
+        int64_t s = p / per_slab, rem = p % per_slab;
+        int64_t r = rem / LINE, w = rem % LINE;
+        int64_t chunk = (w / DMA_CHUNK) ^ (r % 8);
+        *row = (int)r; /* r < rows */
+        *col = (int)((s * LINE + chunk * DMA_CHUNK) / l.elem_bytes); /* < cols */
         return;
     }
     int line_row = (int)(p / LINE), w = (int)(p % LINE);
     int within = ((w / DMA_CHUNK) ^ (line_row % 8)) * DMA_CHUNK;
-    int sub = within / dma_row_bytes(l), b = within % dma_row_bytes(l);
+    int sub = (int)(within / dma_row_bytes(l)), b = (int)(within % dma_row_bytes(l));
     *row = line_row * dma_fold(l) + sub;
     *col = b / l.elem_bytes;
 }
@@ -625,9 +631,10 @@ static std::vector<Access> dma_slab_read_accesses(
     int per_lane = atom_k / 4;
     std::vector<Access> out;
     for(int lane = 0; lane < wave_size; ++lane)
-        out.push_back(Access{lane,
-                             dma_offset(l, m0 + lane % 16, k0 + (lane / 16) * per_lane),
-                             per_lane * l.elem_bytes});
+        out.push_back(Access{
+            lane,
+            to_int(dma_offset(l, m0 + lane % 16, k0 + (lane / 16) * per_lane), "DMA slab offset"),
+            per_lane * l.elem_bytes});
     return out;
 }
 
@@ -807,7 +814,7 @@ static Item normal_layout(
     {
         it.obj.kind = ROCKE_ATTN_BWD_LAYOUT_DMA_SLAB;
         it.obj.dma = dma_slab_layout(rows, cols, eb);
-        it.nbytes = dma_size(it.obj.dma);
+        it.nbytes = to_int(dma_size(it.obj.dma), "DMA slab size");
         it.desc = "dma_slab_xor";
         return it;
     }
@@ -1502,7 +1509,7 @@ rocke_status_t rocke_attn_bwd_dma_slab_layout_init(rocke_attn_bwd_dma_slab_layou
     });
 }
 
-int rocke_attn_bwd_dma_slab_layout_row_bytes(const rocke_attn_bwd_dma_slab_layout_t* l)
+int64_t rocke_attn_bwd_dma_slab_layout_row_bytes(const rocke_attn_bwd_dma_slab_layout_t* l)
 {
     return dma_row_bytes(*l);
 }
@@ -1514,17 +1521,17 @@ int rocke_attn_bwd_dma_slab_layout_slabs(const rocke_attn_bwd_dma_slab_layout_t*
 {
     return dma_slabs(*l);
 }
-int rocke_attn_bwd_dma_slab_layout_size(const rocke_attn_bwd_dma_slab_layout_t* l)
+int64_t rocke_attn_bwd_dma_slab_layout_size(const rocke_attn_bwd_dma_slab_layout_t* l)
 {
     return dma_size(*l);
 }
 
-int rocke_attn_bwd_dma_slab_layout_offset(const rocke_attn_bwd_dma_slab_layout_t* l,
-                                          int row,
-                                          int col,
-                                          rocke_attn_bwd_err_t* err)
+int64_t rocke_attn_bwd_dma_slab_layout_offset(const rocke_attn_bwd_dma_slab_layout_t* l,
+                                              int row,
+                                              int col,
+                                              rocke_attn_bwd_err_t* err)
 {
-    int v = -1;
+    int64_t v = -1;
     lds_boundary(err, [&] { v = dma_offset(*l, row, col); });
     return v;
 }
