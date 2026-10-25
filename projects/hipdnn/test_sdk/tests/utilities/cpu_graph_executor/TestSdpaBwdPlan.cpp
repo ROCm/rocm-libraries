@@ -847,6 +847,95 @@ TEST(TestSdpaBwdPlanDropout, ExecuteMatchesDirectReference)
     EXPECT_FALSE(exactValidation.allClose(dV, dVNoScale));
 }
 
+// Each case changes one field of an accepted explicit-mask dropout graph: FLOAT mask [1, 2, 4, 4]
+// (extras[0]), one-element FLOAT dropout_scale (extras[1]) and dropout_scale_inv (extras[2]).
+// Philox inputs (seed / offset) are declined even without dropout_probability, the mask's rows
+// must be Sq, and both scales must be FLOAT; dropout_scale_inv must be one element and needs a
+// mask.
+struct BwdDropoutFieldCase
+{
+    const char* name;
+    void (*apply)(SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>&);
+    bool applicable;
+};
+
+class TestSdpaBwdPlanDropoutFields : public TestWithParam<BwdDropoutFieldCase>
+{
+};
+
+TEST_P(TestSdpaBwdPlanDropoutFields, MatchesContract)
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+    attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+    attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+    std::vector<RawBwdExtraTensor> extras
+        = {{BWD_DROPOUT_MASK_UID, DataType::FLOAT, {1, 2, 4, 4}},
+           {BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}},
+           {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}};
+    GetParam().apply(attrs, extras);
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
+              GetParam().applicable);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaBwdPlanDropoutFields,
+    Values(BwdDropoutFieldCase{"ExplicitMask",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>&) {},
+                               true},
+           BwdDropoutFieldCase{"WithoutScaleInv",
+                               [](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+                                   a.dropout_scale_inv_tensor_uid.reset();
+                                   e.pop_back();
+                               },
+                               true},
+           BwdDropoutFieldCase{"SeedWithoutProbability",
+                               [](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+                                   a.seed_tensor_uid = 23;
+                                   e.push_back({23, DataType::INT64, {1}});
+                               },
+                               false},
+           BwdDropoutFieldCase{"OffsetWithoutProbability",
+                               [](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+                                   a.offset_tensor_uid = 24;
+                                   e.push_back({24, DataType::INT64, {1}});
+                               },
+                               false},
+           BwdDropoutFieldCase{"HalfScale",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[1].dataType = DataType::HALF;
+                               },
+                               false},
+           BwdDropoutFieldCase{"MaskRowsDifferFromSq",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[0].dims = {1, 2, 3, 4};
+                               },
+                               false},
+           BwdDropoutFieldCase{"HalfScaleInv",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[2].dataType = DataType::HALF;
+                               },
+                               false},
+           BwdDropoutFieldCase{"MultiElementScaleInv",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[2].dims = {1, 1, 1, 2};
+                               },
+                               false},
+           // Without a mask there is no dropout for dropout_scale_inv to undo.
+           BwdDropoutFieldCase{"ScaleInvWithoutMask",
+                               [](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+                                   a.dropout_mask_tensor_uid.reset();
+                                   a.dropout_scale_tensor_uid.reset();
+                                   e.erase(e.begin(), e.begin() + 2);
+                               },
+                               false}),
+    [](const TestParamInfo<BwdDropoutFieldCase>& info) { return std::string(info.param.name); });
+
 // Stats may be rank-3 [B, H, Sq] (the checked-in backward bundles use it) or rank-4
 // [B, H, Sq, 1]; both give identical gradients. Stats must be FLOAT.
 TEST(TestSdpaBwdPlanStats, Rank3StatsEqualRank4)

@@ -1,18 +1,28 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <vector>
+
+#include <gmock/gmock.h>
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
+#include "HarnessTestSupport.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/RngDumpHandoff.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -35,6 +45,11 @@ flatbuffers::DetachedBuffer buildSdpaGraph(std::optional<float> dropoutProbabili
         tensors.push_back(
             CreateTensorAttributesDirect(b, uid, "t", DataType::FLOAT, &strides, &dims));
     }
+    if(rngDumpUid.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, *rngDumpUid, "rng_dump", DataType::FLOAT, &strides, &dims));
+    }
     SdpaAttributesBuilder attrs(b);
     attrs.add_q_tensor_uid(1);
     attrs.add_k_tensor_uid(2);
@@ -55,6 +70,56 @@ flatbuffers::DetachedBuffer buildSdpaGraph(std::optional<float> dropoutProbabili
     b.Finish(CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
     return b.Release();
+}
+
+// The Philox graph the harness runs: q=1, k=2, v=3 inputs; o=4 and rng_dump=9 outputs, each
+// holding four elements.
+constexpr int64_t K_O_UID = 4;
+constexpr int64_t K_DUMP_UID = 9;
+constexpr size_t K_ELEMS = 4;
+
+std::shared_ptr<IntegrationTestBundle> philoxBundle()
+{
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = buildSdpaGraph(0.5F, K_DUMP_UID);
+    bundle->outputTensorUids = {K_O_UID, K_DUMP_UID};
+    return bundle;
+}
+
+// The engine dumps `mask` and writes it to o as well, so a reference that computes o from the
+// mask it was handed matches the engine exactly when it was handed the engine's mask.
+void engineDumps(testing_support::HarnessMocks& mocks, const std::vector<float>& mask)
+{
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([mask](GraphSession&,
+                              const std::optional<LoadedEngine>&,
+                              hipdnn_integration_tests::VariantPack& variantPack) {
+            std::copy(mask.begin(), mask.end(), static_cast<float*>(variantPack.at(K_DUMP_UID)));
+            std::copy(mask.begin(), mask.end(), static_cast<float*>(variantPack.at(K_O_UID)));
+            return EngineOpResult::succeeded();
+        });
+}
+
+// The CPU reference records the rng_dump it was handed and writes it to o.
+void referenceEchoesDump(testing_support::HarnessMocks& mocks, std::vector<float>& seen)
+{
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(
+            [&seen](void*, size_t, const hipdnn_integration_tests::VariantPack& variantPack) {
+                const auto* dump = static_cast<const float*>(variantPack.at(K_DUMP_UID));
+                seen.assign(dump, dump + K_ELEMS);
+                std::copy(dump, dump + K_ELEMS, static_cast<float*>(variantPack.at(K_O_UID)));
+            });
+}
+
+void runCpuVerification(testing_support::HarnessMocks& mocks,
+                        ::testing::TestPartResultArray* results)
+{
+    testing_support::ensureTestConfigInitialized();
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(
+        testing_support::hostPolicy(hipdnn_integration_tests::VerificationMode::CPU)));
+    harness.setBundle(philoxBundle(), "rng-dump-test-bundle");
+    testing_support::driveHarness(harness, results);
 }
 
 Tensor<float> maskTensor(const std::vector<float>& values)
@@ -132,4 +197,35 @@ TEST(TestRngDumpHandoff, CopiesEngineMaskIntoReferenceBuffer)
 
     auto wrongSize = maskTensor({1.0F, 0.0F});
     EXPECT_THROW(copyRngDump(engine, wrongSize), std::runtime_error);
+}
+
+TEST(TestRngDumpHandoff, ReferenceRunsOnTheEngineDump)
+{
+    testing_support::HarnessMocks mocks;
+    const std::vector<float> mask = {1.0F, 0.0F, 0.0F, 1.0F};
+    engineDumps(mocks, mask);
+    std::vector<float> seen;
+    referenceEchoesDump(mocks, seen);
+
+    ::testing::TestPartResultArray results;
+    runCpuVerification(mocks, &results);
+
+    EXPECT_EQ(seen, mask);
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST(TestRngDumpHandoff, InvalidEngineDumpFailsTheBundle)
+{
+    // o matches the reference, and rng_dump is never compared: only the dump check can fail it.
+    testing_support::HarnessMocks mocks;
+    engineDumps(mocks, {1.0F, 0.0F, 0.5F, 1.0F});
+    std::vector<float> seen;
+    referenceEchoesDump(mocks, seen);
+
+    ::testing::TestPartResultArray results;
+    runCpuVerification(mocks, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_THAT(testing_support::allMessages(results), ::testing::HasSubstr("not 0 or 1"));
 }

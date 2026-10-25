@@ -683,9 +683,9 @@ TEST(TestSdpaFwdNode, PreValidatePagedBiasMustMatchMaxSeqLenKv)
     }
 }
 
-// cuDNN's paged rules, one field at a time from an accepted graph: INT32 [B, 1, M, 1] tables,
-// M == ceil(max_seq_len_kv / block_size) when max_seq_len_kv is given, both seq_len tensors, and
-// no max_seq_len_kv without paging.
+// cuDNN's paged rules, one field at a time from an accepted graph: unpacked INT32 [B, 1, M, 1]
+// tables with M > 0, M == ceil(max_seq_len_kv / block_size) when max_seq_len_kv is given, a
+// positive block size, both seq_len tensors, and no max_seq_len_kv without paging.
 TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
 {
     auto q = makeTensor4D(2, 8, 16, 64);
@@ -725,9 +725,35 @@ TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
     rank3Table.set_paged_attention_v_table(rank3);
     EXPECT_EQ(validate(rank3Table), error_code_t::INVALID_VALUE) << "rank-4 tables";
 
+    for(const auto& dims : {std::vector<int64_t>{2, 2, 8, 1}, std::vector<int64_t>{2, 1, 8, 2}})
+    {
+        auto wideTable = paged(8, 30);
+        auto table = std::make_shared<TensorAttributes>();
+        table->set_dim(dims).set_data_type(DataType::INT32);
+        wideTable.set_paged_attention_k_table(table);
+        EXPECT_EQ(validate(wideTable), error_code_t::INVALID_VALUE)
+            << "tables are [B, 1, M, 1], got dims " << dims[1] << ", " << dims[3];
+    }
+    EXPECT_EQ(validate(paged(0, std::nullopt)), error_code_t::INVALID_VALUE)
+        << "at least one table entry";
+
+    auto packedTable = paged(8, 30);
+    auto packedK = makePageTable(2, 8);
+    packedK->set_ragged_offset(makeSeqLen(3));
+    packedTable.set_paged_attention_k_table(packedK);
+    EXPECT_EQ(validate(packedTable), error_code_t::INVALID_VALUE) << "tables are not packed";
+
+    auto zeroBlocks = makePaddedAttrs(q, makeTensor4D(9, 2, 0, 64), v);
+    zeroBlocks.set_paged_attention_k_table(makePageTable(2, 8));
+    zeroBlocks.set_paged_attention_v_table(makePageTable(2, 8));
+    EXPECT_EQ(validate(zeroBlocks), error_code_t::INVALID_VALUE) << "positive block size";
+
     auto noSeqLens = paged(8, 30);
     noSeqLens.set_seq_len_q(nullptr);
     EXPECT_EQ(validate(noSeqLens), error_code_t::ATTRIBUTE_NOT_SET) << "paging needs padding";
+    auto noSeqLenKv = paged(8, 30);
+    noSeqLenKv.set_seq_len_kv(nullptr);
+    EXPECT_EQ(validate(noSeqLenKv), error_code_t::ATTRIBUTE_NOT_SET) << "paging needs seq_len_kv";
 
     auto unpaged = makeMinimalAttrs(q, makeTensor4D(2, 2, 32, 64), makeTensor4D(2, 2, 32, 64));
     unpaged.set_paged_attention_max_seq_len_kv(32);
@@ -740,21 +766,36 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     auto q = makeTensor4D(2, 8, 16, 64);
     auto k = makeTensor4D(2, 8, 32, 64);
     auto v = makeTensor4D(2, 8, 32, 64);
-    const auto validate = [&](const std::shared_ptr<TensorAttributes>& seqLenKv) {
+    const auto validate = [&](const std::shared_ptr<TensorAttributes>& seqLenQ,
+                              const std::shared_ptr<TensorAttributes>& seqLenKv) {
         auto attrs = makePaddedAttrs(q, k, v);
+        attrs.set_seq_len_q(seqLenQ);
         attrs.set_seq_len_kv(seqLenKv);
         const GraphAttributes graphAttrs;
         const SdpaFwdNode node(std::move(attrs), graphAttrs);
         return node.pre_validate_node().code;
     };
-    EXPECT_EQ(validate(makeSeqLen(2)), error_code_t::OK);
-    EXPECT_EQ(validate(makeSeqLen(3)), error_code_t::INVALID_VALUE) << "batch";
-    auto rank1 = std::make_shared<TensorAttributes>();
-    rank1->set_dim({2}).set_data_type(DataType::INT32);
-    EXPECT_EQ(validate(rank1), error_code_t::INVALID_VALUE) << "rank";
+    const auto withDims = [](const std::vector<int64_t>& dims) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_dim(dims).set_data_type(DataType::INT32);
+        return t;
+    };
+    const auto valid = makeSeqLen(2);
+    EXPECT_EQ(validate(valid, valid), error_code_t::OK);
+
+    // Each invalid tensor is rejected as seq_len_q and as seq_len_kv.
     auto int64Len = makeSeqLen(2);
     int64Len->set_data_type(DataType::INT64);
-    EXPECT_EQ(validate(int64Len), error_code_t::INVALID_VALUE) << "INT32";
+    for(const auto& [invalid, rule] : {std::pair{makeSeqLen(3), "batch"},
+                                       std::pair{withDims({2}), "rank"},
+                                       std::pair{withDims({2, 2, 1, 1}), "dim 1"},
+                                       std::pair{withDims({2, 1, 2, 1}), "dim 2"},
+                                       std::pair{withDims({2, 1, 1, 2}), "dim 3"},
+                                       std::pair{int64Len, "INT32"}})
+    {
+        EXPECT_EQ(validate(invalid, valid), error_code_t::INVALID_VALUE) << "seq_len_q " << rule;
+        EXPECT_EQ(validate(valid, invalid), error_code_t::INVALID_VALUE) << "seq_len_kv " << rule;
+    }
 }
 
 // cuDNN's sink: FLOAT [1, H_q, 1, 1] (an unset dtype takes the graph io type).
@@ -776,6 +817,13 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::FLOAT, DataType::HALF), error_code_t::OK);
     EXPECT_EQ(validate({1, 2, 1, 1}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "one logit per query head";
+    for(const auto& dims : {std::vector<int64_t>{2, 8, 1, 1},
+                            std::vector<int64_t>{1, 8, 2, 1},
+                            std::vector<int64_t>{1, 8, 1, 2}})
+    {
+        EXPECT_EQ(validate(dims, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
+            << "dims other than H_q are 1, got " << dims[0] << ", " << dims[2] << ", " << dims[3];
+    }
     EXPECT_EQ(validate({8}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "rank 4";
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::INVALID_VALUE)

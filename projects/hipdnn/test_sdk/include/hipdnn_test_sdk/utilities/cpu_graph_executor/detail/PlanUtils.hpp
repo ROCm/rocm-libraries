@@ -316,6 +316,31 @@ bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttribu
     return dims == std::vector<int64_t>{1, qIt->second->dims()->Get(1), 1, 1};
 }
 
+/// Whether an SDPA node's runtime attention scale is one the references can read: absent, or one
+/// element that is baked, pass-by-value, or an ordinary FLOAT tensor. Works for forward and
+/// backward attributes.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isSupportedSdpaScaleOperand(const SdpaAttributesType& attrs, const TensorMap& tensorMap)
+{
+    if(!attrs.scale_tensor_uid().has_value())
+    {
+        return true;
+    }
+    const auto it = tensorMap.find(attrs.scale_tensor_uid().value());
+    if(it == tensorMap.end() || it->second == nullptr || it->second->dims() == nullptr)
+    {
+        return false;
+    }
+    int64_t count = 1;
+    for(const auto d : *it->second->dims())
+    {
+        count *= d;
+    }
+    return count == 1
+           && (hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(it->second)
+               || it->second->data_type() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
 /// Whether an SDPA node's dropout is one the references implement: none, or cuDNN's custom
 /// dropout with an explicit FLOAT mask [B or 1, H or 1, Sq, Skv] and a single-element FLOAT
 /// dropout_scale. Philox dropout (dropout_probability / seed / offset) is declined: the
