@@ -379,8 +379,100 @@ def test_catalog_retains_only_problem_construction_metadata(tmp_path):
     )
     write_shard(tmp_path, [record])
     library = load_library_metadata(tmp_path, target="gfx942")
-    assert set(library._records[17]) == {"name", "kernelName", "problemType", "sizeMapping"}
+    assert set(library._records[17]) == {
+        "name",
+        "kernelName",
+        "problemType",
+        "sizeMapping",
+        "sizePredicates",
+    }
+    assert library._records[17]["sizePredicates"] == ()
     assert library.choose_single_problem(17).k == 256
+
+
+def test_rocroller_2205_size_bounds_construct_valid_bench_input(tmp_path):
+    record = solution(2205, trans_a=True)
+    record["sizeMapping"].update(macroTile=[32, 32, 1], depthU=64)
+    record["problemType"].update(
+        aType="BFloat8",
+        bType="BFloat8",
+        cType="BFloat16",
+        dType="BFloat16",
+        mxBlockA=32,
+        mxBlockB=32,
+        mxScaleFormat=0,
+    )
+    record["problemPredicate"] = {
+        "type": "And",
+        "value": [
+            {"type": "SizeGreaterThan", "index": 0, "value": 63},
+            {"type": "SizeLessThan", "index": 0, "value": 129},
+            {"type": "SizeGreaterThan", "index": 1, "value": 63},
+            {"type": "SizeLessThan", "index": 1, "value": 129},
+            {"type": "SizeGreaterThan", "index": 3, "value": 127},
+            {"type": "SizeLessThan", "index": 3, "value": 129},
+        ],
+    }
+    write_shard(tmp_path, [record], "TensileLibrary_mx_gfx950.dat")
+    library = load_library_metadata(tmp_path, target="gfx950")
+    for blocks in (1, 8, 17):
+        problem = library.choose_single_problem(2205, reduction_blocks=blocks)
+        assert (problem.m, problem.n, problem.k) == (64, 64, 128)
+        (row,) = yaml.safe_load(bench_yaml([problem]))
+        assert (row["solution_index"], row["M"], row["N"], row["K"]) == (2205, 64, 64, 128)
+        assert (row["lda"], row["ldb"], row["ldc"], row["ldd"]) == (128, 128, 64, 64)
+        assert (row["scaleA"], row["scaleB"]) == (3, 3)
+        assert row["norm_check_assert"] and row["allclose_check"]
+
+
+def test_nested_size_bounds_and_multiples(tmp_path):
+    record = solution()
+    record["problemPredicate"] = {
+        "type": "And",
+        "value": [
+            {"type": "LeadingFree0SizesGreaterOrEqual", "value": 129},
+            {"type": "Free0SizeMultiple", "index": 0, "value": 8},
+            {"type": "SizeEqual", "index": 1, "value": 1},
+            {
+                "type": "And",
+                "value": [
+                    {"type": "SizeInRange", "index": 3, "value": {"min": 65, "max": 200}},
+                    {"type": "BoundSizeMultiple", "index": -1, "value": 48},
+                ],
+            },
+        ],
+    }
+    write_shard(tmp_path, [record])
+    p = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    assert (p.m, p.n, p.k) == (136, 1, 192)
+
+
+@pytest.mark.parametrize(
+    "predicates,error,match",
+    [
+        (
+            [
+                {"type": "SizeGreaterThan", "index": 0, "value": 128},
+                {"type": "SizeLessThan", "index": 0, "value": 129},
+            ],
+            ValueError,
+            "contradictory",
+        ),
+        ([{"type": "SizeMultiple", "index": 3, "value": 0}], ValueError, "value"),
+        ([{"type": "SizeEqual", "index": True, "value": 32}], ValueError, "index"),
+        ([{"type": "SizeEqual", "index": 4, "value": 32}], ValueError, "index"),
+        ([{"type": "SizeEqual", "index": 3, "value": 17}], UnsupportedSolution, "reduction blocks"),
+        ([{"type": "BatchSizeEqual", "index": 0, "value": 2}], UnsupportedSolution, "batch count"),
+    ],
+)
+def test_invalid_size_metadata_is_distinct_from_unsupported_workload(
+    tmp_path, predicates, error, match
+):
+    record = solution()
+    record["problemPredicate"] = {"type": "And", "value": predicates}
+    write_shard(tmp_path, [record])
+    with pytest.raises(error, match=match):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
 @pytest.mark.parametrize(
