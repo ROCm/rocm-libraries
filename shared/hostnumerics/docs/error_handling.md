@@ -1,5 +1,17 @@
 ## Error handling
 
+Native single-value rounding and conversion return values without throwing or
+returning a failure result. `convertScalar<T>` is `noexcept`; like a native cast,
+its caller must satisfy the documented conversion preconditions. `Reject` requires
+representability and complex-to-real input must be real. For non-Boolean integer
+destinations, NaN is outside the domain and infinity requires `Saturate`.
+These conversions do not validate individual values or assert numerical
+preconditions. Tensor storage conversion uses the same numerical preconditions;
+descriptor and storage-access validation remain separate.
+
+Native conversion requires explicit integer rounding and overflow policies.
+These policies do not check floating-to-floating precision loss.
+
 Expected compatibility, support and descriptor-translation failures use explicit
 results or checks. Callers inspect those results to select a backend, materialize
 an operand, or reject a descriptor. They must not infer recovery decisions from
@@ -9,15 +21,15 @@ Internal fallible helpers return `detail::Expected<T, E>`, a C++20 subset of the
 `std::expected` model. Values construct directly; errors use `detail::Unexpected`.
 The result provides `[[nodiscard]]`, boolean/`has_value()` checks, value access,
 and `error()` for propagation. It retains C++20 consumer compatibility; unused
-standard APIs are omitted. Layout, storage, scalar conversion and
-descriptor checks use a closed failure vocabulary; numerical conversion also carries the
-destination width and signedness. Diagnostics are obtained from the failure at
-reporting boundaries, without error-message output parameters. Checks needing
+standard APIs are omitted. Layout, storage and descriptor checks use a closed
+failure vocabulary. Diagnostics are obtained from the failure at reporting
+boundaries, without error-message output parameters. Checks needing
 dynamic diagnostic text can carry an owned string in the same result interface.
 
 The integer-conversion and offset leaves are independent of throwing tensor and
 metadata headers and are tested with exception handling disabled and allocation
-attempts fatal. Their success and failure paths allocate no storage. Result payload construction
+attempts fatal. Native numerical conversion allocates no storage; offset checks
+also allocate no storage on success or failure. Result payload construction
 retains its ordinary exception behaviour; the wrapper does not make allocating
 operations or arbitrary user conversions nonthrowing.
 
@@ -66,11 +78,12 @@ coordinate rank and range and requires bounds already checked during Tensor
 construction. These assertions diagnose a broken internal loop in Debug builds;
 Release builds use the established preconditions without repeated validation.
 
-Numerical conversion remains fallible during prepared execution. A valid Float32
-Tensor can contain infinity, which cannot be converted to an integer under the
-reject policy. Checking storage and coordinates cannot prove that conversion
-will succeed. Conversion leaves return typed failures; the current Tensor and
-prepared codec conveniences report them as exceptions.
+Prepared numerical conversion uses the same cast preconditions as public
+single-value conversion. A valid floating Tensor can contain infinity, so
+validated geometry alone does not establish representability for an integer
+destination. The caller must select a policy whose domain includes the input
+values. Numerical conversion does not check these preconditions in either
+Debug or Release builds.
 
 The internal `detail/layout_offset.hpp` leaf checks borrowed extent, stride and
 coordinate spans without including Shape or Layout. It is tested alongside

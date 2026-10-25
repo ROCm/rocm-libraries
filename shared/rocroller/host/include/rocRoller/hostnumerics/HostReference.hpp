@@ -131,11 +131,13 @@ namespace rocRoller::hostnumerics
            || floatOutput.shape().rank() != 2)
             throw std::runtime_error("rocRoller output conversion requires a rank-two F32 tensor.");
 
-        const size_t                               rows    = floatOutput.shape()[0];
-        const size_t                               columns = floatOutput.shape()[1];
-        roc::hostnumerics::ScalarConversionOptions conversion;
-        if constexpr(std::is_same_v<Output, BFloat16>)
-            conversion.bfloat16Rounding = roc::hostnumerics::BFloat16Rounding::Truncate;
+        const size_t                                     rows    = floatOutput.shape()[0];
+        const size_t                                     columns = floatOutput.shape()[1];
+        const roc::hostnumerics::ScalarConversionOptions conversion{
+            roc::hostnumerics::IntegerRounding::TowardZero,
+            roc::hostnumerics::IntegerOverflow::Reject,
+            std::is_same_v<Output, BFloat16> ? roc::hostnumerics::BFloat16Rounding::Truncate
+                                             : roc::hostnumerics::BFloat16Rounding::NearestEven};
         return floatOutput.copyConvertedTo(HostReferenceDetail::outputScalarType<Output>(),
                                            hostOutputLayout(rows, columns),
                                            conversion);

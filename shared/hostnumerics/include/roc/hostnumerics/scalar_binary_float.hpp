@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/scalar_conversion.hpp>
+#include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
 
 namespace roc::hostnumerics::detail {

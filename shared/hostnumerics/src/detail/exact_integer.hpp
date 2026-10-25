@@ -48,10 +48,7 @@ inline double exactObservationLimit(ScalarType type) {
 }
 
 inline ScalarConversionOptions exactOutputConversion() {
-    ScalarConversionOptions options;
-    options.integerRounding = IntegerRounding::NearestEven;
-    options.integerOverflow = IntegerOverflow::Saturate;
-    return options;
+    return {IntegerRounding::NearestEven, IntegerOverflow::Saturate};
 }
 
 class PreparedExactOutput {

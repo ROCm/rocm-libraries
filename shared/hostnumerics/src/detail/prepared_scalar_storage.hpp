@@ -8,7 +8,7 @@
 namespace roc::hostnumerics::detail {
 // Internal codecs for offsets in a Tensor whose constructor has validated the
 // full layout and backing storage, or a fixed scalar scratch buffer. These omit
-// structural checks; scalar conversion policies retain their numerical checks.
+// structural checks; numerical conversions follow convertScalar's caller preconditions.
 inline void preparedCopyBitRange(std::span<const std::byte> source, uint64_t sourceBitOffset,
                                  std::span<std::byte> destination, uint64_t destinationBitOffset,
                                  uint16_t bitCount) {
