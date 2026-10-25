@@ -15,7 +15,7 @@ recommended stack pins a recent, consistent ROCm:
 
 | Component | Recommended | Also works |
 |---|---|---|
-| ROCm | **7.2** | 7.0.x (older comgr; see the flavor note in §5) |
+| ROCm | **7.2** | 7.0.x (query the loaded compiler; see §5) |
 | PyTorch | **2.12 (+rocm7.2 build)** | 2.8 (+rocm7.0.2) |
 | Python | **3.12** | 3.10+ |
 | OS | Linux (full GPU support) | Windows (build/lowering + RDNA execution; see §4) |
@@ -28,8 +28,8 @@ recommended stack pins a recent, consistent ROCm:
 | RDNA3.5/4 | Ryzen AI / Radeon | `gfx1151`, `gfx1201` | Linux + Windows (HIP SDK); wave32 |
 
 > **Why the stack matters.** The example READMEs and performance numbers were
-> produced on ROCm 7.2. On an older comgr the generated IR must use the matching
-> *LLVM flavor* (§5), and a few kernels behave differently (e.g. a persistent-
+> produced on ROCm 7.2. The generated IR must match the loaded COMGR compiler’s
+> LLVM version (§5), and a few kernels behave differently (e.g. a persistent-
 > kernel path that hangs older comgr but compiles cleanly on 7.2). For
 > reproducing the documented numbers, use ROCm 7.2 + PyTorch 2.12.
 
@@ -228,7 +228,7 @@ are working on that specific kernel path.
 
 | Symptom | Cause / fix |
 |---|---|
-| `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
+| `do_action(COMPILE_SOURCE_TO_BC): status=1` | Inspect `comgr.loaded_compiler_info().describe()` and the COMGR diagnostic. AUTO uses loaded compiler evidence; do not choose an override from a ROCm release label (§5). |
 | `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |

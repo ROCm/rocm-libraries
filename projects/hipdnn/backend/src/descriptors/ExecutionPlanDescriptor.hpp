@@ -4,8 +4,12 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <mutex>
+#include <optional>
 #include <vector>
 
 namespace hipdnn_backend
@@ -37,6 +41,21 @@ private:
     // serializeBackendPlan() call and reused by all subsequent size/fill calls.
     // A finalized plan is immutable, so this never needs invalidation.
     mutable std::vector<uint8_t> _serializedPlanCache;
+    // Guards _serializedPlanCache. serializeBackendPlan() is const and can run on several threads.
+    mutable std::mutex _serializedPlanCacheMutex;
+
+    // Process-unique plan id. Logs use it to tell plans apart, because a plan address
+    // can be reused after the plan is destroyed.
+    const uint64_t _planId = nextPlanId();
+
+    // Id of the graph that the plan was finalized from. A deserialized plan has no id.
+    std::optional<std::array<uint8_t, 16>> _graphId;
+
+    // Number of successful hipdnnBackendExecute calls on this plan. The backend
+    // logs this count so users can see how often each compiled plan runs.
+    std::atomic<uint64_t> _executionCount{0};
+
+    static uint64_t nextPlanId();
 
     void getWorkspaceSize(hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
@@ -91,6 +110,10 @@ public:
         const std::shared_ptr<plugin::EnginePluginResourceManager>& pluginResourceManager,
         const uint8_t* serializedPlan,
         size_t planByteSize);
+
+    // Records one successful submission of this plan and returns the new count (1-based).
+    // Thread-safe: concurrent submissions of the same plan get distinct counts.
+    uint64_t recordExecution();
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

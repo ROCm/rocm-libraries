@@ -1,0 +1,23 @@
+kernel @emit_test() {
+  %tid1 = gpu.thread_id {axis = "x"} : i32
+  %bid2 = gpu.block_id {axis = "x"} : i32
+  %c3 = arith.constant {ity = "i32", value = 16} : i32
+  %mul4 = arith.mul %bid2, %c3 : i32
+  %range5 = arith.assume_range %mul4 {hi = 256, lo = 0, multiple_of = 1, residue = 0} : i32
+  %bid6 = gpu.block_id {axis = "y"} : i32
+  %c7 = arith.constant {ity = "i32", value = 16} : i32
+  %mul8 = arith.mul %bid6, %c7 : i32
+  %range9 = arith.assume_range %mul8 {hi = 256, lo = 0, multiple_of = 1, residue = 0} : i32
+  %c10 = arith.constant {ity = "i32", value = 16} : i32
+  %div11 = arith.div %tid1, %c10 : i32
+  %add12 = arith.add %range5, %div11 : i32
+  %c13 = arith.constant {ity = "i32", value = 3} : i32
+  %add14 = arith.add %add12, %c13 : i32
+  %c15 = arith.constant {ity = "i32", value = 16} : i32
+  %mod16 = arith.mod %tid1, %c15 : i32
+  %add17 = arith.add %range9, %mod16 : i32
+  %c18 = arith.constant {ity = "i32", value = 256} : i32
+  %mul19 = arith.mul %div11, %c18 : i32
+  %mul20 = arith.mul %range5, %c18 : i32
+  %add21 = arith.add %mul19, %mod16 : i32
+}

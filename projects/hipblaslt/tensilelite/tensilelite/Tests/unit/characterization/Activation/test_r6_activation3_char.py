@@ -57,7 +57,7 @@ import shutil
 from dataclasses import dataclass
 
 import pytest
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 from rocisa.code import Module
 
@@ -66,8 +66,8 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Lazy module references (same pattern as test_r4_activation2_char.py)
 # ---------------------------------------------------------------------------
-A = importlib.import_module("Tensile.Activation")
-DataType = importlib.import_module("Tensile.Common.DataType").DataType
+A = importlib.import_module("tensilelite.Activation")
+DataType = importlib.import_module("tensilelite.Common.DataType").DataType
 
 
 def _init_rocisa():

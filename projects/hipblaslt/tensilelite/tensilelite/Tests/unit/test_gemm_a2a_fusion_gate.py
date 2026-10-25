@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from Tensile.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
+from tensilelite.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
 
 
 pytestmark = pytest.mark.unit
@@ -28,7 +28,7 @@ def test_gemm_a2a_logic_requires_explicit_enable(problem_type, enabled, expected
 def restore_type_mismatch_collector():
     """``generateLogicDataAndSolutions`` replaces Solution.py's module-level type
     mismatch collector with its own aggregate. Put the caller's back."""
-    from Tensile.SolutionStructs.Solution import (
+    from tensilelite.SolutionStructs.Solution import (
         getTypeMismatchCollector,
         mergeTypeMismatchCollector,
         resetTypeMismatchCollector,
@@ -49,8 +49,8 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     otherwise the only symptom, which is how a filter that once over-matched
     still passed as a successful build.
     """
-    import Tensile.LibraryIO as LibraryIO
-    import Tensile.TensileCreateLibrary.Run as RunModule
+    import tensilelite.LibraryIO as LibraryIO
+    import tensilelite.TensileCreateLibrary.Run as RunModule
 
     parsed = [
         LibraryIO.LibraryLogic(

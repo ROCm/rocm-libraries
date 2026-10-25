@@ -57,6 +57,20 @@ inline int64_t swPrefetchPerBbAnchorGridOffset(int64_t localK, int64_t bbAnchorG
     return bbAnchorGlobal + localK * kSwPrefetchSpacingBytes;
 }
 
+/// Even base of the 3 SGPRs (pair + scratch) an abs-prefetch burst at KERNEL
+/// ENTRY can write after SGPR compact, once Tensile's reserved triple no longer
+/// means anything.
+///
+/// The block fits inside the range the kernel already declares, so it is free,
+/// and sits below the pair InsertInitialUnclausedVmemPass takes, so it leaves the
+/// SADDR the prologue just read alone. Both passes ask for the same thing, so
+/// neither has to go looking for the other. When nothing fits — a small kernel,
+/// or no published dispatch line — falls back above every register named.
+///
+/// Entry only: mid-kernel, as in the abs-dynamic ladder, a register inside the
+/// range may still hold a value.
+STINKYTOFU_EXPORT uint32_t absPrefetchEntrySgprBase(const Function& function);
+
 /// Place software prefetch (`s_prefetch_inst_pc_rel`) at fixed global byte
 /// boundaries P(k), using one forward IR walk per basic block. See
 /// SwInstructionPrefetchRelStaticPass.cpp design comments for anchor, getpc

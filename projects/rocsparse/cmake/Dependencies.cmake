@@ -23,29 +23,34 @@
 
 # Dependencies
 
+option(ALLOW_FETCH_DEPS "Download rocm-cmake, GoogleTest and the test matrices if they are not found in the build environment" OFF)
 include(FetchContent)
+if(NOT ALLOW_FETCH_DEPS)
+  set(FETCHCONTENT_FULLY_DISCONNECTED ON)
+endif()
 
 # Workaround until hcc & hip cmake modules fixes symlink logic in their config files.
 # (Thanks to rocBLAS devs for finding workaround for this problem!)
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
 
 # ROCm cmake package
-find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}")
+find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS ${CMAKE_PREFIX_PATH} ${ROCM_PATH} /opt/rocm)
 if(NOT ROCmCMakeBuildTools_FOUND)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
-  if(NOT ROCM_FOUND)
-    message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
-    set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-    set(rocm_cmake_tag "rocm-6.4.0" CACHE STRING "rocm-cmake tag to download")
-    FetchContent_Declare(
-      rocm-cmake
-      GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-      GIT_TAG ${rocm_cmake_tag}
-      SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-    )
-    FetchContent_MakeAvailable(rocm-cmake)
-    find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+  if(NOT ALLOW_FETCH_DEPS)
+    message(FATAL_ERROR "ROCmCMakeBuildTools >= 0.11.0 not found. Install the rocm-cmake package and pass its "
+                        "install prefix with -DROCM_PATH or CMAKE_PREFIX_PATH, set ROCmCMakeBuildTools_DIR to "
+                        "its share/rocmcmakebuildtools/cmake directory, or configure with -DALLOW_FETCH_DEPS=ON "
+                        "to download it.")
   endif()
+  message(STATUS "ROCmCMakeBuildTools not found. Fetching rocm-cmake because ALLOW_FETCH_DEPS is ON")
+  FetchContent_Declare(
+    rocm-cmake
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+    GIT_TAG b3959201846b9d9250a6f2a386ad43be04d1d051 # rocm-7.2.4
+    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
+  )
+  FetchContent_MakeAvailable(rocm-cmake)
+  find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 endif()
 
 include(ROCMSetupVersion)

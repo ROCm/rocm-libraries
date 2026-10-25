@@ -697,8 +697,10 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     // Pick M/N so tiles % grid != 0 (partial tiles exist).
     // macroTile=128x128 → tiles = ceil(M/128)*ceil(N/128).
     // 4096x4224: tiles = 32*33 = 1056, grid = min(1056, 256) = 256,
-    // 1056 % 256 != 0 → partial workspace required.
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    // 1056 % 256 != 0 → partial workspace required. K spans several depthU
+    // iterations per tile, without which a workgroup's range would cover whole
+    // tiles only and there would be no partials to size.
+    auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
@@ -728,7 +730,11 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    // K spans two depthU iterations per tile, without which a workgroup's range
+    // would cover whole tiles only and there would be no partials to size. Two
+    // is the most this geometry allows: beyond it the static grid lands on the
+    // tile count itself and the skip below fires instead.
+    auto problem = makeGemmProblem(4096, 4224, 128);
     problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
@@ -738,6 +744,14 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
 
     if(tiles % grid == 0)
         GTEST_SKIP() << "No partial tiles for this config";
+
+    // The other half of the reserve-or-not rule (streamKStraddlesTiles in
+    // ContractionSolution.cpp): a workgroup has to be able to stop part-way
+    // through a tile. Asserted rather than skipped, so a later change to K or
+    // depthU cannot quietly put this case back in the whole-tile regime, where
+    // the expectation below would be wrong again.
+    ASSERT_GT(problem.getItersPerTile(env.solution.sizeMapping), 1u)
+        << "Need a tile a workgroup can stop inside for this test";
 
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
@@ -753,8 +767,8 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    // Use dimensions that produce partial tiles.
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    // Use dimensions and a K that produce partial tiles.
+    auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
 
     size_t wsNeeded = env.solution.requiredWorkspaceSize(
@@ -776,7 +790,7 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
         << "full amount (not 0 from DP fallback). ws=" << wsActual << " needed=" << wsNeeded;
 
     // Providing one byte less must trigger fallback (returns 0 for SK partial).
-    auto problemShort = makeGemmProblem(4096, 4224, 64);
+    auto problemShort = makeGemmProblem(4096, 4224, 512);
     problemShort.setParams().setStreamKTileSchedulingMode(1);
     problemShort.setWorkspaceSize(wsNeeded - 1);
     size_t wsShort = env.solution.requiredWorkspaceSize(problemShort, env.device);

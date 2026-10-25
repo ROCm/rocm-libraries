@@ -17,6 +17,11 @@ static inline int rocke_tf32_mma_count(const char* id)
         return 16;
     return 0;
 }
+/* Mirrors tf32_mma_target_error: for a TF32 MMA `op_id` that the MMA catalog of
+ * target `gfx` does not list, writes the error into `out` and returns true. Any
+ * other op_id, and a TF32 op_id the catalog lists, returns false. Defined in
+ * cpp/core/tf32.cpp, the one TU that needs the arch catalog for it. */
+bool rocke_tf32_mma_target_error(const char* op_id, const char* gfx, char* out, size_t cap);
 /* The operand contract of a TF32 atom the hardware does not encode (mirrors
  * core/tf32.py::_emulated_tf32_mma_error). Same ABI as the native atoms -- logical
  * TF32 A/B carried as I32, FP32 accumulator -- with fragment lengths from the

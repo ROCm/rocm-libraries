@@ -26,6 +26,7 @@ from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.arch.target import (
     _load_specs,
     _expand_mma_rows,
+    _mma_op_by_id,
     _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
     _op_id_family,
@@ -67,10 +68,18 @@ def test_family_declaration_rejects_unsupported_axes(field, value):
         _expand_mma_rows("gfx1250", [declaration])
 
 
-def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
+def test_family_declaration_is_admitted_by_its_content_on_any_arch():
+    # The declaration is checked against the one supported family, not against
+    # the name of the arch whose row carries it.
     declaration = deepcopy(_GFX1250_SCALED_FAMILY)
-    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
-        _expand_mma_rows("gfx950", [declaration])
+    expected = _expand_mma_rows("gfx1250", [declaration])
+    assert expected
+    for gfx in ("gfx950", "gfx1201"):
+        assert _expand_mma_rows(gfx, [deepcopy(declaration)]) == expected
+
+
+def test_family_declaration_rejects_missing_fields_and_duplicates():
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
     for field in declaration:
         if field == "generate":
             with pytest.raises(ValueError, match="invalid MMA declaration"):
@@ -89,6 +98,16 @@ def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
     ):
         with pytest.raises(ValueError, match="duplicate MMA op_id"):
             _expand_mma_rows("gfx1250", declarations)
+
+
+def test_atom_lookup_by_op_id_needs_no_target():
+    # Every catalogued atom is found from its op_id alone, whichever arch lists it.
+    for gfx in _load_specs():
+        for op in ArchTarget.from_gfx(gfx).mma.ops:
+            found = _mma_op_by_id(op.op_id)
+            assert found is not None
+            assert (found.op_id, found.family) == (op.op_id, op.family)
+    assert _mma_op_by_id("unknown") is None
 
 
 @pytest.mark.parametrize("declarations", [None, {}, [None], [42], [{}]])
@@ -479,3 +498,27 @@ def test_mma_naming_without_target_lookup():
                 )
                 result = b.mma(arg, a, a, c, *extra)
                 assert result.name.lstrip("%").startswith(hint)
+
+
+def test_rdna_integer_wmma_rows_name_i8_and_i4():
+    # The instruction names keep "iu8"/"iu4"; the operand dtypes are i8/i4, and only
+    # i8/i4 select the ops ("iu8"/"iu4" are not dtypes).
+    for gfx in ("gfx1151", "gfx11-generic"):
+        mma = ArchTarget.from_gfx(gfx).mma
+        for op_id, dtype, old in (
+            ("wmma_i32_16x16x16_iu8", "i8", "iu8"),
+            ("wmma_i32_16x16x16_iu4", "i4", "iu4"),
+        ):
+            op = mma.by_op_id(op_id)
+            assert (op.a_dtype, op.b_dtype, op.c_dtype) == (dtype, dtype, "i32")
+            for spelling, want in ((dtype, op_id), (old, None)):
+                found = mma.op_for_shape(
+                    family="wmma",
+                    a_dtype=spelling,
+                    b_dtype=spelling,
+                    c_dtype="i32",
+                    m=16,
+                    n=16,
+                    k=16,
+                )
+                assert (found and found.op_id) == want

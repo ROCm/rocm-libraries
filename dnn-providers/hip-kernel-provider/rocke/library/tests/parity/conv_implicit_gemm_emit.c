@@ -271,6 +271,77 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         *arch = "gfx950";
         return 0;
     }
+    case 29:
+    case 30:
+    case 31:
+    case 32:
+    {
+        /* Group merging on WMMA (wave32). Same depthwise problem as 21-28.
+         * 29: gfx1250 mem/cshuffle, 30: gfx1250 wavelet/cshuffle, 31: gfx1250
+         * direct epilogue (vector_size_c pinned to 1), 32: gfx1151 (gfx11
+         * WMMA, 16x16x16 atom) mem/cshuffle. Keep in lockstep with
+         * conv_implicit_gemm_emit.py. */
+        static const int kGm[] = {8, 16, 4, 8}; /* idx 29..32 */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->group_merge = kGm[idx - 29];
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = (idx == 32) ? 16 : 32;
+        spec->wave_size = 32;
+        if(idx == 30)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx == 31)
+        {
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        else
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = (idx == 32) ? "gfx1151" : "gfx1250";
+        return 0;
+    }
+    case 33:
+    case 34:
+    case 35:
+    {
+        /* Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+         * 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+         * depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
+         * Keep in lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = (idx == 34) ? 64 : 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        if(idx == 35)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx != 34)
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = "gfx1250";
+        return 0;
+    }
     default:
         return -1;
     }

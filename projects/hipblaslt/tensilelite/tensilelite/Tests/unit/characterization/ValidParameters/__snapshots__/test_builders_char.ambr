@@ -1379,6 +1379,7 @@
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
+    'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
     'CompactLoopStore',
@@ -1488,6 +1489,7 @@
     'StaggerUMapping',
     'StaggerUStride',
     'StinkyTofuParameters',
+    'StinkyTofuRegisterAllocation',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1681,6 +1683,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ClusterAIDMapping': dict({
+      'head': list([
+        -2,
+        -1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2631,6 +2641,10 @@
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
     }),

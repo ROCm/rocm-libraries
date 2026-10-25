@@ -940,6 +940,11 @@ def main():
         "--only", default="", help="comma-separated family substrings to include"
     )
     ap.add_argument(
+        "--exclude",
+        default="",
+        help="comma-separated family names to leave out (applied after --only)",
+    )
+    ap.add_argument(
         "--pyroot",
         default="",
         help="override the reference-side Python root (e.g. the merge-target "
@@ -993,6 +998,16 @@ def main():
     if args.only:
         subs = [s for s in args.only.split(",") if s]
         fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
+    if args.exclude:
+        excluded = {s for s in args.exclude.split(",") if s}
+        kept = [(n, d) for n, d in fams if n not in excluded]
+        if fams and not kept:
+            # The caller compares these families in another lane.
+            print(
+                f"[diff] every selected family is excluded ({args.exclude}); nothing to do"
+            )
+            return 0
+        fams = kept
 
     jobs = args.jobs or _default_family_workers(len(fams), args.mode)
     print(f"mode={args.mode}  families={len(fams)}  jobs={jobs}  archive={archive}")
