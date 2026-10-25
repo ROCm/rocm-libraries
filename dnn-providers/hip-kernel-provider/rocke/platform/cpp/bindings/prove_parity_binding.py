@@ -2013,6 +2013,30 @@ def problems_gfx950_attention_tiled_2d():
         # head_size 192 single-batch combo (T=64, interleave) and short D192.
         p(2048, 1, 96, 96, 192, 16, 2048, 2048),
         p(512, 1, 96, 96, 192, 16, 512, 4096),
+        # d64/d128 single-batch combo with a sliding window and/or sinks (both
+        # dtypes, every block size), plus the d192 / fp8 exclusions.
+        p(
+            2048,
+            1,
+            128,
+            8,
+            128,
+            64,
+            2048,
+            2048,
+            dtype="fp16",
+            use_sinks=True,
+            sliding_window=128,
+        ),
+        p(8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096),
+        p(2048, 1, 32, 8, 128, 32, 2048, 2048, sliding_window=4096),
+        p(2048, 1, 32, 8, 128, 16, 2048, 2048, sliding_window=4096),
+        p(512, 1, 128, 8, 128, 64, 512, 512, use_sinks=True),
+        p(2048, 1, 128, 8, 128, 64, 2048, 2048, dtype="fp16", use_sinks=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_sinks=True, sliding_window=128),
+        p(512, 1, 64, 8, 64, 64, 512, 512, dtype="fp16", sliding_window=256),
+        p(2048, 1, 96, 96, 192, 16, 2048, 2048, use_sinks=True),
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True, use_sinks=True),
         # ---- misc flag combinations ----
         p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
