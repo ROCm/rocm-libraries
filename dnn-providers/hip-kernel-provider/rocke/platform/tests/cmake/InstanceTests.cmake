@@ -199,3 +199,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wmma_fmha_decode_host.cpp")
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_wmma_fmha_decode_host)
 endif()
+
+# A C spec is a plain struct: a caller can edit a field after *_spec_init, or
+# skip init. The unified, dense and dense-dQ validators re-run __post_init__,
+# so a misspelled page_mode / persist_decode is refused instead of normalised.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_bwd_spec_reinit.cpp")
+  add_executable(rocke_attention_bwd_spec_reinit instances/attention_bwd_spec_reinit.cpp)
+  target_link_libraries(rocke_attention_bwd_spec_reinit PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_bwd_spec_reinit PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_bwd_spec_reinit COMMAND rocke_attention_bwd_spec_reinit)
+  set_tests_properties(rocke_attention_bwd_spec_reinit PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_bwd_spec_reinit)
+  set_target_properties(rocke_attention_bwd_spec_reinit
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_bwd_spec_reinit RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_bwd_spec_reinit)
+endif()

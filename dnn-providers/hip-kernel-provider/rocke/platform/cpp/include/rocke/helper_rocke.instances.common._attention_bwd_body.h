@@ -62,6 +62,9 @@
  * Python string (the "xt" reader is refused where Python's LdsOperand
  * refuses it).
  *
+ * stage_kv's duck-typed slabs (a paged cache's PagedSlab) are
+ * rocke_attn_bwd_row_source_t (rocke_attn_bwd_tile_step_stage_kv_rows).
+ *
  * run_q_step's `prefetch` (a PrefetchStep) and the LdsStatsView it hands back
  * are the ring port's (helper_rocke.instances.common._attention_bwd_ring.h).
  *
@@ -508,6 +511,23 @@ bool rocke_attn_bwd_tile_step_stage_kv(rocke_attn_bwd_tile_step_t* t,
                                        const rocke_attn_bwd_row_slab_t* v_slab,
                                        rocke_value_t* k0,
                                        rocke_value_t* live);
+/* A duck-typed K / V slab: anything with load_vec(row, col0, n) (Python's
+ * stage_kv takes the paged caches' PagedSlab as well as a RowSlab). */
+typedef struct rocke_attn_bwd_row_source
+{
+    rocke_value_t* (*load_vec)(
+        void* ctx, rocke_ir_builder_t* b, rocke_value_t* row, rocke_attn_bwd_iv_t col0, int n);
+    void* ctx;
+} rocke_attn_bwd_row_source_t;
+
+/* stage_kv(b, k_slab, v_slab, k0, live) over row sources (the same IR as
+ * rocke_attn_bwd_tile_step_stage_kv for RowSlab sources). */
+bool rocke_attn_bwd_tile_step_stage_kv_rows(rocke_attn_bwd_tile_step_t* t,
+                                            rocke_ir_builder_t* b,
+                                            const rocke_attn_bwd_row_source_t* k_rows,
+                                            const rocke_attn_bwd_row_source_t* v_rows,
+                                            rocke_value_t* k0,
+                                            rocke_value_t* live);
 /* zero_acc(b). */
 bool rocke_attn_bwd_tile_step_zero_acc(rocke_attn_bwd_tile_step_t* t,
                                        rocke_ir_builder_t* b,
