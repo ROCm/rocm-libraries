@@ -203,7 +203,7 @@ void testReferenceEpilogue() {
     const Tensor ownedInput = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
     EpilogueOptions ownedOptions = options;
-    ownedOptions.outputSelection = OutputSelection::explicitIndices({1, 2}, {});
+    ownedOptions.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({1, 2});
     const EpilogueOutputs owned = referenceEpilogue(ownedInput,
                                                     {.output = ScalarType::Float16,
                                                      .rawOutput = ScalarType::Float32,
@@ -225,7 +225,7 @@ void testReferenceEpilogue() {
 
     EpilogueOptions emptyOptions = ownedOptions;
     emptyOptions.outputSelection =
-        OutputSelection::strided(4, 1, std::numeric_limits<size_t>::max(), {});
+        IndexSelection::stridedLastDimensionFastest(4, 1, std::numeric_limits<size_t>::max());
     const EpilogueOutputs empty = referenceEpilogue(ownedInput,
                                                     {.output = ScalarType::Float16,
                                                      .rawOutput = ScalarType::Float32,
@@ -253,7 +253,7 @@ void testReferenceEpilogue() {
     Tensor preservedAuxiliary = preservedOutput.deepCopy();
     Tensor accumulatedAmax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{100});
     EpilogueOptions preservedOptions(ScalarType::Float32);
-    preservedOptions.outputSelection = OutputSelection::explicitIndices({0, 3}, {});
+    preservedOptions.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({0, 3});
     preservedOptions.accumulateAmax = true;
     referenceEpilogueInto(ownedInput,
                           {.output = preservedOutput,

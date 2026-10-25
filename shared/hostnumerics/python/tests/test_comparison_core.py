@@ -9,12 +9,11 @@ from _hostnumerics_test_support import *  # noqa: F403
 class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
     def test_generation_and_comparison(self):
         seed = 17
-        recipe = real_generation_recipe(
+        recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.uniform_integer(
                 hv.UniformIntegerGenerationParameters(lower=-3, upper=3)
             ),
             seed=seed,
-            index_order=(),
         )
         first = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
         second = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
@@ -92,7 +91,7 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         )
 
         selected = hv.ComparisonOptions()
-        selected.selection = hv.OutputSelection.strided(
+        selected.selection = hv.IndexSelection.strided(
             0, 2, index_order=[1, 0], max_elements=sys.maxsize * 2 + 1
         )
         selected_report = hv.compare(observed, expected, selected)

@@ -27,11 +27,11 @@ TEST(Package, Operations) {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a));
     const Tensor operandB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
-    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32}, OutputSelection::all({}),
-               GemmBackend::Automatic);
+    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32},
+               IndexSelection::allLastDimensionFastest(), GemmBackend::Automatic);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
-    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32}, OutputSelection::all({}),
-               GemmBackend::Blocked);
+    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32},
+               IndexSelection::allLastDimensionFastest(), GemmBackend::Blocked);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
 
     const Tensor ownedGemm =
@@ -58,16 +58,16 @@ TEST(Package, Operations) {
         ScalarType::Float32, ScalarType::Float32);
     ASSERT_FALSE((maximumAbsolute.loadAs<float>({}) != 4));
 
-    Tensor generated =
-        generate(ScalarType::Float32, Shape{4},
-                 GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {-2.0, 3.0}}),
-                                            {.seed = 17}));
+    Tensor generated = generate(ScalarType::Float32, Shape{4},
+                                GenerationRecipe::realOnlyLastDimensionFastest(
+                                    GenerationRecipe::choice({.values = {-2.0, 3.0}}), 17));
     for (size_t index = 0; index < generated.elementCount(); ++index) {
         const float value = generated.loadAs<float>({index});
         ASSERT_FALSE((value != -2.0f && value != 3.0f));
     }
     generateAt(generated, 2,
-               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0}), {}));
+               GenerationRecipe::realOnlyLastDimensionFastest(
+                   GenerationRecipe::constant({.value = 11.0}), 0));
     ASSERT_FALSE((generated.loadAs<float>({2}) != 11.0f));
 
     const Tensor scaledA =
@@ -98,6 +98,7 @@ TEST(Package, Operations) {
     ASSERT_FALSE((!layerNorm.mean || layerNorm.mean->loadAs<float>({0}) != 1.5f));
 
     StructuredSparsityPattern sparsityPattern;
+    sparsityPattern.indexOrder = {0};
     sparsityPattern.axis = 0;
     sparsityPattern.fixedPositions = {0, 2};
     const std::array<float, 4> sparseValues{1, 2, 3, 4};

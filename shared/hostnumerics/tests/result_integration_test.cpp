@@ -11,7 +11,8 @@ using namespace roc::hostnumerics;
 using namespace roc::hostnumerics::detail;
 
 TEST(ResultIntegration, GeometryFailuresPropagateWithoutFormatting) {
-    const auto contiguous = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
+    const auto contiguous =
+        Layout::getContiguousLayoutLastDimensionFastest(Shape{std::numeric_limits<size_t>::max()});
     ASSERT_FALSE(contiguous.has_value());
     EXPECT_EQ(contiguous.error(), LayoutError::ExtentOutOfRange);
     const Layout overflowing(Shape{3}, {std::numeric_limits<ptrdiff_t>::max()}, 0);

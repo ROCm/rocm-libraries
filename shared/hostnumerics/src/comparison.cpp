@@ -61,7 +61,8 @@ ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expe
             const auto [firstSelected, pastLastSelected] =
                 detail::evenlyPartitionedRange(selectedCount, partitionCount, partition);
             detail::forEachLayoutOffsetPairRange(
-                observed.layout(), expected.layout(), options.selection.indexOrder(), firstSelected,
+                observed.layout(), expected.layout(),
+                options.selection.indexOrder(observed.shape().rank()), firstSelected,
                 pastLastSelected,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                     observe(partials[partition], logicalIndex, observedOffset, expectedOffset);
@@ -124,7 +125,8 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
     if (observed.shape() != expected.shape())
         throw std::runtime_error("HostNumerics tensor comparison shape mismatch.");
 
-    (void)detail::resolvedIndexOrder(observed.shape(), options.selection.indexOrder());
+    (void)detail::validatedIndexOrder(observed.shape().rank(),
+                                      options.selection.indexOrder(observed.shape().rank()));
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
 
@@ -326,7 +328,8 @@ SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
         throw std::runtime_error("Logical tensor addresses outside allocated storage.");
     std::vector<bool> used(allocatedElements, false);
     detail::forEachSelectedIndex(
-        layout.shape(), {}, [&](size_t, std::span<const size_t> coordinates) {
+        layout.shape(), IndexSelection::allLastDimensionFastest(),
+        [&](size_t, std::span<const size_t> coordinates) {
             used[static_cast<size_t>(detail::preparedElementOffset(layout, coordinates))] = true;
         });
 

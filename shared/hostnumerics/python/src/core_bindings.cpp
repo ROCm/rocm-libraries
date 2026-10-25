@@ -110,46 +110,6 @@ void registerSelectionBindings(nb::module_& module) {
         .value("Sum", ReductionOperation::Sum)
         .value("MaximumAbsolute", ReductionOperation::MaximumAbsolute);
 
-    nb::enum_<OutputSelectionKind>(module, "OutputSelectionKind")
-        .value("All", OutputSelectionKind::All)
-        .value("Strided", OutputSelectionKind::Strided)
-        .value("Explicit", OutputSelectionKind::Explicit);
-
-    nb::class_<OutputSelection>(module, "OutputSelection")
-        .def_static(
-            "all", [](const std::vector<size_t>& order) { return OutputSelection::all(order); },
-            "index_order"_a)
-        .def_static(
-            "strided",
-            [](size_t first, size_t stride, size_t maxElements, const std::vector<size_t>& order) {
-                return OutputSelection::strided(first, stride, maxElements, order);
-            },
-            "first"_a, "stride"_a, "max_elements"_a, "index_order"_a)
-        .def_static(
-            "explicit_indices",
-            [](std::vector<size_t> indices, const std::vector<size_t>& order) {
-                return OutputSelection::explicitIndices(std::move(indices), order);
-            },
-            "indices"_a, "index_order"_a)
-        .def_static(
-            "prime_stride",
-            [](size_t logical, size_t allocated, size_t requested,
-               const std::vector<size_t>& order) {
-                return OutputSelection::primeStride(logical, allocated, requested, order);
-            },
-            "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a, "index_order"_a)
-        .def_prop_ro("kind", &OutputSelection::kind)
-        .def_prop_ro("selects_all", &OutputSelection::selectsAll)
-        .def_prop_ro("first", &OutputSelection::first)
-        .def_prop_ro("stride", &OutputSelection::stride)
-        .def_prop_ro("max_elements", &OutputSelection::maxElements)
-        .def_prop_ro("index_order",
-                     [](const OutputSelection& selection) {
-                         const auto order = selection.indexOrder();
-                         return std::vector<size_t>(order.begin(), order.end());
-                     })
-        .def("indices", &OutputSelection::indices, "logical_elements"_a);
-
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")
         .def_prop_ro("name", [](const ScalarTypeInfo& info) { return std::string(info.name); })
         .def_ro("category", &ScalarTypeInfo::category)

@@ -43,9 +43,9 @@ struct SelectedOutputBlockPlan {
     std::vector<SelectedOutputLocation> locations;
 };
 
-SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
+SelectedOutputBlockPlan planSelectedOutputBlocks(const IndexSelection& selection,
                                                  const Shape& outputShape) {
-    const detail::IndexIteration iteration(outputShape, selection.indexOrder());
+    const detail::IndexIteration iteration(outputShape, selection.indexOrder(outputShape.rank()));
     const size_t logicalElements = iteration.count();
     const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;

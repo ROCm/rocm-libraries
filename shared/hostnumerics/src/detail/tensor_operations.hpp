@@ -26,7 +26,7 @@ struct BinaryInvocation {
     const Tensor& right;
     Tensor output;
     ScalarType computeType;
-    OutputSelection selection;
+    IndexSelection selection = IndexSelection::allLastDimensionFastest();
 };
 
 struct ActivationInvocation {
@@ -34,13 +34,13 @@ struct ActivationInvocation {
     Tensor output;
     ActivationFunction function;
     ScalarType computeType;
-    OutputSelection selection;
+    IndexSelection selection = IndexSelection::allLastDimensionFastest();
 };
 
 template <typename Function>
-void forEachSelectedCoordinate(const Shape& shape, const OutputSelection& selection,
+void forEachSelectedCoordinate(const Shape& shape, const IndexSelection& selection,
                                Function&& function) {
-    const IndexIteration iteration(shape, selection.indexOrder());
+    const IndexIteration iteration(shape, selection.indexOrder(shape.rank()));
     std::vector<size_t> coordinates(shape.rank(), 0);
     if (selection.selectsAll()) {
         for (size_t index = 0; index < iteration.count(); ++index) {

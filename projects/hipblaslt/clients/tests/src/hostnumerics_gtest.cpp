@@ -421,9 +421,8 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
         const Tensor generated = generate(
             ScalarType::Float32,
             Shape{size},
-            GenerationRecipe::realOnly(
-                std::move(component),
-                {.seed = initialization::seedForSequence(defaultInitializationSeed, sequence)}));
+            GenerationRecipe::realOnlyLastDimensionFastest(
+                std::move(component), initialization::seedForSequence(defaultInitializationSeed, sequence)));
         generated.copyLogicalElementsToEncodedStorage(std::as_writable_bytes(std::span(values)));
         return values;
     };
@@ -715,7 +714,7 @@ TEST(HostNumericsDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encodi
         using namespace roc::hostnumerics;
         const Tensor value = generate(hipblaslt::hostnumerics::scalarType(type),
                                       Shape{1},
-                                      GenerationRecipe::realOnly(GenerationRecipe::zero(), {}));
+                                      GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
         EXPECT_EQ(value.rawEncodedBackingStorage().front(), std::byte{0})
             << "hipDataType=" << static_cast<int>(type);
     }
@@ -2179,7 +2178,7 @@ TEST(HostNumericsDataInitializationBridge, MatmulValidationAcceptsScalarVectorAn
         const Tensor expected
             = generate(ScalarType::Float32,
                        shape,
-                       GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0}), {}));
+                       GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::constant({.value = 1.0}), 0));
         MatmulValidationCase testCase;
         testCase.outputs.emplace_back(expected, expected.deepCopy());
         MatmulValidationOptions options;

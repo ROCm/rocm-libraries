@@ -11,16 +11,18 @@
 #include <vector>
 
 namespace roc::hostnumerics::detail {
-inline std::vector<size_t> resolvedIndexOrder(const Shape& shape, std::span<const size_t> order) {
+inline std::vector<size_t> validatedIndexOrder(size_t rank, std::span<const size_t> order) {
     std::vector<size_t> axes(order.begin(), order.end());
-    if (axes.empty()) {
-        axes.resize(shape.rank());
-        std::iota(axes.begin(), axes.end(), size_t{0});
-    }
-    if (axes.size() != shape.rank())
+    if (axes.size() != rank)
         throw std::runtime_error("Tensor index order rank does not match shape rank.");
-    if (!detail::ShapeAccess::isValidIndexOrder(shape.rank(), axes))
+    if (!detail::ShapeAccess::isValidIndexOrder(rank, axes))
         throw std::runtime_error("Tensor index order must contain each dimension once.");
+    return axes;
+}
+
+inline std::vector<size_t> ascendingIndexOrder(size_t rank) {
+    std::vector<size_t> axes(rank);
+    std::iota(axes.begin(), axes.end(), size_t{0});
     return axes;
 }
 
@@ -44,7 +46,7 @@ class IndexIteration {
    public:
     explicit IndexIteration(const Shape& shape, std::span<const size_t> order)
         : m_extents(shape.dimensions().begin(), shape.dimensions().end()),
-          m_axes(resolvedIndexOrder(shape, order)),
+          m_axes(validatedIndexOrder(shape.rank(), order)),
           m_count(shape.elementCount()) {}
 
     size_t count() const {

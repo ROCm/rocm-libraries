@@ -155,11 +155,9 @@ MxCase unboundedCase() {
 
 void testGenerationRecipeIndexOrder() {
     auto makeProblem = [](std::vector<size_t> order) {
-        MxDataGeneration data = MxDataGeneration::quantize(GenerationRecipe::realOnly(
-            GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}), {
-                                                                             .seed = 123,
-                                                                             .indexOrder = order,
-                                                                         }));
+        MxDataGeneration data = MxDataGeneration::quantize(
+            GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
+                                       {.seed = 123, .indexOrder = order}));
         MxCase problem(Shape{3, 5}, std::move(data));
         problem.dataType = ScalarType::Float8E4M3;
         problem.scaleType = ScalarType::E8M0;
@@ -171,7 +169,7 @@ void testGenerationRecipeIndexOrder() {
     };
 
     const MxCase firstDimensionFastest = makeProblem(std::vector<size_t>{1, 0});
-    const MxCase lastDimensionFastest = makeProblem(std::vector<size_t>{});
+    const MxCase lastDimensionFastest = makeProblem(std::vector<size_t>{0, 1});
     const MxTensor first = generateMx(firstDimensionFastest);
     const MxTensor last = generateMx(lastDimensionFastest);
     require(!sameStorage(first.data, last.data),
@@ -187,9 +185,9 @@ void testGenerationRecipeIndexOrder() {
 }
 
 void testPreservedRawGenerationMasksToDataWidth() {
-    MxCase problem(Shape{17, 3},
-                   MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
-                       GenerationRecipe::randomRawBits(), {.seed = 73})));
+    MxCase problem(Shape{17, 3}, MxDataGeneration::preserveGeneratedEncoding(
+                                     GenerationRecipe::realOnlyLastDimensionFastest(
+                                         GenerationRecipe::randomRawBits(), 73)));
     problem.dataType = ScalarType::Float4E2M1;
     problem.scaleType = ScalarType::E8M0;
     problem.blockAxis = 0;
@@ -361,8 +359,9 @@ TEST(MxGeneration, Behavior) {
                 "MX explicit unity-scale generation mismatch.");
     checkReference(explicitScale, explicitlyScaled);
 
-    MxCase zeroScale(Shape{8, 2}, MxDataGeneration::quantize(
-                                      GenerationRecipe::realOnly(GenerationRecipe::zero(), {})));
+    MxCase zeroScale(Shape{8, 2},
+                     MxDataGeneration::quantize(GenerationRecipe::realOnlyLastDimensionFastest(
+                         GenerationRecipe::zero(), 0)));
     zeroScale.dataType = ScalarType::Float4E2M1;
     zeroScale.scaleType = ScalarType::E8M0Zero;
     zeroScale.blockAxis = 0;
@@ -475,8 +474,8 @@ TEST(MxGeneration, Behavior) {
     }
 
     auto refreshed = generateMx(stochasticCases.front());
-    generate(refreshed.scales,
-             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 2.0}), {}));
+    generate(refreshed.scales, GenerationRecipe::realOnlyLastDimensionFastest(
+                                   GenerationRecipe::constant({.value = 2.0}), 0));
     refreshed.refreshReference();
     detail::forEachIndex(refreshed.data.shape(), [&](std::span<const size_t> index, size_t) {
         require(

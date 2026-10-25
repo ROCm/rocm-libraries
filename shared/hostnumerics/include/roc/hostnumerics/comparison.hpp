@@ -97,7 +97,7 @@ struct ComparisonOptions {
     // `reportedComparisons`. `maxReportedMismatches` caps each reported vector independently.
     bool reportMatchingElements = false;
     size_t maxReportedMismatches = 10;
-    OutputSelection selection;
+    IndexSelection selection = IndexSelection::allLastDimensionFastest();
 };
 
 struct ComparisonValue {
@@ -107,9 +107,9 @@ struct ComparisonValue {
 };
 
 /// One reported logical tensor element. `index` is the selected element's linear logical index in
-/// `ComparisonOptions::selection.indexOrder()`; `coordinates` are tensor coordinates; offsets are
-/// element offsets from the start of each tensor's storage, not byte offsets. Reported values are
-/// normalized to double and can round wide integers, while integer `absoluteDifference` is
+/// `ComparisonOptions::selection.indexOrder(rank)`; `coordinates` are tensor coordinates; offsets
+/// are element offsets from the start of each tensor's storage, not byte offsets. Reported values
+/// are normalized to double and can round wide integers, while integer `absoluteDifference` is
 /// computed exactly before conversion to double. For a complex value, `absoluteDifference` is the
 /// complex-difference magnitude. `tolerance` is the larger component tolerance in componentwise
 /// mode and the complex-value tolerance in magnitude mode.

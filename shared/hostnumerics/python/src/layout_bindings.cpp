@@ -25,7 +25,7 @@ distinct coordinates can share one. Layout does not know the datatype or the
 extent of the underlying storage.
 
 Examples:
-    >>> layout = Layout.contiguous(Shape([2, 3]))
+    >>> layout = Layout.contiguousLastDimensionFastest(Shape([2, 3]))
     >>> layout.strides
     [3, 1]
     >>> layout.element_offset([1, 2])
@@ -42,9 +42,6 @@ immutable and compare and hash by shape, strides, and offset.
         .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a)
-        .def_static(
-            "contiguous", [](const Shape& shape) { return Layout::contiguous(shape); }, "shape"_a,
-            "Contiguous C-order layout with zero offset; the last dimension is fastest.")
         .def_static(
             "contiguous",
             [](const Shape& shape, const std::vector<size_t>& order) {

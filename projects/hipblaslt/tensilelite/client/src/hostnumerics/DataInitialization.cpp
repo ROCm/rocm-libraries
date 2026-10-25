@@ -61,17 +61,17 @@ namespace TensileLite::Client
                                           std::uint64_t         sequence,
                                           std::optional<double> freeValue = std::nullopt)
         {
-            const GenerationRecipeSettings settings{.seed = seed + sequence};
-            auto realOnly = [settings](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnly(std::move(component), settings);
+            const uint64_t recipeSeed = seed + sequence;
+            auto realOnly = [recipeSeed](GenerationRecipe::Component component) {
+                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), recipeSeed);
             };
-            auto replicated = [settings](GenerationRecipe::Component component) {
-                return GenerationRecipe::replicated(std::move(component), settings);
+            auto replicated = [recipeSeed](GenerationRecipe::Component component) {
+                return GenerationRecipe::replicatedLastDimensionFastest(std::move(component), recipeSeed);
             };
-            auto cartesian = [settings](GenerationRecipe::Component component) {
+            auto cartesian = [recipeSeed](GenerationRecipe::Component component) {
                 GenerationRecipe::Component imaginary = component;
-                return GenerationRecipe::cartesian(
-                    std::move(component), std::move(imaginary), settings);
+                return GenerationRecipe::cartesianLastDimensionFastest(
+                    std::move(component), std::move(imaginary), recipeSeed);
             };
 
             switch(mode)
@@ -291,9 +291,11 @@ namespace TensileLite::Client
             return Layout(Shape(std::move(logicalDimensions)), std::move(logicalStrides), 0);
         }
 
-        StructuredSparsityPattern sparsePattern(PruneSparseMode mode, size_t sparseAxis)
+        StructuredSparsityPattern sparsePatternLastDimensionFastest(PruneSparseMode mode, size_t sparseAxis, size_t rank)
         {
             StructuredSparsityPattern pattern;
+            pattern.indexOrder.resize(rank);
+            std::iota(pattern.indexOrder.begin(), pattern.indexOrder.end(), size_t{0});
             pattern.axis = sparseAxis;
             switch(mode)
             {
@@ -451,9 +453,8 @@ namespace TensileLite::Client
         if(lower > upper)
             throw std::runtime_error("TensileLite uniform lower bound exceeds upper bound.");
 
-        const auto uniformRealRecipe = roc::hostnumerics::GenerationRecipe::realOnly(
-            roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
-            {.seed = key.seed + key.semanticStream});
+        const auto uniformRealRecipe = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}), key.seed + key.semanticStream);
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::hostnumerics::generate(generated, uniformRealRecipe);
@@ -508,7 +509,7 @@ namespace TensileLite::Client
             StructuredSparseTensor{.pruned            = prunedTensor,
                                    .compressed        = compressedTensor,
                                    .twoOfFourMetadata = metadataTensor},
-            sparsePattern(mode, dim),
+            sparsePatternLastDimensionFastest(mode, dim, prunedTensor.shape().rank()),
             {});
     }
 } // namespace TensileLite::Client

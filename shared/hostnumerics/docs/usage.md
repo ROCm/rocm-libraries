@@ -93,9 +93,8 @@ using namespace roc::hostnumerics;
 
 // Fill a 2-by-3 F32 tensor with reproducible values sampled uniformly from
 // the range -1 to 1.
-GenerationRecipe recipe = GenerationRecipe::realOnly(
-    GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}),
-    {.seed = 17});
+GenerationRecipe recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+    GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 17);
 Tensor values = generate(ScalarType::Float32, Shape{2, 3}, recipe);
 ```
 
@@ -211,11 +210,7 @@ imports infer the storage type from the array dtype.
 `to_numpy` requires a dtype argument; passing `None` selects the decoded mapping
 returned by `default_decoded_dtype`.
 
-OutputSelection factories require an order argument. As in Shape and Layout,
-axes run from slowest to fastest. An explicit empty order defers ascending axes
-(C order) until an operation knows the tensor rank. A nonempty order must be a
-permutation of that tensor's axes. Shape and Layout validate explicitly supplied
-orders immediately, including their length.
+IndexSelection selects logical indices independently of tensor storage. Factories with an order argument require a permutation of the tensor's axes, listed from slowest to fastest. The LastDimensionFastest factories choose ascending axes explicitly. `indexOrder(rank)` returns the chosen axes and checks the rank; an explicit empty order is valid only for rank zero. Shape and Layout also require a complete order or a function named for the chosen order.
 
 The `hostnumerics` module mirrors the tensor, generation, operation, and
 comparison APIs shown in the Python tutorial above. Python operations accept

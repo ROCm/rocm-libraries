@@ -90,7 +90,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     using roc::hostnumerics::Layout;
     using roc::hostnumerics::MatmulOptions;
     using roc::hostnumerics::multiply;
-    using roc::hostnumerics::OutputSelection;
+    using roc::hostnumerics::IndexSelection;
     using roc::hostnumerics::ScalarType;
     using roc::hostnumerics::Shape;
     using roc::hostnumerics::Tensor;
@@ -138,30 +138,27 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      aColumns,
                      lda,
                      aPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnly(
+                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
-                             .withAffineValueMapping({.offset = 1}),
-                         {}));
+                             .withAffineValueMapping({.offset = 1}), 0));
     generateMatrices(hostB,
                      bRows,
                      bColumns,
                      ldb,
                      bPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnly(
+                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
-                             .withAffineValueMapping({.offset = 1}),
-                         {}));
+                             .withAffineValueMapping({.offset = 1}), 0));
     generateMatrices(hostC,
                      M,
                      N,
                      ldc,
                      cPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnly(
+                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
-                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}),
-                         {}));
+                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}), 0));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);
@@ -315,7 +312,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 scaledC,
                 result,
                 computeType,
-                roc::hostnumerics::OutputSelection::all({}));
+                roc::hostnumerics::IndexSelection::allLastDimensionFastest());
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;
@@ -364,7 +361,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .absoluteTolerance     = std::nextafter(tolerance, 0.0),
                 .maxReportedMismatches = 0,
             };
-            options.selection     = OutputSelection::all(std::vector<size_t>{1, 0});
+            options.selection     = IndexSelection::all(std::vector<size_t>{1, 0});
             const auto comparison = compare(observedD.shareStorageWithLayout(observedLayout),
                                             expectedD.shareStorageWithLayout(expectedLayout),
                                             options);

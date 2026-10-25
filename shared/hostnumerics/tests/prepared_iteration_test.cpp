@@ -48,11 +48,11 @@ TEST(PreparedIteration, PreconditionsAreDiagnosedInDebug) {
 #ifdef NDEBUG
     GTEST_SKIP() << "Prepared execution assertions are enabled in Debug builds.";
 #else
-    const detail::IndexIteration plan(Shape{2, 3}, {});
+    const detail::IndexIteration plan(Shape{2, 3}, std::vector<size_t>{0, 1});
     std::array<size_t, 2> point{};
     EXPECT_DEATH(plan.coordinates(0, std::span<size_t>(point).first(1)), "result.size()");
     EXPECT_DEATH(plan.coordinates(plan.count(), point), "index < m_count");
-    const detail::IndexIteration empty(Shape{0}, {});
+    const detail::IndexIteration empty(Shape{0}, std::vector<size_t>{0});
     EXPECT_DEATH(empty.coordinates(0, std::span<size_t>(point).first(1)), "index < m_count");
     const std::array<size_t, 2> outside{2, 0};
     EXPECT_DEATH((void)plan.linearIndex(outside), "validCoordinates");
@@ -98,18 +98,18 @@ TEST(PreparedIteration, PermutationsAndScalarHaveCorrectLoopBounds) {
     EXPECT_EQ(scalar.count(), 1);
     EXPECT_EQ(scalar.linearIndex({}), 0);
     EXPECT_FALSE(scalar.advance({}));
-    EXPECT_EQ(detail::IndexIteration(Shape{3, 0, 4}, {}).count(), 0);
+    EXPECT_EQ(detail::IndexIteration(Shape{3, 0, 4}, std::vector<size_t>{0, 1, 2}).count(), 0);
     EXPECT_THROW(detail::IndexIteration(shape, std::vector<size_t>{0, 0, 2}), std::runtime_error);
 }
 
-TEST(PreparedIteration, OutputSelectionOrdersAgreeWithShapeAndLayout) {
-    const auto deferred = OutputSelection::explicitIndices({1}, {});
+TEST(PreparedIteration, IndexSelectionOrdersAgreeWithShapeAndLayout) {
+    const auto deferred = IndexSelection::explicitIndicesLastDimensionFastest({1});
     for (const Shape shape : {Shape{3}, Shape{2, 3}, Shape{2, 3, 4}}) {
-        const detail::IndexIteration plan(shape, deferred.indexOrder());
+        const detail::IndexIteration plan(shape, deferred.indexOrder(shape.rank()));
         std::vector<size_t> point(shape.rank());
         plan.coordinates(deferred.indices(shape.elementCount()).front(), point);
-        EXPECT_EQ(point, shape.coordinates(1));
-        const auto offset = Layout::contiguous(shape).elementOffset(point);
+        EXPECT_EQ(point, shape.coordinatesLastDimensionFastest(1));
+        const auto offset = Layout::contiguousLastDimensionFastest(shape).elementOffset(point);
         ASSERT_TRUE(offset);
         EXPECT_EQ(*offset, 1);
     }
@@ -117,8 +117,8 @@ TEST(PreparedIteration, OutputSelectionOrdersAgreeWithShapeAndLayout) {
     const Shape shape{2, 3, 4};
     std::vector<size_t> order{0, 1, 2};
     do {
-        const auto selection = OutputSelection::explicitIndices({1, 7, 23}, order);
-        const detail::IndexIteration plan(shape, selection.indexOrder());
+        const auto selection = IndexSelection::explicitIndices({1, 7, 23}, order);
+        const detail::IndexIteration plan(shape, selection.indexOrder(3));
         const Layout layout = Layout::contiguous(shape, order);
         std::vector<size_t> point(shape.rank());
         for (const size_t index : selection.indices(shape.elementCount())) {
@@ -131,12 +131,9 @@ TEST(PreparedIteration, OutputSelectionOrdersAgreeWithShapeAndLayout) {
         }
     } while (std::next_permutation(order.begin(), order.end()));
 
-    // Shape and Layout validate an explicit order immediately; a selection can
-    // defer its order until an operation supplies the tensor rank.
-    EXPECT_THROW(shape.coordinates(1, deferred.indexOrder()), std::runtime_error);
-    EXPECT_THROW(Layout::contiguous(shape, deferred.indexOrder()), std::runtime_error);
-    const auto invalid = OutputSelection::all(std::vector<size_t>{0, 0, 2});
-    EXPECT_THROW(detail::IndexIteration(shape, invalid.indexOrder()), std::runtime_error);
+    const auto scalarOnly = IndexSelection::all({});
+    EXPECT_THROW(scalarOnly.indexOrder(shape.rank()), std::runtime_error);
+    EXPECT_THROW(IndexSelection::all(std::vector<size_t>{0, 0, 2}), std::runtime_error);
 }
 
 TEST(PreparedIteration, PublicAccessChecksAndValueReturningConversion) {
@@ -146,12 +143,12 @@ TEST(PreparedIteration, PublicAccessChecksAndValueReturningConversion) {
     tensor.storeFrom({0}, 1.75f);
     const detail::RuntimeTensorReader<int64_t> integerReader(tensor);
     EXPECT_EQ(integerReader({0}), 1);
-    const auto affine = GenerationRecipe::realOnly(
+    const auto affine = GenerationRecipe::realOnlyLastDimensionFastest(
         GenerationRecipe::affineIndexRemainder(
             {.dimensionCoefficients = {std::numeric_limits<int64_t>::max()},
              .offset = 1,
              .positiveDivisor = 7}),
-        {});
+        0);
     EXPECT_THROW(generate(tensor, affine), std::runtime_error);
     EXPECT_EQ(tensor.loadAs<float>({0}), 1.75f);
 }
@@ -159,8 +156,8 @@ TEST(PreparedIteration, PublicAccessChecksAndValueReturningConversion) {
 TEST(PreparedIteration, HugeZeroStrideRunAndInvalidEmptyOrders) {
     const Layout layout(Shape{SIZE_MAX}, {0}, 0);
     size_t calls = 0;
-    detail::forEachLayoutOffsetPairRange(layout, layout, {}, SIZE_MAX - 2, SIZE_MAX,
-                                         [&](size_t, ptrdiff_t first, ptrdiff_t second) {
+    detail::forEachLayoutOffsetPairRange(layout, layout, std::vector<size_t>{0}, SIZE_MAX - 2,
+                                         SIZE_MAX, [&](size_t, ptrdiff_t first, ptrdiff_t second) {
                                              EXPECT_EQ(first, 0);
                                              EXPECT_EQ(second, 0);
                                              ++calls;
@@ -173,14 +170,15 @@ TEST(PreparedIteration, HugeZeroStrideRunAndInvalidEmptyOrders) {
 
 TEST(PreparedIteration, AffinePrefixOverflowFailsBeforeAnyOutputWrite) {
     Tensor tensor(ScalarType::Float32, Shape{2, 2});
-    generate(tensor, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 7.0}), {}));
-    const auto recipe =
-        GenerationRecipe::realOnly(GenerationRecipe::affineIndexRemainder({
-                                       .dimensionCoefficients = {1, -1},
-                                       .offset = std::numeric_limits<int64_t>::max(),
-                                       .positiveDivisor = 7,
-                                   }),
-                                   {});
+    generate(tensor, GenerationRecipe::realOnlyLastDimensionFastest(
+                         GenerationRecipe::constant({.value = 7.0}), 0));
+    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::affineIndexRemainder({
+            .dimensionCoefficients = {1, -1},
+            .offset = std::numeric_limits<int64_t>::max(),
+            .positiveDivisor = 7,
+        }),
+        0);
     EXPECT_THROW(generate(tensor, recipe), std::runtime_error);
     EXPECT_EQ(tensor.loadAs<float>({0, 0}), 7.0f);
 }
@@ -188,13 +186,15 @@ TEST(PreparedIteration, AffinePrefixOverflowFailsBeforeAnyOutputWrite) {
 TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmptyOrders) {
     const Shape shape{2, 3, 4};
     Tensor input(ScalarType::Float32, shape), output(ScalarType::Float32, shape);
-    generate(input, GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), {}));
+    generate(input,
+             GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0));
     const Tensor one = Tensor::scalar(ScalarType::Float32, 1.0f);
     const std::vector<size_t> order{1, 0, 2};
     for (const auto& selection :
-         {OutputSelection::all(order), OutputSelection::strided(1, 3, 5, order),
-          OutputSelection::explicitIndices({1, 7, 19}, order)}) {
-        generate(output, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = -7}), {}));
+         {IndexSelection::all(order), IndexSelection::strided(1, 3, 5, order),
+          IndexSelection::explicitIndices({1, 7, 19}, order)}) {
+        generate(output, GenerationRecipe::realOnlyLastDimensionFastest(
+                             GenerationRecipe::constant({.value = -7}), 0));
         addInto(input, one, output, ScalarType::Float32, selection);
         const auto selected = selection.indices(shape.elementCount());
         for (size_t index = 0; index < shape.elementCount(); ++index) {
@@ -207,9 +207,9 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
     }
     for (const Shape& emptyOrScalar : {Shape{2, 0, 4}, Shape{}}) {
         Tensor tensor(ScalarType::Float32, emptyOrScalar);
-        const std::array<size_t, 3> invalidOrder{0, 0, 2};
-        for (const auto& selection : {OutputSelection::all(invalidOrder),
-                                      OutputSelection::explicitIndices({}, invalidOrder)}) {
+        const std::array<size_t, 2> invalidOrder{0, 1};
+        for (const auto& selection : {IndexSelection::all(invalidOrder),
+                                      IndexSelection::explicitIndices({}, invalidOrder)}) {
             EXPECT_THROW(addInto(tensor, one, tensor, ScalarType::Float32, selection),
                          std::runtime_error);
             EXPECT_THROW(
@@ -220,23 +220,24 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
 }
 
 TEST(PreparedIteration, RecipesAndSelectionsOwnOrdersPassedAsSpans) {
-    static_assert(std::is_same_v<decltype(std::declval<GenerationRecipe>().indexOrder()),
-                                 std::span<const size_t>>);
-    static_assert(std::is_same_v<decltype(std::declval<OutputSelection>().indexOrder()),
-                                 std::span<const size_t>>);
-    const auto recipe = GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), {});
+    static_assert(std::is_same_v<decltype(std::declval<GenerationRecipe>().indexOrder(3)),
+                                 std::vector<size_t>>);
+    static_assert(std::is_same_v<decltype(std::declval<IndexSelection>().indexOrder(3)),
+                                 std::vector<size_t>>);
+    const auto recipe =
+        GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0);
     std::array<size_t, 3> order{2, 1, 0};
     const auto ordered = recipe.withIndexOrder(order);
-    const auto selection = OutputSelection::explicitIndices({1, 7}, order);
+    const auto selection = IndexSelection::explicitIndices({1, 7}, order);
     order = {0, 1, 2};
     const std::array<size_t, 3> expected{2, 1, 0};
-    EXPECT_TRUE(std::ranges::equal(ordered.indexOrder(), expected));
-    EXPECT_TRUE(std::ranges::equal(selection.indexOrder(), expected));
+    EXPECT_TRUE(std::ranges::equal(ordered.indexOrder(3), expected));
+    EXPECT_TRUE(std::ranges::equal(selection.indexOrder(3), expected));
     const auto scopedSelection = [] {
         const std::array<size_t, 3> local{2, 1, 0};
-        return OutputSelection::strided(0, 2, 5, local);
+        return IndexSelection::strided(0, 2, 5, local);
     }();
-    EXPECT_TRUE(std::ranges::equal(scopedSelection.indexOrder(), expected));
+    EXPECT_TRUE(std::ranges::equal(scopedSelection.indexOrder(3), expected));
     const auto tensor = generate(ScalarType::Float32, Shape{2, 3, 4}, ordered);
     EXPECT_EQ(tensor.loadAs<float>({1, 0, 2}), 13.0f);
     const Tensor selected = tensor.copySelectedElements(std::array<size_t, 2>{1, 7}, expected);
@@ -252,8 +253,8 @@ TEST(PreparedIteration, EncodedExponentIntervalSupportsFullIntRange) {
     const auto plan = detail::prepareEncodedExponent(parameters, ScalarType::Float32);
     EXPECT_EQ(plan.lowerExponent, std::numeric_limits<int>::min());
     EXPECT_EQ(plan.exponentCount, uint64_t{1} << 32);
-    const auto recipe =
-        GenerationRecipe::realOnly(GenerationRecipe::randomEncodedExponent(parameters), {});
+    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::randomEncodedExponent(parameters), 0);
     EXPECT_NO_THROW(generate(Tensor(ScalarType::Float32, Shape{64}), recipe));
 }
 

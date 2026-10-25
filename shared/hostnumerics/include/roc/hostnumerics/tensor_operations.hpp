@@ -18,7 +18,7 @@ Tensor add(const Tensor& left, const Tensor& right);
 Tensor add(const Tensor& left, const Tensor& right, ScalarType outputType, ScalarType computeType,
            std::optional<Layout> outputLayout);
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             OutputSelection selection);
+             IndexSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -36,7 +36,7 @@ Tensor subtract(const Tensor& left, const Tensor& right);
 Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection);
+                  IndexSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -54,7 +54,7 @@ Tensor multiply(const Tensor& left, const Tensor& right);
 Tensor multiply(const Tensor& left, const Tensor& right, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection);
+                  IndexSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -72,7 +72,7 @@ Tensor activate(const Tensor& input, ActivationFunction function);
 Tensor activate(const Tensor& input, ActivationFunction function, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
-                  ScalarType computeType, OutputSelection selection);
+                  ScalarType computeType, IndexSelection selection);
 
 inline Tensor absolute(const Tensor& input) {
     return activate(input, AbsoluteActivation{});

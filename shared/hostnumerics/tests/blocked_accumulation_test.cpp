@@ -44,7 +44,7 @@ void testSelectedBlockAccumulatorFamilies() {
     constexpr size_t rows = 32;
     constexpr size_t columns = 32;
     constexpr size_t reductions = 64;
-    const OutputSelection selection = OutputSelection::explicitIndices({0}, {});
+    const IndexSelection selection = IndexSelection::explicitIndicesLastDimensionFastest({0});
 
     const std::vector<float> reducedA(rows * reductions, 0.1f);
     const std::vector<float> reducedB(reductions * columns, 0.1f);
@@ -100,7 +100,7 @@ void testSelectedBlockAccumulatorFamilies() {
 }
 
 void requireOnlySelectedOutputsStored(const roc::hostnumerics::Tensor& output,
-                                      const OutputSelection& selection) {
+                                      const IndexSelection& selection) {
     std::vector<size_t> selected = selection.indices(output.elementCount());
     std::sort(selected.begin(), selected.end());
     selected.erase(std::unique(selected.begin(), selected.end()), selected.end());

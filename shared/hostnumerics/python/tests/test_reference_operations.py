@@ -176,7 +176,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter0=0.0,
             activation_parameter1=0.0,
             output_conversion=hv.OutputConversion.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         pre_activation = values + bias[:, None]
         activated = np.maximum(pre_activation, 0.0)
@@ -208,7 +208,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter1=0.0,
             output_conversion=hv.OutputConversion.Default,
             include_amax=False,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         raw = values * 2.0
         np.testing.assert_array_equal(hv.to_numpy(gated.raw_output, dtype=None), raw)
@@ -222,8 +222,8 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             activation=hv.Activation.Relu,
             include_raw_output=True,
-            output_selection=hv.OutputSelection.explicit_indices(
-                [1, 2], index_order=[]
+            output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
+                [1, 2]
             ),
             activation_application=hv.ActivationApplication.Forward,
             output_scale=complex(1.0, 0.0),
@@ -255,7 +255,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter1=0.0,
             include_raw_output=False,
             include_amax=False,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         np.testing.assert_array_equal(
             hv.to_numpy(saturated.output, dtype=None),
@@ -279,7 +279,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         expected = gradient * (activation_input > 0)
         np.testing.assert_array_equal(hv.to_numpy(result.output, dtype=None), expected)
@@ -298,7 +298,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         coefficient0 = np.float32(0.7978845608028654)
         coefficient1 = np.float32(0.044715)
@@ -396,7 +396,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     output_conversion=hv.OutputConversion.Default,
                     include_raw_output=False,
                     include_amax=False,
-                    output_selection=hv.OutputSelection.all([]),
+                    output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                 )
                 np.testing.assert_allclose(
                     hv.to_numpy(result.output, dtype=None),
@@ -444,7 +444,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     output_conversion=hv.OutputConversion.Default,
                     include_raw_output=False,
                     include_amax=False,
-                    output_selection=hv.OutputSelection.all([]),
+                    output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                 )
                 np.testing.assert_allclose(
                     hv.to_numpy(result.output, dtype=None),
@@ -468,7 +468,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
         )
         expected = 1.0 / (1.0 + np.exp(-values))
         np.testing.assert_allclose(

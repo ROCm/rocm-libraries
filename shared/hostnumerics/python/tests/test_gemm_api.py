@@ -59,7 +59,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -92,7 +92,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                     compute_type_a=None,
                     compute_type_b=None,
                     math_mode=hv.MathMode.Default,
-                    output_selection=hv.OutputSelection.all([]),
+                    output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                     backend=hv.GemmBackend.Automatic,
                     output_conversion=hv.OutputConversion.Default,
                     accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -114,7 +114,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                output_selection=hv.OutputSelection.all([]),
+                output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                 backend=hv.GemmBackend.Automatic,
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -140,7 +140,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -164,7 +164,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                output_selection=hv.OutputSelection.all([]),
+                output_selection=hv.IndexSelection.all_last_dimension_fastest(),
                 backend=hv.GemmBackend.Automatic,
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -197,7 +197,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             alpha=1.0,
             beta=0.0,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -229,7 +229,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -263,7 +263,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -287,7 +287,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.OutputSelection.all([]),
+            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -310,8 +310,8 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
-            output_selection=hv.OutputSelection.explicit_indices(
-                [0, 3], index_order=[]
+            output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
+                [0, 3]
             ),
             alpha=1.0,
             beta=0.0,
@@ -335,8 +335,8 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
-            output_selection=hv.OutputSelection.explicit_indices(
-                [0, 3], index_order=[]
+            output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
+                [0, 3]
             ),
             backend=hv.GemmBackend.Blocked,
             alpha=1.0,
@@ -355,6 +355,8 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         self.assertEqual(
-            hv.OutputSelection.prime_stride(10, 10, 3, index_order=[]).indices(10),
+            hv.IndexSelection.prime_stride_last_dimension_fastest(10, 10, 3).indices(
+                10
+            ),
             [0, 3, 6, 9],
         )

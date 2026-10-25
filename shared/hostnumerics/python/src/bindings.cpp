@@ -17,6 +17,7 @@ NB_MODULE(_hostnumerics, module) {
     roc::hostnumerics::python_bindings::registerGenerationBindings(module);
     roc::hostnumerics::python_bindings::registerMxBindings(module);
     roc::hostnumerics::python_bindings::registerSelectionBindings(module);
+    roc::hostnumerics::python_bindings::registerIndexSelectionBindings(module);
     roc::hostnumerics::python_bindings::registerTensorBindings(module);
     roc::hostnumerics::python_bindings::registerGemmBindings(module);
     roc::hostnumerics::python_bindings::registerComparisonBindings(module);

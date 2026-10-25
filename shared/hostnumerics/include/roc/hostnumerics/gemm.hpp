@@ -51,7 +51,7 @@ struct MatmulOptions {
 // NumPy-style matrix multiplication. The owning form allocates output; the
 // `Into` form writes selected coordinates of caller-owned output.
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                OutputSelection selection, GemmBackend backend);
+                IndexSelection selection, GemmBackend backend);
 Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,
               std::optional<Layout> outputLayout, GemmBackend backend);
 }  // namespace roc::hostnumerics

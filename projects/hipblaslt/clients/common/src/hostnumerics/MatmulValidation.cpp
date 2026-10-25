@@ -20,7 +20,7 @@ namespace hipblaslt::hostnumerics
     using roc::hostnumerics::ComparisonTolerance;
     using roc::hostnumerics::findAllCloseTolerance;
     using roc::hostnumerics::Layout;
-    using roc::hostnumerics::OutputSelection;
+    using roc::hostnumerics::IndexSelection;
     using roc::hostnumerics::ScalarType;
     using roc::hostnumerics::Shape;
     using roc::hostnumerics::Tensor;
@@ -94,7 +94,7 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = specialValueConsistency;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = validation.compareAllClose ? 10 : 0;
-                options.selection                    = OutputSelection::all(order);
+                options.selection                    = IndexSelection::all(order);
                 result.comparison                    = compare(observed, expected, options);
             }
 
@@ -107,7 +107,7 @@ namespace hipblaslt::hostnumerics
                 options.computeUlp                   = true;
                 options.ulpType                      = expected.type();
                 options.maxReportedMismatches        = 0;
-                options.selection                    = OutputSelection::all(order);
+                options.selection                    = IndexSelection::all(order);
                 result.unitsInLastPlace              = compare(observed, expected, options);
             }
 
@@ -119,7 +119,7 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = true;
                 options.maxReportedMismatches        = 0;
-                options.selection = OutputSelection::all(std::vector<size_t>{1, 0});
+                options.selection = IndexSelection::all(std::vector<size_t>{1, 0});
 
                 const size_t batches
                     = expected.shape().rank() == 3 ? expected.shape()[2] : size_t{1};
@@ -129,7 +129,7 @@ namespace hipblaslt::hostnumerics
                     std::vector<size_t> batchOrder(batchExpected.shape().rank());
                     for(size_t axis = 0; axis < batchOrder.size(); ++axis)
                         batchOrder[axis] = batchOrder.size() - 1 - axis;
-                    options.selection = OutputSelection::all(std::move(batchOrder));
+                    options.selection = IndexSelection::all(std::move(batchOrder));
                     const ComparisonReport batchReport
                         = compare(batchView(observed, batch), batchExpected, options);
                     result.relativeFrobeniusError += batchReport.relativeFrobeniusError;
@@ -142,7 +142,7 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = 0;
-                options.selection                    = OutputSelection::all(order);
+                options.selection                    = IndexSelection::all(order);
 
                 constexpr std::array<double, 6> candidates{
                     1e-6,

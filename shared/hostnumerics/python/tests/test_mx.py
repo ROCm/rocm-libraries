@@ -9,12 +9,11 @@ class MxTests(unittest.TestCase):  # noqa: F405
         for dimensions, block_axis in (((64, 3), 0), ((3, 64), 1)):
             with self.subTest(dimensions=dimensions, block_axis=block_axis):
                 data_generation = hv.MxDataGeneration.preserve_range(
-                    real_generation_recipe(
+                    real_generation_recipe_last_dimension_fastest(
                         hv.GenerationRecipe.uniform_real(
                             hv.UniformRealGenerationParameters(-1, 1)
                         ),
                         seed=0,
-                        index_order=(),
                     ),
                     hv.MxRepresentedValueRange(-1, 1),
                 )
@@ -102,12 +101,11 @@ class MxTests(unittest.TestCase):  # noqa: F405
 
     def test_mx_scale_policy_is_independent_of_data_generation(self):
         data_generation = hv.MxDataGeneration.preserve_range(
-            real_generation_recipe(
+            real_generation_recipe_last_dimension_fastest(
                 hv.GenerationRecipe.uniform_real(
                     hv.UniformRealGenerationParameters(-1.0, 1.0)
                 ),
                 seed=0,
-                index_order=(),
             ),
             hv.MxRepresentedValueRange(-1.0, 1.0),
         )

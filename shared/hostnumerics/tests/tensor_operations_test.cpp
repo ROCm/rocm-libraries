@@ -25,7 +25,8 @@ void testTensorOperations() {
         multiply(x, Tensor(2.0f), ScalarType::Float32, ScalarType::Float32, std::nullopt);
     const Tensor scaledY =
         multiply(y, Tensor(-0.5f), ScalarType::Float32, ScalarType::Float32, std::nullopt);
-    addInto(scaledX, scaledY, output, ScalarType::Float32, OutputSelection::all({}));
+    addInto(scaledX, scaledY, output, ScalarType::Float32,
+            IndexSelection::allLastDimensionFastest());
 
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
@@ -40,7 +41,8 @@ void testTensorOperations() {
     }
 
     Tensor yOnlyOutput(ScalarType::Float32, shape);
-    multiplyInto(y, Tensor(3.0f), yOnlyOutput, ScalarType::Float32, OutputSelection::all({}));
+    multiplyInto(y, Tensor(3.0f), yOnlyOutput, ScalarType::Float32,
+                 IndexSelection::allLastDimensionFastest());
     require(yOnlyOutput.loadAs<float>({1, 0, 1}) == 3.0f * y.loadAs<float>({1, 0, 1}),
             "Tensor-scalar multiplication mismatch.");
 
@@ -92,7 +94,7 @@ void testTensorOperations() {
     const Tensor scaledComplexY = multiply(complexY, Tensor(-2.0), ScalarType::ComplexFloat32,
                                            ScalarType::ComplexFloat32, std::nullopt);
     addInto(scaledComplexX, scaledComplexY, complexOutput, ScalarType::ComplexFloat32,
-            OutputSelection::all({}));
+            IndexSelection::allLastDimensionFastest());
     require(complexOutput.loadAs<std::complex<float>>({0}) == std::complex<float>(-7.5f, 4.0f),
             "Complex tensor arithmetic mismatch.");
 
@@ -155,7 +157,7 @@ void testTensorOperations() {
     multiplyInto(
         Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(selectedInputValues)),
         Tensor(1.0f), selectedPackedOutput, ScalarType::Float32,
-        OutputSelection::explicitIndices({1}, {}));
+        IndexSelection::explicitIndicesLastDimensionFastest({1}));
     require(selectedPackedOutput.loadAs<float>({0}) == 0.5f &&
                 selectedPackedOutput.loadAs<float>({1}) == 2.0f &&
                 selectedPackedOutput.loadAs<float>({2}) == 0.5f,
@@ -168,7 +170,8 @@ void testTensorOperations() {
     Tensor subtractionOutput(ScalarType::Float32, Shape{2});
     subtractInto(
         Tensor::copyNativeValues<float>(Shape{2}, std::span<const float>(subtractionInputValues)),
-        Tensor(3.0f), subtractionOutput, ScalarType::Float32, OutputSelection::all({}));
+        Tensor(3.0f), subtractionOutput, ScalarType::Float32,
+        IndexSelection::allLastDimensionFastest());
     require(subtractionOutput.loadAs<float>({0}) == 2.0f &&
                 subtractionOutput.loadAs<float>({1}) == 5.0f,
             "Tensor subtraction-into mismatch.");

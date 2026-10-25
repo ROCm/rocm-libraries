@@ -311,11 +311,10 @@ namespace
         generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
     {
         using namespace roc::hostnumerics;
-        const auto recipe = GenerationRecipe::realOnly(
+        const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
             GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
                                                      .upperUnbiasedExponent = 12,
-                                                     .sourceType            = ScalarType::Float32}),
-            {.seed = seed});
+                                                     .sourceType            = ScalarType::Float32}), seed);
         return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
     }
 

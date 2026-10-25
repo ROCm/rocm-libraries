@@ -25,7 +25,7 @@ namespace blocked_backend_test {
 namespace {
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
-using roc::hostnumerics::OutputSelection;
+using roc::hostnumerics::IndexSelection;
 using roc::hostnumerics::Tensor;
 
 constexpr float untouchedValue = -12345.0f;
@@ -82,11 +82,9 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
     const size_t columns = problem.b.shape()[1];
     Tensor expected = makeOutput(rows, columns, untouchedValue);
     const auto selected = problem.outputSelection.indices(problem.d.elementCount());
+    const auto indexOrder = problem.outputSelection.indexOrder(problem.d.shape().rank());
     for (const size_t linearIndex : selected) {
-        const auto coordinates =
-            problem.outputSelection.indexOrder().empty()
-                ? problem.d.shape().coordinates(linearIndex)
-                : problem.d.shape().coordinates(linearIndex, problem.outputSelection.indexOrder());
+        const auto coordinates = problem.d.shape().coordinates(linearIndex, indexOrder);
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         float accumulation = 0.0f;
@@ -148,7 +146,7 @@ float roundThrough(roc::hostnumerics::ScalarType type, float value) {
 void testReducedPrecisionAccumulators();
 void testSelectedBlockAccumulatorFamilies();
 void requireOnlySelectedOutputsStored(const roc::hostnumerics::Tensor& output,
-                                      const roc::hostnumerics::OutputSelection& selection);
+                                      const roc::hostnumerics::IndexSelection& selection);
 void testSmallEdgeBlock();
 void testExplicitSelectionBlockPlan();
 void testStridedSelectionBlockPlan();

@@ -968,7 +968,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     using roc::hostnumerics::EpilogueOptions;
                     using roc::hostnumerics::Layout;
                     using roc::hostnumerics::matmul;
-                    using roc::hostnumerics::OutputSelection;
+                    using roc::hostnumerics::IndexSelection;
                     using roc::hostnumerics::referenceEpilogueInto;
                     using roc::hostnumerics::ScalarType;
                     using roc::hostnumerics::Shape;
@@ -1013,7 +1013,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     ComparisonOptions comparisonOptions{.absoluteTolerance     = tolerance,
                                                         .relativeTolerance     = 2.0 * tolerance,
                                                         .maxReportedMismatches = 10};
-                    comparisonOptions.selection = OutputSelection::all(std::vector<size_t>{1, 0});
+                    comparisonOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
                     const Layout comparisonLayout(
                         Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}, i3 * stride_d[i]);
                     const auto comparison = roc::hostnumerics::compare(

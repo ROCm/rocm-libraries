@@ -161,11 +161,16 @@ void registerGenerationBindings(nb::module_& module) {
         .def_static("cartesian", &GenerationRecipe::cartesian, "real"_a, "imaginary"_a,
                     "settings"_a)
         .def_prop_ro("seed", &GenerationRecipe::seed)
-        .def_prop_ro("index_order",
-                     [](const GenerationRecipe& recipe) {
-                         const auto order = recipe.indexOrder();
-                         return std::vector<size_t>(order.begin(), order.end());
-                     })
+        .def("index_order", &GenerationRecipe::indexOrder, "rank"_a)
+        .def_static("real_only_last_dimension_fastest",
+                    &GenerationRecipe::realOnlyLastDimensionFastest, "component"_a, "seed"_a)
+        .def_static("replicated_last_dimension_fastest",
+                    &GenerationRecipe::replicatedLastDimensionFastest, "component"_a, "seed"_a)
+        .def_static("cartesian_last_dimension_fastest",
+                    &GenerationRecipe::cartesianLastDimensionFastest, "real"_a, "imaginary"_a,
+                    "seed"_a)
+        .def("with_last_dimension_fastest_index_order",
+             &GenerationRecipe::withLastDimensionFastestIndexOrder)
         .def("with_seed", &GenerationRecipe::withSeed, "seed"_a)
         .def(
             "with_index_order",

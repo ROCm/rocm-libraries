@@ -32,6 +32,10 @@ def real_generation_recipe(
     )
 
 
+def real_generation_recipe_last_dimension_fastest(component, *, seed):
+    return hv.GenerationRecipe.real_only_last_dimension_fastest(component, seed)
+
+
 def encode_fp4_e2m1(value):
     value = np.float32(value)
     sign = 0x8 if np.signbit(value) else 0

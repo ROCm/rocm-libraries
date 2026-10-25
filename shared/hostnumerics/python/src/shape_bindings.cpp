@@ -114,9 +114,9 @@ Python exceptions. Values that cannot be converted to size_t raise TypeError.
             "Select axes in the supplied order, allowing repetition. The resulting "
             "shape must have a representable element count; an empty selection is a scalar.")
         .def(
-            "linear_index",
+            "linear_index_last_dimension_fastest",
             [](const Shape& shape, const std::vector<size_t>& indices) {
-                return shape.linearIndex(indices);
+                return shape.linearIndexLastDimensionFastest(indices);
             },
             "indices"_a, "Convert coordinates to a logical index using ascending axes.")
         .def(
@@ -130,7 +130,7 @@ Convert one coordinate per axis to a logical index, independent of storage strid
 Coordinates always use the original axis order. For Shape([2, 3, 5]), axes 0,
 1, and 2 have extents 2, 3, and 5. Order lists axis numbers from slowest to fastest
 (outermost to innermost loop); its last entry changes fastest. It must be a
-permutation of all axes. Omitting order selects ascending axes (row-major).
+permutation of all axes. Use linear_index_last_dimension_fastest for ascending axes.
 
 For order [1, 2, 0], traversal is equivalent to these three nested loops:
 
@@ -145,16 +145,18 @@ The formula is (i1 * 5 + i2) * 2 + i0. The logical strides in original axis
 order are [1, 10, 2], and coordinates [1, 2, 3] map to index 27.
 
 Other orders for the same shape and coordinates:
-    [0, 1, 2] (default): strides [15, 5, 1], index 28
+    [0, 1, 2]:           strides [15, 5, 1], index 28
     [0, 2, 1]:           strides [15, 1, 3], index 26
     [2, 1, 0]:           strides [1, 2, 6], index 23
 
 Every coordinate must be less than its extent. A shape with a zero extent has
-no valid coordinates. Shape().linear_index([]) returns 0 for its one scalar.
+no valid coordinates. Shape().linear_index([], []) returns 0 for its one scalar.
 )doc")
         .def(
-            "coordinates",
-            [](const Shape& shape, size_t index) { return shape.coordinates(index); },
+            "coordinates_last_dimension_fastest",
+            [](const Shape& shape, size_t index) {
+                return shape.coordinatesLastDimensionFastest(index);
+            },
             "linear_index"_a, "Convert a logical index to coordinates using ascending axes.")
         .def(
             "coordinates",
@@ -168,7 +170,7 @@ Invert linear_index using the same slowest-to-fastest axis order.
 The logical index must lie in [0, element_count). The result always uses the
 original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 3].
 See linear_index for the nested-loop interpretation of order. A shape with a
-zero extent has no valid index; Shape().coordinates(0) returns [] for its scalar.
+zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
 )doc")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
