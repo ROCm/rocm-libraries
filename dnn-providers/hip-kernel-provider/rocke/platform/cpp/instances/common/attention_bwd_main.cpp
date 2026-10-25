@@ -16,10 +16,11 @@
  * This mirrors _emit_main(spec, arch, main_kernel_refusals=False): the
  * recorded resource-gate refusals stay Python-only, so the C entry accepts
  * the RESOURCE_REFUSED specs that Python's public build_attn_bwd_main
- * refuses. _kv_tile and the types it shares with the dense backward shell
- * (_attention_dense_bwd_shell.cpp) are declared in
- * rocke/instance_attention_bwd_main_internal.h, with _kv_tile's dense-shell
- * hooks (mask.static_runs, epilogue=, the dense slab sources).
+ * refuses. _kv_tile, the plumbing and the types it shares with the dense
+ * backward shell (_attention_dense_bwd_shell.cpp) and the unified main kernel
+ * (attention_bwd_unified.cpp) are declared in
+ * rocke/instance_attention_bwd_main_internal.h, with _kv_tile's duck-typed
+ * hooks (mask.static_runs, epilogue=, the q_addr .. v_addr slab sources).
  */
 #include "rocke/instance_attention_bwd.h"
 
@@ -50,81 +51,16 @@
 namespace rocke_attn_bwd
 {
 using namespace main_kernel;
+using namespace main_kernel::plumbing;
 
 namespace
 {
 
-typedef rocke_ir_builder_t B;
-typedef rocke_value_t* V;
-typedef rocke_attn_bwd_iv_t IV;
 typedef rocke_attn_bwd_q_step_inputs_t Inputs;
 typedef rocke_attn_bwd_prefetch_tile_t Tile;
 
-const char* const FENCE = ROCKE_ATTN_BWD_BARRIER_FENCE;
 /* The lowering's flat-work-group-size attribute has a fixed minimum of 64. */
 const int MIN_WG_ATTR = 64;
-
-/* ------------------------------------------------------------- plumbing */
-
-bool live(const B* b)
-{
-    return b != NULL && b->status == ROCKE_OK;
-}
-
-[[noreturn]] void raise_builder(B* b)
-{
-    if(b != NULL && b->status != ROCKE_OK)
-        ckc::raise_status(b->status, b->err);
-    throw ckc::ValueError("attention backward main kernel: a helper failed");
-}
-
-void need(B* b, bool ok)
-{
-    if(!ok || !live(b))
-        raise_builder(b);
-}
-
-V needv(B* b, V v)
-{
-    if(v == NULL || !live(b))
-        raise_builder(b);
-    return v;
-}
-
-void need_st(B* b, rocke_status_t st)
-{
-    if(st != ROCKE_OK || !live(b))
-        raise_builder(b);
-}
-
-void need_err(rocke_status_t st, const rocke_attn_bwd_err_t& e)
-{
-    if(st != ROCKE_OK)
-        ckc::raise_status(e.code, e.msg);
-}
-
-bool eq(const char* a, const char* b)
-{
-    if(a == NULL || b == NULL)
-        return a == b;
-    return strcmp(a, b) == 0;
-}
-
-IV ivv(V v)
-{
-    return rocke_attn_bwd_iv_val(v);
-}
-
-V ci(B* b, int64_t x)
-{
-    return rocke_b_const_i32(b, x);
-}
-
-void sync(B* b)
-{
-    rocke_b_sync_fence(b, FENCE);
-    need(b, true);
-}
 
 bool is_int_type(V v, const rocke_type_t* t)
 {
@@ -149,24 +85,6 @@ V* arena_copy(B* b, const std::vector<V>& vals)
         p[i] = vals[i];
     return p;
 }
-
-/* An scf_if region: enter on construction, leave on destruction. */
-struct IfScope
-{
-    B* b;
-    IfScope(B* bb, V cond)
-        : b(bb)
-    {
-        rocke_if_t f = rocke_b_scf_if(b, cond);
-        if(f.op == NULL)
-            raise_builder(b);
-        rocke_b_region_enter(b, f.then_region);
-    }
-    ~IfScope()
-    {
-        rocke_b_region_leave(b);
-    }
-};
 
 /* (name, init) iter args of scf_for_iter. */
 struct IterArgs
@@ -348,11 +266,6 @@ Kargs declare_main(B* b, const rocke_attn_bwd_spec_t& s, const rocke_type_t* io)
 }
 
 /* ------------------------------------------------------------- the kernel */
-
-int threads_of(const Main& m)
-{
-    return m.geom.waves * m.facts.wave_size;
-}
 
 /* _decode_side(b, s, a, bz, side) */
 rocke_attn_bwd_seq_info_t decode_side(Main& m, const Kargs& a, V bz, bool q)
@@ -1806,7 +1719,6 @@ struct QSteps
     }
 };
 
-/* _kv_tile(b, s, a, step, mask, kt=, ..., ring=, tag=) */
 } // namespace
 
 /* _kv_tile(b, s, a, step, mask, kt=, ..., epilogue=, ring=, tag=) */
@@ -1825,10 +1737,21 @@ void main_kernel::kv_tile(
     V k0 = rocke_b_mul(b, kt, ckn);
     t.k0 = k0;
     V live_ = rocke_b_cmp_lt(b, k0, c.seq_kv.length); /* CTA-uniform */
-    rocke_attn_bwd_row_slab_t k_slab = cta_slab(c, SLAB_K, ivv(c.hk), ivv(k0), true);
-    rocke_attn_bwd_row_slab_t v_slab = cta_slab(c, SLAB_V, ivv(c.hv), ivv(k0), true);
-    need(b, true);
-    need(b, rocke_attn_bwd_tile_step_stage_kv(&c.step, b, &k_slab, &v_slab, k0, live_));
+    if(c.kv_rows_fn)
+    {
+        /* k_addr / v_addr whose slab is only a row source (load_vec) */
+        rocke_attn_bwd_row_source_t k_rows = c.kv_rows_fn(SLAB_K, ivv(c.hk), ivv(k0), true);
+        rocke_attn_bwd_row_source_t v_rows = c.kv_rows_fn(SLAB_V, ivv(c.hv), ivv(k0), true);
+        need(b, true);
+        need(b, rocke_attn_bwd_tile_step_stage_kv_rows(&c.step, b, &k_rows, &v_rows, k0, live_));
+    }
+    else
+    {
+        rocke_attn_bwd_row_slab_t k_slab = cta_slab(c, SLAB_K, ivv(c.hk), ivv(k0), true);
+        rocke_attn_bwd_row_slab_t v_slab = cta_slab(c, SLAB_V, ivv(c.hv), ivv(k0), true);
+        need(b, true);
+        need(b, rocke_attn_bwd_tile_step_stage_kv(&c.step, b, &k_slab, &v_slab, k0, live_));
+    }
 
     if(s.head_pack == 1)
     {
