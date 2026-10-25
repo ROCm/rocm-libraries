@@ -1899,7 +1899,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                       false);
     // NaN until written: an output row the kernel skips fails rather than reading as a zero.
     // A case that expects NaN fills with 7 instead, a value no O or LSE here takes.
-    const bool expectsNan = spec.queryNanPosition.has_value() || spec.keyNanPosition.has_value();
+    const bool expectsNan = spec.queryNanPosition.has_value() || spec.keyNanPosition.has_value()
+                            || (spec.withBias && spec.biasNanRows);
     const float unwritten = expectsNan ? 7.0F : std::numeric_limits<float>::quiet_NaN();
     o.fillWith(T(unwritten));
 
@@ -2067,6 +2068,36 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     {
                         bias.set(b, h, s, j, -std::numeric_limits<float>::infinity());
                         biasQ.set(b, h, s, j, T(-std::numeric_limits<float>::infinity()));
+                    }
+                }
+            }
+        }
+        bias.upload();
+        biasQ.upload();
+    }
+    if(spec.withBias && (spec.biasNanRows || spec.biasNanPastKeys))
+    {
+        // NaN on every key of every third row from the second, a row whose O and LSE are NaN;
+        // and under padding NaN at and past each batch's key length, which the kernels must
+        // mask whatever the bias holds there. That needs a bias of its own per batch.
+        ASSERT_TRUE(!spec.biasNanPastKeys
+                    || (!spec.seqLensKv.empty() && biasDims4[0] == spec.batch));
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        for(int64_t b = 0; b < biasDims4[0]; ++b)
+        {
+            const int64_t firstPast
+                = spec.biasNanPastKeys
+                      ? std::clamp<int64_t>(spec.seqLensKv[static_cast<size_t>(b)], 0, biasDims4[3])
+                      : biasDims4[3];
+            for(int64_t h = 0; h < biasDims4[1]; ++h)
+            {
+                for(int64_t s = 0; s < biasDims4[2]; ++s)
+                {
+                    const bool nanRow = spec.biasNanRows && s % 3 == 1;
+                    for(int64_t j = nanRow ? 0 : firstPast; j < biasDims4[3]; ++j)
+                    {
+                        bias.set(b, h, s, j, nan);
+                        biasQ.set(b, h, s, j, T(nan));
                     }
                 }
             }
@@ -5958,6 +5989,116 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PutsEachBatchsBottomRightMaskAtItsOwnCorner)
     // A bottom-right window, each batch's own.
     spec.leftBound = 8;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+namespace
+{
+
+/// Padded graphs with a bias at every key length mod 8 (the aiw objects read the bias 8 keys at
+/// a time), more queries than keys, a bias of its own per batch that is NaN past each batch's
+/// keys (masked whatever it holds there), rows at the lowest finite value, -inf and NaN, and an
+/// f32 bias. The CDNA vectorized objects read past a batch's bias view here until vendored-kernel
+/// modification 37; the RDNA objects' bias view spans the launch's extents and they read one key
+/// at a time, and the aiw objects read whole vectors only inside a batch's keys (its tail tile
+/// one key at a time), so neither family has that hazard: this pins it.
+void expectPaddedBiasAtEveryKeyLength(RdnaFamily family)
+{
+    using hipdnn_data_sdk::types::bfloat16;
+    SdpaGraphSpec spec;
+    spec.batch = 4;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 296;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.biasDims = {4, 4, 160, 296};
+    spec.biasNanPastKeys = true;
+    struct Lengths
+    {
+        std::vector<int32_t> q;
+        std::vector<int32_t> kv;
+    };
+    std::array<Lengths, 3> lengthSets{Lengths{{129, 70, 160, 3}, {57, 58, 59, 60}},
+                                      Lengths{{129, 70, 160, 3}, {61, 62, 63, 64}},
+                                      Lengths{{160, 1, 100, 159}, {293, 294, 295, 133}}};
+    if(family == RdnaFamily::DECODE)
+    {
+        // A speculative step of up to 3 rows.
+        spec.seqLenQ = 3;
+        spec.biasDims = {4, 4, 3, 296};
+        for(auto& lengths : lengthSets)
+        {
+            lengths.q = {3, 1, 2, 3};
+        }
+    }
+    for(const auto& lengths : lengthSets)
+    {
+        setPadding(spec, lengths.q, lengths.kv);
+        for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+        {
+            for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+            {
+                SCOPED_TRACE("keys " + std::to_string(lengths.kv.front()) + ", head_dim "
+                             + std::to_string(headDim)
+                             + (mask == SdpaMask::NONE ? "" : ", bottom-right"));
+                spec.headDim = headDim;
+                spec.mask = mask;
+                expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+            }
+        }
+    }
+    auto edge = spec;
+    edge.headDim = 128;
+    edge.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    setPadding(edge, lengthSets[1].q, lengthSets[1].kv);
+    {
+        SCOPED_TRACE("rows at the lowest finite value, -inf leading keys");
+        auto rows = edge;
+        rows.biasMasksRows = true;
+        rows.biasNegativeInfinityLeadingKeys = 40;
+        expectSdpaMatchesReference<bfloat16>(rows, BF16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("-inf rows");
+        auto rows = edge;
+        rows.biasNegativeInfinityRows = true;
+        expectSdpaMatchesReference<bfloat16>(rows, BF16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("NaN rows");
+        auto rows = edge;
+        rows.biasNanRows = true;
+        expectSdpaMatchesReference<bfloat16>(rows, BF16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("an f32 bias");
+        auto f32 = edge;
+        f32.biasDataType = DataType::FLOAT;
+        f32.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+        expectSdpaMatchesReference<bfloat16>(f32, BF16_TOLERANCE, family);
+    }
+}
+
+} // namespace
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, PadsWithABiasAtEveryKeyLength)
+{
+    SKIP_IF_NO_DEVICES();
+    expectPaddedBiasAtEveryKeyLength(RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesPaddedBatchesWithABiasAtEveryKeyLength)
+{
+    SKIP_IF_NO_DEVICES();
+    expectPaddedBiasAtEveryKeyLength(RdnaFamily::DECODE);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, PadsWithABiasAtEveryKeyLength)
+{
+    SKIP_IF_NO_DEVICES();
+    expectPaddedBiasAtEveryKeyLength(RdnaFamily::AIW);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, PadsWithABiasASinkAndAGenericHeadDim)

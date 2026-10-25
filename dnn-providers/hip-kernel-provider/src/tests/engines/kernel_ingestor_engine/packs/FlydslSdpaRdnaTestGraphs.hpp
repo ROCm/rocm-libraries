@@ -278,6 +278,13 @@ struct SdpaGraphSpec
     /// Every third query row's bias is -inf on every key, a row no key reaches (device
     /// values, both device harnesses).
     bool biasNegativeInfinityRows = false;
+    /// Every third query row from the second gets a NaN bias on every key, so the row's O and
+    /// LSE are NaN where it reaches a key (device values, both device harnesses).
+    bool biasNanRows = false;
+    /// Under padding, every batch's bias at and past its key length is NaN on every row: keys
+    /// past a batch's length are masked whatever the bias holds there. The bias must not be
+    /// broadcast over the batch (device values, both device harnesses).
+    bool biasNanPastKeys = false;
     bool withDropout = false;
     /// Per-batch query and key lengths (one per batch), each a tensor the graph carries when
     /// set: INT32 [B, 1, 1, 1] unless overridden below. With paddingMask, cuDNN's padding.

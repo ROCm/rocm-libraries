@@ -7,6 +7,7 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -2197,6 +2198,14 @@ std::vector<CdnaCase> cdnaDropoutAccepts()
              s.withBias = true;
              s.biasDataType = DataType::FLOAT;
          })},
+        // And under padding, where the bias builds read the bias as the vectorized objects
+        // do (vendored-kernel modification 37), at any key length per batch.
+        {"WithABiasUnderPadding", with([](SdpaGraphSpec& s) {
+             s.batch = 2;
+             setPadding(s, {256, 3}, {256, 41});
+             s.withBias = true;
+             s.biasDataType = s.dataType;
+         })},
     };
 }
 
@@ -2267,12 +2276,6 @@ std::vector<SdpaFieldDecline> cdnaDropoutDeclines()
     });
     // The dropout objects add no sink yet.
     add("WithASink", [](SdpaGraphSpec& s) { s.withSink = true; });
-    add("WithABiasUnderPadding", [](SdpaGraphSpec& s) {
-        s.batch = 2;
-        setPadding(s, {256, 3}, {256, 40});
-        s.withBias = true;
-        s.biasDataType = s.dataType;
-    });
     add("WithABiasAndASink", [](SdpaGraphSpec& s) {
         s.withBias = true;
         s.biasDataType = s.dataType;
@@ -2464,19 +2467,23 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsADroppingGraphWithABiasOnTheDropoutBiasO
     auto f32Bias = dropping;
     f32Bias.biasDataType = DataType::FLOAT;
     EXPECT_FALSE(cdnaAdmits(f32Bias, dropoutBias));
-    // Not under padding: there a bias is read one key at a time (a batch's key length need
-    // not fill the vectorized objects' 4-key runs), and no dropout object reads it so.
+    // Under padding too, at a key length no multiple of the 4-key runs (vendored-kernel
+    // modification 37), and not on the plain dropout object.
     auto padded = dropping;
     setPadding(padded, {256, 100}, {256, 77});
     padded.batch = 2;
-    EXPECT_FALSE(cdnaGraphMatch(padded).has_value());
+    ASSERT_TRUE(cdnaGraphMatch(padded).has_value());
+    EXPECT_TRUE(cdnaAdmits(padded, dropoutBias));
+    EXPECT_FALSE(cdnaAdmits(padded, makeCdnaDropoutKernel()));
 }
 
-TEST(TestFlydslSdpaCdnaKernelMatch, RunsAPaddedGraphsBiasOnTheStridedObjects)
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAPaddedGraphsBiasOnTheVectorizedObjects)
 {
     // Under padding a batch's key length need not be a multiple of the vectorized objects'
-    // 4-key runs, whose last run of the last real row would read as zero: the bias runs on
-    // the strided objects, sink included. Dense, the vectorized object serves it.
+    // 4-key runs: their last real row reads the bias up to the launch's key length
+    // (vendored-kernel modification 37), so they serve it as they do dense, sink included,
+    // and the strided objects still do. A bias the vectorized objects cannot read (f32)
+    // stays on the strided ones.
     auto padded = cdnaPaddedSpec();
     padded.withBias = true;
     padded.biasDataType = padded.dataType;
@@ -2488,10 +2495,17 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsAPaddedGraphsBiasOnTheStridedObjects)
     auto strided = vectorized;
     strided.metadata["bias_kstrided"] = int64_t{1};
     EXPECT_TRUE(cdnaAdmits(dense, vectorized));
-    EXPECT_FALSE(cdnaAdmits(padded, vectorized));
+    EXPECT_TRUE(cdnaAdmits(padded, vectorized));
     EXPECT_TRUE(cdnaAdmits(padded, strided));
+    auto f32 = padded;
+    f32.biasDataType = DataType::FLOAT;
+    EXPECT_FALSE(cdnaAdmits(f32, vectorized));
+    EXPECT_TRUE(cdnaAdmits(f32, strided));
     padded.withSink = true;
+    auto vectorizedSink = vectorized;
+    vectorizedSink.metadata["has_sink"] = int64_t{1};
     strided.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(cdnaAdmits(padded, vectorizedSink));
     EXPECT_TRUE(cdnaAdmits(padded, strided));
 }
 
@@ -2634,7 +2648,9 @@ struct CdnaHostOperands
 
 /// A CDNA launch's RNG dump (FlydslSdpaRngDumpTestSupport.hpp): the oracle's mask bit for bit at
 /// every element, padded rows and keys past a batch's length included, with hipDNN's keep-rate
-/// check; and O as hipDNN's CPU reference computes it with the dump as its explicit mask.
+/// check; and O as hipDNN's CPU reference computes it with the dump as its explicit mask. With
+/// a bias the dump alone: that reference adds none, and the harness checks O against the
+/// oracle's mask and the bias.
 template <typename T>
 void expectCdnaRngDump(const RngDumpReferenceProblem& reference,
                        const std::vector<float>& dumped,
@@ -2645,6 +2661,10 @@ void expectCdnaRngDump(const RngDumpReferenceProblem& reference,
     using Host = CdnaHostOperands<T>;
     expectRngDumpIsTheOracleMask(
         dumped, reference.extents, reference.p, spec.dropoutSeed, spec.dropoutOffset);
+    if(spec.withBias)
+    {
+        return;
+    }
     expectOutputIsTheReferenceUnderTheDump(
         reference,
         dumped,
@@ -2661,6 +2681,42 @@ void expectCdnaRngDump(const RngDumpReferenceProblem& reference,
             return Host::at(host.o, host.oStrides, 0, b, h, s, e);
         },
         tolerance);
+}
+
+/// NaN over the harness's bias values at @p biasOffset (b, h, s, j), within @p extents [B, H, Sq,
+/// Skv]: on every key of every third row from the second (biasNanRows), a row whose O and LSE are
+/// NaN; and under padding at and past each batch's key length (biasNanPastKeys), which the
+/// kernels must mask whatever the bias holds there; that needs a bias of its own per batch
+/// (@p biasDims as the graph declares it).
+template <typename BiasOffset>
+void writeCdnaBiasNans(const SdpaGraphSpec& spec,
+                       const std::vector<int64_t>& biasDims,
+                       const std::array<int64_t, 4>& extents,
+                       BiasOffset biasOffset,
+                       std::vector<float>& biasValues)
+{
+    const auto [b, h, s, skv] = extents;
+    ASSERT_TRUE(!spec.biasNanPastKeys
+                || (!spec.seqLensKv.empty() && biasDims.size() == 4 && biasDims[0] == b));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for(int64_t bi = 0; bi < b; ++bi)
+    {
+        const int64_t firstPast
+            = spec.biasNanPastKeys
+                  ? std::clamp<int64_t>(spec.seqLensKv[static_cast<size_t>(bi)], 0, skv)
+                  : skv;
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t si = 0; si < s; ++si)
+            {
+                const bool nanRow = spec.biasNanRows && si % 3 == 1;
+                for(int64_t j = nanRow ? 0 : firstPast; j < skv; ++j)
+                {
+                    biasValues[biasOffset(bi, hi, si, j)] = nan;
+                }
+            }
+        }
+    }
 }
 
 /// The sink logits a CDNA case binds, one per query head (none without a sink): random values
@@ -3072,6 +3128,10 @@ void expectCandidatesMatchReference(const MatchContext& context,
             }
         }
     }
+    if(spec.withBias && (spec.biasNanRows || spec.biasNanPastKeys))
+    {
+        writeCdnaBiasNans(spec, biasDims, {b, h, s, skv}, biasOffset, biasValues);
+    }
     void* biasDevice = nullptr;
     if(spec.withBias)
     {
@@ -3191,7 +3251,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
     const RngDumpExtents dumpExtents{b, h, s, skv};
     if(spec.withRngDump)
     {
-        ASSERT_FALSE(packed || spec.withBias || spec.withSink || spec.packedQkv);
+        ASSERT_FALSE(packed || spec.withSink || spec.packedQkv);
         buffers.push_back({FLYDSL_SDPA_RDNA_RNG_DUMP_UID, nullptr});
     }
 
@@ -3635,9 +3695,11 @@ void expectCandidatesMatchReference(const MatchContext& context,
             << "padded rows not O = 0 and LSE = -inf, last at " << wherePadded;
 
         // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
-        // the bias, the band and padding the graph has. Not packed, dropped or NaN: the
+        // the bias, the band and padding the graph has; and a bias under padding
+        // (vendored-kernel modification 37), sink or not. Not packed, dropped or NaN: the
         // reference's packed form, dropout and NaN rows are checked above.
-        if(spec.withSink && !packed && !drops && !spec.queryNanPosition && !spec.keyNanPosition)
+        if((spec.withSink || (padded && spec.withBias)) && !packed && !drops
+           && !spec.queryNanPosition && !spec.keyNanPosition && !spec.biasNanRows)
         {
             SdpaCpuReferenceProblem reference{b,
                                               h,
@@ -5161,10 +5223,10 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
     spec.biasDataType = DataType::FLOAT;
     spec.withSink = false;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
-    // A bias the vectorized objects would read dense (a row pitch of 296), over batches whose
-    // key lengths are no multiple of 4 and that have more queries than keys: under padding it
-    // runs on the strided objects, so the last real row's final keys keep their bias. With a
-    // sink too.
+    // A bias the vectorized objects read (a row pitch of 296), over batches whose key lengths
+    // are no multiple of 4 and that have more queries than keys: the last real row's final keys
+    // keep their bias on the vectorized objects (vendored-kernel modification 37) and on the
+    // strided ones. With a sink too.
     spec.seqLenKv = 296;
     spec.biasDataType = spec.dataType;
     spec.seqLensQ = {300, 129, 7};
@@ -5173,6 +5235,98 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
     spec.headDim = 64;
     spec.withSink = true;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns)
+{
+    // Under padding the vectorized bias objects read the last real row's bias up to the
+    // launch's key length (vendored-kernel modification 37). Before it that row's final 4-key
+    // run straddled the batch's bias view and read as zero whenever the batch's key length was
+    // no multiple of 4. Here: every key length mod 4 and mod 8, more queries than keys, keys
+    // across a KV tile, a bias of its own per batch that is NaN past each batch's keys (masked
+    // whatever it holds there), and rows at the lowest finite value, -inf and NaN. Every staged
+    // object the matcher admits runs (vectorized and strided), against the harness's reference
+    // and, but for NaN rows, hipDNN's CPU reference.
+    auto spec = cdnaSpec();
+    spec.batch = 4;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 296;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.biasDims = {4, 4, 160, 296};
+    spec.biasNanPastKeys = true;
+    struct Lengths
+    {
+        std::vector<int32_t> q;
+        std::vector<int32_t> kv;
+    };
+    const std::array<Lengths, 3> lengthSets{Lengths{{129, 70, 160, 3}, {57, 58, 59, 60}},
+                                            Lengths{{129, 70, 160, 3}, {61, 62, 63, 64}},
+                                            Lengths{{160, 1, 100, 159}, {293, 294, 295, 133}}};
+    for(const auto& lengths : lengthSets)
+    {
+        setPadding(spec, lengths.q, lengths.kv);
+        for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+        {
+            for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+            {
+                SCOPED_TRACE("keys " + std::to_string(lengths.kv.front()) + ", head_dim "
+                             + std::to_string(headDim)
+                             + (mask == SdpaMask::NONE ? "" : ", bottom-right"));
+                spec.headDim = headDim;
+                spec.mask = mask;
+                expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            }
+        }
+    }
+    auto edge = spec;
+    edge.headDim = 128;
+    setPadding(edge, lengthSets[1].q, lengthSets[1].kv);
+    for(const auto mask : {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        edge.mask = mask;
+        {
+            SCOPED_TRACE("rows at the lowest finite value, -inf leading keys");
+            auto rows = edge;
+            rows.biasMasksRows = true;
+            rows.biasNegativeInfinityLeadingKeys = 40;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+        {
+            SCOPED_TRACE("-inf rows");
+            auto rows = edge;
+            rows.biasNegativeInfinityRows = true;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+        {
+            SCOPED_TRACE("NaN rows");
+            auto rows = edge;
+            rows.biasNanRows = true;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+    }
+    {
+        // The bucket objects, f16, and a sink (the vectorized sink-and-bias objects).
+        SCOPED_TRACE("head_dim 80, f16");
+        auto bucket = edge;
+        bucket.headDim = 80;
+        bucket.dataType = DataType::HALF;
+        bucket.biasDataType = DataType::HALF;
+        expectCdnaMatchesReference(bucket, BF16_TOLERANCE);
+        SCOPED_TRACE("a sink");
+        auto sink = edge;
+        sink.headDim = 64;
+        sink.withSink = true;
+        sink.biasMasksRows = true;
+        expectCdnaMatchesReference(sink, BF16_TOLERANCE);
+        SCOPED_TRACE("head_dim 256");
+        auto wide = edge;
+        wide.headDim = 256;
+        expectCdnaMatchesReference(wide, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAFloatSink)
@@ -5403,6 +5557,42 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithABias)
     {
         SCOPED_TRACE("the mask through O");
         expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+    // Under padding (vendored-kernel modification 37): key lengths no multiple of 4, a batch
+    // with more queries than keys, one with no query, a bias of its own per batch that is NaN
+    // past each batch's keys; the full output, then the mask bit for bit through O and the RNG
+    // dump.
+    auto padded = cdnaSpec();
+    padded.batch = 3;
+    padded.heads = 8;
+    padded.kvHeads = 2;
+    padded.seqLenQ = 300;
+    padded.seqLenKv = 296;
+    padded.withBias = true;
+    padded.biasDataType = DataType::BFLOAT16;
+    padded.biasDims = {3, 8, 300, 296};
+    padded.biasNanPastKeys = true;
+    padded.stats = SdpaStats::LSE;
+    padded.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    setPadding(padded, {300, 129, 0}, {295, 63, 200});
+    setDropout(padded, 0.1F, 1234U, 77U);
+    {
+        SCOPED_TRACE("under padding");
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+        padded.mask = SdpaMask::NONE;
+        padded.headDim = 64;
+        padded.biasMasksRows = true;
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
+    auto paddedMask = mask;
+    paddedMask.batch = 3;
+    paddedMask.biasDims = {3, 8, 64, 128};
+    paddedMask.biasNanPastKeys = true;
+    paddedMask.withRngDump = true;
+    setPadding(paddedMask, {64, 33, 0}, {127, 61, 128});
+    {
+        SCOPED_TRACE("under padding, the mask through O and the RNG dump");
+        expectCdnaMatchesReference(paddedMask, BF16_TOLERANCE);
     }
 }
 
