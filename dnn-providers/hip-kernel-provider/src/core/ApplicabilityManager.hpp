@@ -8,11 +8,14 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 
 #include "ApplicabilityPool.hpp"
+#include "GraphSchema.hpp"
 #include "Handle.hpp"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -56,16 +59,31 @@ public:
     /// pool must outlive every getApplicableEngineIds call.
     explicit ApplicabilityManager(ApplicabilityPool& pool);
 
-    /// Hides the base: the manager tracks which engines are staged. Register through this type.
-    void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {});
+    /// Hides the base: the manager tracks which engines are staged and the newest graph schema
+    /// each understands (GraphSchema.hpp; the provider baseline unless the engine opts in).
+    /// Register through this type.
+    void addEngine(std::unique_ptr<Engine> engine,
+                   std::string_view name = {},
+                   const hipdnn_data_sdk::utilities::Version& maxGraphSchema
+                   = providerBaselineGraphSchema());
 
     /// Same ids, in the same order, as the base class's loop, and an engine that throws is
-    /// skipped the same way: it is inapplicable and the others are still reported.
+    /// skipped the same way: it is inapplicable and the others are still reported. But for the
+    /// provider's schema guard: an engine whose declared schema is below the graph's floor
+    /// (graphSchemaFloor) declines it without running.
     std::vector<int64_t> getApplicableEngineIds(Handle& handle, const IGraph& opGraph);
 
     std::size_t stagedEngineCount() const noexcept;
 
+    /// The newest graph schema the engine @p engineId was registered as understanding.
+    hipdnn_data_sdk::utilities::Version maxGraphSchema(int64_t engineId) const;
+
 private:
+    /// Whether the engine @p engineId understands a graph whose floor is @p floor.
+    bool understands(int64_t engineId, const hipdnn_data_sdk::utilities::Version& floor) const;
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::utilities::Version> _maxGraphSchema;
+
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     using StagedEngine = hipdnn_plugin_sdk::ingestor::IStagedApplicability<Handle>;
 

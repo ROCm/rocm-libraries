@@ -447,13 +447,14 @@ field the schema added up to it is gated:
 | 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
 
 `TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
-fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **What still
-stands between a ragged graph and these engines:** the provider itself declares engine
-plugin API 1.2.0 (`src/core/PluginPublic.cpp`), and hipDNN's backend skips a plugin below a
-graph's floor, so through the backend no hip-kernel-provider engine receives a ragged graph
-yet. Raising that is a provider-wide change: the non-ingestor engines (`asm_sdpa`,
-`hip_mlops`, `hip_flash2`) would then receive ragged and aligned graphs with no version gate
-of their own.
+fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **Through
+hipDNN's backend:** the provider declares engine plugin API 1.4.0, the SDK's newest
+(`src/core/PluginPublic.cpp`), so the backend routes it ragged graphs; its schema guard
+(`src/core/GraphSchema.hpp`) still declines a graph past 1.2.0 for every engine that has not
+opted in (`asm_sdpa`, `hip_mlops`, `hip_flash2`, rocKE, the other ingestor engines), and the
+FlyDSL SDPA engines opt in through their UEDs (`TestContainer.PinsEveryEnginesDeclaredGraphSchema`).
+The reference branch's four BSHD ragged bundles pass end to end on these engines against
+their golden tensors.
 
 ### 5.3 Against common SDPA feature requirements
 

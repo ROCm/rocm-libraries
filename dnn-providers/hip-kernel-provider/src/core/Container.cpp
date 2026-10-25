@@ -154,7 +154,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                                                  << error.what());
                          return nullptr;
                      }
-                 }});
+                 },
+                 // The schema its matchers claim; the plan builder enforces it too.
+                 set.engine.sdkVersion});
         }
 #endif
 
@@ -230,7 +232,8 @@ Container::Container()
         // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
-            _engineManager->addEngine(std::move(engine), engineDefinition.name);
+            _engineManager->addEngine(
+                std::move(engine), engineDefinition.name, engineDefinition.maxGraphSchema);
         }
     }
 }

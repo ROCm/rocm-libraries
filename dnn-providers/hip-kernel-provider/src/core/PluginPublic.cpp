@@ -13,8 +13,21 @@ using namespace hip_kernel_provider::core;
 #define HIPDNN_PLUGIN_HANDLE_TYPE Handle
 #define HIPDNN_PLUGIN_CONTEXT_TYPE Context
 
-#define HIPDNN_PLUGIN_API_VERSION "1.2.0"
+// hipDNN's newest engine plugin API (PluginVersionConstants.hpp K_MAX_SUPPORTED_API_VERSION,
+// asserted below), so the backend routes the provider every graph the SDK can express. Which of
+// them an engine sees is the provider's schema guard's to say (GraphSchema.hpp): an engine that
+// has not opted in still declines any graph needing more than providerBaselineGraphSchema().
+#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
+
+#include <string_view>
+
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+
+static_assert(std::string_view(HIPDNN_PLUGIN_API_VERSION)
+                  == hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION,
+              "the SDK defines another engine plugin API: review the provider's schema guard "
+              "(GraphSchema.hpp) and the engines that opt in, then raise this with it");
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
