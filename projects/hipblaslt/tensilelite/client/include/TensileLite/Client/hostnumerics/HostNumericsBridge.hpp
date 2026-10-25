@@ -6,6 +6,7 @@
 // TensileLite client-private adapter.
 
 #include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/detail/prime.hpp>
 #include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/operation_types.hpp>
@@ -362,7 +363,7 @@ namespace TensileLite::Client
             return OutputSelection::all(order);
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
-        const auto stride = roc::hostnumerics::detail::getNextPrimeStride(candidate);
+        const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
         if(!stride)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(

@@ -37,10 +37,11 @@ void testOutputSelection() {
 
     // SIZE_MAX is composite for the supported 32/64-bit size_t widths. The
     // candidate cannot advance to another odd value without wrapping.
-    require(!detail::getNextPrimeStride(std::numeric_limits<size_t>::max()).has_value(),
+    require(!detail::getNextPrime(std::numeric_limits<size_t>::max()).has_value(),
             "Prime-stride overflow did not return a failure.");
-    requireError([] { (void)detail::nextPrimeStride(std::numeric_limits<size_t>::max()); },
-                 "Terminal prime-stride overflow did not throw a generic error.");
+    requireError(
+        [] { (void)OutputSelection::primeStride(2, std::numeric_limits<size_t>::max(), 1, {}); },
+        "Terminal prime-stride overflow did not throw.");
     const auto prime = OutputSelection::primeStride(10, 10, 3, {}).indices(10);
     require(prime == std::vector<size_t>({0, 3, 6, 9}), "Prime-stride output selection mismatch.");
     require(OutputSelection::primeStride(20, 9, 1, {}).indices(20) == std::vector<size_t>({0, 11}),
