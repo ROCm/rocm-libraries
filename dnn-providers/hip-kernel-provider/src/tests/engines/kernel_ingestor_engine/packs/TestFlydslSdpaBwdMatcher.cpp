@@ -34,6 +34,7 @@ namespace
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 using flydsl_sdpa_bwd::Decline;
+using flydsl_sdpa_bwd::MatchOptions;
 using flydsl_sdpa_bwd::NO_UID;
 using flydsl_sdpa_bwd::NO_WINDOW;
 using flydsl_sdpa_bwd::ScaleSource;
@@ -45,10 +46,13 @@ using flydsl_sdpa_bwd::Strides;
 
 constexpr float TWO_POW_20 = 1048576.0F;
 
+/// The options of an engine that serves fp32.
+constexpr MatchOptions ACCEPT_FLOAT{true};
+
 /// The problem the matcher computed, or a failure carrying its decline.
-std::optional<SdpaBwdProblem> accepted(const SdpaBwdSpec& spec)
+std::optional<SdpaBwdProblem> accepted(const SdpaBwdSpec& spec, const MatchOptions& options = {})
 {
-    const auto result = matchSdpaBwdSpec(spec);
+    const auto result = matchSdpaBwdSpec(spec, options);
     if(const auto* decline = std::get_if<Decline>(&result))
     {
         ADD_FAILURE() << "declined [" << decline->cause << "]: " << decline->detail;
@@ -57,9 +61,12 @@ std::optional<SdpaBwdProblem> accepted(const SdpaBwdSpec& spec)
     return std::get<SdpaBwdProblem>(result);
 }
 
-void declined(const SdpaBwdSpec& spec, std::string_view cause, std::string_view detail)
+void declined(const SdpaBwdSpec& spec,
+              std::string_view cause,
+              std::string_view detail,
+              const MatchOptions& options = {})
 {
-    const auto result = matchSdpaBwdSpec(spec);
+    const auto result = matchSdpaBwdSpec(spec, options);
     const auto* decline = std::get_if<Decline>(&result);
     if(decline == nullptr)
     {
@@ -275,6 +282,53 @@ TEST(TestFlydslSdpaBwdMatcher, DT2FloatDeclines)
     EXPECT_TRUE(accepted(baseline()));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, DT2FloatIsServedOnlyWhenTheEngineOptsIn)
+{
+    const auto half = accepted(baseline());
+    ASSERT_TRUE(half.has_value());
+    EXPECT_EQ(half->elementBytes, 2U);
+    SdpaBwdSpec bf16;
+    bf16.dtype = data_objects::DataType::BFLOAT16;
+    const auto bfloat = accepted(bf16, ACCEPT_FLOAT);
+    ASSERT_TRUE(bfloat.has_value());
+    EXPECT_EQ(bfloat->elementBytes, 2U);
+
+    declined(fp32Spec(), "data_type", "Q (uid 1) is FLOAT, not f16/bf16");
+    const auto problem = accepted(fp32Spec(), ACCEPT_FLOAT);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->dtype, data_objects::DataType::FLOAT);
+    EXPECT_EQ(problem->elementBytes, 4U);
+    expectStrides(problem->q, 8192, 1024, 64);
+
+    // One dtype on every tensor, bias and dBias included; FP8 stays declined.
+    declined(fp32Spec().withEdit(
+                 [](SdpaBwdGraph& g) { g.tensor("dk").dtype = data_objects::DataType::HALF; }),
+             "data_type",
+             "dK (uid 8) is HALF, but Q is FLOAT",
+             ACCEPT_FLOAT);
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { g.tensor("v").dtype = data_objects::DataType::FLOAT; }),
+             "data_type",
+             "V (uid 3) is FLOAT, but Q is HALF",
+             ACCEPT_FLOAT);
+    SdpaBwdSpec fp8;
+    fp8.dtype = data_objects::DataType::FP8_E4M3;
+    declined(fp8, "data_type", "FP8_E4M3", ACCEPT_FLOAT);
+
+    const auto withBias = fp32Spec().withEdit([](SdpaBwdGraph& g) {
+        addBias(g);
+        addDbias(g);
+    });
+    const auto biased = accepted(withBias, ACCEPT_FLOAT);
+    ASSERT_TRUE(biased.has_value());
+    EXPECT_EQ(biased->dbiasUid, sdpa_bwd_uid::DBIAS);
+    declined(fp32Spec().withEdit(
+                 [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::HALF; }),
+             "attn_mask",
+             "bias (uid 11) is HALF, but Q is FLOAT",
+             ACCEPT_FLOAT);
+}
+
 TEST(TestFlydslSdpaBwdMatcher, DT3Fp8Declines)
 {
     SdpaBwdSpec fp8;
@@ -442,6 +496,81 @@ TEST(TestFlydslSdpaBwdMatcher, DT9SlabAbove32BitByteOffsetsDeclines)
     declined(withBiasStride(134217728, true), "layout", "dBias (uid 12) per-head slab");
     EXPECT_TRUE(accepted(withBiasStride(1048576, false)));
     EXPECT_TRUE(accepted(withBiasStride(1048576, true)));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DT8Fp32HeadDimNotAMultipleOf4NeedsRowStrideOfThePaddedWidth)
+{
+    // A FLOAT vector is 4 elements: D = 60 needs no slack, D = 61 needs rows 64 apart.
+    SdpaBwdSpec dim60 = fp32Spec();
+    dim60.headDimQk = 60;
+    dim60.headDimV = 60;
+    const auto problem = accepted(dim60, ACCEPT_FLOAT);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->q.seq, 60);
+    // 60 is no multiple of 8, so the same strides decline on f16 (LY-3).
+    SdpaBwdSpec half60 = baseline();
+    half60.headDimQk = 60;
+    half60.headDimV = 60;
+    EXPECT_TRUE(accepted(half60));
+    declined(half60.withEdit(
+                 [](SdpaBwdGraph& g) { g.tensor("q").strides = {8 * 16 * 60, 16 * 60, 60, 1}; }),
+             "layout",
+             "multiple of 8 elements");
+
+    SdpaBwdSpec dim61 = fp32Spec();
+    dim61.headDimQk = 61;
+    dim61.headDimV = 61;
+    const auto padded = accepted(dim61, ACCEPT_FLOAT);
+    ASSERT_TRUE(padded.has_value());
+    EXPECT_EQ(padded->q.seq, 64);
+    declined(dim61.withEdit(
+                 [](SdpaBwdGraph& g) { g.tensor("q").strides = {8 * 16 * 60, 16 * 60, 60, 1}; }),
+             "layout",
+             "Q (uid 1) head dim 61 is not a multiple of 4 and its smallest row stride 60 is "
+             "below the padded width 64",
+             ACCEPT_FLOAT);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, LY3Fp32StrideOfANonUnitAxisNeedsAMultipleOf4)
+{
+    const auto withQRowStride = [](const SdpaBwdSpec& spec, int64_t rowStride) {
+        return spec.withEdit([rowStride](SdpaBwdGraph& g) {
+            g.tensor("q").strides = {8 * 16 * rowStride, 16 * rowStride, rowStride, 1};
+        });
+    };
+    EXPECT_TRUE(accepted(withQRowStride(fp32Spec(), 68), ACCEPT_FLOAT));
+    declined(withQRowStride(fp32Spec(), 66),
+             "layout",
+             "Q (uid 1) stride 66 on axis 2 (extent 16) is not a non-negative multiple of 4 "
+             "elements",
+             ACCEPT_FLOAT);
+    declined(withQRowStride(baseline(), 68), "layout", "multiple of 8 elements");
+    EXPECT_TRUE(accepted(withQRowStride(baseline(), 72)));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DT9Fp32SlabIsBoundedByTheByteOffsetAtFourBytesPerElement)
+{
+    // 15 rows at the stride plus the 64-element row: 4-byte elements reach 2^31 bytes at half
+    // the stride 2-byte elements do, so 35791392 serves f16 and declines FLOAT.
+    const auto withQStride = [](const SdpaBwdSpec& spec, int64_t seqStride) {
+        return spec.withEdit(
+            [seqStride](SdpaBwdGraph& g) { g.tensor("q").strides[2] = seqStride; });
+    };
+    EXPECT_TRUE(accepted(withQStride(fp32Spec(), 35791388), ACCEPT_FLOAT));
+    declined(withQStride(fp32Spec(), 35791392),
+             "layout",
+             "Q (uid 1) per-head slab of 16 rows at stride 35791392 exceeds the 32-bit byte offset "
+             "limit",
+             ACCEPT_FLOAT);
+    EXPECT_TRUE(accepted(withQStride(baseline(), 35791392)));
+
+    const auto withBiasStride = [](int64_t seqStride) {
+        return fp32Spec().withEdit(
+            [seqStride](SdpaBwdGraph& g) { addBias(g).strides[2] = seqStride; });
+    };
+    // 15 rows at the stride plus the 16-key row, at 4 bytes each.
+    EXPECT_TRUE(accepted(withBiasStride(35791392), ACCEPT_FLOAT));
+    declined(withBiasStride(35791408), "layout", "bias (uid 11) per-head slab", ACCEPT_FLOAT);
 }
 
 TEST(TestFlydslSdpaBwdMatcher, SH1ShapeDisagreementDeclines)
@@ -656,6 +785,29 @@ TEST(TestFlydslSdpaBwdMatcher, SS1PackedStatsInEitherOrderAcceptAndOtherStridesD
     }),
              "layout",
              "stats (uid 6) is BFLOAT16, not FLOAT");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SS3StatsAlignmentBelow16BytesDeclines)
+{
+    EXPECT_TRUE(
+        accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").alignment = 16; })));
+    EXPECT_TRUE(
+        accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").alignment = 32; })));
+    for(const int64_t alignment : {4, 8, 24})
+    {
+        SCOPED_TRACE(alignment);
+        declined(baseline().withEdit(
+                     [alignment](SdpaBwdGraph& g) { g.tensor("stats").alignment = alignment; }),
+                 "operand",
+                 "stats (uid 6) declares alignment " + std::to_string(alignment) + " bytes");
+    }
+    EXPECT_TRUE(
+        accepted(fp32Spec().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").alignment = 16; }),
+                 ACCEPT_FLOAT));
+    declined(fp32Spec().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").alignment = 8; }),
+             "operand",
+             "stats (uid 6) declares alignment 8 bytes",
+             ACCEPT_FLOAT);
 }
 
 TEST(TestFlydslSdpaBwdMatcher, SS1StatsSpanOfABatchAbove32BitByteOffsetsDeclines)
@@ -1054,6 +1206,40 @@ TEST(TestFlydslSdpaBwdMatcher, PV4SeqLenOtherThanInt32Declines)
     })));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, PV11SeqLenMustBeDenseAndAlignedToItsElementSize)
+{
+    for(const char* tensor : {"seq_len_q", "seq_len_kv"})
+    {
+        SCOPED_TRACE(tensor);
+        const std::string name = tensor;
+        const auto withAlignment = [name](int64_t alignment) {
+            return baseline().withEdit([name, alignment](SdpaBwdGraph& g) {
+                addSeqLens(g);
+                g.tensor(name).alignment = alignment;
+            });
+        };
+        EXPECT_TRUE(accepted(withAlignment(4)));
+        declined(withAlignment(2), "varlen", name + " (uid ");
+        declined(
+            withAlignment(2), "varlen", "declares alignment 2 bytes, below its element size 4");
+    }
+    const auto withStrides = [](int64_t batch, std::vector<int64_t> strides) {
+        SdpaBwdSpec spec;
+        spec.batch = batch;
+        return spec.withEdit([strides](SdpaBwdGraph& g) {
+            addSeqLens(g);
+            g.tensor("seq_len_kv").strides = strides;
+        });
+    };
+    EXPECT_TRUE(accepted(withStrides(2, {1, 1, 1, 1})));
+    declined(withStrides(2, {1, 3, 1, 1}),
+             "varlen",
+             "seq_len_kv (uid 14) strides [1,3,1,1] are not dense for dims [2,1,1,1]");
+    // A single batch has no batch stride to compare, but the strides are still dense.
+    EXPECT_TRUE(accepted(withStrides(1, {1, 1, 1, 1})));
+    declined(withStrides(1, {5, 1, 1, 1}), "varlen", "strides [5,1,1,1] are not dense");
+}
+
 TEST(TestFlydslSdpaBwdMatcher, PV7SeqLenMustBeADeviceTensorWithoutRaggedOffsets)
 {
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
@@ -1280,6 +1466,51 @@ TEST(TestFlydslSdpaBwdMatcher, BI7DbiasDtypeOtherThanBiasDtypeDeclines)
     })));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, BI9DbiasStridesOfNonUnitAxesNeedAMultipleOfTheVectorWidth)
+{
+    const auto withDbiasRowStride = [](const SdpaBwdSpec& spec, int64_t rowStride) {
+        return spec.withEdit([rowStride](SdpaBwdGraph& g) {
+            addBias(g);
+            addDbias(g).strides = {8 * 16 * rowStride, 16 * rowStride, rowStride, 1};
+        });
+    };
+    const auto problem = accepted(withDbiasRowStride(baseline(), 24));
+    ASSERT_TRUE(problem.has_value());
+    expectStrides(problem->dbiasStrides, 8 * 16 * 24, 16 * 24, 24);
+    declined(withDbiasRowStride(baseline(), 20),
+             "layout",
+             "dBias (uid 12) stride 20 on axis 2 (extent 16) is not a non-negative multiple of 8 "
+             "elements");
+    // The input bias at the same stride is the engine's staging rule (BI-8), not the matcher's.
+    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addBias(g).strides = {8 * 16 * 20, 16 * 20, 20, 1};
+        addDbias(g).strides = {8 * 16 * 24, 16 * 24, 24, 1};
+    })));
+
+    // The batch and head strides are checked too.
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addBias(g);
+        addDbias(g).strides = {8 * 16 * 16 + 4, 16 * 16, 16, 1};
+    }),
+             "layout",
+             "dBias (uid 12) stride 2052 on axis 0");
+    // An axis of one element has no stride to align.
+    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addBias(g, {1, 8, 16, 16});
+        addDbias(g).strides = {7, 256, 16, 1};
+    })));
+
+    // FLOAT vectors are 4 elements wide.
+    const auto fp32 = accepted(withDbiasRowStride(fp32Spec(), 20), ACCEPT_FLOAT);
+    ASSERT_TRUE(fp32.has_value());
+    expectStrides(fp32->dbiasStrides, 8 * 16 * 20, 16 * 20, 20);
+    declined(withDbiasRowStride(fp32Spec(), 18),
+             "layout",
+             "dBias (uid 12) stride 18 on axis 2 (extent 16) is not a non-negative multiple of 4 "
+             "elements",
+             ACCEPT_FLOAT);
+}
+
 // ---------------------------------------------------------------------------
 // Dropout and seed
 // ---------------------------------------------------------------------------
@@ -1419,6 +1650,55 @@ TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetAsDeviceOrPassByValueScalarsAccep
     }),
              "dropout",
              "differ");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DR8DeviceSeedAndOffsetMustBeDenseAndAlignedToTheirElementSize)
+{
+    struct Case
+    {
+        data_objects::DataType type;
+        int64_t elementBytes;
+    };
+    for(const Case entry :
+        {Case{data_objects::DataType::INT32, 4}, Case{data_objects::DataType::INT64, 8}})
+    {
+        const auto type = entry.type;
+        const auto elementBytes = entry.elementBytes;
+        for(const char* tensor : {"seed", "offset"})
+        {
+            SCOPED_TRACE(std::string(data_objects::EnumNameDataType(type)) + " " + tensor);
+            const std::string name = tensor;
+            const auto withAlignment = [type, name](int64_t alignment) {
+                return baseline().withEdit([type, name, alignment](SdpaBwdGraph& g) {
+                    addDropout(g, 0.2F, type);
+                    g.tensor(name).alignment = alignment;
+                });
+            };
+            EXPECT_TRUE(accepted(withAlignment(elementBytes)));
+            declined(withAlignment(elementBytes / 2),
+                     "dropout",
+                     name + " (uid " + (name == "seed" ? "15" : "16") + ") declares alignment "
+                         + std::to_string(elementBytes / 2) + " bytes, below its element size "
+                         + std::to_string(elementBytes));
+        }
+    }
+    const auto withStrides = [](std::vector<int64_t> strides) {
+        return baseline().withEdit([strides](SdpaBwdGraph& g) {
+            addDropout(g);
+            g.tensor("offset").strides = strides;
+        });
+    };
+    EXPECT_TRUE(accepted(withStrides({1, 1, 1, 1})));
+    declined(withStrides({2, 1, 1, 1}),
+             "dropout",
+             "offset (uid 16) strides [2,1,1,1] are not dense for dims [1,1,1,1]");
+
+    // A pass-by-value scalar is uploaded by value: it has no memory to align.
+    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.2F, data_objects::DataType::INT64, true);
+        g.tensor("seed").alignment = 1;
+        g.tensor("offset").strides = {2, 2, 2, 2};
+    })));
 }
 
 TEST(TestFlydslSdpaBwdMatcher, DR7DropoutMaskScaleAndScaleInvTensorsDecline)

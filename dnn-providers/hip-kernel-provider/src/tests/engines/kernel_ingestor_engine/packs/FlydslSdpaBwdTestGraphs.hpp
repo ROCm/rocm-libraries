@@ -155,7 +155,8 @@ struct SdpaBwdGraph
     }
 };
 
-/// A graph the matcher is asked about: dimensions, then the edits applied in order.
+/// A graph the matcher is asked about: dimensions, then the edits applied in order. The row
+/// strides of the default graph are the head dim rounded up to a 16-byte vector of its dtype.
 struct SdpaBwdSpec
 {
     hipdnn_flatbuffers_sdk::data_objects::DataType dtype
@@ -200,6 +201,27 @@ inline int64_t ceilToEight(int64_t value)
     return (value + 7) / 8 * 8;
 }
 
+/// Elements of one 16-byte vector of @p dtype: 8 for f16 and bf16, 4 for FLOAT.
+inline int64_t vectorElementsOf(hipdnn_flatbuffers_sdk::data_objects::DataType dtype)
+{
+    return dtype == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? 4 : 8;
+}
+
+/// @p value rounded up to a whole vector of @p dtype.
+inline int64_t ceilToVectorOf(hipdnn_flatbuffers_sdk::data_objects::DataType dtype, int64_t value)
+{
+    const auto vector = vectorElementsOf(dtype);
+    return (value + vector - 1) / vector * vector;
+}
+
+/// A spec for an fp32 graph: FLOAT on every data tensor, bias and dBias.
+inline SdpaBwdSpec fp32Spec()
+{
+    SdpaBwdSpec spec;
+    spec.dtype = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    return spec;
+}
+
 /// The default graph for @p spec, with the spec's edits not yet applied.
 inline SdpaBwdGraph makeSdpaBwdGraph(const SdpaBwdSpec& spec)
 {
@@ -230,10 +252,12 @@ inline SdpaBwdGraph makeSdpaBwdGraph(const SdpaBwdSpec& spec)
     const std::vector<int64_t> kDims{spec.batch, spec.kvHeads, spec.seqKv, spec.headDimQk};
     const std::vector<int64_t> vDims{spec.batch, spec.kvHeads, spec.seqKv, spec.headDimV};
     const std::vector<int64_t> oDims{spec.batch, spec.heads, spec.seqQ, spec.headDimV};
-    const auto qStrides = headMajorStrides(spec.heads, spec.seqQ, ceilToEight(spec.headDimQk));
-    const auto kStrides = headMajorStrides(spec.kvHeads, spec.seqKv, ceilToEight(spec.headDimQk));
-    const auto vStrides = headMajorStrides(spec.kvHeads, spec.seqKv, ceilToEight(spec.headDimV));
-    const auto oStrides = headMajorStrides(spec.heads, spec.seqQ, ceilToEight(spec.headDimV));
+    const auto rowQk = ceilToVectorOf(spec.dtype, spec.headDimQk);
+    const auto rowV = ceilToVectorOf(spec.dtype, spec.headDimV);
+    const auto qStrides = headMajorStrides(spec.heads, spec.seqQ, rowQk);
+    const auto kStrides = headMajorStrides(spec.kvHeads, spec.seqKv, rowQk);
+    const auto vStrides = headMajorStrides(spec.kvHeads, spec.seqKv, rowV);
+    const auto oStrides = headMajorStrides(spec.heads, spec.seqQ, rowV);
     const std::vector<int64_t> statsDims{spec.batch, spec.heads, spec.seqQ, 1};
     const std::vector<int64_t> statsStrides{spec.heads * spec.seqQ, spec.seqQ, 1, 1};
 
@@ -494,9 +518,9 @@ inline flatbuffers::FlatBufferBuilder buildSdpaBwdGraph(const SdpaBwdSpec& spec)
     return builder;
 }
 
-/// What the shared backward matcher says about @p spec's graph.
+/// What the shared backward matcher says about @p spec's graph under @p options.
 inline std::variant<flydsl_sdpa_bwd::SdpaBwdProblem, flydsl_sdpa_bwd::Decline>
-    matchSdpaBwdSpec(const SdpaBwdSpec& spec)
+    matchSdpaBwdSpec(const SdpaBwdSpec& spec, const flydsl_sdpa_bwd::MatchOptions& options = {})
 {
     const auto builder = buildSdpaBwdGraph(spec);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -505,13 +529,14 @@ inline std::variant<flydsl_sdpa_bwd::SdpaBwdProblem, flydsl_sdpa_bwd::Decline>
     properties.gcnArchName = "gfx950";
     properties.warpSize = 64;
     return flydsl_sdpa_bwd::matchSdpaBackward(
-        hipdnn_plugin_sdk::ingestor::MatchContext{graph, 0, properties});
+        hipdnn_plugin_sdk::ingestor::MatchContext{graph, 0, properties}, options);
 }
 
-/// What the matcher says about an already-built graph buffer, for graphs that do not come from
-/// a spec (the hipDNN test SDK's createValidSdpaBwdGraph).
+/// What the matcher says about an already-built graph buffer under @p options, for graphs that
+/// do not come from a spec (the hipDNN test SDK's createValidSdpaBwdGraph).
 inline std::variant<flydsl_sdpa_bwd::SdpaBwdProblem, flydsl_sdpa_bwd::Decline>
-    matchSdpaBwdBuffer(const flatbuffers::FlatBufferBuilder& builder)
+    matchSdpaBwdBuffer(const flatbuffers::FlatBufferBuilder& builder,
+                       const flydsl_sdpa_bwd::MatchOptions& options = {})
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -519,7 +544,7 @@ inline std::variant<flydsl_sdpa_bwd::SdpaBwdProblem, flydsl_sdpa_bwd::Decline>
     properties.gcnArchName = "gfx950";
     properties.warpSize = 64;
     return flydsl_sdpa_bwd::matchSdpaBackward(
-        hipdnn_plugin_sdk::ingestor::MatchContext{graph, 0, properties});
+        hipdnn_plugin_sdk::ingestor::MatchContext{graph, 0, properties}, options);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
