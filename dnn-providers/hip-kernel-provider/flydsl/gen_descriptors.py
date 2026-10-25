@@ -47,6 +47,16 @@ Layout, per op:
   the objects themselves with ``manifest.json``: generated content, stored with DVC.
   Its readable summary, ``<arch>.SOURCE.md``, sits beside the folder.
 
+**The split engine** (``hipkernel:flydsl_sdpa_bwd_split``) is slotted (RFC 0021). Its three
+slots are the ops ``sdpa_bwd_prep``, ``sdpa_bwd_dkdv`` and ``sdpa_bwd_dq`` (``SPLIT_SLOT_OPS``),
+each keeping its own manifest and content folder. A slot op's folder holds the slot's KMD,
+UDD and kernel matcher (the symbols are ``hipkernel.flydsl_sdpa_bwd_split.<slot>.*``), and
+its arch pack is a KDP 1.1 naming the slot. The engine's one UED 1.1 lives in the
+descriptor-only folder ``<content>/sdpa_bwd_split/`` (no objects, no manifest): the slots,
+each with its KMD and tuning-only knobs, the shared workspace token and the native graph
+match, and none of the members a slotted UED may not carry. It is derived whenever an
+arch holds the content of the slot ops, and then of all three.
+
 ``--check`` re-derives the documents and compares them to what is checked in,
 then runs the packer's own authoring validator over the whole FlyDSL folder.
 """
@@ -96,9 +106,25 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
     "sdpa_bwd_merged",
+    "sdpa_bwd_split",
 )
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
+
+# The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
+# slotted; every other document stays at DESCRIPTOR_VERSION.
+SLOTTED_VERSION = "1.1"
+# The slotted split engine: its descriptor-only content folder, and the ops that are its
+# slots in declaration (launch) order. A slot is named as its op minus the common prefix.
+SPLIT_ENGINE = "sdpa_bwd_split"
+SPLIT_SLOT_OPS = ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
+SPLIT_SHARED_WORKSPACE = "ws.bytes"
+
+
+def slot_of(op: str) -> str | None:
+    """The split engine's slot a content op is, or None for an unslotted op."""
+    return op.removeprefix("sdpa_bwd_") if op in SPLIT_SLOT_OPS else None
+
 
 MANIFEST_NAME = "manifest.json"
 
@@ -317,6 +343,9 @@ def _metadata_value(key: str, value: Any) -> Any:
 class OpDescriptors:
     """The one-per-op descriptors: schema, engine, heuristic, dispatch, matcher.
 
+    A slot op of the split engine owns only the slot's share: its KMD, dispatch and
+    kernel matcher, on the engine's symbols, ids and shared UED (``SplitEngine``).
+
     Shared by every arch's pack of the op and authored once, under ``<op>/``.
     The packer copies them into each shard whose pack reaches them, so the ids
     are deliberately *not* arch-scoped: two shards carrying the same engine with
@@ -326,17 +355,34 @@ class OpDescriptors:
 
     def __init__(self, op: str, fields: dict[str, str]) -> None:
         self.op = op
+        self.slot = slot_of(op)
         self.stem = f"flydsl_{op}"
-        self.symbols = f"hipkernel.{self.stem}"
         self.fields = fields
+        if self.slot is None:
+            self.symbols = f"hipkernel.{self.stem}"
+            engine = op
+        else:
+            engine = SPLIT_ENGINE
+            self.symbols = f"hipkernel.flydsl_{engine}.{self.slot}"
 
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
-        self.ued_id = _uuid(f"ued/{op}")
+        self.ued_id = _uuid(f"ued/{engine}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
 
     def documents(self) -> dict[str, dict[str, Any]]:
+        documents = self._documents()
+        if self.slot is None:
+            return documents
+        # A slot's share: the engine's UED and ranker are the split engine's own.
+        return {
+            name: document
+            for name, document in documents.items()
+            if name.endswith((".kmd.json", ".udd.json", ".umd.json"))
+        }
+
+    def _documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
             "version": DESCRIPTOR_VERSION,
             "id": self.ued_id,
@@ -509,7 +555,7 @@ def _arch_documents(
         )
 
     kdp = {
-        "version": DESCRIPTOR_VERSION,
+        "version": DESCRIPTOR_VERSION if op.slot is None else SLOTTED_VERSION,
         "id": _uuid(f"kdp/{op.op}/{arch}"),
         "name": f"flydsl {op.op} kernels ({arch})",
         "arch": runs_on,
@@ -519,7 +565,78 @@ def _arch_documents(
         "provenance": op.provenance(),
         "kernelDescriptors": kernels,
     }
+    if op.slot is not None:
+        kdp["slot"] = op.slot
     return {f"{op.stem}.kdp.json": kdp}
+
+
+def _require_injective_slot(op: OpDescriptors, kdp: dict[str, Any]) -> None:
+    """A slot's KMD tuples are unique among its kernels.
+
+    The loader drops a slotted pack whose metadata tuple repeats one in its slot, so a
+    generator that emitted two such rows would ship neither silently.
+    """
+    seen: dict[str, str] = {}
+    for kernel in kdp["kernelDescriptors"]:
+        key = json.dumps(kernel["metadata"], sort_keys=True)
+        if key in seen:
+            raise HkpPackError(
+                f"slot '{op.slot}' ({op.op}): {kernel['name']} and {seen[key]} have the "
+                f"same metadata {key}; a slot's kernels must differ in their metadata"
+            )
+        seen[key] = kernel["name"]
+
+
+def _require_disjoint_ids(slots: dict[str, dict[str, Any]]) -> None:
+    """No kernel id (nor pack id) appears in two slots of the engine, or twice in one."""
+    owner: dict[str, str] = {}
+    for slot, kdp in slots.items():
+        ids = [kdp["id"], *(kernel["id"] for kernel in kdp["kernelDescriptors"])]
+        for identity in ids:
+            if identity in owner:
+                raise HkpPackError(
+                    f"id {identity} is used by slot '{owner[identity]}' and slot '{slot}'"
+                    if owner[identity] != slot
+                    else f"id {identity} is used twice in slot '{slot}'"
+                )
+            owner[identity] = slot
+
+
+class SplitEngine:
+    """The split engine's descriptor-only content: its UED 1.1.
+
+    Each slot names its own KMD and carries only the tuning fields of its own schema as
+    knobs. The engine has no ranker (the loader falls back to priority, then id), no
+    top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
+    ``predict_applicable_kernels``, and does not author the serialization note: a slotted
+    engine's plans cannot be saved.
+    """
+
+    def __init__(self, slot_ops: dict[str, OpDescriptors]) -> None:
+        self.slot_ops = slot_ops
+        self.stem = f"flydsl_{SPLIT_ENGINE}"
+        self.symbols = f"hipkernel.{self.stem}"
+
+    def documents(self) -> dict[str, dict[str, Any]]:
+        return {
+            f"{self.stem}.ued.json": {
+                "version": SLOTTED_VERSION,
+                "id": _uuid(f"ued/{SPLIT_ENGINE}"),
+                "name": f"hipkernel:{self.stem}",
+                # Pass-by-value scalars (softmax scale, dropout seed and offset).
+                "sdk_version": PASS_BY_VALUE_SDK_VERSION,
+                "graph_match": {"native": f"{self.symbols}.graph_match"},
+                "shared_workspace": SPLIT_SHARED_WORKSPACE,
+                "slots": [
+                    {
+                        "name": slot.slot,
+                        "metadata": slot.kmd_id,
+                        "knobs": [f for f in slot.fields if f in TUNING_FIELDS],
+                    }
+                    for slot in self.slot_ops.values()
+                ],
+            }
+        }
 
 
 def build_documents(
@@ -532,10 +649,27 @@ def build_documents(
         by_op.setdefault(entry.op, []).append(entry)
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
+    slot_ops: dict[str, OpDescriptors] = {}
+    slot_packs: dict[str, dict[str, Any]] = {}
     for op_name, op_entries in sorted(by_op.items()):
         op = OpDescriptors(op_name, _fields_for_op(op_entries))
         folders[Path(op_name)] = op.documents()
-        folders[Path(op_name) / arch] = _arch_documents(op_entries, op, arch)
+        folders[Path(op_name) / arch] = pack = _arch_documents(op_entries, op, arch)
+        if op.slot is not None:
+            slot_ops[op_name] = op
+            slot_packs[op.slot] = pack[f"{op.stem}.kdp.json"]
+            _require_injective_slot(op, slot_packs[op.slot])
+
+    if slot_ops:
+        missing = [op for op in SPLIT_SLOT_OPS if op not in slot_ops]
+        if missing:
+            raise HkpPackError(
+                f"{arch}: the split engine's slots are {list(SPLIT_SLOT_OPS)}; "
+                f"no content for {missing}"
+            )
+        _require_disjoint_ids(slot_packs)
+        engine = SplitEngine({op: slot_ops[op] for op in SPLIT_SLOT_OPS})
+        folders[Path(SPLIT_ENGINE)] = engine.documents()
     return folders
 
 
