@@ -28,8 +28,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-A = importlib.import_module("Tensile.Activation")
-DataType = importlib.import_module("Tensile.Common.DataType").DataType
+A = importlib.import_module("tensilelite.Activation")
+DataType = importlib.import_module("tensilelite.Common.DataType").DataType
 
 import rocisa
 from rocisa.code import Module
@@ -239,7 +239,7 @@ def test_activation_inline_body_renders(isa):
 # PackData_F16: F32->F16 pack now goes through ECvtF32toF16(sel=LOW).
 # ---------------------------------------------------------------------------
 def test_packdata_f16_gwvw1_branches():
-    from Tensile.Components.PackData import PackData_F16
+    from tensilelite.Components.PackData import PackData_F16
 
     packer = PackData_F16()
 

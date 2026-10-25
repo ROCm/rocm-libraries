@@ -29,6 +29,21 @@ Usage (Legacy single-project mode):
         [--job-name "Test name"] \
         [--dry-run]
 
+Usage (Every failed job of the current GitHub Actions run attempt):
+    python notify_teams.py \
+        --failed-jobs-from-run \
+        --webhook-urls '{"miopen": "URL1", "hipdnn": "URL2"}' \
+        --pr-number NUM \
+        --pr-title "[miopen] Fix bug" \
+        --component-name "projects/miopen" \
+        [--dry-run]
+
+    Lists the failed Linux::/Windows:: jobs of GITHUB_REPOSITORY /
+    GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT with the gh CLI (GH_TOKEN), downloads
+    each job's log and sends one notification per job. Test jobs are routed
+    by job name; build jobs by --component-name. Exits 1 if any notification
+    could not be sent.
+
 Routing Logic (when using --webhook-urls):
     1. Single PR title tag (e.g., "[miopen]") -> routes to that project
     2. Multiple tags (e.g., "[miopen][hipdnn]") -> uses component name to disambiguate
@@ -48,6 +63,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 import logging
@@ -508,6 +524,209 @@ class TeamsNotifier:
         return message
 
 
+# Job names of TheRock's reusable build/test workflows as called from
+# therock-multi-arch-ci.yml, e.g. "Windows::release / Build Windows packages",
+# "Linux::release / Test gfx94X-dcgpu / Test miopen (shard 1/1) (gfx94X-dcgpu)".
+THEROCK_JOB_PREFIXES = ("Linux::", "Windows::")
+# Expected-failure test jobs; their failures are not actionable.
+XFAIL_JOB_MARKER = "(xfail)"
+GITHUB_ERROR_MARKER = "##[error]"
+JOBS_PER_PAGE = 100
+
+
+def select_failed_jobs(jobs: List[dict]) -> List[dict]:
+    """Return the failed TheRock build/test jobs, excluding expected failures."""
+    return [
+        job
+        for job in jobs
+        if job["conclusion"] == "failure"
+        and job["name"].startswith(THEROCK_JOB_PREFIXES)
+        and XFAIL_JOB_MARKER not in job["name"]
+    ]
+
+
+def classify_job(job_name: str, build_component_name: str) -> Tuple[str, str, str]:
+    """Return (failure_stage, routing component, platform) for a TheRock job.
+
+    Test job names carry the tested component; build jobs build every changed
+    project, so they are routed by build_component_name.
+    """
+    job_platform = "windows" if job_name.startswith("Windows::") else "linux"
+    if " / Test " in job_name:
+        return "test", job_name, job_platform
+    return "build", build_component_name, job_platform
+
+
+def truncate_at_first_error(log: str) -> str:
+    """Keep the log up to and including the first GitHub Actions error line,
+    so the error context is not buried under post-job cleanup output."""
+    marker = log.find(GITHUB_ERROR_MARKER)
+    if marker == -1:
+        return log
+    line_end = log.find("\n", marker)
+    return log if line_end == -1 else log[: line_end + 1]
+
+
+def gh_api(endpoint: str) -> str:
+    """GET a GitHub REST endpoint through the gh CLI (authenticated via GH_TOKEN)."""
+    return subprocess.run(
+        ["gh", "api", endpoint],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout
+
+
+def list_run_jobs(repository: str, run_id: str, run_attempt: str) -> List[dict]:
+    """List every job of one workflow run attempt."""
+    jobs: List[dict] = []
+    page = 1
+    while True:
+        response = json.loads(
+            gh_api(
+                f"repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}"
+                f"/jobs?per_page={JOBS_PER_PAGE}&page={page}"
+            )
+        )
+        jobs.extend(response["jobs"])
+        if not response["jobs"] or len(jobs) >= response["total_count"]:
+            return jobs
+        page += 1
+
+
+def fetch_job_log(repository: str, job_id: int) -> str:
+    """Download a job log; an unavailable log yields an empty string so the
+    failure is still reported."""
+    try:
+        return gh_api(f"repos/{repository}/actions/jobs/{job_id}/logs")
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Could not download log of job {job_id}: {e.stderr.strip()}")
+        return ""
+
+
+def notify_failure(
+    *,
+    failure_stage: str,
+    log_path: str,
+    webhook_urls: Optional[Dict[str, str]],
+    webhook_url: str,
+    project: str,
+    pr_number: str,
+    pr_title: str,
+    component_name: str,
+    job_name: str,
+    job_platform: str,
+    run_url: str,
+    dry_run: bool,
+) -> bool:
+    """Route, extract and send one failure notification.
+
+    With webhook_urls the target project is routed from the PR title and
+    component; otherwise project/webhook_url are used as given (legacy mode).
+
+    Returns:
+        False if the notification could not be sent. Unsupported projects and
+        unset webhook secrets are skipped and count as success.
+    """
+    if webhook_urls is not None:
+        project = ChannelRouter().determine_target_channel(pr_title, component_name)
+
+        if project is None:
+            logger.info("No notification sent - project not supported")
+            return True
+
+        if project not in webhook_urls:
+            logger.warning(
+                f"Project '{project}' matched but no webhook URL provided in --webhook-urls"
+            )
+            return True
+
+        webhook_url = webhook_urls[project]
+
+        # Check for empty webhook URL (secret not set)
+        if not webhook_url or not webhook_url.strip():
+            logger.warning(
+                f"Webhook URL for project '{project}' is empty (secret may not be set)"
+            )
+            return True
+
+        if not ChannelRouter.validate_webhook_url(webhook_url):
+            logger.error(
+                f"Invalid Teams webhook URL format for project '{project}'. "
+                f"Expected: https://<tenant>.webhook.office.com/webhookb2/... or "
+                f"https://<id>.environment.api.powerplatform.com/powerautomate/..."
+            )
+            return False
+
+    error_context, issue_type = ErrorExtractor(log_path, failure_stage).extract()
+
+    return TeamsNotifier(webhook_url, dry_run).send_notification(
+        project=project,
+        platform=job_platform,
+        failure_stage=failure_stage,
+        run_url=run_url,
+        error_context=error_context,
+        issue_type=issue_type,
+        pr_number=pr_number if pr_number else None,
+        pr_title=pr_title if pr_title else None,
+        job_name=job_name if job_name else None,
+    )
+
+
+def notify_failed_jobs_from_run(
+    *,
+    repository: str,
+    run_id: str,
+    run_attempt: str,
+    component_name: str,
+    **notify_kwargs,
+) -> bool:
+    """Send one notification per failed TheRock build/test job of a run attempt.
+
+    notify_kwargs are forwarded to notify_failure; the per-job fields
+    (stage, log, component, job name, platform) are derived from each job.
+
+    Returns:
+        False if the jobs could not be listed or any notification failed.
+    """
+    try:
+        jobs = list_run_jobs(repository, run_id, run_attempt)
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"Could not list jobs of run {run_id} attempt {run_attempt}: {e.stderr.strip()}"
+        )
+        return False
+
+    failed_jobs = select_failed_jobs(jobs)
+    if not failed_jobs:
+        logger.info("No failed Linux/Windows build or test jobs in this run attempt")
+        return True
+
+    success = True
+    with tempfile.TemporaryDirectory() as log_dir:
+        for job in failed_jobs:
+            failure_stage, job_component, job_platform = classify_job(
+                job["name"], component_name
+            )
+            log_path = Path(log_dir) / f"{job['id']}.log"
+            log_path.write_text(
+                truncate_at_first_error(fetch_job_log(repository, job["id"])),
+                encoding="utf-8",
+            )
+            logger.info(f"Reporting {failure_stage} failure of job '{job['name']}'")
+            sent = notify_failure(
+                failure_stage=failure_stage,
+                log_path=str(log_path),
+                component_name=job_component,
+                job_name=job["name"],
+                job_platform=job_platform,
+                **notify_kwargs,
+            )
+            success = sent and success
+    return success
+
+
 def main():
     # Configure logging
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -522,14 +741,19 @@ def main():
     )
     parser.add_argument(
         "--failure-stage",
-        required=True,
         choices=["build", "test"],
-        help="Stage of failure (build or test)",
+        help="Stage of failure (build or test). Required unless --failed-jobs-from-run is set.",
     )
     parser.add_argument(
         "--log-path",
-        required=True,
-        help="Path to log file or directory containing logs",
+        help="Path to log file or directory containing logs. Required unless --failed-jobs-from-run is set.",
+    )
+    parser.add_argument(
+        "--failed-jobs-from-run",
+        action="store_true",
+        help="Notify once per failed Linux::/Windows:: job of the current run attempt "
+        "(GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT), downloading job logs "
+        "with the gh CLI. Test jobs are routed by job name, build jobs by --component-name.",
     )
     # New: JSON object mapping project names to webhook URLs
     parser.add_argument(
@@ -561,13 +785,26 @@ def main():
 
     args = parser.parse_args()
 
+    if args.failed_jobs_from_run:
+        per_job_flags = {
+            "--failure-stage": args.failure_stage,
+            "--log-path": args.log_path,
+            "--job-name": args.job_name,
+        }
+        given = [flag for flag, value in per_job_flags.items() if value]
+        if given:
+            parser.error(
+                f"{', '.join(given)} cannot be combined with --failed-jobs-from-run"
+            )
+    elif not args.failure_stage or not args.log_path:
+        parser.error(
+            "--failure-stage and --log-path are required unless --failed-jobs-from-run is set"
+        )
+
     # Handle pr_title which may be a list due to nargs='*'
     pr_title = " ".join(args.pr_title) if args.pr_title else ""
 
-    # Determine webhook URL and project based on arguments
-    webhook_url = ""
-    project = args.project
-
+    webhook_urls = None
     if args.webhook_urls:
         # New multi-project routing mode
         try:
@@ -578,54 +815,14 @@ def main():
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in --webhook-urls: {e}")
             sys.exit(1)
-
-        # Determine target channel using ChannelRouter
-        router = ChannelRouter()
-        target_project = router.determine_target_channel(pr_title, args.component_name)
-
-        # Exit early if no matching project found
-        if target_project is None:
-            logger.info("No notification sent - project not supported")
-            sys.exit(0)  # Exit with success
-
-        # Check if webhook URL exists for the matched project
-        if target_project not in webhook_urls:
-            logger.warning(
-                f"Project '{target_project}' matched but no webhook URL provided in --webhook-urls"
-            )
-            sys.exit(0)  # Exit with success
-
-        webhook_url = webhook_urls[target_project]
-        project = target_project
-
-        # Check for empty webhook URL (secret not set)
-        if not webhook_url or not webhook_url.strip():
-            logger.warning(
-                f"Webhook URL for project '{target_project}' is empty (secret may not be set)"
-            )
-            sys.exit(0)  # Exit with success
-
-        # Validate webhook URL format
-        if not ChannelRouter.validate_webhook_url(webhook_url):
-            logger.error(
-                f"Invalid Teams webhook URL format for project '{target_project}'. "
-                f"Expected: https://<tenant>.webhook.office.com/webhookb2/... or "
-                f"https://<id>.environment.api.powerplatform.com/powerautomate/..."
-            )
-            sys.exit(1)
-
     elif args.webhook_url:
         # Legacy single webhook mode
-        webhook_url = args.webhook_url
-        if not project:
+        if not args.project:
             logger.error("--project is required when using --webhook-url")
             sys.exit(1)
     else:
         logger.error("Either --webhook-urls or --webhook-url must be provided")
         sys.exit(1)
-
-    # Detect platform automatically
-    detected_platform = platform.system().lower()
 
     # Construct GitHub Actions run URL from environment variables
     # Use defaults for local testing when environment variables are not set
@@ -634,27 +831,47 @@ def main():
 
     run_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
 
-    if github_repository == "local/testing":
-        print("Warning: Running in local test mode (GITHUB_REPOSITORY not set)")
-        print(f"Using placeholder run URL: {run_url}")
-
-    # Extract error context
-    extractor = ErrorExtractor(args.log_path, args.failure_stage)
-    error_context, issue_type = extractor.extract()
-
-    # Send notification
-    notifier = TeamsNotifier(webhook_url, args.dry_run)
-    success = notifier.send_notification(
-        project=project,
-        platform=detected_platform,
-        failure_stage=args.failure_stage,
+    notify_kwargs = dict(
+        webhook_urls=webhook_urls,
+        webhook_url=args.webhook_url,
+        project=args.project,
+        pr_number=args.pr_number,
+        pr_title=pr_title,
         run_url=run_url,
-        error_context=error_context,
-        issue_type=issue_type,
-        pr_number=args.pr_number if args.pr_number else None,
-        pr_title=pr_title if pr_title else None,
-        job_name=args.job_name if args.job_name else None,
+        dry_run=args.dry_run,
     )
+
+    if args.failed_jobs_from_run:
+        missing_env = [
+            name
+            for name in ("GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")
+            if not os.getenv(name)
+        ]
+        if missing_env:
+            logger.error(
+                f"--failed-jobs-from-run requires {', '.join(missing_env)} to be set"
+            )
+            sys.exit(1)
+        success = notify_failed_jobs_from_run(
+            repository=github_repository,
+            run_id=github_run_id,
+            run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+            component_name=args.component_name,
+            **notify_kwargs,
+        )
+    else:
+        if github_repository == "local/testing":
+            print("Warning: Running in local test mode (GITHUB_REPOSITORY not set)")
+            print(f"Using placeholder run URL: {run_url}")
+
+        success = notify_failure(
+            failure_stage=args.failure_stage,
+            log_path=args.log_path,
+            component_name=args.component_name,
+            job_name=args.job_name,
+            job_platform=platform.system().lower(),
+            **notify_kwargs,
+        )
 
     sys.exit(0 if success else 1)
 

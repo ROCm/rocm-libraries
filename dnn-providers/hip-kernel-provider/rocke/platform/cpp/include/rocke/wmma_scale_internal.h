@@ -90,9 +90,12 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id)
         return NULL;
     if(strncmp(op_id, "tile.", 5) == 0)
         op_id += 5;
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
-    const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
-    return atom && strcmp(atom->family, "wmma_scaled") == 0 ? atom : NULL;
+    /* The atom comes from whichever arch's catalog lists op_id; whether a
+     * given target may lower it is the lowerer's question. */
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(!family || strcmp(family, "wmma_scaled") != 0)
+        return NULL;
+    return rocke_arch_mma_op_by_id(op_id);
 }
 
 static inline rocke_matrix_fragment_layout_t

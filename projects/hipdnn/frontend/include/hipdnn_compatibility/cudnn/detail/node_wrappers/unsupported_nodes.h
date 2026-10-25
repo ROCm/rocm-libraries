@@ -9,21 +9,7 @@
 
 /**
  * @file unsupported_nodes.h
- * @brief Tier-2 fail-stub node surface for the hipDNN cuDNN-compatibility shim.
- *
- * cuDNN v9 defines 39 `*_attributes` node classes; roughly half have a 1:1
- * hipDNN equivalent (aliased in `cudnn_frontend/graph_properties.h`). The rest
- * have no hipDNN engine yet. So that any hipified v9 source still compiles and
- * fails *loudly* (never silently) on those nodes, this header declares each
- * missing attribute class and the macros the graph wrapper uses to stamp out a
- * matching `Graph::*` node method that records
- * `error_code_t::GRAPH_NOT_SUPPORTED`.
- *
- * The error is recorded on the composition Graph and surfaces from the next
- * `validate()` / `build_operation_graph()` — node-adding methods return tensors,
- * not `error_t`, so they cannot report it directly.
- *
- * @note Internal-to-shim; pulled in by `detail/graph_wrapper.h`.
+ * @brief cuDNN FE node attribute types that hipDNN does not support.
  */
 
 #pragma once
@@ -47,14 +33,9 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 namespace detail
 {
 
-// Common base for a Tier-2 fail-stub attribute class. It carries only the
-// universal accessors every cuDNN attribute type shares (`set_name`/`get_name`,
-// `set_compute_data_type`/`get_compute_data_type`) so hipified source that
-// chains or reads them still compiles, matching the hipDNN attribute types the
-// Tier-1 aliases resolve to.
-// Node-specific setters are intentionally omitted until a consumer asks for the
-// node (consumer-driven landing order); adding one is how the node
-// graduates from a stub to a real wrapper/alias.
+// Base for unsupported attribute classes: only the accessors every cuDNN attribute
+// type shares (name, compute data type). Add node-specific setters when a consumer
+// needs them.
 template <typename Derived>
 class UnsupportedAttributes
 {
@@ -94,14 +75,9 @@ private:
     DataType_t _computeDataType = DataType_t::NOT_SET;
 };
 
-// A Tier-2 fail-stub records GRAPH_NOT_SUPPORTED but must still hand back a live,
-// graph-registered tensor: idiomatic cuDNN FE chains the result
-// (`node(...)->set_output(true).set_uid(n)`), so a null return dereferences null
-// before the error can surface at validate(). These helpers mint placeholder
-// tensor(s) through the graph's public tensor() so they are tracked like any
-// other tensor; they are never validated because the recorded error
-// short-circuits validate()/build_operation_graph() first. Templated on the graph
-// type to avoid a dependency cycle with the wrapper that includes this header.
+// An unsupported node still returns a live, graph-registered placeholder tensor so
+// chained calls (`node(...)->set_output(true)`) don't dereference null before the
+// recorded error surfaces. Templated on the graph type to avoid an include cycle.
 template <typename Ptr>
 struct is_shared_ptr : std::false_type
 {
@@ -112,9 +88,8 @@ struct is_shared_ptr<std::shared_ptr<T>> : std::true_type
 {
 };
 
-// Build a fail-stub's return value: a single placeholder tensor, or an array of
-// them for multi-output nodes. Result is the node method's declared return type
-// (a std::shared_ptr<Tensor_attributes> or a std::array<..., N> of them).
+// Result is the node method's return type: a shared_ptr<Tensor_attributes> or a
+// std::array of them for multi-output nodes.
 template <typename Result, typename GraphT>
 Result makeUnsupportedNodeResult(GraphT& graph)
 {
@@ -135,9 +110,8 @@ Result makeUnsupportedNodeResult(GraphT& graph)
 
 } // namespace detail
 
-// Stamp a Tier-2 fail-stub attribute class from an upstream cuDNN v9 class name.
-// The user-provided constructor keeps C++17 brace-init from aggregate-initializing
-// the private CRTP base constructor directly.
+// Stamps an unsupported attribute class. The user-provided constructor stops C++17
+// brace-init from aggregate-initializing the private CRTP base constructor.
 // NOLINTBEGIN(bugprone-macro-parentheses): name is a type token, not an expression.
 #define HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(name)         \
     class name : public detail::UnsupportedAttributes<name>  \
@@ -147,35 +121,31 @@ Result makeUnsupportedNodeResult(GraphT& graph)
     }
 // NOLINTEND(bugprone-macro-parentheses)
 
-/// @brief Unsupported node attribute.
-/// hipDNN has no equivalent engine; the node compiles but reports
-/// `error_code_t::GRAPH_NOT_SUPPORTED` at validate()/build().
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Genstats_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(DBN_weight_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Matmul_fp8_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Instancenorm_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Instancenorm_backward_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Rng_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_backward_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Softmax_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(DiagonalBandMask_attributes);
-/// @copydoc Genstats_attributes
+/// @brief Unsupported node attributes; the node records GRAPH_NOT_SUPPORTED.
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(PagedCacheLoad_attributes);
 
-/// @brief Unsupported node attribute that still stores its node-specific
-/// configuration, so consumer source which sets it compiles and can read it
-/// back. The node reports `error_code_t::GRAPH_NOT_SUPPORTED` at
-/// validate()/build() regardless — storing a value is not a claim to honor it.
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class Reshape_attributes : public detail::UnsupportedAttributes<Reshape_attributes>
 {
 public:
@@ -197,7 +167,8 @@ private:
     ReshapeMode_t _mode = ReshapeMode_t::VIEW_ONLY;
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class Transpose_attributes : public detail::UnsupportedAttributes<Transpose_attributes>
 {
 public:
@@ -218,7 +189,8 @@ private:
     std::vector<int64_t> _permutation;
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class Slice_attributes : public detail::UnsupportedAttributes<Slice_attributes>
 {
 public:
@@ -251,7 +223,8 @@ private:
     std::vector<int64_t> _strides = {1};
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class Concatenate_attributes : public detail::UnsupportedAttributes<Concatenate_attributes>
 {
 public:
@@ -284,7 +257,8 @@ private:
     int64_t _inPlaceIndex = -1;
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class AdaLayernorm_attributes : public detail::UnsupportedAttributes<AdaLayernorm_attributes>
 {
 public:
@@ -317,14 +291,14 @@ private:
     std::shared_ptr<Tensor_attributes> _epsilon;
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class BN_finalize_attributes : public detail::UnsupportedAttributes<BN_finalize_attributes>
 {
 public:
     BN_finalize_attributes() {} // NOLINT(modernize-use-equals-default)
 
-    // Non-const references mirror upstream's signature; consumer source passes
-    // lvalue shared_ptrs and an rvalue would not bind there either.
+    // Non-const references match upstream's signature.
     BN_finalize_attributes& set_previous_running_stats(std::shared_ptr<Tensor_attributes>& mean,
                                                        std::shared_ptr<Tensor_attributes>& variance,
                                                        std::shared_ptr<Tensor_attributes>& momentum)
@@ -356,7 +330,8 @@ private:
     std::shared_ptr<Tensor_attributes> _momentum;
 };
 
-/// @copydoc Reshape_attributes
+/// @brief Unsupported node attributes; settings are stored but not honored. The node records
+/// GRAPH_NOT_SUPPORTED.
 class AdaLayernorm_backward_attributes
     : public detail::UnsupportedAttributes<AdaLayernorm_backward_attributes>
 {
@@ -391,27 +366,17 @@ private:
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 
-// Stamp a Tier-2 fail-stub node method body. Records GRAPH_NOT_SUPPORTED on the
-// composition Graph — surfaced at the next validate()/build_operation_graph() —
-// with a message pointing at the issue tracker, then returns a live,
-// graph-registered placeholder result (a real Tensor_attributes, or an array of
-// them for multi-output nodes) so idiomatic cuDNN FE chaining
-// (`node(...)->set_output(true).set_uid(n)`) survives instead of dereferencing
-// null before the recorded error can surface.
-//
-// Expands inside the shim graph wrapper (detail/graph_wrapper.h), so it relies on
-// that class providing recordError(); the placeholder result is built by
-// detail::makeUnsupportedNodeResult<Result>(graph) above.
+// Stamps an unsupported Graph node method: records GRAPH_NOT_SUPPORTED (surfaced by
+// the next validate()/build_operation_graph()) and returns placeholder tensor(s).
+// Expands inside the graph wrapper, which provides recordError().
 //
 // `name`   — the cuDNN v9 method name (stringized into the message)
 // `params` — the parameter list, PARENTHESIZED so its commas are one macro arg
-// `...`    — the return type (variadic so its commas, e.g. std::array<T, N>,
-//            do not split it across arguments)
-#define HIPDNN_CUDNN_SHIM_FAIL_NODE(name, params, ...)                                  \
-    __VA_ARGS__ name params                                                             \
-    {                                                                                   \
-        recordError(error_code_t::GRAPH_NOT_SUPPORTED,                                  \
-                    "cuDNN-shim node '" #name "' has no hipDNN equivalent yet; file a " \
-                    "request at https://github.com/ROCm/rocm-libraries/issues");        \
-        return detail::makeUnsupportedNodeResult<__VA_ARGS__>(*this);                   \
+// `...`    — the return type (variadic so commas in std::array<T, N> survive)
+#define HIPDNN_CUDNN_SHIM_FAIL_NODE(name, params, ...)                           \
+    __VA_ARGS__ name params                                                      \
+    {                                                                            \
+        recordError(error_code_t::GRAPH_NOT_SUPPORTED,                           \
+                    "cuDNN-shim node '" #name "' has no hipDNN equivalent yet"); \
+        return detail::makeUnsupportedNodeResult<__VA_ARGS__>(*this);            \
     }

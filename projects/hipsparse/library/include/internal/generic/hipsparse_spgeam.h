@@ -24,7 +24,6 @@
 #ifndef HIPSPARSE_SPGEAM_H
 #define HIPSPARSE_SPGEAM_H
 
-// The generic SpGEAM API is gated behind the HIPSPARSE_WITH_SPGEAM build-time feature flag.
 // Use the include-root-relative path so it resolves both in the hipSPARSE build and for
 // downstream consumers that only add the include root (e.g. -I <prefix>/include) to their path.
 #include "hipsparse/hipsparse-config.h"
@@ -43,7 +42,7 @@ extern "C" {
 // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
 // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
 // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
 // clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr);
@@ -57,7 +56,7 @@ hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr);
 *  resources used by the descriptor.
 */
 // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
 // clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
@@ -108,7 +107,7 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
 // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
 // clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
@@ -172,7 +171,7 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
 // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
 // clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
@@ -253,7 +252,7 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
 // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
 // clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,

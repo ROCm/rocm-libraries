@@ -582,13 +582,45 @@ struct target
     }
 };
 
+/**
+ * \brief Get the current architecture in device compilation.
+ * 
+ * This function will always return `unknown` when called from the host; host code should instead
+ * call host_target_arch to query the current device from the HIP API. It also returns
+ * unknown if it is using spirv.
+ * 
+ * \return target_arch the architecture currently being compiled for on the device.
+ */
+constexpr target_arch device_target_arch()
+{
+#if defined(__amdgcn_processor__) && (!defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0)
+    // The terminating zero is not counted in the length of the string
+    return get_target_arch_from_name(__amdgcn_processor__,
+                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
+#else
+    return target_arch::unknown;
+#endif
+}
+
+template<typename Target>
+constexpr int match_target(const Target& target, gen g, target_arch i, gpu s = gpu::generic)
+{
+    // Priority order: prefer exact GPU match first; otherwise allow an Arch match (if GPU differs);
+    // finally allow a Gen match (if both Arch and GPU differ). This ensures we progressively
+    // refine the fallback from generic -> generation -> arch -> exact GPU.
+    return (target.s != gpu::generic && target.s == s)           ? 3
+           : (target.i != target_arch::unknown && target.i == i) ? 2
+           : (target.g != gen::unknown && target.g == g)         ? 1
+                                                                 : 0;
+}
+
 template<typename... Ts>
 struct comp_targets
 {
     template<typename F>
     static constexpr void for_each(F f)
     {
-        (f(Ts{}), ...);
+        (call_if_selected<Ts>(f), ...);
     }
 
     template<typename F>
@@ -605,7 +637,75 @@ struct comp_targets
             });
         return result;
     }
+
+private:
+    static constexpr target_arch cur_arch = device_target_arch();
+    static constexpr gen         cur_gen  = gen_from_target_arch(cur_arch);
+
+    static constexpr int best_score = std::max({match_target(Ts{}, cur_gen, cur_arch)...});
+
+    template<typename T, typename F>
+    static constexpr void call_if_selected(F& f)
+    {
+        constexpr T t{};
+
+        if constexpr(cur_arch == target_arch::unknown)
+        {
+            // Compile time unrecognized arch: nothing to filter against.
+            // It will build all the kernels.
+            f(t);
+        }
+        else if constexpr(best_score == 0)
+        {
+            // There are no matches at all: only build the unknown fallback.
+            if constexpr(target{t} == target{})
+            {
+                f(t);
+            }
+        }
+        else
+        {
+            // Keep only the entries that reach the best level
+            // (all matching-arch entries, or else all matching-gen entries).
+            // If at compile time there are only targets that match the generation,
+            // the best possible score is 1. Then all the targets with score one
+            // will be build.
+            if constexpr(match_target(t, cur_gen, cur_arch) == best_score)
+            {
+                f(t);
+            }
+        }
+    }
 };
+
+template<class Targets>
+constexpr target most_common_config(target target_current)
+{
+    // Takes unknown as default.
+    target ret{};
+    int    best_score = 0;
+
+    Targets::for_each(
+        [&](auto t)
+        {
+            // Skip unknown target for picking.
+            if constexpr(!(target{} == t))
+            {
+                // This determines the fallback order and which config is chosen.
+                const int score
+                    = match_target(t, target_current.g, target_current.i, target_current.s);
+
+                // Strictly better wins; on ties the later entry wins.
+                if(score > 0 && score >= best_score)
+                {
+                    best_score = score;
+                    ret        = target{t};
+                }
+            }
+        });
+
+    return ret;
+}
 
 constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknown)
 {
@@ -634,25 +734,6 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
     }
 }
 
-/**
- * \brief Get the current architecture in device compilation.
- * 
- * This function will always return `unknown` when called from the host, host could should instead
- * call host_target_arch to query the current device from the HIP API.
- * 
- * \return target_arch the architecture currently being compiled for on the device.
- */
-constexpr target_arch device_target_arch()
-{
-#if defined(__amdgcn_processor__)
-    // The terminating zero is not counted in the length of the string
-    return get_target_arch_from_name(__amdgcn_processor__,
-                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
-#else
-    return target_arch::unknown;
-#endif
-}
-
 template<typename Kernel>
 struct launch_plan
 {
@@ -670,40 +751,6 @@ struct launch_plan
                            device_callback);
     }
 };
-
-template<class Targets>
-constexpr target most_common_config(target target_current)
-{
-    // Takes unknown as default.
-    target ret{};
-    Targets::for_each(
-        [&](auto t)
-        {
-            // Skip unknown target for picking.
-            if(!(target{} == t))
-            {
-                constexpr target_arch Arch = t.i;
-                constexpr gpu         GPU  = t.s;
-                constexpr gen         Gen  = t.g;
-
-                // Update `ret` if the candidate `t` matches more specifically than the current `ret`.
-                // Priority order: prefer exact GPU match first; otherwise allow an Arch match (if GPU differs);
-                // finally allow a Gen match (if both Arch and GPU differ). This ensures we progressively
-                // refine the fallback from generic -> generation -> arch -> exact GPU.
-                if((GPU == target_current.s)
-                   || (Arch == target_current.i
-                       && (target_current.s != ret.s || ret.s == gpu::generic))
-                   || (Gen == target_current.g
-                       && ((target_current.s != ret.s || ret.s == gpu::generic)
-                           && (target_current.i != ret.i || ret.i == target_arch::unknown))))
-                {
-                    ret = target{t};
-                }
-            }
-        });
-
-    return ret;
-}
 
 template<class Selector>
 constexpr typename Selector::param_type default_select_config(target t)
@@ -772,27 +819,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS((LaunchSelector<Config, Selector, Target>::
     trampoline_kernel(Kernel kernel)
 {
     using TargetConfig = target_config<Config, Selector, Target, TargetWaveSize>;
-
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    using Targets = typename Selector::targets;
-    // If the arch does not exist in the Targets it should run the arch for the most_common_config.
-    constexpr target device_arch_target = most_common_config<Targets>(target(device_target_arch()));
-    // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
-    if constexpr(Target::i == device_arch_target.i)
-    {
-        kernel(TargetConfig{});
-    }
-    else if constexpr(ROCPRIM_IS_GENERIC())
-    {
-        kernel(TargetConfig{});
-    }
-    else
-    {
-        __builtin_unreachable();
-    }
-#else
     kernel(TargetConfig{});
-#endif
 }
 
 template<class Config,

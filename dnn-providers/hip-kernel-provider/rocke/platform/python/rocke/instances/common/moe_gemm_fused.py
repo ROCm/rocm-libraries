@@ -45,7 +45,7 @@ from ...helpers.tensor_view import (
     make_global_view,
     make_tile_window,
 )
-from ...helpers.transforms import calculate_magic_numbers, do_magic_division
+from ...helpers.magic_division import calculate_magic_numbers, do_magic_division
 from .gemm_universal import (
     DataSpec,
     TileSpec,

@@ -3,28 +3,28 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for the ``Tensile`` package ``__init__``: the version
-constant, ``ROOT_PATH``, and ``PrintTensileRoot``."""
+"""Characterization tests for the ``tensilelite`` package ``__init__``: the
+version constant, ``ROOT_PATH``, and ``PrintTensileRoot``."""
 
 import os
 
 import pytest
 
-import Tensile
+import tensilelite
 
 pytestmark = pytest.mark.unit
 
 
 def test_version(snapshot):
-    assert Tensile.__version__ == snapshot
+    assert tensilelite.__version__ == snapshot
 
 
 def test_root_path():
     # The absolute path is env-specific, so only pin that it is absolute.
-    assert os.path.isabs(Tensile.ROOT_PATH)
+    assert os.path.isabs(tensilelite.ROOT_PATH)
 
 
 def test_print_tensile_root(capsys):
-    Tensile.PrintTensileRoot()
+    tensilelite.PrintTensileRoot()
     out = capsys.readouterr().out
-    assert out == Tensile.ROOT_PATH  # printed with end='' (no newline)
+    assert out == tensilelite.ROOT_PATH  # printed with end='' (no newline)

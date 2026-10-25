@@ -134,6 +134,14 @@ protected:
         {
             GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
         }
+        // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 hipBLASLt
+        // has no MX kernel for the layout this provider sends, so the graph is declined.
+        if(hipdnn_test_sdk::utilities::archMatches(
+               archName, "gfx1250", hipdnn_test_sdk::utilities::ArchMatchMode::PREFIX))
+        {
+            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for this provider's "
+                            "layout on gfx1250";
+        }
     }
 };
 

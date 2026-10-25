@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
 
     // rocSPARSE handle
     rocsparse_handle handle;
-    rocsparse_create_handle(&handle);
+    ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
     // Transposition of the matrix
     rocsparse_operation trans = rocsparse_operation_none;
