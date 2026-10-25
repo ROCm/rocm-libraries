@@ -310,6 +310,82 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert explicit.waves_per_eu == explicit_reduce.waves_per_eu == 3
 
 
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_dispatch_follows_the_kernel_gate(arch):
+    """Head size and GQA ratio are the kernel's decision: dispatch admits a
+    shape exactly when the strided runner's own 3D gate does."""
+    from dispatch.attention.common import _problem
+    from dispatch.attention.strided_decode import make_candidate
+    from kernels.common import attention_unified as au
+
+    candidate = make_candidate()
+    for ratio in (*range(1, 17), 32):
+        for head_size in (64, 96, 128, 192, 256):
+            req = replace(
+                _strided_request(arch),
+                nhead_q=2 * ratio,
+                hdim_q=head_size,
+                hdim_v=head_size,
+            )
+            ok, why = au._explicit_path_supported(_problem(req), None, "3d", arch)
+            assert candidate.admits(req) == (ok, "supported" if ok else why), (
+                ratio,
+                head_size,
+            )
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        dict(nhead_q=10),
+        dict(nhead_q=12),
+        dict(nhead_q=24),
+        dict(hdim_q=192, hdim_v=192),
+    ],
+)
+def test_strided_dispatch_admits_what_the_kernel_gate_admits(
+    arch, changes, monkeypatch
+):
+    """GQA 5/6/12 and D192 reach the strided kernel through dispatch as soon
+    as the kernel gate admits them; dispatch keeps no list of its own."""
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = replace(_strided_request(arch), **changes)
+    monkeypatch.setattr(
+        strided_decode, "_explicit_path_supported", lambda *a: (True, "kernel ok")
+    )
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    segment = result.spec.kernel_spec
+    assert segment.kv_layout == "strided"
+    assert segment.head_size == req.hdim_q
+    assert segment.num_query_heads == req.nhead_q
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_dispatch_rejects_what_the_kernel_gate_rejects(arch, monkeypatch):
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = _strided_request(arch)
+    gate_calls = []
+
+    def gate(problem, tuning_spec, kind, gate_arch):
+        gate_calls.append((tuning_spec, kind, gate_arch))
+        return False, "kernel declines this shape"
+
+    monkeypatch.setattr(strided_decode, "_explicit_path_supported", gate)
+    assert strided_decode.make_candidate().admits(req) == (
+        False,
+        "kernel declines this shape",
+    )
+    assert gate_calls == [(None, "3d", arch)]
+    with pytest.raises(ValueError):
+        dispatch_attention(req)
+
+
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
 def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import _problem

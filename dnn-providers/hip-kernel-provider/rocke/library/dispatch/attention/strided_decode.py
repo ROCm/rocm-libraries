@@ -10,6 +10,7 @@ import math
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _3d_signature,
+    _explicit_path_supported,
     _strided_3d_specs_from_problem,
     _validate_strided_3d_spec,
 )
@@ -38,8 +39,6 @@ def make_candidate() -> KernelCandidate:
             == AttentionMaskType.TOP_LEFT_CAUSAL
         ):
             return False, "strided decode uses bottom-right causal alignment"
-        if req.nhead_q // req.nhead_k not in (1, 2, 4, 8, 16):
-            return False, "GQA ratio must divide the 16-row query tile"
         if req.tuning_id not in ("auto", "strided"):
             return False, "unknown strided decode tuning_id"
         if req.tuning_knobs:
@@ -47,8 +46,14 @@ def make_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return ok, why
+        # Head size and GQA ratio are the kernel's call: defer to the same gate
+        # the strided runner applies, so dispatch admits what the kernel admits.
+        problem = _problem(req)
+        ok, why = _explicit_path_supported(problem, None, "3d", req.arch.lower())
+        if not ok:
+            return False, why
         try:
-            _strided_3d_specs_from_problem(_problem(req), arch=req.arch.lower())
+            _strided_3d_specs_from_problem(problem, arch=req.arch.lower())
         except ValueError as exc:
             return False, str(exc)
         return True, "supported"
@@ -154,7 +159,6 @@ def make_candidate() -> KernelCandidate:
             arches=("gfx942", "gfx950"),
             dtypes=("fp16", "bf16"),
             shapes=(
-                ShapeRange("hdim_q", allowed=(64, 128, 256)),
                 ShapeRange("seqlen_q", allowed=(1,)),
                 ShapeRange("kv_block_size", allowed=(16, 32, 64)),
             ),
