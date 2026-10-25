@@ -177,6 +177,11 @@ static const std::vector<int>* eval_cached(rocke_ir_builder_t* b, const rocke_la
                 ok = false;
                 break;
             }
+            if(x0 < INT32_MIN || x0 > INT32_MAX || x1 < INT32_MIN || x1 > INT32_MAX)
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "lane map coordinate outside int range");
+                return NULL;
+            }
             t[((size_t)lane * m->frag_len + s) * 2] = (int)x0;
             t[((size_t)lane * m->frag_len + s) * 2 + 1] = (int)x1;
         }
@@ -472,9 +477,10 @@ static bool simulate(const rocke_attn_bwd_relabel_plan_t* plan,
     {
         for(int m = 0; m < plan->n_xlane; ++m)
         {
-            int j = (int)plan->xlane[m][0];
-            if(j < 0 || 2 * j + 1 >= nvals)
+            int64_t jx = plan->xlane[m][0];
+            if(jx < 0 || 2 * jx + 1 >= nvals)
                 return false;
+            int j = (int)jx;
             int64_t sel = lane / 16 == 0 ? plan->xlane[m][1] : plan->xlane[m][2];
             Byte own[4], partner[4], pool[8], d[4];
             dwords(lane, j, own);
@@ -799,69 +805,6 @@ const rocke_type_t* rocke_attn_bwd_ir_type(rocke_ir_builder_t* b, const char* dt
     return NULL;
 }
 
-/* Private twin of _attention_bwd_valu.rne_noguard_bf16 (until the valu port
- * lands). */
-static rocke_value_t* rne_noguard_bf16(rocke_ir_builder_t* b, rocke_value_t* frag)
-{
-    if(!live(b))
-        return NULL;
-    int n = frag->type->count;
-    if(n % 2)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "rne_noguard_bf16 packs element pairs: n must be even");
-        return NULL;
-    }
-    const rocke_type_t* vi = rocke_vector_type(b, rocke_i32(), n);
-    rocke_value_t* u = rocke_b_vec_bitcast(b, frag, vi);
-    auto splat = [&](int64_t v) {
-        rocke_value_t* cv = rocke_b_const_i32(b, v);
-        return rocke_b_vector_splat(b, cv, n);
-    };
-    /* py: lsb = b.vector_and(b.vector_lshr(u, splat(16)), splat(1)) */
-    rocke_value_t* s16 = splat(16);
-    rocke_value_t* sh = rocke_b_vector_lshr(b, u, s16);
-    rocke_value_t* s1 = splat(1);
-    rocke_value_t* lsb = rocke_b_vector_and(b, sh, s1);
-    /* py: r = b.vector_add(b.vector_add(u, lsb), splat(0x7FFF)) */
-    rocke_value_t* ul = rocke_b_vector_add(b, u, lsb);
-    rocke_value_t* s7 = splat(0x7FFF);
-    rocke_value_t* r = rocke_b_vector_add(b, ul, s7);
-    std::vector<rocke_value_t*> words;
-    for(int j = 0; j < n / 2; ++j)
-    {
-        rocke_value_t* hi = rocke_b_vec_extract(b, r, 2 * j + 1);
-        rocke_value_t* lo = rocke_b_vec_extract(b, r, 2 * j);
-        words.push_back(rocke_b_byte_perm(b, hi, lo, 0x07060302));
-    }
-    rocke_value_t* packed = rocke_b_vec_pack(b, words.data(), (int)words.size(), rocke_i32());
-    return rocke_b_vec_bitcast(b, packed, rocke_vector_type(b, rocke_bf16(), n));
-}
-
-/* Private twin of _attention_bwd_valu.cast_c_frag. */
-static rocke_value_t* cast_c_frag(rocke_ir_builder_t* b,
-                                  rocke_value_t* frag,
-                                  const rocke_type_t* elem,
-                                  const char* bf16_cast)
-{
-    if(!live(b))
-        return NULL;
-    if(bf16_cast == NULL || strcmp(bf16_cast, "generic") == 0)
-        return rocke_b_vec_cast_f32_to(b, frag, elem);
-    if(strcmp(bf16_cast, "rne_noguard") != 0)
-    {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "bf16_cast='%s' not in ('generic', 'rne_noguard')", bf16_cast);
-        return NULL;
-    }
-    if(!rocke_type_eq(elem, rocke_bf16()))
-    {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "bf16_cast='rne_noguard' applies to bf16 operands only");
-        return NULL;
-    }
-    return rne_noguard_bf16(b, frag);
-}
-
 /* _concat_all */
 static rocke_value_t* concat_all(rocke_ir_builder_t* b, std::vector<rocke_value_t*> parts)
 {
@@ -930,7 +873,7 @@ rocke_value_t* rocke_attn_bwd_emit_c_to_a(rocke_ir_builder_t* b,
     std::vector<rocke_value_t*> cast;
     for(int t = 0; t < n_tiles; ++t)
     {
-        rocke_value_t* v = cast_c_frag(b, c_tiles[t], elem, bf16_cast);
+        rocke_value_t* v = rocke_attn_bwd_cast_dst_frag(b, c_tiles[t], elem, bf16_cast);
         if(v == NULL)
             return NULL;
         cast.push_back(v);
@@ -1480,61 +1423,35 @@ rocke_value_t* rocke_attn_bwd_xor_view_emit_index(rocke_ir_builder_t* b,
     return idx;
 }
 
-/* DmaSlabLayout(rows, cols, 2).offset(row, col) // 2 (private twin of the lds
- * layout until that port lands). */
+/* DmaSlabLayout(rows, cols, 2).offset(row, col) // 2 */
 bool rocke_attn_bwd_slab_offset(
     rocke_ir_builder_t* b, int64_t rows, int64_t cols, int64_t row, int64_t col, int64_t* out)
 {
-    const int64_t line = 128, chunk_b = 16, eb = 2;
-    int64_t rb = cols * eb;
     *out = 0;
     if(!live(b))
         return false;
-    /* DmaSlabLayout.__post_init__ */
-    if(rows <= 0 || rb <= 0)
+    for(int64_t v : {rows, cols, row, col})
+        if(v < INT32_MIN || v > INT32_MAX)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "DMA slab argument out of int range");
+            return false;
+        }
+    rocke_attn_bwd_err_t err;
+    err.code = ROCKE_OK;
+    err.msg[0] = '\0';
+    rocke_attn_bwd_dma_slab_layout_t l;
+    if(rocke_attn_bwd_dma_slab_layout_init(&l, (int)rows, (int)cols, 2, &err) != ROCKE_OK)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "DmaSlabLayout rows and cols must be positive");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err.msg);
         return false;
     }
-    if(rb % chunk_b || (rb >= line && rb % line)
-       || (rb < line && (line % rb || rows % (line / rb))))
+    int64_t off = rocke_attn_bwd_dma_slab_layout_offset(&l, (int)row, (int)col, &err);
+    if(err.code != ROCKE_OK)
     {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "illegal DMA slab layout %lldx%lld",
-                        (long long)rows,
-                        (long long)cols);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err.msg);
         return false;
     }
-    if(!(0 <= row && row < rows && 0 <= col && col < cols))
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "(%lld, %lld) outside the %lldx%lld tile",
-                        (long long)row,
-                        (long long)col,
-                        (long long)rows,
-                        (long long)cols);
-        return false;
-    }
-    int64_t bb = col * eb, within, line_row, base;
-    if(rb >= line)
-    {
-        int64_t s = bb / line;
-        within = bb % line;
-        line_row = row;
-        base = s * rows * line + row * line;
-    }
-    else
-    {
-        int64_t fold = line / rb > 1 ? line / rb : 1;
-        line_row = row / fold;
-        int64_t sub = row % fold;
-        within = sub * rb + bb;
-        base = line_row * line;
-    }
-    int64_t ch = within / chunk_b, inner = within % chunk_b;
-    *out = (base + (ch ^ (line_row % 8)) * chunk_b + inner) / 2;
+    *out = off / 2;
     return true;
 }
 

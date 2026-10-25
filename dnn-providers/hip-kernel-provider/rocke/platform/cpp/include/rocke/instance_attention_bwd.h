@@ -64,10 +64,9 @@
  *   an explicit 0 stay distinct (asm_tail_nop, waves_per_eu, ...).
  *
  * Mirrored constants. STAGE_ORDERS, G4_SLICINGS, COPY_ORDERS (body), SCHEDS
- * and the deferred-knob texts (sched), COUNTED_ISSUES / COUNTED_VMCNT_MAX
- * (counted) and BF16_CASTS / BWD_EXP2S / STATS_VECS (valu) are file-static
- * copies in attention_bwd.cpp until those modules are ported; the unit that
- * ports each module must replace the copy with its export.
+ * and the deferred-knob texts (sched) are file-static copies in
+ * attention_bwd.cpp until those modules are ported; the unit that ports each
+ * module must replace the copy with its export.
  *
  * Not ported (host-only or other units): INERT_KNOBS, DECLARATION_ONLY,
  * NOT_YET_EFFECTIVE_KNOBS (sweep bookkeeping), AttnBwdSpec.dq_spec (the split
