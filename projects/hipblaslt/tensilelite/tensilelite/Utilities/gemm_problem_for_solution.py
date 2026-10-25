@@ -14,7 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from ..ExecutionPolicy import normalize_execution_policy
-from .LibraryIO import iterSolutionRecords
+from .BinaryLibraryIO import iterSolutionRecords
 from .DataTypes import TYPE_PROPERTIES
 
 # Older metadata can name both FP8 operands with a single ordered pair.

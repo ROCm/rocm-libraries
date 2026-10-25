@@ -9,7 +9,7 @@ import json
 import math
 import re
 from pathlib import Path
-from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack
+from tensilelite.Utilities.BinaryLibraryIO import iterSolutionRecords, readMessagePack
 from tensilelite.Utilities.gemm_problem_for_solution import (
     LibraryMetadata,
     UnsupportedSolution,

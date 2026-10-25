@@ -590,7 +590,7 @@ class SweepTests(unittest.TestCase):
                     )
 
     def test_regular_policy_streams_both_formats_and_preserves_sample_prefix(self):
-        from tensilelite.Utilities.LibraryIO import writeMessagePack
+        from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
