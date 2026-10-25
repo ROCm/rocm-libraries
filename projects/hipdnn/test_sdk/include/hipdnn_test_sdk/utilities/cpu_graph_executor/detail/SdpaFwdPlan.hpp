@@ -320,6 +320,12 @@ public:
     using VDataType = utilities::DataTypeToNative<VDataTypeEnum>;
     using ODataType = utilities::DataTypeToNative<ODataTypeEnum>;
     using MaskType = utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
+    // fp8 inputs need the Q/K/V descales and allow the sdpa_fp8 scaling (isSupportedSdpaFwdNode).
+    static constexpr bool IS_FP8_INPUT
+        = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -327,152 +333,23 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        // The dense gate is shared with the GPU reference (isSupportedSdpaFwdNode). The CPU gathers
+        // paged K/V before dequantizing, so a paged side may take a per-batch descale.
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
-        if(nodeAttributes == nullptr)
+        if(nodeAttributes == nullptr
+           || !isSupportedSdpaFwdNode(*nodeAttributes,
+                                      tensorMap,
+                                      MaskDataTypeEnum,
+                                      IS_FP8_INPUT,
+                                      /*requireScalarPagedDescale=*/false))
         {
             return false;
         }
-
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->q_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->k_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->v_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->o_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->q_tensor_uid(), QDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
-
-        // The builder's mask dtype must match the graph: UNSET builds only mask-free graphs,
-        // every other builder only graphs whose mask tensor has exactly that dtype.
-        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
-        {
-            if(nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
-        }
-
-        if(!isSupportedSdpaAlibi(*nodeAttributes))
-        {
-            return false;
-        }
-
-        // Padding: both seq_len tensors (INT32, one value per batch) or neither.
-        if(!isSupportedSdpaPadding(*nodeAttributes, tensorMap))
-        {
-            return false;
-        }
-
-        // Dropout: cuDNN's explicit-mask form, or Philox dropout checked through the engine's
-        // RNG_DUMP keep mask. Philox without RNG_DUMP has no exact oracle and is declined.
-        const bool philoxWithDump = isSdpaPhiloxDropoutWithDump(*nodeAttributes, tensorMap);
-        if(!philoxWithDump
-           && (!isSupportedSdpaDropout(*nodeAttributes, tensorMap)
-               || nodeAttributes->rng_dump_tensor_uid().has_value()))
-        {
-            return false;
-        }
-
-        // Paged KV cache: cuDNN layout, which needs padding; see sdpaPagedMaxSeqKv.
-        if(sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap) < 0)
-        {
-            return false;
-        }
-
-        // cuDNN block-sparse mask: UINT8, one bit per 128 x 128 score tile.
-        if(!isSupportedSdpaBlockMask(*nodeAttributes, tensorMap))
-        {
-            return false;
-        }
-
-        // Attention sink: FLOAT [1, H, 1, 1].
-        if(!isSupportedSdpaSink(*nodeAttributes, tensorMap))
-        {
-            return false;
-        }
-        // Runtime scale: one element, baked, pass-by-value or FLOAT.
-        if(!isSupportedSdpaScaleOperand(*nodeAttributes, tensorMap))
-        {
-            return false;
-        }
-
-        // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
-        // requirement that q/k/v descales are all provided for fp8) and rejected
-        // for non-fp8 inputs.
-        constexpr bool IS_FP8_INPUT
-            = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
-              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
-              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
-              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
-        const int numQkvDescales
-            = static_cast<int>(nodeAttributes->descale_q_tensor_uid().has_value())
-              + static_cast<int>(nodeAttributes->descale_k_tensor_uid().has_value())
-              + static_cast<int>(nodeAttributes->descale_v_tensor_uid().has_value());
-        if((IS_FP8_INPUT && numQkvDescales != 3) || (!IS_FP8_INPUT && numQkvDescales != 0))
-        {
-            return false;
-        }
-        // Descales are read as float.
-        for(const auto uid : {nodeAttributes->descale_q_tensor_uid(),
-                              nodeAttributes->descale_k_tensor_uid(),
-                              nodeAttributes->descale_v_tensor_uid()})
-        {
-            if(uid.has_value())
-            {
-                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
-                CHECK_TENSOR_TYPE(
-                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-                // A pass-by-value descale is staged as one value, so it must be one element.
-                const auto descale = unpackTensorAttributes(*tensorMap.at(uid.value()));
-                if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(descale)
-                   && elementCount(descale) != 1)
-                {
-                    return false;
-                }
-            }
-        }
-
-        // cuDNN sdpa_fp8 softmax / output scaling and amax outputs (fp8 inputs only).
-        if(!isSupportedSdpaFp8Scaling(*nodeAttributes, tensorMap, IS_FP8_INPUT))
-        {
-            return false;
-        }
-
-        // cuDNN Max / Sum_exp row statistics: FLOAT outputs (the reference checks [B, H, Sq, 1]).
-        for(const auto uid :
-            {nodeAttributes->max_tensor_uid(), nodeAttributes->sum_exp_tensor_uid()})
-        {
-            if(uid.has_value())
-            {
-                CHECK_TENSOR_EXISTS(tensorMap, uid.value());
-                CHECK_TENSOR_TYPE(
-                    tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-            }
-        }
-
-        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
-        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
-        // in execute().
-        if(nodeAttributes->stats_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->stats_tensor_uid().value(),
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-        }
-
-        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }

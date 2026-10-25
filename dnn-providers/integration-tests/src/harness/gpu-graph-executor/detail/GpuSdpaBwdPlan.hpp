@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -173,8 +172,8 @@ private:
 };
 
 // GPU SDPA backward plan builder: one I/O dtype for Q/K/V/O/dO/dQ/dK/dV (as the CPU reference
-// registers) and one mask dtype (UNSET = no mask). Applicability mirrors the CPU SdpaBwdPlan, plus
-// the device checks on stats and scale.
+// registers) and one mask dtype (UNSET = no mask). Applicability is isSupportedSdpaBwdNode, which
+// the CPU SdpaBwdPlanBuilder shares, plus this builder's I/O dtype.
 template <hipdnn_flatbuffers_sdk::data_objects::DataType IoDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
           = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
@@ -190,9 +189,9 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
-        using hipdnn_flatbuffers_sdk::data_objects::DataType;
+        // The dense gate is shared with the CPU reference (isSupportedSdpaBwdNode).
         const auto* attrs = node.attributes_as_SdpaBackwardAttributes();
-        if(attrs == nullptr)
+        if(attrs == nullptr || !isSupportedSdpaBwdNode(*attrs, tensorMap, MaskDataTypeEnum))
         {
             return false;
         }
@@ -205,86 +204,9 @@ public:
                               attrs->dk_tensor_uid(),
                               attrs->dv_tensor_uid()})
         {
-            CHECK_TENSOR_EXISTS(tensorMap, uid);
             CHECK_TENSOR_TYPE(tensorMap, uid, IoDataTypeEnum);
         }
-
-        // Stats: FLOAT, rank-3 [B, H, Sq] or rank-4 [B, H, Sq, 1].
-        CHECK_TENSOR_EXISTS(tensorMap, attrs->stats_tensor_uid());
-        {
-            const auto* stats = tensorMap.at(attrs->stats_tensor_uid());
-            const auto* dims = stats->dims();
-            if(stats->data_type() != DataType::FLOAT || dims == nullptr
-               || (dims->size() != 3 && (dims->size() != 4 || dims->Get(3) != 1)))
-            {
-                return false;
-            }
-        }
-
-        if constexpr(MaskDataTypeEnum == DataType::UNSET)
-        {
-            if(attrs->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if(!attrs->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, attrs->attn_mask_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap, attrs->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
-        }
-
-        if(!isSupportedSdpaAlibi(*attrs) || !isSupportedSdpaPadding(*attrs, tensorMap))
-        {
-            return false;
-        }
-
-        // dBias has the bias tensor's shape and dtype (cuDNN).
-        if(attrs->dbias_tensor_uid().has_value())
-        {
-            if(!attrs->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, attrs->dbias_tensor_uid().value());
-            const auto* dBias = tensorMap.at(attrs->dbias_tensor_uid().value());
-            const auto* mask = tensorMap.at(attrs->attn_mask_tensor_uid().value());
-            if(dBias->data_type() != mask->data_type() || dBias->dims() == nullptr
-               || mask->dims() == nullptr
-               || !std::equal(dBias->dims()->begin(),
-                              dBias->dims()->end(),
-                              mask->dims()->begin(),
-                              mask->dims()->end()))
-            {
-                return false;
-            }
-        }
-
-        // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv one FLOAT element.
-        if(!isSupportedSdpaDropout(*attrs, tensorMap))
-        {
-            return false;
-        }
-        if(attrs->dropout_scale_inv_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, attrs->dropout_scale_inv_tensor_uid().value());
-            const auto inv = hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensorMap.at(attrs->dropout_scale_inv_tensor_uid().value()));
-            if(hipdnn_test_sdk::detail::elementCount(inv) != 1 || inv.data_type != DataType::FLOAT
-               || !attrs->dropout_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-        }
-
-        CHECK_NO_RAGGED_TENSORS(tensorMap);
-
-        // The scale may be baked, pass-by-value or device-resident: one element, FLOAT on device.
-        return isSupportedSdpaScaleOperand(*attrs, tensorMap);
+        return true;
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
