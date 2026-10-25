@@ -292,6 +292,14 @@ class UnifiedAttention2DTiledSpec:
     # v1 is intentionally restricted to bf16/no-bias/no-window until parity
     # is proven broadly.
     use_register_pv: bool = False
+    # Work-item order of the (kv_head, q_block) launch grid. "" keeps the
+    # default grid (kv head fastest, query blocks ascending). "qmajor" launches
+    # (q_block, kv_head) so one KV head's query blocks are adjacent. "rev" walks
+    # query blocks longest-first (causal cost grows with the block index).
+    # "swzrev" additionally gives each of the 8 XCDs (dispatch round-robins
+    # workgroups over them) a contiguous band of kv heads, one head at a time,
+    # longest-first; it needs num_kv_heads % 8 == 0.
+    grid_order: str = ""
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -871,6 +879,23 @@ class UnifiedAttention2DTiledSpec:
         return self.block_m // self.num_queries_per_kv
 
     @property
+    def grid_order_eff(self) -> str:
+        # P7 EXPERIMENT ONLY (remove before acceptance): env override for D256.
+        import os
+
+        env = os.environ.get("P7_GRID")
+        if env is not None and self.head_size == 256:
+            if env == "swzrev" and self.num_kv_heads % 8 != 0:
+                return "rev"
+            return env
+        return self.grid_order
+
+    @property
+    def use_q_major_grid(self) -> bool:
+        """Launch grid is ``(q_block, kv_head)`` instead of ``(kv_head, q_block)``."""
+        return self.grid_order_eff == "qmajor"
+
+    @property
     def tile_size_eff(self) -> int:
         """Effective per-iter KV-tile size in tokens."""
         return self.tile_size if self.tile_size is not None else self.block_size
@@ -955,6 +980,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            f"go{self.grid_order_eff}" if self.grid_order_eff else "",
         )
 
 
@@ -1300,8 +1326,36 @@ def build_unified_attention_2d_tiled(
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
 
-    kv_head_idx = b.block_id_x()
-    q_block_global_idx = b.block_id_y()
+    GRID_ORDER = spec.grid_order_eff
+    if GRID_ORDER not in ("", "qmajor", "rev", "swzrev"):
+        raise ValueError(f"unknown grid_order {GRID_ORDER!r}")
+    if GRID_ORDER == "swzrev" and NUM_KV % 8 != 0:
+        raise ValueError("grid_order='swzrev' needs num_kv_heads % 8 == 0")
+    if GRID_ORDER == "qmajor":
+        q_block_global_idx = b.block_id_x()
+        kv_head_idx = b.block_id_y()
+    else:
+        kv_head_idx = b.block_id_x()
+        q_block_global_idx = b.block_id_y()
+    if GRID_ORDER in ("rev", "swzrev"):
+        # Grid y extent = total_q // BLOCK_Q + num_seqs (the launcher's count).
+        total_q = b.global_load_i32(cu_q, num_seqs_p)
+        nqb_all = b.add(b.div(total_q, b.const_i32(BLOCK_Q)), num_seqs_p)
+        if GRID_ORDER == "swzrev":
+            # Dispatch linear id -> (xcd, slot); xcd owns kv heads
+            # [xcd*hpx, (xcd+1)*hpx) and runs them one at a time.
+            n_xcd = 8
+            hpx = NUM_KV // n_xcd
+            lin = b.add(b.mul(q_block_global_idx, b.const_i32(NUM_KV)), kv_head_idx)
+            xcd = b.mod(lin, b.const_i32(n_xcd))
+            slot = b.div(lin, b.const_i32(n_xcd))
+            kv_head_idx = b.add(
+                b.mul(xcd, b.const_i32(hpx)), b.div(slot, nqb_all)
+            )
+            q_block_global_idx = b.mod(slot, nqb_all)
+        q_block_global_idx = b.sub(
+            b.sub(nqb_all, b.const_i32(1)), q_block_global_idx
+        )
     tid = b.thread_id_x()
 
     # Wave decomposition. For NUM_WARPS=1 this collapses to `wave_id=0,

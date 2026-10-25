@@ -5629,8 +5629,11 @@ def _get_2d_launch_meta(
         _2D_KV_ADDR_LIMITS[cache_key] = _spec_kv_addr_limit(
             problem, _tiled_spec_from_problem(problem, arch)
         )
+    grid = (int(problem.num_kv_heads), int(total_num_q_blocks), 1)
+    if getattr(_tiled_spec_from_problem(problem, arch), "use_q_major_grid", False):
+        grid = (grid[1], grid[0], 1)
     meta = _Attention2DLaunchMeta(
-        grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
+        grid=grid,
         block=(int(wave_size * num_warps), 1, 1),
         kv_addr_limit=_2D_KV_ADDR_LIMITS[cache_key],
     )
