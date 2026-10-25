@@ -4,17 +4,24 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <flatbuffers/flatbuffers.h>
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
@@ -24,11 +31,15 @@
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h"
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
@@ -59,6 +70,92 @@ constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
 constexpr int64_t EXPECTED_WORKSPACE_BYTES = 1024;
+
+// In epsilons of the fixture's element type. Each output of the convolution graph is a sum
+// of C*R*S = 2*3*3 terms.
+constexpr float CONV_FWD_TOLERANCE_EPSILONS = 2 * 3 * 3;
+
+// The fixed layout of the ingestor plan payload: the marker, then the format major and minor
+// as little-endian 16-bit values. The header is 48 bytes, and the payload body follows it.
+constexpr std::array<uint8_t, 4> INGESTOR_PLAN_MARKER = {'H', 'K', 'I', 'P'};
+constexpr size_t INGESTOR_PLAN_FORMAT_MAJOR_OFFSET = 4;
+constexpr size_t INGESTOR_PLAN_FORMAT_MINOR_OFFSET = 6;
+constexpr size_t INGESTOR_PLAN_HEADER_SIZE = 48;
+
+constexpr std::array<SaveForm, 2> SAVE_FORMS = {SaveForm::GRAPH_AND_PLAN, SaveForm::PLAN_ONLY};
+
+const char* saveFormName(SaveForm form)
+{
+    return form == SaveForm::GRAPH_AND_PLAN ? "graph and plan" : "plan only";
+}
+
+// Checks that a save or a load failed in the plugin with status, and that the message holds
+// phrase.
+void expectPluginRefusal(const Error& error, hipdnnPluginStatus_t status, const std::string& phrase)
+{
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR) << error.err_msg;
+    EXPECT_NE(error.err_msg.find(::toString(status)), std::string::npos)
+        << "expected " << ::toString(status) << " in: " << error.err_msg;
+    EXPECT_NE(error.err_msg.find(phrase), std::string::npos)
+        << "expected '" << phrase << "' in: " << error.err_msg;
+}
+
+uint16_t readLittleEndianU16(const std::vector<uint8_t>& bytes, size_t offset)
+{
+    return static_cast<uint16_t>(bytes.at(offset) | (bytes.at(offset + 1) << 8));
+}
+
+void writeLittleEndianU16(std::vector<uint8_t>& bytes, size_t offset, uint16_t value)
+{
+    bytes.at(offset) = static_cast<uint8_t>(value & 0xFFU);
+    bytes.at(offset + 1) = static_cast<uint8_t>(value >> 8);
+}
+
+// Finds the plugin payload in the bytes of a plan-only save. Checks that the payload is an
+// ingestor plan.
+void findIngestorPlanPayload(const std::vector<uint8_t>& saved, size_t& offset, size_t& size)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::Verifier verifier(saved.data(), saved.size());
+    ASSERT_TRUE(data_objects::VerifySerializedExecutionPlanBuffer(verifier));
+    const auto* payload = data_objects::GetSerializedExecutionPlan(saved.data())->plugin_payload();
+    ASSERT_NE(payload, nullptr);
+    ASSERT_GT(payload->size(), INGESTOR_PLAN_HEADER_SIZE);
+    ASSERT_TRUE(
+        std::equal(INGESTOR_PLAN_MARKER.begin(), INGESTOR_PLAN_MARKER.end(), payload->begin()))
+        << "the plugin payload is not an ingestor plan";
+
+    offset = static_cast<size_t>(payload->data() - saved.data());
+    size = payload->size();
+}
+
+// Finds the stored code object in the bytes of a plan-only save of an ingestor plan.
+void findCodeObject(const std::vector<uint8_t>& saved, size_t& offset, size_t& size)
+{
+    namespace fb = serialization::fb;
+
+    size_t payloadOffset = 0;
+    size_t payloadSize = 0;
+    ASSERT_NO_FATAL_FAILURE(findIngestorPlanPayload(saved, payloadOffset, payloadSize));
+    const size_t bodyOffset = payloadOffset + INGESTOR_PLAN_HEADER_SIZE;
+    const size_t bodySize = payloadSize - INGESTOR_PLAN_HEADER_SIZE;
+
+    // FlatBuffers reads need an aligned body, and the payload sits at any address.
+    std::vector<uint64_t> aligned((bodySize + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+    std::memcpy(aligned.data(), saved.data() + bodyOffset, bodySize);
+    const auto* body = reinterpret_cast<const uint8_t*>(aligned.data());
+
+    flatbuffers::Verifier verifier(body, bodySize);
+    ASSERT_TRUE(fb::VerifyExecutionPlanBuffer(verifier));
+    const auto* codeObject = fb::GetExecutionPlan(body)->kernel_image()->code_object();
+    ASSERT_NE(codeObject, nullptr);
+    ASSERT_GT(codeObject->size(), 0U);
+
+    offset = bodyOffset + static_cast<size_t>(codeObject->data() - body);
+    size = codeObject->size();
+    ASSERT_LE(offset + size, payloadOffset + payloadSize);
+}
 
 std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::string& name)
 {
@@ -600,7 +697,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
     // C*R*S = 2*3*3: every output element is an 18-term sum, and GPU and CPU accumulate
     // in different orders, so the budget is 18 epsilons rather than the elementwise one.
     GraphVerificationContext context(*graph);
-    registerValidatorsForOutputs(context, /*epsilonMultiple=*/2 * 3 * 3);
+    registerValidatorsForOutputs(context, CONV_FWD_TOLERANCE_EPSILONS);
     verifyBuiltGraph(context, 0);
 }
 
@@ -628,6 +725,248 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
 
     EXPECT_TRUE(offers(pointwiseEngines, engineId()));
     EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
+}
+
+// ---------------------------------------------------------------------------
+// Saved plans
+// ---------------------------------------------------------------------------
+
+class IntegrationGpuKernelIngestorSaveLoad : public IntegrationGpuKernelIngestor
+{
+protected:
+    // Builds graph with pinnedEngineId, validates one run and saves the plan in form. Then
+    // it destroys graph, loads the plan with a new handle and validates two runs of the
+    // loaded plan. Every run uses the CPU reference of the original graph. Then it checks
+    // that the loaded plan cannot be saved again.
+    void roundTripInAFreshHandle(std::shared_ptr<Graph> graph,
+                                 int64_t pinnedEngineId,
+                                 SaveForm form,
+                                 float epsilonMultiple)
+    {
+        {
+            const ScopedPluginLogCapture capture(this);
+            ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, pinnedEngineId));
+            // The load below must log no selection. This check proves that the capture
+            // records selection lines.
+            ASSERT_TRUE(capture.recorder().hasLogContaining(detail::SELECTED_KERNEL_LOG))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+
+        int64_t servingEngineId = 0;
+        auto result = graph->get_execution_plan_engine_id(servingEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(servingEngineId, pinnedEngineId);
+
+        std::vector<BehaviorNote> notes;
+        result = graph->get_behavior_notes_for_engine(pinnedEngineId, notes);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NE(std::find(notes.begin(),
+                            notes.end(),
+                            BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                  notes.end());
+
+        VerificationRun run;
+        {
+            GraphVerificationContext context(*graph);
+            ASSERT_NO_FATAL_FAILURE(registerValidatorsForOutputs(context, epsilonMultiple));
+            ASSERT_NO_FATAL_FAILURE(prepareVerification(context, /*seed=*/0, run));
+        }
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *graph, _handle));
+
+        std::vector<uint8_t> saved;
+        {
+            const ScopedPluginLogCapture capture(this);
+            auto save = detail::saveInForm(*graph, form);
+            ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+            saved = std::move(save.first);
+            EXPECT_FALSE(capture.recorder().hasLogContaining(
+                "does not support execution plan serialization"))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            int contents = 0;
+            ASSERT_EQ(
+                hipdnnBackendGetSerializedBinaryContents_ext(saved.data(), saved.size(), &contents),
+                HIPDNN_STATUS_SUCCESS);
+            ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
+                << "the saved graph holds no execution plan";
+        }
+
+        int64_t originalWorkspaceSize = 0;
+        result = graph->get_workspace_size(originalWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const std::weak_ptr<Graph> original = graph;
+        graph.reset();
+        ASSERT_TRUE(original.expired()) << "another owner keeps the original graph alive";
+
+        const ScopedPluginLogCapture capture(this);
+        ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(_handle, _stream));
+
+        auto loaded = std::make_shared<Graph>();
+        result = detail::loadInForm(*loaded, _handle, saved, form);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        EXPECT_TRUE(capture.recorder().hasLogContaining(detail::CREATING_CONTAINER_LOG))
+            << "the new handle did not get a new provider container. Captured logs:\n"
+            << capture.recorder().getRecordedLogsAsString();
+        detail::expectNoKernelSelectionLogged(capture.recorder());
+
+        int64_t loadedEngineId = 0;
+        result = loaded->get_execution_plan_engine_id(loadedEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedEngineId, pinnedEngineId);
+
+        int64_t loadedWorkspaceSize = 0;
+        result = loaded->get_workspace_size(loadedWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedWorkspaceSize, originalWorkspaceSize);
+
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+
+        const auto resave = detail::saveInForm(*loaded, form);
+        expectPluginRefusal(
+            resave.second, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
+    }
+};
+
+TEST_F(IntegrationGpuKernelIngestorSaveLoad, RestoresAPointwiseGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(buildPointwiseAddGraph(),
+                            engineId(),
+                            SaveForm::GRAPH_AND_PLAN,
+                            POINTWISE_TOLERANCE_EPSILONS);
+}
+
+TEST_F(IntegrationGpuKernelIngestorSaveLoad, RestoresAPointwisePlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(
+        buildPointwiseAddGraph(), engineId(), SaveForm::PLAN_ONLY, POINTWISE_TOLERANCE_EPSILONS);
+}
+
+TEST_F(IntegrationGpuKernelIngestorSaveLoad, RestoresAConvFwdGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(
+        buildConvFwdGraph(), convEngineId(), SaveForm::GRAPH_AND_PLAN, CONV_FWD_TOLERANCE_EPSILONS);
+}
+
+TEST_F(IntegrationGpuKernelIngestorSaveLoad, RestoresAConvFwdPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(
+        buildConvFwdGraph(), convEngineId(), SaveForm::PLAN_ONLY, CONV_FWD_TOLERANCE_EPSILONS);
+}
+
+class IntegrationGpuKernelIngestorSaveLoadRefusals : public IntegrationGpuKernelIngestor
+{
+protected:
+    // Builds the convolution graph with the ConvFwd engine and saves its plan only.
+    void saveAConvFwdPlanOnly(std::vector<uint8_t>& saved)
+    {
+        auto graph = buildConvFwdGraph();
+        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, convEngineId()));
+        auto save = detail::saveInForm(*graph, SaveForm::PLAN_ONLY);
+        ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+        saved = std::move(save.first);
+    }
+};
+
+TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
+       RefusesToSaveABenchmarkingPlanBeforeItsFirstExecute)
+{
+    auto graph = buildPointwiseAddGraph();
+    std::vector<KnobSetting> knobSettings;
+    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
+    {
+        const ScopedPluginLogCapture capture(this);
+        ASSERT_NO_FATAL_FAILURE(buildAndCompileWithKnobs(*graph, engineId(), knobSettings));
+        ASSERT_TRUE(capture.recorder().hasLogContaining("' will benchmark "))
+            << "the plan is not a benchmarking plan. Captured logs:\n"
+            << capture.recorder().getRecordedLogsAsString();
+        ASSERT_FALSE(capture.recorder().hasLogContaining("will benchmark 1 candidate(s)"))
+            << "the plan has one candidate only. Captured logs:\n"
+            << capture.recorder().getRecordedLogsAsString();
+    }
+
+    for(const SaveForm form : SAVE_FORMS)
+    {
+        SCOPED_TRACE(saveFormName(form));
+        const auto save = detail::saveInForm(*graph, form);
+        expectPluginRefusal(
+            save.second, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "has not chosen a kernel yet");
+    }
+
+    VerificationRun run;
+    {
+        GraphVerificationContext context(*graph);
+        ASSERT_NO_FATAL_FAILURE(
+            registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS));
+        ASSERT_NO_FATAL_FAILURE(prepareVerification(context, /*seed=*/0, run));
+    }
+    ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *graph, _handle));
+
+    for(const SaveForm form : SAVE_FORMS)
+    {
+        SCOPED_TRACE(saveFormName(form));
+        const auto save = detail::saveInForm(*graph, form);
+        EXPECT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+        EXPECT_FALSE(save.first.empty());
+    }
+}
+
+// The FlatBuffers Verifier accepts a body with one changed code-object byte, so only the
+// body digest finds that damage.
+TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
+       RefusesToLoadDamagedBytesOrAnotherFormatMajorVersion)
+{
+    std::vector<uint8_t> saved;
+    ASSERT_NO_FATAL_FAILURE(saveAConvFwdPlanOnly(saved));
+
+    const auto loadWithOneCodeObjectByteChanged = [this](std::vector<uint8_t> copy) {
+        SCOPED_TRACE("one code-object byte changed");
+        size_t codeOffset = 0;
+        size_t codeSize = 0;
+        ASSERT_NO_FATAL_FAILURE(findCodeObject(copy, codeOffset, codeSize));
+
+        const size_t middleOfCode = codeOffset + (codeSize / 2);
+        copy.at(middleOfCode) = static_cast<uint8_t>(copy.at(middleOfCode) ^ 0xFFU);
+
+        auto loaded = std::make_shared<Graph>();
+        const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
+        expectPluginRefusal(
+            result, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "ingestor plan data is damaged");
+        EXPECT_NE(result.err_msg.find("body digest mismatch"), std::string::npos) << result.err_msg;
+    };
+
+    const auto loadWithAnotherFormatMajorVersion = [this](std::vector<uint8_t> copy) {
+        SCOPED_TRACE("another format major version");
+        size_t payloadOffset = 0;
+        size_t payloadSize = 0;
+        ASSERT_NO_FATAL_FAILURE(findIngestorPlanPayload(copy, payloadOffset, payloadSize));
+
+        const uint16_t major
+            = readLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET);
+        const uint16_t minor
+            = readLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MINOR_OFFSET);
+        const auto otherMajor = static_cast<uint16_t>(major + 1);
+        writeLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET, otherMajor);
+
+        auto loaded = std::make_shared<Graph>();
+        const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
+        expectPluginRefusal(result,
+                            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                            "payload format version " + std::to_string(otherMajor) + "."
+                                + std::to_string(minor) + " is not readable");
+        EXPECT_NE(result.err_msg.find("reads format versions " + std::to_string(major) + "."),
+                  std::string::npos)
+            << result.err_msg;
+    };
+
+    ASSERT_NO_FATAL_FAILURE(loadWithOneCodeObjectByteChanged(saved));
+    ASSERT_NO_FATAL_FAILURE(loadWithAnotherFormatMajorVersion(saved));
 }
 
 INSTANTIATE_TEST_SUITE_P(,

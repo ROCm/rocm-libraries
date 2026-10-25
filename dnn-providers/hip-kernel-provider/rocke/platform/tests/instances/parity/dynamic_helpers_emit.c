@@ -4,7 +4,8 @@
  * tests/parity/dynamic_helpers_emit.c -- C-side emitter for the runtime-shape
  * (AOT) helpers: rocke_software_pipeline_run_ping_pong_dynamic and the dynamic
  * coordinate transforms (embed_dynamic, unmerge_magic_dynamic, pad_dynamic,
- * the dynamic tensor descriptor). Builds each kernel identically to
+ * the dynamic tensor descriptor) and rocke_chiplet_transform_chunked_runtime.
+ * Builds each kernel identically to
  * dynamic_helpers_emit.py so run_diff.py can byte-compare the two engines'
  * .ll; see that file for the config-by-config rationale.
  *
@@ -14,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.grid.h"
 #include "rocke/helper_rocke.helpers.pipeline.h"
 #include "rocke/helper_rocke.helpers.schedule.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
@@ -388,6 +390,33 @@ static void build_pad_dynamic(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* ------------------------------------------------------------------------- */
+/* chiplet_transform_chunked_runtime                                         */
+/* ------------------------------------------------------------------------- */
+
+static void chiplet_runtime(rocke_ir_builder_t* b, bool explicit_chunk)
+{
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* p_n = rocke_b_param(b, "p_num_wgs", rocke_i32(), NULL);
+    rocke_value_t* p_chunk = explicit_chunk ? rocke_b_param(b, "p_chunk", rocke_i32(), NULL) : NULL;
+    rocke_value_t* wgid = rocke_b_block_id_x(b);
+    rocke_value_t* remapped = rocke_chiplet_transform_chunked_runtime(b, wgid, p_n, 8, p_chunk);
+    if(remapped == NULL)
+        return;
+    rocke_b_global_store(b, o, wgid, remapped, 1);
+    rocke_b_ret(b);
+}
+
+static void build_chiplet_runtime_default(rocke_ir_builder_t* b)
+{
+    chiplet_runtime(b, false);
+}
+
+static void build_chiplet_runtime_chunk(rocke_ir_builder_t* b)
+{
+    chiplet_runtime(b, true);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 /* Index-for-index with the Python emitter's CONFIGS list. */
@@ -400,6 +429,8 @@ static const build_fn_t CONFIGS[] = {
     build_pingpong_mask,
     build_pingpong_mask_split_k,
     build_unmerge_mixed,
+    build_chiplet_runtime_default,
+    build_chiplet_runtime_chunk,
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

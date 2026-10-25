@@ -29,6 +29,7 @@
 
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
+#include "common/misc/generate.hpp"
 #include "common/misc/lapack_host_reference.hpp"
 #include "common/misc/norm.hpp"
 #include "common/misc/rocsolver.hpp"
@@ -155,54 +156,66 @@ void sytrs_initData(const rocblas_handle handle,
                     Th& hA,
                     Ih& hIpiv,
                     Uh& hIpiv_cpu,
-                    Th& hB,
-                    const char pivots = 'D')
+                    Th& hB)
 {
     if(CPU)
     {
         rocblas_init<T>(hA, true);
         rocblas_init<T>(hB, true);
 
-        for(I b = 0; b < bc; ++b)
+        bool const use_syrand = true;
+        if(use_syrand)
         {
-            // pivots = 'R': a symmetric indefinite matrix with random entries, whose factorization
-            // has 1-by-1 and 2-by-2 blocks and interchanges in no particular pattern
-            if(pivots == 'R')
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                T* const A = &(hA[b][0]);
                 {
-                    for(rocblas_int i = 0; i <= j; i++)
+                    int value = 0xFF;
+                    size_t nbytes = sizeof(T) * lda * n;
+                    memset((void*)A, value, nbytes);
+                }
+
+                syrand(uplo, n, A, lda);
+
+                // set diagonal entries
+                {
+                    using S = decltype(std::real(T{}));
+                    T const alpha = std::numeric_limits<S>::epsilon();
+
+                    for(I i = 0; i < n; i++)
                     {
-                        T const v = hA[b][i + j * lda] - T(5.5);
-                        hA[b][i + j * lda] = v;
-                        hA[b][j + i * lda] = v;
+                        A[i + i * int64_t(lda)] = alpha;
                     }
                 }
-                continue;
-            }
-
-            for(rocblas_int i = 0; i < n; i++)
+            } // end for b
+        }
+        else
+        {
+            for(I b = 0; b < bc; ++b)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                for(rocblas_int i = 0; i < n; i++)
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
                 }
-            }
 
-            // shuffle rows to test pivoting
-            // always the same permutation for debugging purposes
-            for(rocblas_int i = 0; i < n / 2; i++)
-            {
-                for(rocblas_int j = 0; j < n; j++)
+                // shuffle rows to test pivoting
+                // always the same permutation for debugging purposes
+                for(rocblas_int i = 0; i < n / 2; i++)
                 {
-                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                    }
                 }
-            }
 
-        } // end for b
+            } // end for b
+        }
 
         // do the symmetric decomposition of matrix A w/ the reference LAPACK routine
         for(I b = 0; b < bc; ++b)
@@ -249,12 +262,11 @@ void sytrs_getError(const rocblas_handle handle,
                     Uh& hIpiv_cpu,
                     Th& hB,
                     Th& hBRes,
-                    double* max_err,
-                    const char pivots = 'D')
+                    double* max_err)
 {
     // input data initialization
     sytrs_initData<true, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, bc,
-                                  hA, hIpiv, hIpiv_cpu, hB, pivots);
+                                  hA, hIpiv, hIpiv_cpu, hB);
 
     // execute computations
     // GPU lapack
@@ -277,7 +289,7 @@ void sytrs_getError(const rocblas_handle handle,
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, (*max_err));
     }
 }
 
@@ -304,13 +316,12 @@ void sytrs_getPerfData(const rocblas_handle handle,
                        const int hot_calls,
                        const int profile,
                        const bool profile_kernels,
-                       const bool perf,
-                       const char pivots = 'D')
+                       const bool perf)
 {
     if(!perf)
     {
         sytrs_initData<true, false, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -322,13 +333,13 @@ void sytrs_getPerfData(const rocblas_handle handle,
     }
 
     sytrs_initData<true, false, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB,
-                                   bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
+                                   bc, hA, hIpiv, hIpiv_cpu, hB);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
         sytrs_initData<false, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         CHECK_ROCBLAS_ERROR(rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs, dA.data(), lda, stA,
                                             dIpiv.data(), stP, dB.data(), ldb, stB, bc));
@@ -352,7 +363,7 @@ void sytrs_getPerfData(const rocblas_handle handle,
     for(int iter = 0; iter < hot_calls; iter++)
     {
         sytrs_initData<false, true, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, pivots);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         timer.start(stream);
         rocsolver_sytrs(STRIDED, handle, uplo, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -375,7 +386,6 @@ void testing_sytrs(Arguments& argus)
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
     rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
-    char pivots = argus.get<char>("pivots", 'D');
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;
@@ -487,14 +497,14 @@ void testing_sytrs(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             sytrs_getError<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error, pivots);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             sytrs_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
-                                          argus.profile_kernels, argus.perf, pivots);
+                                          argus.profile_kernels, argus.perf);
     }
     else
     {
@@ -529,20 +539,20 @@ void testing_sytrs(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             sytrs_getError<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
-                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error, pivots);
+                                       stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
             sytrs_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
-                                          argus.profile_kernels, argus.perf, pivots);
+                                          argus.profile_kernels, argus.perf);
     }
 
     // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
+    // using 6 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 6 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
