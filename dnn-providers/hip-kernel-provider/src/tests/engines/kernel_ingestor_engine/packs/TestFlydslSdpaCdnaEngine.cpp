@@ -2448,6 +2448,32 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsADroppingGraphOnlyOnTheDropoutObjects)
     EXPECT_FALSE(cdnaAdmits(cdnaSpec(), unknown));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAKeyAlignedDroppingGraphOnTheAlignedDropoutObjects)
+{
+    // The non-causal dropout objects' builds without the KV tail mask (gfx942, gfx950): a
+    // dropping graph whose key length the KV tile divides, never another one, never a padded
+    // one, and never a graph that does not drop.
+    auto aligned = makeCdnaDropoutKernel();
+    aligned.metadata[CDNA_KV_ALIGN_FIELD] = int64_t{64};
+    const auto masked = makeCdnaDropoutKernel();
+    const auto dropping = cdnaDroppingSpec();
+    ASSERT_EQ(dropping.seqLenKv % 64, 0);
+    EXPECT_TRUE(cdnaAdmits(dropping, aligned));
+    EXPECT_TRUE(cdnaAdmits(dropping, masked));
+    auto ragged = dropping;
+    ragged.seqLenQ = 333;
+    ragged.seqLenKv = 333;
+    EXPECT_FALSE(cdnaAdmits(ragged, aligned)) << "the object skips the KV tail mask";
+    EXPECT_TRUE(cdnaAdmits(ragged, masked));
+    auto padded = cdnaPaddedSpec();
+    setDropout(padded, 0.1F);
+    EXPECT_FALSE(cdnaAdmits(padded, aligned));
+    EXPECT_TRUE(cdnaAdmits(padded, masked));
+    auto noDrop = dropping;
+    noDrop.dropoutProbability = 0.0F;
+    EXPECT_FALSE(cdnaAdmits(noDrop, aligned));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsADroppingGraphWithABiasOnTheDropoutBiasObjects)
 {
     // Dropout with a bias (COVERAGE.md section 7.9's second wave): the dropout objects' bias
