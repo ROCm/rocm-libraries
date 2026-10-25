@@ -239,6 +239,25 @@ class EarlyStop:
             _record(self.record_key, ms)
         return ms
 
+    def note(self, ms: float, *, passed: Optional[bool] = None) -> None:
+        """Record a time this object did not measure itself.
+
+        For a sweep that ranks its kernels another way (see
+        :mod:`benchmarks.common.batched_timing`) and so never calls
+        :meth:`measure`, but still has to leave ``--early-stop-record`` the
+        case's best time -- ``benchmark_conv_compare.py`` seeds the
+        implicit-GEMM sweep from that file. A kernel that failed verification
+        is ignored here for the same reason it is in :meth:`measure`: a
+        wrong-but-fast kernel would prune every correct one in the seeded run.
+        """
+        if passed is False:
+            return
+        self.n_measured += 1
+        if self.best_ms is None or ms < self.best_ms:
+            self.best_ms = ms
+        if self.record_key is not None:
+            _record(self.record_key, ms)
+
     def report(self, label: str) -> None:
         """Print the line for a kernel :meth:`measure` just skipped."""
         seeded = " (seed)" if self.best_ms == self.seed_ms else ""

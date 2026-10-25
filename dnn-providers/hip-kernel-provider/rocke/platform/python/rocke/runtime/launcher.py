@@ -467,6 +467,15 @@ class KernelLauncher:
     def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
         return self._cluster_dims
 
+    def _live_fn(self):
+        """The kernel handle, or a clear error if :meth:`unload` took it."""
+        if self._fn is None:
+            raise RuntimeError(
+                f"KernelLauncher({self._kernel_name!r}) was unloaded; "
+                f"build a new one to launch it again"
+            )
+        return self._fn
+
     def _resolve_cluster(self, config: LaunchConfig) -> Optional[Tuple[int, int, int]]:
         if config.cluster is None:
             return self._cluster_dims
@@ -501,7 +510,7 @@ class KernelLauncher:
             # there's no bucket growth and no need to attach tensor
             # refs to a completion event.
             rt.launch_blocking(
-                self._fn,
+                self._live_fn(),
                 config.grid,
                 config.block,
                 args,
@@ -522,7 +531,7 @@ class KernelLauncher:
         # us and ~1 us per launch in tight benchmark loops, and
         # multiple-percent on tiny kernels like the conv bake-off.
         rt.launch(
-            self._fn,
+            self._live_fn(),
             config.grid,
             config.block,
             args,
@@ -551,7 +560,7 @@ class KernelLauncher:
         lives; drain the stream before dropping it.
         """
         launch = _runtime().prepare_launch(
-            self._fn,
+            self._live_fn(),
             config.grid,
             config.block,
             self._packer(values),
@@ -565,9 +574,32 @@ class KernelLauncher:
 
         return run
 
+    def unload(self) -> None:
+        """Unload the HIP module this launcher owns. The launcher is dead after.
+
+        A launcher normally lives as long as its problem shape, and the module
+        goes when the process does. A harness that loads thousands of distinct
+        binaries in one run (an AOT sweep over a kernel cache) needs to give
+        the code objects back rather than hold every one it ever launched, so
+        it owns the lifetime explicitly and calls this.
+
+        **The device must be drained first.** Unloading a module whose kernels
+        are still in flight faults; this call cannot check that for the caller
+        (there is no stream to wait on here), so the caller synchronizes --
+        :func:`synchronize_and_release` -- before it unloads.
+
+        Idempotent: a second call does nothing. Calling the launcher after it
+        is unloaded raises.
+        """
+        module, self._module = self._module, None
+        self._fn = None
+        if module is not None:
+            module.unload()
+
     def __repr__(self) -> str:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""
-        return f"KernelLauncher({self._kernel_name!r}{key_str})"
+        dead = "" if self._module is not None else ", unloaded"
+        return f"KernelLauncher({self._kernel_name!r}{key_str}{dead})"
 
 
 class PipelineLauncher:

@@ -38,7 +38,7 @@ both caches.
 
 The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
 ``--dtype`` / ``--direction`` / ``--run-from-cache`` / ``--early-stop`` /
-``--early-stop-after`` flags are forwarded to both scripts.
+``--early-stop-after`` / ``--fast-rank`` flags are forwarded to both scripts.
 
 Early stopping carries over from one script to the other: direct conv runs
 first and records each case's best time (a kernel that fails ``--verify`` is
@@ -47,6 +47,13 @@ each case from that time instead of from nothing -- so from its first kernel it
 skips any that cannot come within ``--early-stop`` times the direct result.
 ``--no-seed-from-direct`` turns that off.  ``--dtype`` / ``--direction`` default to fp16 / fwd for explicit shapes;
 with a MIOpenDriver command they are taken from the command unless given.
+
+``--fast-rank`` (cache runs only) replaces that mechanism rather than tuning
+it: each script probes its cached kernels in batches and measures only the
+best few, so the seed no longer prunes anything on the implicit side. The
+record file is still written -- it is the comparison's own record of the best
+direct-conv time -- and passing ``--early-stop``/``--early-stop-after``
+alongside ``--fast-rank`` has no effect.
 
 Notes
 -----
@@ -214,6 +221,23 @@ def _build_mode_args(args) -> list[str]:
         a += ["--early-stop", str(args.early_stop)]
     if args.early_stop_after is not None:
         a += ["--early-stop-after", str(args.early_stop_after)]
+    # Both scripts take the fast-ranking flags with the same names and the
+    # same defaults (they share benchmarks.common.batched_timing), so a knob
+    # is forwarded only when it was given and the scripts' own default stands
+    # otherwise -- one place for the default, not three.
+    if args.fast_rank:
+        a += ["--fast-rank"]
+        for flag, value in (
+            ("--fast-rank-finalists", args.fast_rank_finalists),
+            ("--fast-rank-chunk", args.fast_rank_chunk),
+            ("--fast-rank-warmup", args.fast_rank_warmup),
+            ("--fast-rank-iters", args.fast_rank_iters),
+            ("--fast-rank-primer", args.fast_rank_primer),
+        ):
+            if value is not None:
+                a += [flag, str(value)]
+    if args.module_cache_bytes is not None:
+        a += ["--module-cache-bytes", str(args.module_cache_bytes)]
     return a
 
 
@@ -242,6 +266,11 @@ def _build_implicit_only_args(args) -> list[str]:
             a += ["--streamk-reductions", args.streamk_reductions]
         if args.streamk_ctas != -1:
             a += ["--streamk-ctas", str(args.streamk_ctas)]
+    # Only the implicit-GEMM sweep allocates device scratch per launch config
+    # (two-stage wgrad workspaces, dgrad sub-GEMM tables), so only it has a
+    # budget to cap the probe's chunks with.
+    if args.fast_rank and args.fast_rank_scratch is not None:
+        a += ["--fast-rank-scratch", str(args.fast_rank_scratch)]
     return a
 
 
@@ -396,6 +425,85 @@ def main() -> int:
         help="skip the implicit-GEMM benchmark (direct-conv only)",
     )
 
+    rank_grp = parser.add_argument_group(
+        "Fast ranking",
+        "Forwarded to both scripts; needs --run-from-cache. Each times its "
+        "cached kernels in batches between two device drains and spends the "
+        "full --warmup/--iters only on the best few. A knob left unset keeps "
+        "the benchmark scripts' own default.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank",
+        action="store_true",
+        dest="fast_rank",
+        help="rank each script's cached kernels with a batched probe round "
+        "instead of timing every one of them in full. Replaces --early-stop "
+        "(and the implicit sweep's --split-k-prune) for the run, and makes "
+        "--verify check the finalists rather than every kernel.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-finalists",
+        type=int,
+        default=None,
+        dest="fast_rank_finalists",
+        metavar="N",
+        help="kernels carried from the probe into the full-fidelity round",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-chunk",
+        type=int,
+        default=None,
+        dest="fast_rank_chunk",
+        metavar="N",
+        help="kernels timed between two device drains",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-scratch",
+        type=int,
+        default=None,
+        dest="fast_rank_scratch",
+        metavar="MiB",
+        help="device scratch the probe may hold before it closes a chunk. "
+        "Forwarded to implicit-GEMM only -- direct conv shares one set of "
+        "buffers across its kernels and allocates no per-kernel scratch.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-warmup",
+        type=int,
+        default=None,
+        dest="fast_rank_warmup",
+        metavar="N",
+        help="probe warmup launches per kernel",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-iters",
+        type=int,
+        default=None,
+        dest="fast_rank_iters",
+        metavar="N",
+        help="probe timed launches per kernel",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-primer",
+        type=int,
+        default=None,
+        dest="fast_rank_primer",
+        metavar="N",
+        help="launches issued before a case's first measured chunk, to bring "
+        "the device's clocks up",
+    )
+
+    parser.add_argument(
+        "--module-cache-bytes",
+        type=int,
+        default=None,
+        dest="module_cache_bytes",
+        metavar="N",
+        help="AOT: HSACO bytes each script keeps loaded across cases, so a "
+        "shape-generic binary is loaded once per run rather than once per "
+        "case (unset keeps the scripts' own default; 0 loads per use)",
+    )
+
     implicit_grp = parser.add_argument_group(
         "Implicit-GEMM options",
         "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
@@ -500,6 +608,16 @@ def main() -> int:
     shape_grp.add_argument("--groups", "-g", type=int, default=1)
 
     args = parser.parse_args()
+
+    if args.fast_rank and args.run_from_cache is None:
+        # Both scripts reject it anyway; catching it here beats launching two
+        # subprocesses to watch them both exit 2.
+        print(
+            "error: --fast-rank ranks the kernels of an AOT cache; "
+            "pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
 
     using_miopen = args.miopen_cmd is not None or args.miopen_file is not None
 

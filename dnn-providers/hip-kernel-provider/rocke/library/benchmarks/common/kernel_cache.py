@@ -28,13 +28,16 @@ import hashlib
 import itertools
 import json
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from kernels.conv.kernel_identity import (  # noqa: F401 (re-exported)
     KernelIdentity,
     current_llvm_flavor,
+    identity_capability_key,
     identity_supports_problem,
+    problem_capability_key,
 )
 
 
@@ -122,6 +125,13 @@ def comgr_input_key(comgr_input) -> str:
 # KernelCache
 # ---------------------------------------------------------------------------
 
+# How many ``(identity, path, meta)`` rows :meth:`KernelCache.compatible`
+# keeps memoised across every shape key. Bounding rows rather than keys is
+# what makes the memo's footprint independent of how wide the cache is: ~2M
+# tuple references is ~16 MB, a few dozen shapes' worth of a 20k-entry cache
+# or thousands of a narrow one.
+_COMPATIBLE_MEMO_ROWS = 2_000_000
+
 # Direction → subdirectory name.
 _DIRECTION_DIRS: Dict[str, str] = {
     "fwd": "conv_fwd",
@@ -174,6 +184,24 @@ class KernelCache:
         # whole cache several times (describe, stale check, compatible), and
         # each pass parses every metadata file. Dropped on every write.
         self._loaded: Dict[str, list] = {}
+        # Entries of one subdirectory grouped by capability key, built on the
+        # first :meth:`compatible` for that direction (see _groups).
+        self._groups: Dict[str, list] = {}
+        # ``compatible`` answers, by (direction, problem capability key).
+        self._compatible: "OrderedDict[tuple, list]" = OrderedDict()
+        self._compatible_rows = 0
+        # Parsed metadata by path, for the lookups that only want the entry
+        # point symbol (:meth:`entry_meta`) and would otherwise re-read and
+        # re-parse the same file once per candidate per shape.
+        self._meta: Dict[Path, Optional[dict]] = {}
+
+    def _forget(self) -> None:
+        """Drop everything read from disk. Called on every write."""
+        self._loaded.clear()
+        self._groups.clear()
+        self._compatible.clear()
+        self._compatible_rows = 0
+        self._meta.clear()
 
     def _dir_for(self, identity: KernelIdentity) -> Path:
         subdir = _DIRECTION_DIRS.get(identity.direction, identity.direction)
@@ -234,12 +262,12 @@ class KernelCache:
             self._meta_path(identity),
             json.dumps(full_meta, indent=2, sort_keys=True).encode("utf-8"),
         )
-        self._loaded.clear()
+        self._forget()
 
     def discard(self, identity: KernelIdentity) -> None:
         """Remove ``identity``'s entry. Its binary stays: others may share it."""
         self._meta_path(identity).unlink(missing_ok=True)
-        self._loaded.clear()
+        self._forget()
 
     def put(
         self,
@@ -275,14 +303,39 @@ class KernelCache:
         return {ident.stable_hash(): meta for ident, _, meta in entries}
 
     def meta(self, identity: KernelIdentity) -> Optional[dict]:
-        """The identity's metadata, or ``None`` when it has no entry."""
+        """The identity's metadata, or ``None`` when it has no entry.
+
+        Memoised by path: a direct-conv plan looks up the same transform or
+        fold helper for every candidate of every shape, and parsing its one
+        file again each time is pure overhead. Dropped on every write.
+        """
         meta_path = self._meta_path(identity)
-        if not meta_path.exists():
+        if meta_path in self._meta:
+            return self._meta[meta_path]
+        parsed: Optional[dict] = None
+        if meta_path.exists():
+            try:
+                parsed = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                parsed = None
+        self._meta[meta_path] = parsed
+        return parsed
+
+    def entry_meta(self, identity: KernelIdentity) -> Optional[dict]:
+        """The identity's metadata when its binary is present, else ``None``.
+
+        :meth:`get` with the bytes left on disk. A caller that only needs the
+        entry point symbol of a helper kernel -- which is every caller that
+        builds a launch plan, since the binary is read later, once, by the
+        launcher -- asks here instead and reads no HSACO at all.
+        """
+        meta = self.meta(identity)
+        if meta is None:
             return None
-        try:
-            return json.loads(meta_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        path = self._resolve(self._meta_path(identity), meta)
+        if not path.exists() or path.stat().st_size == 0:
             return None
+        return meta
 
     def _resolve(self, meta_path: Path, meta: dict) -> Path:
         if "blob" in meta:
@@ -375,6 +428,40 @@ class KernelCache:
         """
         return identity_supports_problem(identity, problem)
 
+    def _groups_for(self, direction: Optional[str]) -> list:
+        """``[(identity, [entries...])]`` of one direction, by capability key.
+
+        The identity heading a group is a representative: every entry in it
+        answers :func:`identity_supports_problem` alike, so the predicate runs
+        once per group rather than once per entry. A cache sweeps one
+        geometry over the whole tuning grid, so the groups are much wider than
+        one entry -- tile, pipeline, LDS layout and scheduling knobs all leave
+        the key alone.
+        """
+        cache_key = direction or ""
+        groups = self._groups.get(cache_key)
+        if groups is None:
+            by_key: Dict[tuple, list] = {}
+            for pos, entry in enumerate(self._entries(direction)):
+                by_key.setdefault(identity_capability_key(entry[0]), []).append(
+                    (pos, entry)
+                )
+            groups = self._groups[cache_key] = [
+                (members[0][1][0], members) for members in by_key.values()
+            ]
+        return groups
+
+    def _remember(self, key: tuple, out: list) -> None:
+        """Memoise one ``compatible`` answer, oldest out when the budget is."""
+        self._compatible[key] = out
+        self._compatible_rows += len(out)
+        while (
+            self._compatible_rows > _COMPATIBLE_MEMO_ROWS
+            and len(self._compatible) > 1
+        ):
+            _, dropped = self._compatible.popitem(last=False)
+            self._compatible_rows -= len(dropped)
+
     def compatible(
         self, problem: object, *, direction: Optional[str] = None
     ) -> List[Tuple[KernelIdentity, Path, dict]]:
@@ -382,10 +469,35 @@ class KernelCache:
 
         The metadata is returned because the caller needs ``kernel_name`` from
         it: the HSACO's entry-point symbol is not derivable from the identity.
+
+        Answers are grouped and memoised, which a sweep over thousands of
+        shapes needs and a one-shot caller does not notice: see
+        :func:`~kernels.conv.kernel_identity.problem_capability_key`. The
+        memo is bounded by the number of rows it holds, not by the number of
+        shapes, and is dropped whenever the cache is written. The returned
+        list is the caller's own -- mutating it does not disturb the memo.
         """
-        out: List[Tuple[KernelIdentity, Path, dict]] = []
-        for identity, hsaco_path, meta in self._entries(direction):
+        groups = self._groups_for(direction)
+        is_direct = all(ident.is_direct for ident, _ in groups)
+        key = problem_capability_key(problem, is_direct=is_direct)
+        if key is not None:
+            key = (direction, key)
+            hit = self._compatible.get(key)
+            if hit is not None:
+                self._compatible.move_to_end(key)
+                return list(hit)
+        picked: List[Tuple[int, Tuple[KernelIdentity, Path, dict]]] = []
+        for identity, members in groups:
             ok, _ = self.supports_problem(identity, problem)
             if ok:
-                out.append((identity, hsaco_path, meta))
+                picked.extend(members)
+        # Back into the order :meth:`_entries` yields (identity sha1 within a
+        # direction), which is what every caller downstream -- ``--sample``'s
+        # fixed-seed subset, ``--early-stop-after``, the probe order -- sees.
+        # Grouping is an implementation detail and must not reshuffle it.
+        picked.sort(key=lambda item: item[0])
+        out = [entry for _, entry in picked]
+        if key is not None:
+            self._remember(key, out)
+            return list(out)
         return out
