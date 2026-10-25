@@ -579,6 +579,32 @@ diff against upstream plus the modifications below.
     - **Objects:** the 24 prefill and 8 decode sink objects per arch change; every other
       object (the dual-wave ones included) is byte-identical to modification 35's.
     - Not yet upstream.
+37. **A padded batch's bias view spans the launch's keys** (`flash_attn_utils.py`; vectorized
+    bias builds).
+    - **Why:** the vectorized bias builds read the bias in runs of 4 keys. Under padding
+      (modification 32) each (batch, head) bias view ended at `(Sq_b - 1) * stride_q +
+      Skv_b`, so when a batch's key length was no multiple of 4 its last real row's final
+      run straddled the view's end and read as zero: wrong O and LSE on that row (found at
+      `Skv_b` 63). The provider had routed every padded bias to the strided builds instead,
+      which are 1.2-5.4x slower, and declined dropout with a bias under padding.
+    - **Change:** under a varlen build the vectorized view's last row ends at the launch's
+      key length, `(Sq_b - 1) * stride_q + Skv`. The provider serves these builds only a
+      bias dense over `[.., Sq, Skv]` with `Skv` a multiple of 4 and the row pitch a
+      multiple of 8 (`servableVectorBias`), so the runs end on `Skv` and every element read
+      lies inside the tensor. The keys from `Skv_b` on are masked by the batch's own key
+      compare, as on every other row (whose runs already read the next row's elements): a
+      masked score is a select, so whatever the bias holds there (NaN included) never
+      reaches the softmax. Rows still end at `Sq_b`, and a batch with no rows or keys still
+      reads none. A dense launch's lengths are the launch's, so its view is unchanged.
+    - **Objects:** the vectorized bias objects (`has_bias` 1, `bias_kstrided` 0; 44 on
+      gfx950 and gfx942, 60 on gfx90a) change, outside their KV loops: every loop keeps
+      its instruction counts but one gfx90a object's, which loses two SGPR reloads. The
+      prologues and epilogues differ by scalar register assignment and, on the objects
+      already short of SGPRs, by a few SGPR spills to VGPR lanes either way (at most 15
+      instructions). VGPR counts are unchanged but gfx942's `head_dim` 256 non-causal
+      object's (439 to 441, the same occupancy). Every other object is byte-identical to
+      modification 36's.
+    - Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

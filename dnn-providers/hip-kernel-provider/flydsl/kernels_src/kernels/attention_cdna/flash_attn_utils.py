@@ -3389,13 +3389,21 @@ class GenericFlashAttnContext:
 
         A strided bias build (@p kstrided, its key stride and f32 switch; modification
         31) reads one key at a time: its slice ends at (seq_len - 1) * bias_stride0 +
-        (seq_len_kv - 1) * stride_k + 1 elements of 2 bytes, or 4 for an f32 bias."""
+        (seq_len_kv - 1) * stride_k + 1 elements of 2 bytes, or 4 for an f32 bias.
+
+        Under padding the vectorized slice's last row spans the launch's keys, not the
+        batch's (modification 37): its runs of 4 keys end on the launch's key length, a
+        multiple of 4 the provider requires, and the bias is dense over it, so the last
+        real row's final run no longer straddles the view and reads as zero when the
+        batch's key length is no multiple of 4. The keys past the batch's are masked as
+        on every other row."""
         self.bias_stride0_v = fx.Index(bias_stride0)
         self.bias_kstrided = kstrided is not None
         if kstrided is None:
-            span = (
-                self.seqlen_q_b - fx.Index(1)
-            ) * self.bias_stride0_v + self.seqlen_kv_b
+            row_keys = (
+                self.seqlen_kv_b if self.varlen_flags is None else self.seq_len_kv_v
+            )
+            span = (self.seqlen_q_b - fx.Index(1)) * self.bias_stride0_v + row_keys
             elem_bytes = fx.Index(2)
         else:
             stride_k, f32_on = kstrided
