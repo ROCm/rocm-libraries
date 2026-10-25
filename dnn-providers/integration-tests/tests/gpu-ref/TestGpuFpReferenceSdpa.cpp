@@ -2023,8 +2023,10 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
                 }
                 else
                 {
+                    // Measured worst case 6e-8 on gfx942 (~170x margin).
                     EXPECT_NEAR(mGpu, mCpu, 1e-5F) << "b=" << b << " h=" << h << " s=" << s;
                 }
+                // Sum of up to Skv exponentials: measured worst relative gap 1.3e-7 on gfx942.
                 EXPECT_NEAR(eGpu, eCpu, 1e-4F * std::max(1.0F, eCpu))
                     << "b=" << b << " h=" << h << " s=" << s;
                 if(s == 1 && s < (b == 0 ? 6 : 4))
@@ -2225,7 +2227,12 @@ void expectFp8ForwardMatchesCpu()
         {
             for(int64_t s = 0; s < SQ; ++s)
             {
-                EXPECT_NEAR(lseGpu.getHostValue(b, h, s), lseCpu.getHostValue(b, h, s, 0), 1e-5F)
+                // Relative: fp8 LSE reaches ~11, where 1e-5 absolute is only ~10 ulp (measured worst
+                // gap 9.5e-7 on gfx942).
+                const float lseWant = lseCpu.getHostValue(b, h, s, 0);
+                EXPECT_NEAR(lseGpu.getHostValue(b, h, s),
+                            lseWant,
+                            1e-5F * std::max(1.0F, std::fabs(lseWant)))
                     << "b=" << b << " h=" << h << " s=" << s;
             }
         }
@@ -2492,6 +2499,7 @@ void expectFp8ScaledForwardMatchesCpu()
     amaxSGpu.memory().hostData();
     amaxOGpu.memory().hostData();
     EXPECT_EQ(amaxSGpu.getHostValue(0), amaxSCpu.getHostValue(0));
+    // A max over the same fp32 O values: bit-exact on gfx942; the bound allows ulp-level noise.
     EXPECT_NEAR(
         amaxOGpu.getHostValue(0), amaxOCpu.getHostValue(0), 1e-5f * amaxOCpu.getHostValue(0));
 
@@ -2738,6 +2746,8 @@ TEST_P(TestGpuSdpaFwdSweepFp32, MatchesCpuReference)
             .setAlibi(c.alibi)
             .setSoftcap(softcap)
             .setLse(&lseGpu));
+    // Measured worst case 1.8e-7 (O) and 2.3e-7 relative (LSE) on gfx942 across the sweep; 1e-4
+    // keeps over 400x margin for cross-architecture device-math variation.
     assertAllClose(oCpu, oGpu, 1e-4f);
     lseGpu.memory().hostData();
     for(int64_t b = 0; b < c.batch; ++b)
