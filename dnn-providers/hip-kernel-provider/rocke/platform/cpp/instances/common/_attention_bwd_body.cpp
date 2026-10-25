@@ -739,6 +739,23 @@ V packed_load_fn(void* ctx, V r, V c)
     return needv(b, rocke_attn_bwd_row_slab_load_vec(&slab, q, ivv(c), L->vec));
 }
 
+/* slab_row_loader over a duck-typed slab (rocke_attn_bwd_row_source_t). */
+struct SourceRowLoader
+{
+    B* b;
+    const rocke_attn_bwd_row_source_t* src;
+    V row0;
+    int vec;
+};
+
+V source_load_fn(void* ctx, V r, V c)
+{
+    auto* L = (SourceRowLoader*)ctx;
+    /* py: slab.load_vec(b.add(row0, r), c, vec) */
+    V row = rocke_b_add(L->b, L->row0, r);
+    return needv(L->b, L->src->load_vec(L->src->ctx, L->b, row, ivv(c), L->vec));
+}
+
 V call_load(B* b, const rocke_attn_bwd_tile_loader_t& l, V r, V c)
 {
     return needv(b, l.fn(l.ctx, r, c));
@@ -2181,12 +2198,25 @@ void copy_rows_to_lds(B* b,
     copy_rows(b, load, view, rows, cols, tid, threads, vec);
 }
 
-void stage_kv(B* b,
-              Step* t,
-              const rocke_attn_bwd_row_slab_t* k_slab,
-              const rocke_attn_bwd_row_slab_t* v_slab,
-              V k0,
-              V live)
+/* copy_rows_to_lds over a duck-typed slab. */
+void copy_source_to_lds(B* b,
+                        const rocke_attn_bwd_row_source_t* src,
+                        const rocke_attn_bwd_lds_view_t* view,
+                        V row0,
+                        int rows,
+                        int cols,
+                        V tid,
+                        int threads,
+                        int vec)
+{
+    SourceRowLoader ctx = {b, src, row0, vec};
+    rocke_attn_bwd_tile_loader_t load = {source_load_fn, (void*)&ctx};
+    copy_rows(b, load, view, rows, cols, tid, threads, vec);
+}
+
+/* stage_kv over K / V row sources (a RowSlab or another shell's slab). */
+template <class Src, class Copy>
+void stage_kv_with(B* b, Step* t, const Src* k_slab, const Src* v_slab, V k0, V live, Copy copy)
 {
     const Geom* g = t->geom;
     int d = g->head_size, n0 = g->k_n0;
@@ -2195,9 +2225,9 @@ void stage_kv(B* b,
     bool reg = eq(g->kv_residency, "reg");
     {
         IfScope s(b, live);
-        copy_rows_to_lds(b, k_slab, &t->v_k, k0, n0, d, t->tid, threads, 8);
+        copy(b, k_slab, &t->v_k, k0, n0, d, t->tid, threads, 8);
         if(!reg)
-            copy_rows_to_lds(b, v_slab, &t->v_v, k0, n0, d, t->tid, threads, 8);
+            copy(b, v_slab, &t->v_v, k0, n0, d, t->tid, threads, 8);
     }
     sync(b);
     if(reg)
@@ -2214,12 +2244,22 @@ void stage_kv(B* b,
         sync(b); /* stage-0 K reads complete before V overwrites the phase */
         {
             IfScope s(b, live);
-            copy_rows_to_lds(b, v_slab, &t->v_v, k0, n0, d, t->tid, threads, 8);
+            copy(b, v_slab, &t->v_v, k0, n0, d, t->tid, threads, 8);
         }
         sync(b);
         t->v_regs = load_all_b(b, &g->g0, lds_opnd(b, &t->v_v), lane, t->o0[1]);
         sync(b); /* stage-0 reads complete before the loop phase is written */
     }
+}
+
+void stage_kv(B* b,
+              Step* t,
+              const rocke_attn_bwd_row_slab_t* k_slab,
+              const rocke_attn_bwd_row_slab_t* v_slab,
+              V k0,
+              V live)
+{
+    stage_kv_with(b, t, k_slab, v_slab, k0, live, copy_rows_to_lds);
 }
 
 void zero_lds_acc(B* b, Step* t)
@@ -3620,6 +3660,17 @@ bool rocke_attn_bwd_tile_step_stage_kv(rocke_attn_bwd_tile_step_t* t,
                                        rocke_value_t* live_)
 {
     return guarded(b, [&]() { stage_kv(b, t, k_slab, v_slab, k0, live_); });
+}
+
+bool rocke_attn_bwd_tile_step_stage_kv_rows(rocke_attn_bwd_tile_step_t* t,
+                                            rocke_ir_builder_t* b,
+                                            const rocke_attn_bwd_row_source_t* k_rows,
+                                            const rocke_attn_bwd_row_source_t* v_rows,
+                                            rocke_value_t* k0,
+                                            rocke_value_t* live_)
+{
+    return guarded(b,
+                   [&]() { stage_kv_with(b, t, k_rows, v_rows, k0, live_, copy_source_to_lds); });
 }
 
 bool rocke_attn_bwd_tile_step_zero_acc(rocke_attn_bwd_tile_step_t* t,

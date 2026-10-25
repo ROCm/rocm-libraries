@@ -397,6 +397,11 @@ std::string kernel_name(const rocke_attn_bwd_spec_t& spec, const std::string& st
  * of every field that differs from its declared default, in field order. */
 std::vector<std::pair<std::string, std::string>>
     non_default_fields(const rocke_attn_bwd_spec_t& spec);
+/* salted_kernel_name(base, [(k, v) for k, v in non_default_fields(spec) if k
+ * not in skip]): non_default_fields skips head_size and name. */
+std::string salted_kernel_name(const std::string& base,
+                               const rocke_attn_bwd_spec_t& spec,
+                               const std::vector<std::string>& skip);
 rocke_attn_bwd_lds_request_t lds_request(const rocke_attn_bwd_spec_t& spec,
                                          const std::string& arch);
 rocke_attn_bwd_lds_plan_t lds_plan(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
