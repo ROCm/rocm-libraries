@@ -2970,31 +2970,68 @@ TEST_F(DAGSchedulerPassTest, QueueStartCalibratedIssueCycles_WmmaPreemptsAfterTh
 }
 
 // The loop-head deferral wins: when the latch ends in a WMMA and the header region is cut from
-// the block start, its first WMMA waits for other work, and no burst runs there.
+// the block start, its first WMMA waits for other work, and no burst runs there, also with
+// queueStartForceWmmaBurst.
 TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {
-    bb->addSuccessor(bb);
-    {
-        // A non-movable barrier (no LDS pseudo-reg) cuts the header's first region.
-        AsmIRBuilder builder(*bb, arch);
-        StinkyInstruction* cut = builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch));
-        cut->addSrcReg(StinkyRegister(-1));
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        {
+            // A non-movable barrier (no LDS pseudo-reg) cuts the header's first region.
+            AsmIRBuilder builder(*bb, arch);
+            StinkyInstruction* cut = builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch));
+            cut->addSrcReg(StinkyRegister(-1));
+        }
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        const std::string shape = wdShape(mnemonicSequence(*bb));
+        EXPECT_NE(shape.substr(1, 2), "WW") << "forced=" << v << " " << shape;
     }
-    for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
-    createSCmpWritingScc(bb, /*srcSgpr=*/90);
-    for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
-    createSCbranchReadingScc(bb);
-    PassContext ctx;
-    ctx.setGemmTileConfig(config);
-    PassFeatureConfig pfc;
-    pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.dsSpread = false;
-    pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.wmmaQueueDepth = 8;
-    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
-    ctx.setPassFeatureConfig(pfc);
-    pass->run(*func, ctx, am);
-    const std::string shape = wdShape(mnemonicSequence(*bb));
-    EXPECT_NE(shape.substr(1, 2), "WW") << shape;
+}
+
+// The queue is reset at every block and region start. Without queueStartForceWmmaBurst only
+// the loop header's first WMMA region opens with a burst; with it, a block that is not a loop
+// header does too: its first WMMAs go ahead of the ready ds_loads and the compare.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueueFirst) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        const int beforeCount = countStinkyInstructions(*bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_NE(shapes[0].substr(0, 8), "WWWWWWWW") << shapes[0];
+    EXPECT_EQ(shapes[1].substr(0, 9), "WWWWWWWWd") << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'W'), 16) << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8) << shapes[1];
 }
 
 // After a barrier wait the queue starts empty: the WMMAs behind it fill the queue before the

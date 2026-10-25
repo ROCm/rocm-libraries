@@ -3078,7 +3078,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
 
     // The queue is empty at a region start: the loop header's first WMMA region and a region cut
-    // by a barrier wait fill it first. The loop-head deferral wins over the burst.
+    // by a barrier wait fill it first; with queueStartForceWmmaBurst every WMMA region does, since
+    // the queue is reset at each block and region start. The loop-head deferral wins over the
+    // burst.
     if (fillQueueAfterResetOn() && hasWMMAInRegion_) {
         const bool headerStart =
             headerBurstPending_ && loop && loop->headerBB == blockBegin->getParent();
@@ -3088,7 +3090,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             afterWait = prev != nullptr && isBarrierWait(*prev);
         }
         if (headerStart) headerBurstPending_ = false;
-        regionStartBurst_ = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
+        regionStartBurst_ = (headerStart || afterWait || dagFeatures.queueStartForceWmmaBurst) &&
+                            !deferHeadBalanceThisRegion_;
     }
 
     regionFillerTotal_ = regionFillerCount;
