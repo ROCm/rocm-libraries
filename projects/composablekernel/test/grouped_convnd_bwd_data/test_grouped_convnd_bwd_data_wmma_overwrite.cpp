@@ -92,10 +92,7 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param,
                                            PassThrough{},
                                            PassThrough{},
                                            PassThrough{});
-    if(!expect_rejection)
-    {
-        Reference::MakeInvoker().Run(ref_arg);
-    }
+    Reference::MakeInvoker().Run(ref_arg);
 
     ck::DeviceMem out_device(sizeof(DataType) * out.mDesc.GetElementSpaceSize());
     ck::DeviceMem wei_device(sizeof(DataType) * wei.mDesc.GetElementSpaceSize());
