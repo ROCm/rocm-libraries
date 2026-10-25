@@ -16,7 +16,6 @@
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include "get_handle.hpp"
 #include "../workspace.hpp"
 
@@ -26,7 +25,6 @@
 #include <type_traits>
 #include <utility>
 #include <cmath>
-#include <type_traits>
 #include <iterator>
 
 #include <vector>
@@ -34,8 +32,6 @@
 
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
-#include "get_handle.hpp"
-#include "../workspace.hpp"
 #endif
 
 using miopen::solver::CKSolverType;
