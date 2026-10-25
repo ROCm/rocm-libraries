@@ -113,7 +113,7 @@ SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
 }
 
 /// A bias of the graph's full dims and, with @p withDbias, its gradient.
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, std::vector<int64_t> dims = {})
+SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
 {
     return spec.withEdit([=](SdpaBwdGraph& g) {
         addBias(g, dims);
@@ -275,6 +275,8 @@ constexpr uint64_t WORKSPACE = 0x70000000;
 
 void* asPointer(uint64_t address)
 {
+    // A fake address, only ever compared and offset into, never dereferenced.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
 }
 
@@ -720,7 +722,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1DoesNotServeAValueDimThatDiffersFromTheKe
     mla.headDimQk = 64;
     mla.headDimV = 32;
     EXPECT_FALSE(anyServes(specOf(mla), catalog()));
-    Shape equal;
+    const Shape equal;
     EXPECT_TRUE(serves(specOf(equal), plainRow(64)));
 }
 
@@ -1108,7 +1110,7 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, HoldsTheSeedAndOffsetUnlessTheyAre64BitDe
 TEST(TestFlydslSdpaBwdMergedWorkspace, HoldsAFullShapeDbiasWhereTheBiasIsBroadcast)
 {
     // (B, Hq, Sq, Sk) elements of 2 bytes, whichever axes the bias broadcasts.
-    constexpr size_t FULL_BYTES = 2 * 8 * 16 * 16 * 2;
+    constexpr size_t FULL_BYTES = size_t{2} * 8 * 16 * 16 * 2;
     for(const auto& dims : {std::vector<int64_t>{1, 8, 16, 16},
                             std::vector<int64_t>{2, 1, 16, 16},
                             std::vector<int64_t>{1, 1, 16, 16}})
@@ -1121,7 +1123,7 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, HoldsAFullShapeDbiasWhereTheBiasIsBroadca
 
 TEST(TestFlydslSdpaBwdMergedWorkspace, PlacesTheDbiasBufferOnThe256ByteBoundaryAfterTheSeed)
 {
-    constexpr size_t FULL_BYTES = 2 * 8 * 16 * 16 * 2;
+    constexpr size_t FULL_BYTES = size_t{2} * 8 * 16 * 16 * 2;
     const auto spec
         = withDropout(withBias(baseSpec(), true, {1, 8, 16, 16}), 0.2F, DataType::INT32, false);
     auto row = biasRow();
@@ -1131,7 +1133,7 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, PlacesTheDbiasBufferOnThe256ByteBoundaryA
 
 TEST(TestFlydslSdpaBwdMergedWorkspace, AgreesWithTheOffsetsALaunchUses)
 {
-    constexpr size_t FULL_BYTES = 2 * 8 * 16 * 16 * 2;
+    constexpr size_t FULL_BYTES = size_t{2} * 8 * 16 * 16 * 2;
     struct Case
     {
         SdpaBwdSpec spec;
@@ -1524,7 +1526,7 @@ TEST(TestFlydslSdpaBwdMergedReduce, CoversEveryVectorOfEveryRowOfALongerPlane)
     tall.seqKv = 100;
     // Rows of 104 elements, so every bias object can stage the bias.
     const auto spec = specOf(tall).withEdit([](SdpaBwdGraph& g) {
-        addBias(g, {1, 8, 64, 100}).strides = {8 * 64 * 104, 64 * 104, 104, 1};
+        addBias(g, {1, 8, 64, 100}).strides = {int64_t{8} * 64 * 104, int64_t{64} * 104, 104, 1};
         addDbias(g);
     });
     ASSERT_TRUE(serves(spec, biasRow()));
@@ -1536,7 +1538,7 @@ TEST(TestFlydslSdpaBwdMergedReduce, CoversEveryVectorOfEveryRowOfALongerPlane)
     EXPECT_EQ(values.at("stride_ws_seq"), 100U);
     EXPECT_EQ(values.at("stride_ws_head"), 6400U);
     EXPECT_EQ(values.at("stride_ws_batch"), 51200U);
-    EXPECT_EQ(dump.workspaceBytes, size_t{2 * 8 * 64 * 100 * 2});
+    EXPECT_EQ(dump.workspaceBytes, size_t{2} * 8 * 64 * 100 * 2);
 }
 
 TEST(TestFlydslSdpaBwdMergedReduce, ReadsTheReduceSymbolOnlyForABroadcastDbias)
