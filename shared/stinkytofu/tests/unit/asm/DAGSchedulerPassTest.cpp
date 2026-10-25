@@ -3004,9 +3004,11 @@ TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {
 
 // The queue is reset at every block and region start. Without queueStartForceWmmaBurst only
 // the loop header's first WMMA region opens with a burst; with it, a block that is not a loop
-// header does too: its first WMMAs go ahead of the ready ds_loads and the compare.
+// header does too: its first WMMAs go ahead of the ready ds_loads and the compare, and they are
+// marked so MergeDscnt decides whether their waits merge.
 TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueueFirst) {
     std::string shapes[2];
+    std::string marks[2];
     for (int v = 0; v < 2; ++v) {
         SetUp();
         for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
@@ -3027,11 +3029,18 @@ TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_NonHeaderBlockFillsTheQueu
         pass->run(*func, ctx, am);
         ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
         shapes[v] = wdShape(mnemonicSequence(*bb));
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::v_wmma_f32_16x16x16_bf16)
+                marks[v] += inst->getModifier<WmmaForcedBurstData>() != nullptr ? 'B' : 'W';
+        }
     }
     EXPECT_NE(shapes[0].substr(0, 8), "WWWWWWWW") << shapes[0];
+    EXPECT_EQ(marks[0], std::string(16, 'W'));
     EXPECT_EQ(shapes[1].substr(0, 9), "WWWWWWWWd") << shapes[1];
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'W'), 16) << shapes[1];
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8) << shapes[1];
+    EXPECT_EQ(marks[1], std::string(8, 'B') + std::string(8, 'W'));
 }
 
 // After a barrier wait the queue starts empty: the WMMAs behind it fill the queue before the
