@@ -26,6 +26,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.instances.common._attention_bwd_body.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_sched.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_valu.h"
@@ -37,10 +38,8 @@ namespace rocke_attn_bwd
 static const int NONE = ROCKE_ATTN_BWD_NONE;
 
 /* ====================================================================== *
- * value sets (Python constants; the ones other modules own are mirrored
- * here until their C twins exist: _attention_bwd_body STAGE_ORDERS /
- * G4_SLICINGS / COPY_ORDERS; the sched, counted and valu constants come from
- * those helpers' exports)
+ * value sets (Python constants; the body, sched, counted and valu
+ * constants come from those helpers' exports)
  * ====================================================================== */
 
 typedef std::vector<std::string> Strs;
@@ -85,14 +84,8 @@ static const Strs SPLIT_DQ_ARCHS = {"gfx942", "gfx950"};
 static const Strs DQ_ISSUES = {"block", "fragment", "fragment_regs"};
 static const Strs DKV_EPILOGUES = {"lds_staged", "lds_staged_pair", "direct"};
 static const Strs LDS_ORDERS = {"resident_low", "phase_low"};
-/* _attention_bwd_body */
-static const Strs STAGE_ORDERS = {"g1g3g4", "g3g1g4", "g4g1g3", "g1g4g3", "g3g4g1", "g4g3g1"};
-static const char* const DEFAULT_STAGE_ORDER = "g1g3g4";
-static const Strs G4_SLICINGS = {"step", "slice", "slice_db", "slice_db_g3"};
-static const char* const DEFAULT_G4_SLICING = "step";
-static const Strs G4_AFTER_G3_ORDERS = {"g1g3g4", "g3g4g1"};
-static const Strs COPY_ORDERS = {"split", "loads_first", "joint"};
-/* _attention_bwd_sched / _counted / _valu: views of the owners' exports */
+/* _attention_bwd_body / _sched / _counted / _valu: views of the owners'
+ * exports */
 template <typename T, size_t N>
 static std::vector<T> as_vec(const T (&a)[N])
 {
@@ -102,6 +95,14 @@ static Strs as_strs(const char* const* a, int n)
 {
     return Strs(a, a + n);
 }
+static const Strs STAGE_ORDERS
+    = as_strs(ROCKE_ATTN_BWD_STAGE_ORDERS, ROCKE_ATTN_BWD_N_STAGE_ORDERS);
+static const char* const DEFAULT_STAGE_ORDER = ROCKE_ATTN_BWD_DEFAULT_STAGE_ORDER;
+static const Strs G4_SLICINGS = as_strs(ROCKE_ATTN_BWD_G4_SLICINGS, ROCKE_ATTN_BWD_N_G4_SLICINGS);
+static const char* const DEFAULT_G4_SLICING = ROCKE_ATTN_BWD_DEFAULT_G4_SLICING;
+static const Strs G4_AFTER_G3_ORDERS
+    = as_strs(ROCKE_ATTN_BWD_G4_AFTER_G3_ORDERS, ROCKE_ATTN_BWD_N_G4_AFTER_G3_ORDERS);
+static const Strs COPY_ORDERS = as_strs(ROCKE_ATTN_BWD_COPY_ORDERS, ROCKE_ATTN_BWD_N_COPY_ORDERS);
 static const Strs SCHEDS = as_strs(ROCKE_ATTN_BWD_SCHEDS, ROCKE_ATTN_BWD_N_SCHEDS);
 static const Strs STAGE_TABLE_SCHEDS
     = as_strs(ROCKE_ATTN_BWD_STAGE_TABLE_SCHEDS, ROCKE_ATTN_BWD_N_STAGE_TABLE_SCHEDS);
