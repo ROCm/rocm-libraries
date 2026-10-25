@@ -51,6 +51,8 @@ class GemmProblem:
 
     Scalars are alpha=1 and beta=0, batch count is one, and optional epilogue
     features are disabled. Native execution still checks solution support.
+    TODO(newling): Cover other scalar values, batches and optional output
+    operations for broader race detection (AIHPBLAS-3605).
     MX block sizes of zero mean unscaled operands. MX scale format is 0 for
     ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
     """
@@ -167,6 +169,8 @@ class LibraryMetadata:
         reasons = []
         if split == -1 or mapping.get("adaptiveGemmGSUA", 0):
             reasons.append("automatic split-K")
+        # TODO(newling): Add grouped and sparse GEMM, required output operations
+        # and the excluded matrix layouts (AIHPBLAS-3605).
         unsupported = (
             "groupedGemm",
             "fusedGemmA2A",
