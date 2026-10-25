@@ -172,11 +172,11 @@ MLA prefill with V 128 and Q/K up to 256, exact 512/512 prefill (the VAE mid-blo
 attention), and absorbed-MLA decode at V 512 (Q/K 576).
 Padding (per-batch lengths, padded rows O = 0 and LSE = −inf) runs on the generic prefill
 and decode objects, packed THD sequences (ragged offsets, compact) on the generic prefill
-objects, and dropout (AOTriton's Philox mask, bit for bit) on 12 generic prefill objects
-per arch, with a bias on 12 more; exact f32 on 6 generic prefill objects per arch: every
+objects, and dropout (AOTriton's Philox mask, bit for bit) on 22 generic prefill objects
+on gfx942, 16 on gfx950 and 12 on gfx90a, with a bias on 12 more per arch; exact f32 on 6 generic prefill objects per arch: every
 multiple of 8 up to 128 (to 256 on gfx950) and 256.
-174 objects on gfx950, 176 on gfx942 and 192 on gfx90a, plus the RNG dump's keep-mask writer on
-each (175, 177 and 193 in all). Each class ships a default
+178 objects on gfx950, 186 on gfx942 and 192 on gfx90a, plus the RNG dump's keep-mask writer on
+each (179, 187 and 193 in all). Each class ships a default
 object and measured companions -- other tiles for short queries and large problems --
 chosen by timing every candidate on the dnn-benchmarking attention graphs
 ([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries
@@ -360,7 +360,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 465/465 gfx11-generic, 613/613 gfx12-generic, 327/327 gfx950, 329/329 gfx942, 345/345 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 465/465 gfx11-generic, 613/613 gfx12-generic, 331/331 gfx950, 339/339 gfx942, 345/345 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

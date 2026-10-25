@@ -115,8 +115,8 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask` | 466 (90 + 63 + 204 + 108 + 1) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask` | 614 (90 + 63 + 156 + 108 + 196 + 1) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask` | 328 (90 + 63 + 130 + 20 + 24 + 1) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 330 (90 + 63 + 152 + 24 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask` | 332 (90 + 63 + 134 + 20 + 24 + 1) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 340 (90 + 63 + 162 + 24 + 1) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 346 (90 + 63 + 168 + 24 + 1) |
 
 ```bash
