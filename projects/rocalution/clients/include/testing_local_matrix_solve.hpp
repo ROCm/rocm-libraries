@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -74,7 +74,7 @@ bool testing_local_matrix_lusolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -172,7 +172,7 @@ bool testing_local_matrix_llsolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -284,7 +284,7 @@ bool testing_local_matrix_lsolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -390,7 +390,7 @@ bool testing_local_matrix_usolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
