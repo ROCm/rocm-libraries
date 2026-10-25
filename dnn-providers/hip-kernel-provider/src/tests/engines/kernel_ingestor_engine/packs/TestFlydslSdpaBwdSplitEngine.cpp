@@ -4,12 +4,19 @@
 // Redundant with the CMake gate on purpose; see TestFlydslRmsNormEngine.cpp.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <limits>
 #include <map>
 #include <optional>
@@ -18,14 +25,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include <gtest/gtest.h>
-
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
@@ -575,7 +574,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, ServesThePlainGraphTheSharedMatcherAccepts)
     EXPECT_TRUE(graphMatch(baseSpec()).has_value());
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph, DeclinesExactlyWhatTheSharedMatcherDeclinesAndPaddedVarlen)
+TEST(TestFlydslSdpaBwdSplitGraph, DeclinesExactlyWhatTheSharedMatcherDeclines)
 {
     const std::vector<SdpaBwdSpec> specs{
         baseSpec(),
@@ -601,23 +600,23 @@ TEST(TestFlydslSdpaBwdSplitGraph, DeclinesExactlyWhatTheSharedMatcherDeclinesAnd
     {
         SCOPED_TRACE("spec " + std::to_string(index));
         const auto matched = matchSdpaBwdSpec(specs[index], flydsl_sdpa_bwd::MatchOptions{true});
-        bool expected = false;
-        if(const auto* problem = std::get_if<flydsl_sdpa_bwd::SdpaBwdProblem>(&matched))
-        {
-            expected = !problem->paddingMask && problem->seqLenQUid == flydsl_sdpa_bwd::NO_UID
-                       && problem->seqLenKvUid == flydsl_sdpa_bwd::NO_UID;
-        }
-        EXPECT_EQ(graphMatch(specs[index]).has_value(), expected);
+        EXPECT_EQ(graphMatch(specs[index]).has_value(),
+                  std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matched));
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph, SPVLDeclinesPaddedVarlenTheMatcherAccepts)
+TEST(TestFlydslSdpaBwdSplitGraph, ServesPaddedVarlenWithEverySlotsObject)
 {
-    for(const auto& spec : {withPaddedVarlen(baseSpec()), withPaddedVarlen(withCausal(baseSpec()))})
+    const std::array<std::pair<SdpaBwdSpec, RowSpec>, 2> cells{
+        {{withPaddedVarlen(baseSpec()), plainRow()},
+         {withPaddedVarlen(withCausal(baseSpec())), causalRow()}}};
+    for(const auto& [spec, row] : cells)
     {
-        EXPECT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
-            matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true})));
-        EXPECT_FALSE(graphMatch(spec).has_value());
+        EXPECT_TRUE(graphMatch(spec).has_value());
+        for(const Slot slot : SLOTS)
+        {
+            EXPECT_TRUE(serves(slot, spec, row));
+        }
     }
 }
 
@@ -1032,7 +1031,9 @@ std::vector<SharedCell> sharedCells()
             {"scale", withScale(baseSpec()), plainRow()},
             {"grouped", grouped, plainRow()},
             {"oddShape", dimsSpec(3, 5, 77, 91, 64), plainRow()},
-            {"unitAxes", dimsSpec(1, 1, 1, 1, 64), plainRow()}};
+            {"unitAxes", dimsSpec(1, 1, 1, 1, 64), plainRow()},
+            {"paddedVarlen", withPaddedVarlen(baseSpec()), plainRow()},
+            {"paddedVarlenCausal", withPaddedVarlen(withCausal(baseSpec())), causalRow()}};
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedEngines)
@@ -1060,6 +1061,33 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
         // prep reads the raw statistics, as the merged kernel does.
         EXPECT_EQ(prep.at("LSE"), mergedValues.at("LSE"));
     }
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, PaddedVarlenPassesTheLengthTensorsAndBothSidesOfVarlenBits)
+{
+    const auto spec = withPaddedVarlen(baseSpec());
+    const uint64_t lengthsQ = ptrOf(sdpa_bwd_uid::SEQ_LEN_Q);
+    const uint64_t lengthsKv = ptrOf(sdpa_bwd_uid::SEQ_LEN_KV);
+    const uint64_t unused = ptrOf(sdpa_bwd_uid::O);
+    for(const Slot slot : SLOTS)
+    {
+        const auto values = valuesOf(slot, dumpOf(slot, spec, plainRow()));
+        EXPECT_EQ(values.at("seqinfo_q0"), lengthsQ);
+        EXPECT_EQ(values.at("seqinfo_q1"), unused);
+        EXPECT_EQ(values.at("varlen_bits"), 0x0404U);
+        EXPECT_EQ(values.at("num_seqlens"), 0U);
+        EXPECT_EQ(values.at("max_seqlen_q"), 16U);
+        if(slot != Slot::PREP)
+        {
+            EXPECT_EQ(values.at("seqinfo_k0"), lengthsKv);
+            EXPECT_EQ(values.at("seqinfo_k1"), unused);
+            EXPECT_EQ(values.at("max_seqlen_k"), 16U);
+        }
+    }
+    // A dense graph reads no lengths.
+    const auto dense = valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, baseSpec(), plainRow()));
+    EXPECT_EQ(dense.at("seqinfo_q0"), unused);
+    EXPECT_EQ(dense.at("varlen_bits"), 0U);
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, SeedWordsAndPointersEqualTheMergedEnginesAndOnlyPrepUploads)
