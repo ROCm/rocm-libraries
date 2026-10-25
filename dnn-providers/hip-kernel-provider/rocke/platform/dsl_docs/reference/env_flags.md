@@ -14,6 +14,8 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
+| `ROCKE_CODEOBJ_BACKEND` | `comgr` (**comgr**) | Which compiler turns emitted LLVM IR into HSACO. COMGR is the only value; the setting is independent of `ROCKE_BACKEND`. |
+| `ROCKE_CODEOBJ_DIRECT_LIB` | path (unset) | Explicit Rust FFI library (`rocke_codeobj_ffi`) for the fixed gfx1151 WMMA direct-HSACO emitter. When unset, rocKE searches the platform library path. This path uses no COMGR and no LLVM. |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |

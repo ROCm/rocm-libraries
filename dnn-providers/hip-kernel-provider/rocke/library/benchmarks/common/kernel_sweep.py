@@ -44,7 +44,7 @@ from benchmarks.common.kernel_cache import (
     KernelCache,
     KernelIdentity,
     comgr_input_key,
-    current_comgr_id,
+    current_compiler_id,
     current_emitter_digest,
     current_llvm_flavor,
 )
@@ -341,12 +341,12 @@ def enumerate_jobs(
 
 
 def _emit(build, job: BuildJob, arch: str, dtype: str):
-    """Build and lower one job: ``(ComgrInput, content key, meta)``."""
-    from rocke.helpers.compile import lower_kernel_for_comgr
+    """Build and lower one job: ``(CodeObjectInput, content key, meta)``."""
+    from rocke.helpers.compile import lower_kernel_for_code_object
 
     kernel, meta = build(job, arch, dtype)
-    comgr_input = lower_kernel_for_comgr(kernel, arch=arch)
-    return comgr_input, comgr_input_key(comgr_input), meta
+    code_object_input = lower_kernel_for_code_object(kernel, arch=arch)
+    return code_object_input, comgr_input_key(code_object_input), meta
 
 
 def _emit_worker(payload):
@@ -366,22 +366,22 @@ def _emit_worker(payload):
 
 def _compile_worker(payload):
     """Phase 2 worker: compile one binary. Returns ``(key, hsaco, name, error)``."""
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 
     build, job, arch, dtype, key = payload
     try:
-        comgr_input, got, _ = _emit(build, job, arch, dtype)
+        code_object_input, got, _ = _emit(build, job, arch, dtype)
         if got != key:
             # The emitter is deterministic; a different key here means the
             # sources changed between the two phases.
             raise RuntimeError("kernel IR changed between emit and compile")
         hsaco, _ = build_hsaco_from_llvm_ir(
-            comgr_input.llvm_text,
-            isa=comgr_input.isa,
-            options=list(comgr_input.options),
-            fresh_process=comgr_input.fresh_process,
+            code_object_input.llvm_text,
+            isa=code_object_input.isa,
+            options=list(code_object_input.options),
+            fresh_process=code_object_input.fresh_process,
         )
-        return key, hsaco, comgr_input.kernel_name, None
+        return key, hsaco, code_object_input.kernel_name, None
     except Exception as exc:  # noqa: BLE001 - reported per binary, never fatal
         return key, None, None, f"{type(exc).__name__}: {exc}"
 
@@ -622,7 +622,7 @@ def compile_jobs(
     ``limit`` caps how many jobs go through steps 2-3 (smoke tests).
     """
     digest = current_emitter_digest()
-    comgr_id = current_comgr_id()
+    compiler_id = current_compiler_id()
     # Only the directions these jobs live in: a shared cache can hold ~10^6
     # entries of other families, and every one parsed here is resident in the
     # process the compile workers fork from.
@@ -633,7 +633,7 @@ def compile_jobs(
         return (
             meta is not None
             and meta.get("emitter_digest") == digest
-            and meta.get("comgr_id") == comgr_id
+            and meta.get("compiler_id", meta.get("comgr_id")) == compiler_id
         )
 
     pending = [j for j in all_jobs if not _up_to_date(j)]
@@ -662,7 +662,9 @@ def compile_jobs(
 
     def _link(key: str, job: BuildJob, meta: dict) -> None:
         cache.link(
-            job.identity, key, dict(meta, emitter_digest=digest, comgr_id=comgr_id)
+            job.identity,
+            key,
+            dict(meta, emitter_digest=digest, compiler_id=compiler_id),
         )
         state["linked"] += 1
 
@@ -910,7 +912,7 @@ def describe_cache(
     # function of these as well as of the kernel's identity.
     log(
         f"  this checkout: emitter {current_emitter_digest()[:12]}, "
-        f"LLVM {current_llvm_flavor()}, comgr {current_comgr_id()}"
+        f"LLVM {current_llvm_flavor()}, compiler {current_compiler_id()}"
     )
     log(
         "  kernel names are complete identities; rebuild one with: "

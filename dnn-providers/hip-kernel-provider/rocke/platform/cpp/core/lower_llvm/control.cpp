@@ -177,10 +177,9 @@ void rocke_ll_yield_push(rocke_lower_t* L)
     /* yield_stack stores a distinct anonymous-struct pointer type; the in-place
      * layout is identical, so launder through void* to satisfy the compiler. */
     void* frame_v = frame;
-    /* C++ build: the element type is a distinct anonymous-struct pointer, so
-     * the void* must be cast back explicitly (C allowed the implicit conversion).
-     * __typeof__ recovers the exact element type; layout is identical. */
-    rocke_vec_push(&L->arena, &L->yield_stack, (__typeof__(*L->yield_stack.data))frame_v, rc);
+    /* C++ build: the void* must be cast back explicitly (C allowed the implicit
+     * conversion). The element type is ll_yield_frame_t*; layout is identical. */
+    rocke_vec_push(&L->arena, &L->yield_stack, (ll_yield_frame_t*)frame_v, rc);
     if(rc != 0)
     {
         rocke_ll_fail(L, ROCKE_ERR_OOM, "yield_push: arena OOM");

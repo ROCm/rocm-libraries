@@ -3,9 +3,8 @@
 
 """HSACO compilation + HIP module load + kernel launch.
 
-`rocke.runtime` is the bottom of the DSL stack: it owns the
-in-process pipeline that turns AMDGPU LLVM IR text into a running
-kernel.
+`rocke.runtime` is the bottom of the DSL stack: it owns the pipeline
+that turns AMDGPU LLVM IR text into a running kernel.
 
 Layered modules (bottom-up). The first five run torch-free -- the
 hip-only core; ``torch_interop`` and ``launcher`` are the torch-aware
@@ -22,7 +21,9 @@ edge:
   - ``comgr``       : ctypes wrapper over `libamd_comgr.so`. Implements
                       `LLVM IR (text) -> BC -> relocatable ELF -> HSA
                       executable`. Provides `build_hsaco_from_llvm_ir`.
-                      Steady-state ~1.2 ms per kernel.
+
+  - ``code_object`` : code-object facade over COMGR, plus the direct Rust
+                      gfx1151 GEMM compiler that uses no LLVM.
 
   - ``hip_module``  : ctypes wrapper over `libamdhip64.so`. Bare
                       minimum for `hipModuleLoadData`,
@@ -86,7 +87,20 @@ When to drop to the lower-level APIs:
 
 from __future__ import annotations
 
-from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .code_object import (
+    DIRECT_GFX1151_WMMA_GEMM_SYMBOL,
+    CodeObjectCompilerInfo,
+    CodeObjectError,
+    CodeObjectProcessDied,
+    CodeObjectTimings,
+    build_direct_gfx1151_wmma_gemm_hsaco,
+    build_hsaco_from_llvm_ir,
+    build_hsaco_from_llvm_modules,
+    compiler_identity,
+    loaded_compiler_info,
+    resolve_code_object_backend,
+)
+from .comgr import ComgrError, ComgrProcessDied, ComgrTimings
 from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
@@ -111,7 +125,13 @@ from .torch_interop import (
 )
 
 __all__ = [
+    "DIRECT_GFX1151_WMMA_GEMM_SYMBOL",
+    "CodeObjectCompilerInfo",
+    "CodeObjectError",
+    "CodeObjectProcessDied",
+    "CodeObjectTimings",
     "ComgrError",
+    "ComgrProcessDied",
     "ComgrTimings",
     "DeviceInfo",
     "DeviceMem",
@@ -123,13 +143,18 @@ __all__ = [
     "Runtime",
     "TorchLaunchSummary",
     "WorkspacePool",
+    "build_direct_gfx1151_wmma_gemm_hsaco",
     "build_hsaco_from_llvm_ir",
+    "build_hsaco_from_llvm_modules",
+    "compiler_identity",
     "empty_workspace",
     "get_device_info",
     "launch_torch_kernel",
+    "loaded_compiler_info",
     "no_fence",
     "pack_args",
     "release_retained_for_stream",
+    "resolve_code_object_backend",
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",

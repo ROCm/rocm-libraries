@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
 
 from rocke.helpers import (
+    compile_gfx1151_wmma_gemm_direct,
     compile_kernel,
     make_gemm_manifest,
     write_artifact,
@@ -54,6 +55,11 @@ def main() -> int:
     p.add_argument("--output-dir", default=None)
     p.add_argument("--no-verify", action="store_true")
     p.add_argument(
+        "--direct-hsaco",
+        action="store_true",
+        help="use the toolchain-free Rust gfx1151 WMMA HSACO emitter",
+    )
+    p.add_argument(
         "--tol",
         type=float,
         default=1e-2,
@@ -70,10 +76,18 @@ def main() -> int:
                 f"{name}={d} must be a multiple of 16 (WMMA 16x16x16 tile)"
             )
 
-    spec = WmmaGemmSpec(name=f"wmma_gemm_{args.arch}")
-    art = compile_kernel(build_wmma_gemm(spec, arch=args.arch), arch=args.arch)
+    if args.direct_hsaco:
+        if args.arch != "gfx1151":
+            raise SystemExit("--direct-hsaco currently supports only gfx1151")
+        spec = WmmaGemmSpec(name="rocke_direct_wmma_gemm")
+        art = compile_gfx1151_wmma_gemm_direct()
+    else:
+        spec = WmmaGemmSpec(name=f"wmma_gemm_{args.arch}")
+        art = compile_kernel(build_wmma_gemm(spec, arch=args.arch), arch=args.arch)
     print(
-        f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa}) "
+        f"[{args.arch}] built {art.kernel_name} "
+        f"({'direct HSACO' if args.direct_hsaco else 'compiler'}, "
+        f"{art.hsaco_bytes} B, isa={art.isa}) "
         f"total={art.timings.get('total', 0):.1f}ms"
     )
 

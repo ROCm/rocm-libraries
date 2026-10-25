@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from rocke.core.ir import KernelDef, Region
 from rocke.runtime.comgr import ComgrTimings
 
+backend_module = importlib.import_module("rocke.core.backend")
 compile_module = importlib.import_module("rocke.helpers.compile")
 
 
@@ -126,3 +128,57 @@ def test_hipcc_ir_maps_runtime_profile_to_compiler_target(kernel: KernelDef) -> 
     lower.assert_called_once_with(kernel, arch="gfx1250")
     assert "--offload-arch=gfx1250" in run.call_args.args[0]
     assert 'target datalayout = "test"' in llvm_ir
+
+
+def test_explicit_code_object_backend_drives_lowering_flavor(
+    kernel: KernelDef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    with (
+        mock.patch.object(
+            compile_module,
+            "_require_compiler_info",
+            return_value=SimpleNamespace(llvm_version=(23, 0, 0)),
+        ) as probe,
+        mock.patch.object(
+            compile_module, "_lower_llvm_via_backend", return_value="llvm"
+        ) as lower,
+        mock.patch.object(
+            compile_module,
+            "build_hsaco_from_llvm_ir",
+            return_value=(b"hsaco", ComgrTimings()),
+        ) as build,
+    ):
+        compile_module.compile_kernel(
+            kernel,
+            arch="gfx950",
+            code_object_backend="comgr",
+        )
+
+    probe.assert_called_once_with("comgr")
+    assert lower.call_args.kwargs["llvm_flavor"] == "llvm23"
+    assert build.call_args.kwargs["backend"] == "comgr"
+
+
+def test_cpp_lowering_does_not_treat_flavor_probe_failure_as_fallback(
+    kernel: KernelDef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    probe_error = RuntimeError("selected compiler probe failed")
+    python_lower = mock.Mock(return_value="unexpected fallback")
+
+    with (
+        mock.patch.object(backend_module, "_effective_flavor", side_effect=probe_error),
+        mock.patch.object(backend_module, "_record_fallback") as record_fallback,
+        mock.patch.object(backend_module, "_lower_via_cpp_engine") as cpp_lower,
+        pytest.raises(RuntimeError, match="selected compiler probe failed"),
+    ):
+        backend_module.lower_kernel_via_backend(
+            kernel,
+            arch="gfx950",
+            python_lower=python_lower,
+        )
+
+    record_fallback.assert_not_called()
+    cpp_lower.assert_not_called()
+    python_lower.assert_not_called()

@@ -378,9 +378,12 @@ def lower_kernel_via_backend(
     from .ir_serialize import serialize
 
     if chosen == BACKEND_CPP:
+        # Compiler/flavor discovery is shared policy, not a C++ engine
+        # operation. Let its failure propagate instead of misreporting it as
+        # engine unavailability and silently retrying through Python.
+        flavor = _effective_flavor(llvm_flavor)
         try:
             ir_text = serialize(kernel)
-            flavor = _effective_flavor(llvm_flavor)
             out = _lower_via_cpp_engine(ir_text, _arch, flavor)
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():

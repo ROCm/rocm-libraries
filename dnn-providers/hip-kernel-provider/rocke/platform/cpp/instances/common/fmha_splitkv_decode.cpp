@@ -17,6 +17,7 @@
  */
 #include "rocke/instance_fmha_splitkv_decode.h"
 
+#include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h> /* memset, memcpy, strlen */
 
@@ -772,7 +773,7 @@ rocke_kernel_def_t* rocke_build_fmha_fwd_splitkv_decode_reduce(
             lane_d_base = rocke_b_mul(b, tid, rocke_b_const_i32(b, ept));
 
             /* neg_inf = const_f32(-inf); zero_f = const_f32(0.0) */
-            neg_inf = rocke_b_const_f32(b, -1.0 / 0.0);
+            neg_inf = rocke_b_const_f32(b, -INFINITY);
             zero_f = rocke_b_const_f32(b, 0.0);
 
             /* base_ml = seq_idx*num_query_heads + head_idx */

@@ -436,6 +436,10 @@ _PROCESS_CACHE: dict = {}
 
 
 def _flavor() -> str:
+    from rocke.runtime.code_object import resolve_code_object_backend
+
+    if resolve_code_object_backend() == "direct":
+        return "direct"
     flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
     if flavor:
         return flavor
@@ -445,13 +449,13 @@ def _flavor() -> str:
 
 
 def _comgr_version() -> str:
+    """Compatibility name for the selected code-object compiler identity."""
     try:
-        from rocke.runtime.comgr import resolved_lib_rocm_version
+        from rocke.runtime.code_object import compiler_identity
 
-        v = resolved_lib_rocm_version()
+        return compiler_identity()
     except Exception:  # noqa: BLE001 - recorded as unknown in the cache key
-        v = None
-    return "unknown" if v is None else f"{v[0]}.{v[1]}"
+        return "unknown"
 
 
 def _code_object(step, plan, disk):

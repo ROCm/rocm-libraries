@@ -367,13 +367,13 @@ _LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
 
 
 def _detect_llvm_flavor() -> str:
-    """Choose an explicit flavor or query the compiler loaded by COMGR.
+    """Choose an explicit flavor or query the selected code-object compiler.
 
-    Loading and querying are owned by runtime.comgr, which caches the result
-    for its loaded handle. ROCm package versions and compiler executables on
-    PATH are not evidence about that compiler. If COMGR cannot be loaded or
-    queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
-    or the lowering API's llvm_flavor argument.
+    Loading and querying are owned by runtime.code_object. ROCm package
+    versions and unrelated compiler executables on PATH are not evidence about
+    the compiler that will consume this IR. If it cannot be loaded or queried,
+    raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR or the
+    lowering API's llvm_flavor argument.
 
     A set-but-unrecognized ROCKE_LLVM_FLAVOR raises immediately rather than
     silently falling back to auto-detection -- a typo'd override otherwise
@@ -387,9 +387,14 @@ def _detect_llvm_flavor() -> str:
                 f"expected one of {LLVM_FLAVORS}"
             )
         return env
-    from ..runtime.comgr import _require_compiler_info
+    from ..runtime.code_object import _require_compiler_info
 
     info = _require_compiler_info()
+    if info.llvm_version is None:
+        raise ValueError(
+            f"the {info.backend!r} code-object backend consumes rocKE IR, not "
+            "LLVM IR; no LLVM flavor applies"
+        )
     return _flavor_for_llvm(info.llvm_version[0])
 
 
@@ -1763,6 +1768,326 @@ class _OpTargetFact(enum.Enum):
         }[self]
 
 
+def _has_nsw(op: Op) -> bool:
+    """Whether the lowered integer ``add`` / ``sub`` / ``mul`` carries ``nsw``.
+
+    ``nsw`` makes a signed overflow poison, as C does for signed types;
+    unsigned values wrap modulo 2**N, and a ``wrap="nuw"`` add carries ``nuw``.
+    """
+    return not _is_unsigned(op.result.type) and op.attrs.get("wrap") != "nuw"
+
+
+_I32_MIN = -(1 << 31)
+_I32_MAX = (1 << 31) - 1
+
+# Ops whose result is the same in every lane of a wave, whatever the operands.
+_WAVE_UNIFORM_OPS = frozenset(
+    {
+        "gpu.block_id",
+        "gpu.cluster_id",
+        "gpu.cluster_workgroup_id",
+        "gpu.cluster_workgroup_max_id",
+        "gpu.cluster_workgroup_flat_id",
+        "gpu.cluster_workgroup_max_flat_id",
+        "tile.readfirstlane",
+        "tile.readlane",
+        "tile.wave_all",
+        "tile.wave_any",
+        "tile.wave_ballot",
+        "tile.wave_reduce",
+    }
+)
+# Ops outside ``arith`` that compute their result from their operands alone
+# (every ``arith`` op does).
+_PURE_OPS = frozenset({"tile.global_ptr_add", "tile.global_ptr_to_i64", "tile.pin_sgpr"})
+
+# Bytes per element of the scalar types a global access GEPs over.
+_GEP_ELEM_BYTES = {
+    "i8": 1,
+    "i16": 2,
+    "half": 2,
+    "bfloat": 2,
+    "i32": 4,
+    "float": 4,
+    "i64": 8,
+    "double": 8,
+}
+
+
+def _i32_constant(v: Value) -> Optional[int]:
+    """The value of an i32 ``arith.constant``, else None."""
+    op = v.op
+    if op is None or op.name != "arith.constant" or v.type.name != "i32":
+        return None
+    return int(op.attrs["value"])
+
+
+def _trunc_div(a: int, b: int) -> int:
+    """``a / b`` rounded toward zero, as ``sdiv`` computes it."""
+    q = abs(a) // abs(b)
+    return q if (a < 0) == (b < 0) else -q
+
+
+class _IndexFacts:
+    """Which values of a kernel are wave-uniform, and bounds on its i32 values.
+
+    Serves :meth:`_Lowerer._global_gep`. A value is *uniform* when it is the
+    same in every lane of a wave: a kernel argument, a constant, a workgroup
+    id, a cross-lane result, an ``scf.for`` counter with uniform bounds, a
+    loop-carried value whose initial and yielded values are uniform, and a pure
+    op (any ``arith`` op) of uniform operands. A loaded value never is.
+
+    The *bounds* ``(lo, hi)`` of an i32 value hold in every execution in which
+    the value is not poison. They come from constants, the thread and lane ids
+    (the launch contract keeps a thread id below the kernel's
+    ``max_workgroup_size``, which LLVM assumes too), ``scf.for`` bounds, and
+    the semantics of each integer op. ``arith.assume_range`` is looked
+    through, not trusted: nothing checks its claim. Only i32 values get
+    bounds, so every bound the C++ mirror computes fits a 64-bit integer.
+
+    Built before lowering starts, because the unrolled-loop lowering renames
+    values while it runs and a loop's counter and carried values are told apart
+    by name. Facts are keyed by value identity. Mirrored by
+    ``cpp/core/lower_llvm/index_facts.cpp``.
+    """
+
+    def __init__(self, kernel: KernelDef, wave_size: int) -> None:
+        self._params = frozenset(f"%{p.name}" for p in kernel.params)
+        self._thread_id_max = kernel.max_workgroup_size - 1
+        self._lane_id_max = wave_size - 1
+        self._facts: Dict[int, Tuple[Value, bool, Optional[Tuple[int, int]]]] = {}
+        # id(scf.for op) -> its counter and carried values, by name.
+        self._block_values: Dict[int, Dict[str, Value]] = {}
+        self._find_block_values(kernel.body)
+        self._visit(kernel.body)
+
+    def uniform(self, v: Value) -> bool:
+        fact = self._facts.get(id(v))
+        if fact is not None and fact[0] is v:
+            return fact[1]
+        if v.op is None:
+            return v.name in self._params
+        return v.op.name == "arith.constant"
+
+    def bounds(self, v: Value) -> Optional[Tuple[int, int]]:
+        """Bounds of an i32 ``v`` (the full i32 range when nothing tighter is
+        known); None for any other type."""
+        if v.type.name != "i32":
+            return None
+        fact = self._facts.get(id(v))
+        if fact is not None and fact[0] is v and fact[2] is not None:
+            return fact[2]
+        c = _i32_constant(v)
+        if c is not None and _I32_MIN <= c <= _I32_MAX:
+            return (c, c)
+        return (_I32_MIN, _I32_MAX)
+
+    def split_index(self, idx: Value) -> Optional[Tuple[List[Value], Value]]:
+        """``idx`` as wave-uniform terms plus one per-lane term, or None.
+
+        The sum is taken apart only through ``nsw`` adds, which compute the
+        exact integer sum whenever it is not poison (and a poison index makes
+        the access undefined), and through range markers. A uniform subtree is
+        one term, and so is the per-lane subtree left over. None unless exactly
+        one per-lane term remains.
+        """
+        uniform: List[Value] = []
+        lane: Optional[Value] = None
+        stack = [idx]
+        while stack:
+            v = stack.pop()
+            op = v.op
+            if self.uniform(v):
+                uniform.append(v)
+            elif op is not None and op.name == "arith.assume_range":
+                stack.append(op.operands[0])
+            elif op is not None and op.name == "arith.add" and _has_nsw(op):
+                stack.extend(reversed(op.operands))
+            elif lane is None:
+                lane = v
+            else:
+                return None
+        if lane is None:
+            return None
+        return uniform, lane
+
+    def _record(self, v: Value, uniform: bool, bounds: Optional[Tuple[int, int]]) -> None:
+        self._facts[id(v)] = (v, uniform, bounds)
+
+    def _find_block_values(self, region: Region) -> None:
+        for op in region.ops:
+            for v in op.operands:
+                loop = v.op
+                if (
+                    loop is not None
+                    and loop.name == "scf.for"
+                    and not any(v is r for r in loop.results)
+                ):
+                    self._block_values.setdefault(id(loop), {})[v.name] = v
+            for inner in op.regions:
+                self._find_block_values(inner)
+
+    def _visit(self, region: Region) -> None:
+        for op in region.ops:
+            if op.name == "scf.for":
+                self._visit_for(op)
+                continue
+            for inner in op.regions:
+                self._visit(inner)
+            if len(op.results) == 1:
+                self._record(op.result, self._op_uniform(op), self._op_bounds(op))
+
+    def _visit_for(self, op: Op) -> None:
+        lower, upper, step = op.operands[:3]
+        num_iter = int(op.attrs.get("num_iter_args", 0))
+        inits = op.operands[3 : 3 + num_iter]
+        body = op.regions[0]
+        values = self._block_values.get(id(op), {})
+        counted = all(self.uniform(v) for v in (lower, upper, step))
+        iv = values.get(op.attrs.get("iv"))
+        if iv is not None:
+            self._record(iv, counted, self._counter_bounds(iv, lower, upper, step))
+        carried = [
+            values.get(m.get("name")) if isinstance(m, dict) else None
+            for m in op.attrs.get("iter_args", [])
+        ]
+        yielded = next(
+            (o.operands for o in reversed(body.ops) if o.name == "scf.yield"), []
+        )
+        # A carried value is uniform if its initial value is and every yield
+        # is; assume so, then drop the assumption where a yield disagrees.
+        assumed = [counted and self.uniform(v) for v in inits]
+        while True:
+            for v, u in zip(carried, assumed):
+                if v is not None:
+                    self._record(v, u, None)
+            self._visit(body)
+            held = [
+                u and i < len(yielded) and self.uniform(yielded[i])
+                for i, u in enumerate(assumed)
+            ]
+            if held == assumed:
+                break
+            assumed = held
+        for r, u in zip(op.results, assumed):
+            self._record(r, u, None)
+
+    def _counter_bounds(
+        self, iv: Value, lower: Value, upper: Value, step: Value
+    ) -> Optional[Tuple[int, int]]:
+        # The body runs for lower <= iv < upper when the step is positive.
+        if iv.type.name != "i32":
+            return None
+        lo_b, hi_b, step_b = self.bounds(lower), self.bounds(upper), self.bounds(step)
+        if lo_b is None or hi_b is None or step_b is None or step_b[0] < 1:
+            return None
+        return (lo_b[0], max(lo_b[0], hi_b[1] - 1))
+
+    def _op_uniform(self, op: Op) -> bool:
+        if op.name in _WAVE_UNIFORM_OPS:
+            return True
+        if op.name.startswith("arith.") or op.name in _PURE_OPS:
+            return all(self.uniform(v) for v in op.operands)
+        return False
+
+    def _op_bounds(self, op: Op) -> Optional[Tuple[int, int]]:
+        if op.result.type.name != "i32":
+            return None
+        name = op.name
+        if name == "gpu.thread_id":
+            return (0, self._thread_id_max)
+        if name == "tile.lane_id":
+            return (0, self._lane_id_max)
+        args = op.operands
+        if name == "arith.assume_range":
+            return self.bounds(args[0])
+        if name == "arith.zext" and args[0].type.name == "i1":
+            return (0, 1)
+        if name == "arith.select":
+            a, b = self.bounds(args[1]), self.bounds(args[2])
+        elif name.startswith("arith.") and len(args) == 2:
+            a, b = self.bounds(args[0]), self.bounds(args[1])
+        else:
+            return None
+        if a is None or b is None:
+            return None
+        got = self._binary_bounds(op, a, b)
+        if got is None:
+            return None
+        lo, hi = max(got[0], _I32_MIN), min(got[1], _I32_MAX)
+        # An empty range means the op always overflows into poison.
+        return (lo, hi) if lo <= hi else None
+
+    @staticmethod
+    def _binary_bounds(
+        op: Op, a: Tuple[int, int], b: Tuple[int, int]
+    ) -> Optional[Tuple[int, int]]:
+        (alo, ahi), (blo, bhi) = a, b
+        name = op.name
+        if name == "arith.select":
+            return (min(alo, blo), max(ahi, bhi))
+        if name == "arith.add":
+            if not _has_nsw(op) and (alo < 0 or blo < 0 or ahi + bhi > _I32_MAX):
+                return None
+            return (alo + blo, ahi + bhi)
+        if name == "arith.sub":
+            return (alo - bhi, ahi - blo)
+        if name == "arith.mul":
+            corners = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
+            return (min(corners), max(corners))
+        if name == "arith.div":
+            if blo == bhi != 0:
+                ends = (_trunc_div(alo, blo), _trunc_div(ahi, blo))
+                return (min(ends), max(ends))
+            if alo >= 0 and blo >= 1:
+                return (alo // bhi, ahi // blo)
+            return None
+        if name == "arith.mod":
+            # The remainder takes the dividend's sign and is smaller in
+            # magnitude than the divisor.
+            m = max(abs(blo), abs(bhi)) - 1
+            if m < 0:
+                return None
+            return (max(alo, -m) if alo < 0 else 0, min(ahi, m) if ahi > 0 else 0)
+        if name == "arith.and":
+            if alo >= 0 and blo >= 0:
+                return (0, min(ahi, bhi))
+            if alo >= 0 or blo >= 0:
+                return (0, ahi if alo >= 0 else bhi)
+            return None
+        if name in ("arith.or", "arith.xor"):
+            if alo >= 0 and blo >= 0:
+                return (0, (1 << max(ahi, bhi).bit_length()) - 1)
+            return None
+        if name == "arith.shl":
+            if blo == bhi and 0 <= blo < 32 and alo >= 0 and ahi << blo <= _I32_MAX:
+                return (alo << blo, ahi << blo)
+            return None
+        if name == "arith.lshr":
+            if blo == bhi and 0 <= blo < 32:
+                if alo >= 0:
+                    return (alo >> blo, ahi >> blo)
+                if blo >= 1:
+                    return (0, ((1 << 32) - 1) >> blo)
+                return None
+            return (0, ahi) if alo >= 0 else None
+        if name == "arith.smax":
+            return (max(alo, blo), max(ahi, bhi))
+        if name == "arith.smin":
+            return (min(alo, blo), min(ahi, bhi))
+        if name == "arith.umax":
+            if alo >= 0 and blo >= 0:
+                return (max(alo, blo), max(ahi, bhi))
+            return None
+        if name == "arith.umin":
+            if alo >= 0 and blo >= 0:
+                return (min(alo, blo), min(ahi, bhi))
+            if alo >= 0 or blo >= 0:
+                return (0, ahi if alo >= 0 else bhi)
+            return None
+        return None
+
+
 class _Lowerer:
     def __init__(
         self,
@@ -1836,6 +2161,9 @@ class _Lowerer:
         # For scf.for nesting we record the body-region's recorded
         # yield-operand stack so the latch block can read it back.
         self._yield_stack: List[List[str]] = []
+        # Set by ``_collect_index_facts`` on targets that split global
+        # addresses; None keeps every global address one GEP.
+        self._index_facts: Optional[_IndexFacts] = None
 
     # ----- helpers -----
 
@@ -2116,6 +2444,93 @@ class _Lowerer:
         op = v.op
         val = op.attrs["value"]
         return int(val)
+
+    # ----- pre-pass: index facts for global addresses -----
+
+    def _collect_index_facts(self) -> None:
+        if self._backend.splits_global_address:
+            self._index_facts = _IndexFacts(self.kernel, self._backend.arch.wave_size)
+
+    def _global_gep(
+        self, gep: str, elem_ty: str, ptr: Value, idx: Value, idx_ty: str = "i32"
+    ) -> None:
+        """Emit ``gep``, the address of element ``idx`` of global ``ptr``.
+
+        AMDGPU global instructions can address with an SGPR base pair plus a
+        zero-extended 32-bit VGPR byte offset, but the backend picks that form
+        only when the address visibly is ``uniform + zext(per-lane)``. So on a
+        target whose backend ``splits_global_address``, when ``ptr`` is uniform
+        and ``idx`` is wave-uniform terms plus one non-negative per-lane term
+        whose byte offset stays below ``2**32`` (:meth:`_IndexFacts.split_index`),
+        the address is a GEP chain: one GEP per non-constant uniform term, one
+        for the summed constants, and the per-lane term last.
+
+        Every GEP sign-extends its index, so the chain computes the address of
+        the single GEP whenever ``idx`` is not poison. The partial addresses
+        are not known to be in bounds, so the chain carries no ``inbounds``.
+        The constants come right before the per-lane term so that the GEP the
+        per-lane term indexes is shared or loop-variant; LLVM's LICM otherwise
+        reassociates a single-use chain to hoist the loop-invariant per-lane
+        offset, which puts the per-lane term back into the base. Everything
+        else keeps the single GEP.
+        """
+        split = self._split_global_index(elem_ty, ptr, idx, idx_ty)
+        cur = self._current()
+        if split is None:
+            cur.emit(
+                f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+                f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
+            )
+            return
+        terms, constant, lane = split
+        base = self._operand(ptr)
+        indices = [f"i32 {self._operand(t)}" for t in terms]
+        if constant:
+            indices.append(f"i64 {constant}")
+        for index in indices:
+            term_base = self._fresh("gbase")
+            cur.emit(
+                f"  {term_base} = getelementptr {elem_ty}, ptr addrspace(1) "
+                f"{base}, {index}"
+            )
+            base = term_base
+        cur.emit(
+            f"  {gep} = getelementptr {elem_ty}, ptr addrspace(1) "
+            f"{base}, i32 {self._operand(lane)}"
+        )
+
+    def _split_global_index(
+        self, elem_ty: str, ptr: Value, idx: Value, idx_ty: str
+    ) -> Optional[Tuple[List[Value], int, Value]]:
+        """``_global_gep``'s split of ``idx``: the non-constant uniform terms,
+        the sum of the constant ones, and the per-lane term; None to keep the
+        single GEP."""
+        facts = self._index_facts
+        elem_bytes = _GEP_ELEM_BYTES.get(elem_ty)
+        if (
+            facts is None
+            or elem_bytes is None
+            or idx_ty != "i32"
+            or idx.type.name != "i32"
+            or self._ptr_llvm_type(ptr) != "ptr addrspace(1)"
+            or not facts.uniform(ptr)
+        ):
+            return None
+        split = facts.split_index(idx)
+        if split is None:
+            return None
+        uniform, lane = split
+        terms = [t for t in uniform if _i32_constant(t) is None]
+        constant = sum(c for c in map(_i32_constant, uniform) if c is not None)
+        lane_bounds = facts.bounds(lane)
+        if (
+            not terms
+            or lane_bounds is None
+            or lane_bounds[0] < 0
+            or lane_bounds[1] * elem_bytes >= 1 << 32
+        ):
+            return None
+        return terms, constant, lane
 
     # ----- pre-pass: collect smem allocations -----
 
@@ -2528,10 +2943,7 @@ class _Lowerer:
         )
 
     def _wrapping_binop(self, op: Op, llvm_op: str) -> None:
-        # ``nsw`` makes a signed overflow poison, as C does for signed types;
-        # unsigned values wrap modulo 2**N, so they get no flag.
-        flag = "" if _is_unsigned(op.result.type) else " nsw"
-        self._binop(op, llvm_op + flag)
+        self._binop(op, llvm_op + (" nsw" if _has_nsw(op) else ""))
 
     def _op_arith_add(self, op: Op) -> None:
         wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
@@ -3488,10 +3900,7 @@ class _Lowerer:
         ptr, idx = op.operands
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "half", ptr, idx)
         self._current().emit(
             f"  {op.result.name} = load half, ptr addrspace(1) {gep}, align {align}"
         )
@@ -3501,10 +3910,7 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, elem_ty, ptr, idx)
         self._current().emit(
             f"  {op.result.name} = load {elem_ty}, ptr addrspace(1) {gep}, align {align}"
         )
@@ -3513,10 +3919,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "half", ptr, idx)
         self._current().emit(
             f"  store half {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
         )
@@ -3526,10 +3929,7 @@ class _Lowerer:
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, elem_ty, ptr, idx)
         self._current().emit(
             f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
         )
@@ -3544,10 +3944,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, elem_ty, ptr, idx)
         ordering = op.attrs.get("ordering", "monotonic")
         # Float atomicrmw needs an explicit ``fadd`` op on AMDGPU; int
         # atomicrmw uses ``add``. Both compile down to the right
@@ -3589,10 +3986,7 @@ class _Lowerer:
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
         gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "i32", ptr, idx)
         self._current().emit(
             f"  store atomic i32 {self._operand(val)}, ptr addrspace(1) {gep}"
             f"{_llvm_syncscope(scope)} {ordering}, align 4"
@@ -3609,10 +4003,7 @@ class _Lowerer:
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         gep = self._fresh("gep")
         cur = self._current()
-        cur.emit(
-            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "i32", ptr, idx)
         spin = self._new_block("flag.wait")
         cur.emit(f"  br label %{spin.label}")
         cur.terminated = True
@@ -3643,10 +4034,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
-            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
-        )
+        self._global_gep(gep, "bfloat", ptr, idx, idx_ty)
         ordering = op.attrs.get("ordering", "monotonic")
         self._needs_fp_atomic_md = True
         md = (
@@ -3669,10 +4057,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         self._need("global.atomic.fadd.v2f16")
         gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "half", ptr, idx)
         self._current().emit(
             f"  {op.result.name} = call <2 x half> "
             f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
@@ -3692,10 +4077,7 @@ class _Lowerer:
         # Cast the index-into-elem offset into a pointer-cast: we GEP by
         # elem, then bitcast to ptr to <vec x elem>. This is exactly the
         # pattern Clang emits for `*(__fp16x4_t*)(ptr + idx)`.
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
-        )
+        self._global_gep(gep, elem_ty, ptr, idx, idx_ty)
         align = int(op.attrs.get("align", vec * 2))
         self._current().emit(
             f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(1) {gep}, "
@@ -6567,10 +6949,7 @@ class _Lowerer:
             if isinstance(val.type, VectorType)
             else _llvm_type(val.type)
         )
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, elem_ty, ptr, idx)
         elem_name = (
             val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
         )
@@ -6602,10 +6981,7 @@ class _Lowerer:
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
         gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds float, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
+        self._global_gep(gep, "float", ptr, idx)
         tmp = self._fresh("a")
         self._needs_fp_atomic_md = True
         self._current().emit(
@@ -7556,6 +7932,7 @@ def _lower_kernel_to_llvm_python(
     lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
     lowerer._collect_smem(kernel.body)
     lowerer._compute_smem_layout()
+    lowerer._collect_index_facts()
     lowerer.lower_region(kernel.body)
     return lowerer.finalize()
 

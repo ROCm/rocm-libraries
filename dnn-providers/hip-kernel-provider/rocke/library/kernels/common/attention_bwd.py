@@ -869,9 +869,10 @@ class AttnBwdSpec:
     MFMA) when the register estimate fits the arch-VGPR file, else stays
     ``None`` (backend choice); see :func:`_policy_agpr_alloc`. A one-wave
     ``head_size = 128`` tile with ``scheduler_strategy = None`` resolves to
-    the register-minimising machine scheduler on every arch (see
-    :data:`_D128_LOW_WAVE_SCHED`), and so does the CDNA narrow d128 tile
-    (``stage_vec = 1``; see :data:`_NARROW_D128_SCHED`).
+    the register-minimising machine scheduler on every arch but gfx1151 (see
+    :data:`_D128_LOW_WAVE_SCHED`), and so do the RDNA d128 tiles of more waves
+    and the CDNA narrow d128 tile (``stage_vec = 1``; see
+    :func:`_d128_sched`, :data:`_NARROW_D128_SCHED`).
     """
 
     head_size: int
@@ -1278,8 +1279,10 @@ class AttnBwdSpec:
             out = dataclasses.replace(out, **grids)
         if out.agpr_alloc is None and attn_bwd_arch_facts(arch).matrix_path == "mfma":
             out = dataclasses.replace(out, agpr_alloc=_policy_agpr_alloc(out, arch))
-        if out.scheduler_strategy is None and out.waves == 1 and out.head_size == 128:
-            out = dataclasses.replace(out, scheduler_strategy=_D128_LOW_WAVE_SCHED)
+        if out.scheduler_strategy is None and out.head_size == 128:
+            sched = _d128_sched(arch, out.waves)
+            if sched is not None:
+                out = dataclasses.replace(out, scheduler_strategy=sched)
         return _canonical_g4_slicing(_canonical_asm_knobs(out))
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
@@ -1388,18 +1391,40 @@ _CDNA_TILES = {
 _NARROW_TILE = (16, 64, 32, 4, (1, 4), "reg", "reg")
 _NARROW_TILE_D32 = (32, 64, 32, 4, (2, 2), "reg", "reg")
 _DEBUG_TILE = (16, 16, 16, 1, (1, 1), "lds", "lds")
-# Machine-scheduler strategy of the RDNA d128 start points (LDS accumulators,
-# one or two waves) and of every one-wave d128 tile (the CDNA 16 x 16
-# correctness tile): one wave holds all of D = 128 of a 16-row tile, the default
-# scheduler fills the 256-VGPR file and the production backend then spills a
-# few registers on some instances (atomic dK / dV with head packing).
+# Machine-scheduler strategy of the RDNA d128 tiles of two or more waves (LDS
+# accumulators) and of the one-wave d128 tiles of _D128_LOW_WAVE_SCHED: a few
+# waves hold all of D = 128 of a 16-row tile, the default scheduler fills the
+# 256-VGPR file and the production backend then spills a few registers on some
+# instances (atomic dK / dV with head packing on the two-wave RDNA tile).
 _RDNA_D128_SCHED = "iterative-minreg"
-_D128_LOW_WAVE_SCHED = _RDNA_D128_SCHED
+# The one-wave d128 tile (the RDNA start point, the CDNA 16 x 16 correctness
+# tile) per target; a target not listed keeps the backend's default scheduler.
+# On gfx1151 every shipped one-wave d128 instance compiles spill-free under the
+# default scheduler, and the tile's LDS footprint, not its registers, bounds the
+# resident waves, so the register-minimising scheduler gains no occupancy and
+# serialises the q loop's global loads; the opt-in levers that spill there under
+# the default scheduler are refused (RESOURCE_REFUSED). The other targets'
+# one-wave d128 tiles are validated on hardware with the register-minimising
+# scheduler.
+_D128_LOW_WAVE_SCHED = MappingProxyType(
+    {arch: _RDNA_D128_SCHED for arch in ("gfx942", "gfx950", "gfx1201")}
+)
 # The CDNA narrow d128 tile (stage_vec = 1, 16 x 64, K / V / K^T in registers)
 # sits at the 256-VGPR file under the default scheduler, and the production
 # backend spills one register on gfx950 (atomic dK / dV under a band); the
 # register-minimising scheduler keeps every narrow d128 instance spill-free.
 _NARROW_D128_SCHED = _RDNA_D128_SCHED
+
+
+def _d128_sched(arch: str, waves: int) -> Optional[str]:
+    """The machine-scheduler strategy of a d128 tile of ``waves`` waves whose
+    spec leaves it to the policy (the CDNA narrow tile takes its start point's,
+    :data:`_NARROW_D128_SCHED`)."""
+    if waves == 1:
+        return _D128_LOW_WAVE_SCHED.get(arch)
+    if attn_bwd_arch_facts(arch).matrix_path == "wmma":
+        return _RDNA_D128_SCHED
+    return None
 
 
 def attn_bwd_default_geometry(
@@ -1414,8 +1439,8 @@ def attn_bwd_default_geometry(
     The shipped correctness configuration uses the portable paths:
     ``global_path = "vgpr"``, ring depth 1, no stage table; on gfx942 the plain
     LDS transpose, on gfx950 the transpose read. RDNA uses the one-wave 16 x 16
-    WMMA schedule with LDS accumulators (d128 with the register-minimising
-    machine scheduler). ``seq_mode`` does not change the start point today; it
+    WMMA schedule with LDS accumulators (d128 with the machine scheduler of
+    :func:`_d128_sched`). ``seq_mode`` does not change the start point today; it
     is part of the signature so a tuned table may key on it.
     """
     facts = attn_bwd_arch_facts(arch)
@@ -1447,9 +1472,7 @@ def attn_bwd_default_geometry(
             "head_pack": False,
             "acc_in_lds": True,
             "s_in_agpr": False,
-            # d128 on one / two waves sits at the 256-VGPR file: the
-            # register-minimising machine scheduler keeps it free of spills.
-            "scheduler_strategy": _RDNA_D128_SCHED if head_size == 128 else None,
+            "scheduler_strategy": _d128_sched(arch, w) if head_size == 128 else None,
         }
     key = "gfx950" if facts.has_tr_read else "gfx942"
     if stage_vec == 8:

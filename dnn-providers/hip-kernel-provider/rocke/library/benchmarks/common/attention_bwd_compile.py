@@ -147,7 +147,12 @@ def _worker_init(comgr_digests: Mapping | None = None) -> None:
 
 
 def _identity_tag(tc: Toolchain) -> dict:
-    return {"comgr": tc.comgr, "flavor": tc.flavor, "emit": tc.emit}
+    return {
+        "compiler": tc.compiler,
+        "comgr": tc.comgr,
+        "flavor": tc.flavor,
+        "emit": tc.emit,
+    }
 
 
 def _compile_task(
@@ -158,7 +163,7 @@ def _compile_task(
     ``tc`` is the caller's identity for in-process (serial / thread) compiles;
     a pool worker uses the identity it took at start-up.
     """
-    from rocke.runtime.comgr import ComgrProcessDied
+    from rocke.runtime.code_object import CodeObjectProcessDied
 
     tc = tc or _WORKER_TOOLCHAIN or toolchain_identity()
     tag = _identity_tag(tc)
@@ -166,7 +171,7 @@ def _compile_task(
         name, blob, secs = compile_one(stage, spec, arch)
     except NotImplementedError as ex:
         return {"error": "not_built", "detail": str(ex)[:300], **tag}
-    except ComgrProcessDied as ex:
+    except CodeObjectProcessDied as ex:
         # a kernel compiled in a fresh process (helpers.compile) whose process
         # died: the same toolchain crash a dying pool worker reports
         return {"error": COMPILE_CRASH, "detail": str(ex)[:300], **tag}
@@ -255,13 +260,13 @@ def compile_batch(
             results[i] = CompileResult(
                 stage, spec, None, out["error"], out.get("detail", "")
             )
-        elif (out.get("comgr"), out.get("flavor"), out.get("emit", "")) != (
-            cache.toolchain.comgr,
+        elif (out.get("compiler"), out.get("flavor"), out.get("emit", "")) != (
+            cache.toolchain.compiler,
             cache.toolchain.flavor,
             cache.toolchain.emit,
         ):
             results[i] = CompileResult(
-                stage, spec, None, "toolchain_mismatch", str(out.get("comgr"))
+                stage, spec, None, "toolchain_mismatch", str(out.get("compiler"))
             )
         else:
             entry = cache.write(

@@ -23,7 +23,7 @@ transforms) kernel is covered.
 The name fixes the *configuration*. The binary is also a function of the
 emitter sources and the COMGR that compiled it, which no name carries: with
 ``--cache`` the rebuilt binary is compared with the cached one, and a
-difference is reported together with the emitter digest and COMGR each was
+difference is reported together with the emitter digest and compiler each was
 built with -- a cache entry from older sources needs that checkout to be
 reproduced bit for bit.
 """
@@ -41,7 +41,7 @@ from benchmarks.common.kernel_cache import (
     KernelCache,
     KernelIdentity,
     comgr_input_key,
-    current_comgr_id,
+    current_compiler_id,
     current_emitter_digest,
     current_llvm_flavor,
 )
@@ -90,7 +90,7 @@ def reproduce(
 ) -> bool:
     """Rebuild the kernel ``name``; ``True`` when it was rebuilt (and, with a
     ``cache``, matches the cached binary)."""
-    from rocke.helpers.compile import lower_kernel_for_comgr
+    from rocke.helpers.compile import lower_kernel_for_code_object
 
     name = strip_launch_suffix(name)
     log(f"\n{name}")
@@ -116,7 +116,7 @@ def reproduce(
     arch, dtype = identity.arch, identity.dtype_a
     try:
         kernel, meta = build(job, arch, dtype)
-        comgr_input = lower_kernel_for_comgr(kernel, arch=arch)
+        comgr_input = lower_kernel_for_code_object(kernel, arch=arch)
     except Exception as e:  # noqa: BLE001 - reported per kernel
         log(f"  [error] build failed: {type(e).__name__}: {e}")
         return False
@@ -128,7 +128,7 @@ def reproduce(
 
     hsaco = None
     if compile_hsaco:
-        from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+        from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 
         try:
             hsaco, _ = build_hsaco_from_llvm_ir(
@@ -174,7 +174,11 @@ def reproduce(
                         cached_meta.get("emitter_digest"),
                         current_emitter_digest(),
                     ),
-                    ("comgr", cached_meta.get("comgr_id"), current_comgr_id()),
+                    (
+                        "compiler",
+                        cached_meta.get("compiler_id", cached_meta.get("comgr_id")),
+                        current_compiler_id(),
+                    ),
                 ):
                     note = "same" if cached_v == now_v else "changed"
                     log(f"    {what:8s} cached {cached_v}  now {now_v}  ({note})")
@@ -195,7 +199,7 @@ def reproduce(
             options=list(comgr_input.options),
             content_key=key,
             emitter_digest=current_emitter_digest(),
-            comgr_id=current_comgr_id(),
+            compiler_id=current_compiler_id(),
             **{k: v for k, v in meta.items() if k not in ("kernel_name",)},
         )
         (out_dir / f"{stem}.json").write_text(

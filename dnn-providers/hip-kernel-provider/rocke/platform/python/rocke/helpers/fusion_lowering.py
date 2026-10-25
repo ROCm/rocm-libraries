@@ -174,7 +174,7 @@ def _build_region_hsaco(kernel, *, explicit_arch: Optional[str] = None) -> bytes
     """
     from ..core.arch import validate_arch
     from ..core.lower_llvm import lower_kernel_to_llvm
-    from ..runtime.comgr import build_hsaco_from_llvm_ir
+    from ..runtime.code_object import build_hsaco_from_llvm_ir
     from ..runtime.hip_module import get_device_arch
 
     arch = explicit_arch or get_device_arch()

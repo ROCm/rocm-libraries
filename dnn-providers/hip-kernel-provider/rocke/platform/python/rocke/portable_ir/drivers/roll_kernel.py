@@ -692,7 +692,7 @@ def verify_parity(
         cell = "-"
         if hsaco:
             from rocke.core.arch import ArchTarget
-            from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+            from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 
             isa = ArchTarget.from_gfx(arch).isa_triple
             py_h, _ = build_hsaco_from_llvm_ir(py_ll, isa=isa, options=["-O3"])

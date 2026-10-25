@@ -1108,7 +1108,7 @@ std::string gfx950_scaled_lower_llvm(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP] = {};
     auto status
-        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof(err));
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof(err));
     rocke_ir_builder_free(&b);
     return take_lowered(status, ll, err, "gfx950_block_scaled_gemm");
 }

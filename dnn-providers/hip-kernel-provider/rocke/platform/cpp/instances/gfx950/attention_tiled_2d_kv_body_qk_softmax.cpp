@@ -133,10 +133,10 @@ static rocke_value_t* fh_warp_xor_reduce_sum(rocke_gfx950_attn2d_build_ctx_t* ct
 
 /* Parity anchor for helpers/attention.py's narrow-K atom; the gfx950 path uses
  * the 16x16x32 variant below. Kept for module symmetry, hence the attribute. */
-__attribute__((unused)) static rocke_value_t* fh_mfma_16x16x16(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                                               rocke_value_t* a,
-                                                               rocke_value_t* bv,
-                                                               rocke_value_t* c)
+[[maybe_unused]] static rocke_value_t* fh_mfma_16x16x16(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                       rocke_value_t* a,
+                                                       rocke_value_t* bv,
+                                                       rocke_value_t* c)
 {
     return rocke_mfma_16x16x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
 }

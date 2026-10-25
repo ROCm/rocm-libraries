@@ -27,7 +27,7 @@ static bool rocke_tv_name_is(const rocke_type_t* t, const char* name)
 /* Python ``_dtype_elem_bytes`` -- used only by the buffer path (out of scope
  * this phase) but kept for parity with the module surface. The unused attribute
  * documents that this is an intentionally-retained parity anchor. */
-__attribute__((unused)) static int rocke_tv_dtype_elem_bytes(const rocke_type_t* dtype)
+[[maybe_unused]] static int rocke_tv_dtype_elem_bytes(const rocke_type_t* dtype)
 {
     if(rocke_tv_name_is(dtype, "f16") || rocke_tv_name_is(dtype, "bf16"))
         return 2;

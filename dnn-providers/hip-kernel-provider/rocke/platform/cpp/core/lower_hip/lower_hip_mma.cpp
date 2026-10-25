@@ -699,7 +699,7 @@ static const char* h_idx_join(rocke_h_lowerer_t* lw, rocke_value_t* const* vals,
 /* Python idiom `{"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")`. */
 static const char* h_tr_vec_prefix(const char* elem)
 {
-    if(elem && !__builtin_strcmp(elem, "bf16"))
+    if(elem && !strcmp(elem, "bf16"))
     {
         return "bf16x";
     }
@@ -1227,17 +1227,17 @@ static rocke_status_t rocke_h_op_vector_cmp(rocke_h_lowerer_t* lw, const rocke_o
     {
         pred = "lt";
     }
-    if(!__builtin_strcmp(pred, "lt"))
+    if(!strcmp(pred, "lt"))
         cop = "<";
-    else if(!__builtin_strcmp(pred, "le"))
+    else if(!strcmp(pred, "le"))
         cop = "<=";
-    else if(!__builtin_strcmp(pred, "gt"))
+    else if(!strcmp(pred, "gt"))
         cop = ">";
-    else if(!__builtin_strcmp(pred, "ge"))
+    else if(!strcmp(pred, "ge"))
         cop = ">=";
-    else if(!__builtin_strcmp(pred, "eq"))
+    else if(!strcmp(pred, "eq"))
         cop = "==";
-    else if(!__builtin_strcmp(pred, "ne"))
+    else if(!strcmp(pred, "ne"))
         cop = "!=";
     rocke_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
@@ -1382,12 +1382,12 @@ static rocke_status_t rocke_h_op_scf_if(rocke_h_lowerer_t* lw, const rocke_op_t*
 static const char* h_for_cpp_type(rocke_h_lowerer_t* lw, const char* type_name)
 {
     const char* hip;
-    if(type_name && !__builtin_strncmp(type_name, "vec<f32x", 8))
+    if(type_name && !strncmp(type_name, "vec<f32x", 8))
     {
         int n = atoi(type_name + 8);
         return rocke_arena_printf(&lw->b->arena, "f32x%d", n);
     }
-    if(type_name && !__builtin_strncmp(type_name, "vec<f16x", 8))
+    if(type_name && !strncmp(type_name, "vec<f16x", 8))
     {
         int n = atoi(type_name + 8);
         return rocke_arena_printf(&lw->b->arena, "f16x%d", n);

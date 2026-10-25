@@ -197,14 +197,13 @@ def describe_environment(lib: Path, replay_cli: Path | None) -> None:
     probe = (
         "import ctypes\n"
         "from rocke.portable_ir.src import online\n"
-        "from rocke.runtime import comgr\n"
+        "from rocke.runtime.code_object import loaded_compiler_info\n"
         "from rocke.portable_ir.drivers.hsaco_parity import _auto_cap_gb\n"
         "lib = online.load()\n"
         "fn = lib.rocke_build_id; fn.restype = ctypes.c_char_p; fn.argtypes = []\n"
-        "ver = comgr.resolved_lib_rocm_version()\n"
+        "info = loaded_compiler_info()\n"
         "print('   engine build-id :', fn().decode())\n"
-        "print('   comgr           :', comgr.resolved_lib_path())\n"
-        "print('   comgr ROCm      :', '.'.join(map(str, ver)) if ver else 'unknown')\n"
+        "print('   code compiler   :', info.describe() if info else 'unavailable')\n"
         "print('   memory cap      :', str(_auto_cap_gb()) + 'G per compile')\n"
     )
     print("== environment ==")

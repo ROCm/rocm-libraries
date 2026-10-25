@@ -171,7 +171,7 @@ def _variants(recipe: Dict[str, Any], guard: Optional[Dict[str, Any]]) -> List[T
 def _comgr_ms(ll: str, n: int) -> Optional[float]:
     try:
         from rocke.core.arch import ArchTarget
-        from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+        from rocke.runtime.code_object import build_hsaco_from_llvm_ir
     except Exception:  # noqa: BLE001
         return None
     isa = ArchTarget.from_gfx(ARCH).isa_triple

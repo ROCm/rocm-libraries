@@ -113,11 +113,7 @@ static void op_memref_global_load(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* idx = op->operands[1];
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 2);
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "half", ptr, idx, "i32");
     rocke_ll_emitf(
         L, "  %s = load half, ptr addrspace(1) %s, align %lld", ll_res(op), gep, (long long)align);
 }
@@ -129,12 +125,7 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   elem_ty,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, elem_ty, ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  %s = load %s, ptr addrspace(1) %s, align %lld",
                    ll_res(op),
@@ -150,11 +141,7 @@ static void op_memref_global_store(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* val = op->operands[2];
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 2);
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "half", ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  store half %s, ptr addrspace(1) %s, align %lld",
                    rocke_ll_operand(L, val),
@@ -170,12 +157,7 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
     const char* elem_ty = rocke_ll_llvm_type(L, val->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   elem_ty,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, elem_ty, ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  store %s %s, ptr addrspace(1) %s, align %lld",
                    elem_ty,
@@ -235,11 +217,7 @@ static void op_memref_global_flag_store(rocke_lower_t* L, const rocke_op_t* op)
     const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
     const char* ordering = ll_sync_attr(L, op, "ordering", k_ll_flag_store_orderings);
     const char* gep = rocke_ll_fresh(L, "gep");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "i32", ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  store atomic i32 %s, ptr addrspace(1) %s%s %s, align 4",
                    rocke_ll_operand(L, val),
@@ -264,12 +242,7 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     rocke_ll_block_t* done;
     const char* val;
     const char* hit;
-    rocke_ll_block_emitf(L,
-                         cur,
-                         "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
-                         gep,
-                         rocke_ll_operand(L, ptr),
-                         rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "i32", ptr, idx, "i32");
     spin = rocke_ll_new_block(L, "flag.wait");
     if(!cur || !spin)
         return;
@@ -304,12 +277,7 @@ static void op_memref_global_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
     bool is_f32;
     const char* rmw_op;
     const char* md = "";
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   elem_ty,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, elem_ty, ptr, idx, "i32");
     ordering = ll_attr_str(op, "ordering", "monotonic");
     is_f32 = (val->type->name && strcmp(val->type->name, "f32") == 0);
     rmw_op = is_f32 ? "fadd" : "add";
@@ -337,11 +305,7 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
     const char* gep = rocke_ll_fresh(L, "gep");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds float, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "float", ptr, idx, "i32");
     /* Python: tmp = self._fresh("a"); the atomicrmw result goes to this fresh
      * local, NOT to op.result (this op has no result -- has_result == false).
      * Capture the fresh name and use it (using ll_res here would deref a NULL
@@ -372,12 +336,7 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   idx_ty,
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "bfloat", ptr, idx, idx_ty);
     L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
                    "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
@@ -398,11 +357,7 @@ static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_
     const char* gep;
     rocke_ll_need(L, "global.atomic.fadd.v2f16");
     gep = rocke_ll_fresh(L, "gep");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, "half", ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  %s = call <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
                    "ptr addrspace(1) %s, <2 x half> %s)",
@@ -455,13 +410,7 @@ static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align;
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
-                   gep,
-                   elem_ty,
-                   rocke_ll_operand(L, ptr),
-                   idx_ty,
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, elem_ty, ptr, idx, idx_ty);
     align = ll_attr_int(op, "align", vec * 2);
     rocke_ll_emitf(L,
                    "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld%s",
@@ -489,12 +438,7 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(
             L, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const char* ty = rocke_ll_llvm_type(L, val->type);
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   elem_ty,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
+    rocke_ll_global_gep(L, gep, elem_ty, ptr, idx, "i32");
     rocke_ll_emitf(L,
                    "  store %s %s, ptr addrspace(1) %s, align %lld%s",
                    ty,

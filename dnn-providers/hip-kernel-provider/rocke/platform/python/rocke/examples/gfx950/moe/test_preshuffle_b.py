@@ -42,7 +42,7 @@ from rocke.instances.common.batched_gemm import (  # noqa: E402
     build_batched_gemm,
 )
 from rocke.instances.common.gemm_universal import TileSpec, TraitSpec  # noqa: E402
-from rocke.runtime.comgr import build_hsaco_from_llvm_ir  # noqa: E402
+from rocke.runtime.code_object import build_hsaco_from_llvm_ir  # noqa: E402
 from rocke.runtime.hip_module import Runtime, get_device_arch  # noqa: E402
 from rocke.runtime.host_buffers import as_u8_buffer  # noqa: E402
 from rocke.runtime.launcher import (  # noqa: E402

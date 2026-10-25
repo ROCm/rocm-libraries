@@ -230,7 +230,7 @@ def _alpha_norm(text: str) -> str:
 
 def _flavor() -> str:
     from rocke.core.lower_llvm import _flavor_for_llvm
-    from rocke.runtime.comgr import _require_compiler_info
+    from rocke.runtime.code_object import _require_compiler_info
 
     info = _require_compiler_info()
     return _flavor_for_llvm(info.llvm_version[0])
@@ -238,7 +238,7 @@ def _flavor() -> str:
 
 def _hsaco(ll: str) -> bytes:
     from rocke.core.arch import ArchTarget
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 
     hsaco, _ = build_hsaco_from_llvm_ir(
         ll, isa=ArchTarget.from_gfx(ARCH).isa_triple, options=["-O3"]

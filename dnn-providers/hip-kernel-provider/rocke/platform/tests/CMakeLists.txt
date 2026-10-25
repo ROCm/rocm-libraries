@@ -39,6 +39,32 @@ if(BUILD_TESTING)
             "CTest is not registered")
   endif()
 
+  if(ROCKE_BUILD_RUST_CODEOBJ)
+    add_executable(rocke_native_gemm_code_object
+                   runtime/test_native_gemm_code_object.cpp)
+    target_link_libraries(rocke_native_gemm_code_object PRIVATE rocke_core)
+    rocke_link_codeobj_ffi(rocke_native_gemm_code_object)
+    add_test(NAME rocke_native_gemm_code_object
+             COMMAND rocke_native_gemm_code_object)
+    set_tests_properties(rocke_native_gemm_code_object
+                         PROPERTIES LABELS "ckc;integration;host")
+
+    # C++ builder -> C++ serializer -> Rust direct compiler for gfx1151
+    # attention, convolution and GEMM; also a per-stage compile-time harness
+    # (--reps N --json FILE --dump DIR). The C++ conv builder emits
+    # tile.buffer_load_vN_f16 where the Python builder emits tile.buffer_load_vN,
+    # and the direct compiler parses only the latter, so conv is expected to be
+    # rejected until the builders agree; the harness fails once it compiles.
+    add_executable(rocke_native_direct_code_object
+                   runtime/test_native_direct_code_object.cpp)
+    target_link_libraries(rocke_native_direct_code_object PRIVATE rocke_core)
+    rocke_link_codeobj_ffi(rocke_native_direct_code_object)
+    add_test(NAME rocke_native_direct_code_object
+             COMMAND rocke_native_direct_code_object --reps 3 --expect-reject conv)
+    set_tests_properties(rocke_native_direct_code_object
+                         PROPERTIES LABELS "ckc;integration;host")
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)

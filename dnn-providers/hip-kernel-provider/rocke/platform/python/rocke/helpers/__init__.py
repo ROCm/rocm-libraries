@@ -126,12 +126,15 @@ from .attention import (
     wave_reduce_sum,
 )
 from .compile import (
+    CodeObjectInput,
     KernelArtifact,
     KernelModule,
     ModuleArtifact,
     compile_kernel,
     compile_module,
+    lower_kernel_for_code_object,
 )
+from .direct_gemm import compile_gfx1151_wmma_gemm_direct
 from .mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -549,11 +552,14 @@ __all__ = [
     "ValidationReport",
     "run_fusion_validation_matrix",
     # Compile
+    "CodeObjectInput",
     "KernelArtifact",
     "KernelModule",
     "ModuleArtifact",
     "compile_kernel",
     "compile_module",
+    "compile_gfx1151_wmma_gemm_direct",
+    "lower_kernel_for_code_object",
     # Manifest
     "MANIFEST_SCHEMA",
     "attention_args_signature",

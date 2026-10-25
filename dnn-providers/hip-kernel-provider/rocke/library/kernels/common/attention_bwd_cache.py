@@ -83,7 +83,7 @@ __all__ = [
 ]
 
 STAGES = ("main", "prep", "convert", "dq", "reduce", "dense", "dense_dq")
-CACHE_SCHEMA = "rocke_bwd_compile_cache/v1"
+CACHE_SCHEMA = "rocke_bwd_compile_cache/v2"
 # Directory of the opt-in cache of the run glue (unset: no disk cache).
 HSACO_CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
 # Environment switches that change the emitted IR of a kernel built from the
@@ -140,13 +140,15 @@ def emission_env() -> str:
 
 @dataclass(frozen=True)
 class Toolchain:
-    """The LLVM flavor and the comgr library a process compiles with."""
+    """The LLVM flavor and code-object compiler a process compiles with."""
 
     flavor: str
     comgr_path: str | None
     comgr_rocm: str | None  # ROCm vintage of the resolved library, "major.minor"
     comgr_sha: str | None  # content digest of the resolved library file
     emit: str = ""  # emission-changing environment (see :data:`EMIT_ENV`)
+    compiler_backend: str = "comgr"
+    compiler_id: str | None = None
 
     @property
     def comgr(self) -> str:
@@ -154,9 +156,20 @@ class Toolchain:
         name = Path(self.comgr_path).name if self.comgr_path else "none"
         return f"{name}@rocm{self.comgr_rocm or '?'}#{self.comgr_sha or '?'}"
 
+    @property
+    def compiler(self) -> str:
+        """Compiler-neutral cache identity; old COMGR fixtures remain valid."""
+        if self.compiler_id:
+            return self.compiler_id
+        if self.compiler_backend == "comgr":
+            return self.comgr
+        return f"{self.compiler_backend}:unknown"
+
     def record(self) -> dict:
         return {
             "rocke_llvm_flavor": self.flavor,
+            "code_object_backend": self.compiler_backend,
+            "code_object_compiler_id": self.compiler,
             "comgr": self.comgr,
             "comgr_path": self.comgr_path,
             "comgr_rocm": self.comgr_rocm,
@@ -173,9 +186,16 @@ def toolchain_identity() -> Toolchain:
     torch-free process names the same library, vintage and digest as one that
     imported torch. The library digest is memoised per file version.
     """
-    from kernels.common.attention_bwd_comgr import ensure_production_comgr
+    from rocke.runtime.code_object import (
+        loaded_compiler_info,
+        resolve_code_object_backend,
+    )
 
-    ensure_production_comgr()
+    selected = resolve_code_object_backend()
+    if selected == "comgr":
+        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+
+        ensure_production_comgr()
     flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
     if not flavor:
         try:
@@ -185,18 +205,32 @@ def toolchain_identity() -> Toolchain:
         except Exception:  # noqa: BLE001
             flavor = "unknown"
     path = rocm = sha = None
-    try:
-        from rocke.runtime.comgr import resolved_lib_path, resolved_lib_rocm_version
+    if selected == "comgr":
+        try:
+            from rocke.runtime.comgr import (
+                resolved_lib_path,
+                resolved_lib_rocm_version,
+            )
 
-        path = resolved_lib_path()
-        v = resolved_lib_rocm_version()
-        rocm = f"{v[0]}.{v[1]}" if v else None
-        if path and os.path.exists(path):
-            path = os.path.realpath(path)
-            sha = _comgr_sha(path)
-    except Exception:  # noqa: BLE001 - recorded as unknown
-        pass
-    return Toolchain(flavor, path, rocm, sha, emission_env())
+            path = resolved_lib_path()
+            v = resolved_lib_rocm_version()
+            rocm = f"{v[0]}.{v[1]}" if v else None
+            if path and os.path.exists(path):
+                path = os.path.realpath(path)
+                sha = _comgr_sha(path)
+        except Exception:  # noqa: BLE001 - recorded as unknown
+            pass
+    info = loaded_compiler_info(selected)
+    compiler_id = info.identity if info is not None else None
+    return Toolchain(
+        flavor,
+        path,
+        rocm,
+        sha,
+        emission_env(),
+        selected,
+        compiler_id,
+    )
 
 
 def source_files(root: Path | None = None) -> list[Path]:
@@ -387,7 +421,7 @@ def entry_key(
         spec_identity(stage, spec),
         arch,
         toolchain.flavor,
-        toolchain.comgr,
+        toolchain.compiler,
         source_hash,
     ]
     if toolchain.emit:  # absent when unset: keys of plain builds are unchanged
@@ -479,6 +513,7 @@ class CompileCache:
             "schema": CACHE_SCHEMA,
             "arch": arch,
             "flavor": self.toolchain.flavor,
+            "compiler": self.toolchain.compiler,
             "comgr": self.toolchain.comgr,
             "emit": self.toolchain.emit,
             "source_hash": self.source_hash,

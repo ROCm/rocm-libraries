@@ -102,7 +102,7 @@ def main() -> int:
 
     from rocke.core.arch import ArchTarget
     from rocke.portable_ir.src import online
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.runtime.code_object import build_hsaco_from_llvm_ir
     from rocke.runtime.launcher import DeviceMem, _runtime
 
     spec, recorded_name, bundle, chunk = author(args.op, args.dtype)

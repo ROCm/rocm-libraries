@@ -1452,7 +1452,10 @@ estimate and the LDS plan allow, in whole workgroups, and a hint above the LDS
 bound is legal but unattainable, so a sweep skips it), `scheduler_strategy` (the backend's machine scheduler; the
 one-wave d128 tiles, the CDNA narrow d128 tile and the RDNA d128 tiles resolve
 to `iterative-minreg`, because the default scheduler fills the 256-VGPR file
-there and some instances spill), `acc_in_lds` (dK / dV as fp32 LDS images:
+there and some instances spill; the one-wave d128 tile on gfx1151 keeps the
+default scheduler: every shipped instance compiles spill-free under it, the
+tile's LDS footprint bounds its occupancy, and the levers that spill under it
+are refused), `acc_in_lds` (dK / dV as fp32 LDS images:
 each 16 x 16 tile is read before its MMA chain and written back after it; each
 lane reads back exactly the cells it writes, so no barrier is needed; implies
 the VGPR form), and `dkv_slab_hoist` / `interior_clamp` (address and clamp

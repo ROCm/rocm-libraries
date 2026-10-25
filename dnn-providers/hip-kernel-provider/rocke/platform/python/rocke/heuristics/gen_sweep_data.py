@@ -66,7 +66,7 @@ import pandas as pd
 
 from ..core.arch import arch_from_isa
 from ..core.lower_llvm import lower_kernel_to_llvm
-from ..runtime.comgr import build_hsaco_from_llvm_ir
+from ..runtime.code_object import build_hsaco_from_llvm_ir, compiler_identity
 
 
 # ---------------------------------------------------------------------
@@ -478,8 +478,18 @@ def _build_spec(
     problem = adapter.problem_columns(spec)
     flops = adapter.flops(spec)
 
+    try:
+        compiler_id = compiler_identity()
+    except Exception as error:  # compile below records the authoritative failure
+        compiler_id = f"<unavailable:{type(error).__name__}:{error}>"
     blob = json.dumps(
-        {"name": name, "config": config, "problem": problem}, sort_keys=True
+        {
+            "name": name,
+            "config": config,
+            "problem": problem,
+            "code_object_compiler": compiler_id,
+        },
+        sort_keys=True,
     ).encode()
     spec_hash = hashlib.sha1(blob).hexdigest()[:12]
     out_path = cache_dir / f"{spec_hash}_{name[:120]}.hsaco"

@@ -40,7 +40,7 @@ ARCHES = os.environ.get("ARCHES", "gfx942,gfx950").split(",")
 def _auto_flavor() -> Tuple[str, str]:
     """-> (flavor, where it came from), the second for the log line."""
     from rocke.core.lower_llvm import _flavor_for_llvm
-    from rocke.runtime.comgr import _require_compiler_info
+    from rocke.runtime.code_object import _require_compiler_info
 
     info = _require_compiler_info()
     return _flavor_for_llvm(info.llvm_version[0]), info.describe()

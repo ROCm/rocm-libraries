@@ -4,8 +4,8 @@
 """Composable Kernel Tile DSL — Python authoring surface.
 
 `rocke` is a Python DSL for writing CK Tile-style GPU kernels that
-lower in-process to AMDGPU LLVM IR and then to HSACO via libamd_comgr.
-No `hipcc`, no template metaprogramming, no MLIR round-trip.
+lower to AMDGPU LLVM IR and then to HSACO through a selectable code-object
+compiler. No template metaprogramming or MLIR round-trip is required.
 
 The package is organised as four layers:
 
@@ -94,7 +94,16 @@ from .core.lower_llvm import lower_kernel_to_llvm
 from .core.passes import PassStats, optimize_kernel
 
 # ---- runtime ----
-from .runtime.comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .runtime.code_object import (
+    CodeObjectCompilerInfo,
+    CodeObjectError,
+    CodeObjectProcessDied,
+    CodeObjectTimings,
+    build_hsaco_from_llvm_ir,
+    compiler_identity,
+    resolve_code_object_backend,
+)
+from .runtime.comgr import ComgrError, ComgrProcessDied, ComgrTimings
 from .runtime.hip_module import HipError, Runtime
 from .runtime.launcher import StreamConfig, launch_kernel, make_kernel
 
@@ -106,6 +115,7 @@ from .helpers import (
     Attention3DConfig,
     AsyncTileLoaderSlot,
     CoalescedTileLoader,
+    CodeObjectInput,
     CShuffleEpilogue,
     DirectEpilogue,
     KernelArtifact,
@@ -119,7 +129,9 @@ from .helpers import (
     SoftwarePipeline,
     WarpGrid,
     attention_args_signature,
+    compile_gfx1151_wmma_gemm_direct,
     compile_kernel,
+    lower_kernel_for_code_object,
     gemm_args_signature,
     make_conv_manifest,
     make_attention_manifest,
@@ -202,13 +214,20 @@ __all__ = [
     "optimize_kernel",
     # runtime
     "ComgrError",
+    "ComgrProcessDied",
     "ComgrTimings",
+    "CodeObjectCompilerInfo",
+    "CodeObjectError",
+    "CodeObjectProcessDied",
+    "CodeObjectTimings",
     "HipError",
     "Runtime",
     "StreamConfig",
     "build_hsaco_from_llvm_ir",
+    "compiler_identity",
     "launch_kernel",
     "make_kernel",
+    "resolve_code_object_backend",
     # helpers
     "MFMA_F16_ATOMS",
     "Attention2DConfig",
@@ -216,6 +235,7 @@ __all__ = [
     "AsyncTileLoader",
     "AsyncTileLoaderSlot",
     "CoalescedTileLoader",
+    "CodeObjectInput",
     "CShuffleEpilogue",
     "DirectEpilogue",
     "KernelArtifact",
@@ -226,7 +246,9 @@ __all__ = [
     "SchedulePolicy",
     "SoftwarePipeline",
     "WarpGrid",
+    "compile_gfx1151_wmma_gemm_direct",
     "compile_kernel",
+    "lower_kernel_for_code_object",
     "attention_args_signature",
     "gemm_args_signature",
     "make_attention_manifest",

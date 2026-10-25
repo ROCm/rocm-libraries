@@ -86,9 +86,19 @@ from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import _lower_kernel_to_llvm_python
+from ..core.lower_llvm import (
+    LLVM_FLAVORS,
+    _flavor_for_llvm,
+    _lower_kernel_to_llvm_python,
+)
 from ..core.passes import PassStats, optimize_kernel
-from ..runtime.comgr import build_hsaco_from_llvm_ir, build_hsaco_from_llvm_modules
+from ..runtime.code_object import (
+    _require_compiler_info,
+    build_direct_rocke_ir_hsaco,
+    build_hsaco_from_llvm_ir,
+    build_hsaco_from_llvm_modules,
+    resolve_code_object_backend,
+)
 
 # Kernel attribute (bool) a builder sets on a kernel whose code generation
 # depends on what the compiling process compiled before (it emits
@@ -131,6 +141,7 @@ def compile_kernel(
     capture_ir_text: bool = True,
     optimize_ir: bool = False,
     backend: Optional[str] = None,
+    code_object_backend: str | None = None,
     spec: Optional[object] = None,
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
@@ -168,6 +179,12 @@ def compile_kernel(
     other kernel compiles in this process.
     """
     _lower_arch, isa = _resolve_compile_target(arch, isa)
+    selected_code_object_backend = resolve_code_object_backend(code_object_backend)
+    if selected_code_object_backend == "direct":
+        return _compile_kernel_direct(
+            kernel, isa=isa, capture_ir_text=capture_ir_text, optimize_ir=optimize_ir
+        )
+    llvm_flavor = _code_object_llvm_flavor(selected_code_object_backend)
 
     timings: Dict[str, float] = {}
 
@@ -177,7 +194,11 @@ def compile_kernel(
     ir_text = print_ir(kernel) if capture_ir_text else ""
     t1 = time.perf_counter()
     llvm_text = _lower_llvm_via_backend(
-        kernel, arch=_lower_arch, backend=backend, spec=spec
+        kernel,
+        arch=_lower_arch,
+        backend=backend,
+        spec=spec,
+        llvm_flavor=llvm_flavor,
     )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
@@ -185,6 +206,7 @@ def compile_kernel(
         isa=isa,
         options=_comgr_options_for_kernel(kernel),
         fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
+        backend=selected_code_object_backend,
     )
     t3 = time.perf_counter()
 
@@ -194,12 +216,57 @@ def compile_kernel(
     timings["comgr_bc"] = comgr_t.bc * 1000.0
     timings["comgr_relocatable"] = comgr_t.relocatable * 1000.0
     timings["comgr_executable"] = comgr_t.executable * 1000.0
+    timings["codeobj_bc"] = timings["comgr_bc"]
+    timings["codeobj_relocatable"] = timings["comgr_relocatable"]
+    timings["codeobj_executable"] = timings["comgr_executable"]
     timings["total"] = (t3 - t0) * 1000.0
 
     return KernelArtifact(
         kernel=kernel,
         ir_text=ir_text,
         llvm_text=llvm_text,
+        hsaco=hsaco,
+        timings=timings,
+        pass_stats=pass_stats,
+        isa=isa,
+    )
+
+
+def _compile_kernel_direct(
+    kernel: KernelDef,
+    *,
+    isa: str,
+    capture_ir_text: bool,
+    optimize_ir: bool,
+) -> KernelArtifact:
+    """``compile_kernel`` for ``code_object_backend="direct"``: no LLVM text."""
+    from ..core.ir_serialize import serialize
+
+    timings: Dict[str, float] = {}
+    t0 = time.perf_counter()
+    pass_stats = optimize_kernel(kernel) if optimize_ir else PassStats()
+    t_pass = time.perf_counter()
+    ir_text = print_ir(kernel) if capture_ir_text else ""
+    t1 = time.perf_counter()
+    serialized = serialize(kernel)
+    t2 = time.perf_counter()
+    hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(serialized, isa=isa)
+    t3 = time.perf_counter()
+
+    timings["ir_opt"] = (t_pass - t0) * 1000.0
+    timings["ir_build"] = (t1 - t_pass) * 1000.0
+    timings["ir_serialize"] = (t2 - t1) * 1000.0
+    timings["ir_lower_llvm"] = 0.0
+    for stage in ("bc", "relocatable"):
+        timings[f"comgr_{stage}"] = 0.0
+        timings[f"codeobj_{stage}"] = 0.0
+    timings["comgr_executable"] = 0.0
+    timings["codeobj_executable"] = codeobj_t.executable * 1000.0
+    timings["total"] = (t3 - t0) * 1000.0
+    return KernelArtifact(
+        kernel=kernel,
+        ir_text=ir_text,
+        llvm_text="",
         hsaco=hsaco,
         timings=timings,
         pass_stats=pass_stats,
@@ -306,6 +373,7 @@ def compile_module(
     capture_ir_text: bool = True,
     optimize_ir: bool = False,
     backend: Optional[str] = None,
+    code_object_backend: str | None = None,
 ) -> ModuleArtifact:
     """Lower every kernel of `module` and link them into one code object.
 
@@ -325,6 +393,8 @@ def compile_module(
     as in :func:`compile_kernel`, before any link.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
+    selected_code_object_backend = resolve_code_object_backend(code_object_backend)
+    llvm_flavor = _code_object_llvm_flavor(selected_code_object_backend)
     kernels = module.kernels
 
     fresh = [k.name for k in kernels if k.attrs.get(COMGR_FRESH_PROCESS_ATTR)]
@@ -351,12 +421,21 @@ def compile_module(
     ir_texts = tuple(print_ir(k) if capture_ir_text else "" for k in kernels)
     t1 = time.perf_counter()
     llvm_texts = tuple(
-        _lower_llvm_via_backend(k, arch=lower_arch, backend=backend, spec=None)
+        _lower_llvm_via_backend(
+            k,
+            arch=lower_arch,
+            backend=backend,
+            spec=None,
+            llvm_flavor=llvm_flavor,
+        )
         for k in kernels
     )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_modules(
-        llvm_texts, isa=isa, options=options[0]
+        llvm_texts,
+        isa=isa,
+        options=options[0],
+        backend=selected_code_object_backend,
     )
     t3 = time.perf_counter()
 
@@ -367,6 +446,10 @@ def compile_module(
     timings["comgr_link"] = comgr_t.link * 1000.0
     timings["comgr_relocatable"] = comgr_t.relocatable * 1000.0
     timings["comgr_executable"] = comgr_t.executable * 1000.0
+    timings["codeobj_bc"] = timings["comgr_bc"]
+    timings["codeobj_link"] = timings["comgr_link"]
+    timings["codeobj_relocatable"] = timings["comgr_relocatable"]
+    timings["codeobj_executable"] = timings["comgr_executable"]
     timings["total"] = (t3 - t0) * 1000.0
 
     return ModuleArtifact(
@@ -397,12 +480,12 @@ def _resolve_compile_target(arch: Optional[str], isa: str):
 
 
 @dataclass(frozen=True)
-class ComgrInput:
-    """Everything :func:`build_hsaco_from_llvm_ir` needs to compile a kernel.
+class CodeObjectInput:
+    """Everything a code-object backend needs to compile one kernel.
 
-    The HSACO is a pure function of these three fields and the COMGR library
-    that compiles them, which is what lets a caller key a binary cache on them
-    and skip the (expensive) COMGR step when they have not changed.
+    The HSACO is a pure function of these fields and the selected compiler
+    identity, which lets a caller key a binary cache on them and skip code
+    generation when they have not changed.
     ``fresh_process`` (the kernel's ``COMGR_FRESH_PROCESS_ATTR``) is how to
     compile it, so that this holds for a kernel whose code generation would
     otherwise depend on the process's earlier compiles.
@@ -415,14 +498,15 @@ class ComgrInput:
     fresh_process: bool = False
 
 
-def lower_kernel_for_comgr(
+def lower_kernel_for_code_object(
     kernel: KernelDef,
     *,
     arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     backend: Optional[str] = None,
-) -> ComgrInput:
-    """The lowering half of :func:`compile_kernel`, without running COMGR.
+    code_object_backend: str | None = None,
+) -> CodeObjectInput:
+    """The lowering half of :func:`compile_kernel`, without code generation.
 
     Resolves the target the same way and lowers through the same backend, so
     ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
@@ -430,10 +514,15 @@ def lower_kernel_for_comgr(
     ``compile_kernel(kernel, arch=arch)`` would.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
+    selected_code_object_backend = resolve_code_object_backend(code_object_backend)
     llvm_text = _lower_llvm_via_backend(
-        kernel, arch=lower_arch, backend=backend, spec=None
+        kernel,
+        arch=lower_arch,
+        backend=backend,
+        spec=None,
+        llvm_flavor=_code_object_llvm_flavor(selected_code_object_backend),
     )
-    return ComgrInput(
+    return CodeObjectInput(
         kernel_name=kernel.name,
         llvm_text=llvm_text,
         isa=isa,
@@ -442,12 +531,18 @@ def lower_kernel_for_comgr(
     )
 
 
+# Compatibility names for callers that predate compiler-neutral code objects.
+ComgrInput = CodeObjectInput
+lower_kernel_for_comgr = lower_kernel_for_code_object
+
+
 def _lower_llvm_via_backend(
     kernel: KernelDef,
     *,
     arch: Optional[str],
     backend: Optional[str],
     spec: Optional[object],
+    llvm_flavor: str | None = None,
 ) -> str:
     """Produce the AMDGPU ``.ll`` text through the selected backend.
 
@@ -481,6 +576,7 @@ def _lower_llvm_via_backend(
             return lower_kernel_via_backend(
                 kernel,
                 arch=arch,
+                llvm_flavor=llvm_flavor,
                 python_lower=_lower_kernel_to_llvm_python,
             )
         finally:
@@ -492,8 +588,30 @@ def _lower_llvm_via_backend(
     return lower_kernel_via_backend(
         kernel,
         arch=arch,
+        llvm_flavor=llvm_flavor,
         python_lower=_lower_kernel_to_llvm_python,
     )
+
+
+def _code_object_llvm_flavor(code_object_backend: str) -> str:
+    """Resolve lowering flavor from the compiler that will consume the IR."""
+    import os
+
+    if code_object_backend == "direct":
+        raise ValueError(
+            "the direct code-object backend compiles rocKE IR without LLVM; "
+            "only compile_kernel supports it"
+        )
+    override = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
+    if override:
+        if override not in LLVM_FLAVORS:
+            raise ValueError(
+                f"ROCKE_LLVM_FLAVOR={override!r} is not a recognized flavor; "
+                f"expected one of {LLVM_FLAVORS}"
+            )
+        return override
+    info = _require_compiler_info(code_object_backend)
+    return _flavor_for_llvm(info.llvm_version[0])
 
 
 def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:

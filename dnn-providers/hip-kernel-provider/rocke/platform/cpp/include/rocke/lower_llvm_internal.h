@@ -223,6 +223,12 @@ typedef struct rocke_isa_backend
      * gfx950. Elsewhere LLVM may still select the intrinsic and write an
      * encoding the GPU does not have, so the lowerer refuses the ops. */
     bool has_fp8_scale_conversion;
+    /* Python ISABackend.splits_global_address: a global access indexed by
+     * wave-uniform terms plus one per-lane term is emitted as a GEP chain,
+     * uniform terms first (rocke_ll_global_gep), so the AMDGPU backend can
+     * address it with an SGPR base and a VGPR offset. Set per RDNA target
+     * (Python _GLOBAL_ADDRESS_SPLIT_TARGETS); false elsewhere. */
+    bool splits_global_address;
 } rocke_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). Returns the
@@ -386,6 +392,10 @@ typedef struct
     const char* gname;
 } rocke_ll_lds_prov_t;
 
+/* Wave uniformity and i32 bounds of a kernel's values (Python _IndexFacts).
+ * Defined in lower_llvm/index_facts.cpp; arena-owned. */
+typedef struct rocke_ll_index_facts rocke_ll_index_facts_t;
+
 /* A "needed intrinsic" record: the decl key plus the resolved decl text. The
  * decl text is captured at _need() time so dynamically-built decls (Python
  * self._decls[intrin] = ... for vector smax) are preserved in emit order. */
@@ -441,6 +451,11 @@ struct rocke_lower
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
      * Each frame is a vector of operand strings. */
     ROCKE_VEC(ROCKE_VEC(const char*) *) yield_stack;
+
+    /* Set by rocke_ll_collect_index_facts on targets that split global
+     * addresses (Python _index_facts); NULL keeps every global address one
+     * GEP. */
+    rocke_ll_index_facts_t* index_facts;
 
     /* unroll trailing-sync elision marker (Python _unroll_elide_sync_op):
      * points at the specific tile.sync op to skip, or NULL. */
@@ -658,6 +673,26 @@ const char*
 /* ", !alias.scope !A, !noalias !N" for an LDS access to gname, or "" (Python
  * _lds_aa_suffix). */
 const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname);
+
+/* ====================================================================== */
+/* Global address split (Python _IndexFacts / _global_gep) -- index_facts  */
+/* ====================================================================== */
+
+/* Pre-pass: on a target whose backend splits_global_address, compute the
+ * uniformity and bounds facts of every kernel value into L->index_facts
+ * (Python _collect_index_facts). Must run before rocke_ll_lower_region: the
+ * unrolled-loop lowering renames values while it runs. */
+void rocke_ll_collect_index_facts(rocke_lower_t* L);
+
+/* Emit `gep`, the address of element `idx` of the global `ptr` (Python
+ * _global_gep): the split GEP chain when L->index_facts admits it, else
+ * `getelementptr inbounds <elem_ty>, ptr addrspace(1) <ptr>, <idx_ty> <idx>`. */
+void rocke_ll_global_gep(rocke_lower_t* L,
+                         const char* gep,
+                         const char* elem_ty,
+                         const rocke_value_t* ptr,
+                         const rocke_value_t* idx,
+                         const char* idx_ty);
 /* Provenance helpers for i64 LDS addresses. */
 void rocke_ll_lds_prov_set(rocke_lower_t* L, const rocke_value_t* v, const char* gname);
 const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const rocke_value_t* v);

@@ -481,10 +481,11 @@ def test_select_guard_issues_the_same_atomics_without_row_branches(row):
     as the row-branch guard, none inside a per-row branch (only the CTA's
     liveness branch), each added value a select against ``+0.0``."""
     arch = row[0]
-    kernels = {
-        knob: build_attn_bwd_main(_spec(row, knob), arch=arch)
-        for knob in (None, "select")
-    }
+    kernels = {}
+    for knob in (None, "select"):
+        r = _structural(_spec(row, knob), arch)
+        _check_refusal(r, arch)
+        kernels[knob] = _build(r, arch)
     counts = {}
     for knob, kernel in kernels.items():
         in_q = {id(op) for lp in q_loops(kernel) for op, _ in _walk([lp])}

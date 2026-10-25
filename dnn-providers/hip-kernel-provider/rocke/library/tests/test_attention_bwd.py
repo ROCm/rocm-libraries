@@ -218,9 +218,9 @@ def test_default_geometry_start_points():
     assert (g["block_m"], g["block_n"], g["waves"]) == (16, 16, 1)
     assert g["acc_in_lds"] is True and g["transpose_source"] == "wmma_lds"
     assert g["scheduler_strategy"] is None
-    for arch in ("gfx1151", "gfx1201"):
-        g = attn_bwd_default_geometry(arch, 128)
-        assert g["scheduler_strategy"] == "iterative-minreg"
+    assert attn_bwd_default_geometry("gfx1151", 128)["scheduler_strategy"] is None
+    g = attn_bwd_default_geometry("gfx1201", 128)
+    assert g["scheduler_strategy"] == "iterative-minreg"
     for arch in ("gfx942", "gfx950"):
         g = attn_bwd_default_geometry(arch, 64, stage_vec=1)
         assert (g["block_m"], g["block_n"]) == (16, 64)
@@ -233,22 +233,32 @@ def test_default_geometry_start_points():
 
 
 @pytest.mark.parametrize("arch", BWD_ARCHS)
-def test_one_wave_d128_tiles_resolve_to_the_register_minimising_scheduler(arch):
+def test_one_wave_d128_tiles_resolve_to_the_policy_scheduler(arch):
+    """The register-minimising scheduler on every arch but gfx1151, whose
+    one-wave d128 tile keeps the backend default; the RDNA two-wave d128 tile
+    keeps the register-minimising scheduler on both RDNA targets."""
     one_wave = dict(waves=1, block_m=16, block_n=16, block_k4=16, warp_grid_g4=(1, 1))
     if attn_bwd_arch_facts(arch).matrix_path == "mfma":
         one_wave.update(
             atom_g02="16x16x16", atom_g13="16x16x16", atom_g4="16x16x16",
             kv_residency="lds", kt_source="lds", transpose_source="lds_plain",
         )  # fmt: skip
+    d128 = None if arch == "gfx1151" else "iterative-minreg"
     for d in BWD_HEAD_SIZES:
         r = AttnBwdSpec(head_size=d, **one_wave).resolved(arch)
-        assert r.scheduler_strategy == ("iterative-minreg" if d == 128 else None)
+        assert r.scheduler_strategy == (d128 if d == 128 else None)
         # an explicit strategy is kept
         r = AttnBwdSpec(head_size=d, scheduler_strategy="max-ilp", **one_wave)
         assert r.resolved(arch).scheduler_strategy == "max-ilp"
+    r = AttnBwdSpec(head_size=128, scheduler_strategy="iterative-minreg", **one_wave)
+    assert r.resolved(arch).scheduler_strategy == "iterative-minreg"
     # the multi-wave CDNA start points keep the default scheduler
     if arch in ("gfx942", "gfx950"):
         assert AttnBwdSpec(head_size=128).resolved(arch).scheduler_strategy is None
+    else:
+        two_wave = dict(waves=2, block_m=16, block_n=32, block_k4=32, warp_grid_g4=(1, 2))
+        r = AttnBwdSpec(head_size=128, **two_wave).resolved(arch)
+        assert r.scheduler_strategy == "iterative-minreg"
 
 
 def test_resolved_agpr_alloc_prefers_the_vgpr_form():
@@ -1795,8 +1805,8 @@ def test_staging_knobs_exclude_the_ring_and_dma(kw):
 # --------------------------------------------------------------------------- G4 key
 # slicing (g4_slicing, block_k4)
 
-# Kernel names of the shipped defaults (bf16, batched, direct, band), captured
-# before g4_slicing existed: the new field must salt nothing at its default.
+# Kernel names of the shipped defaults (bf16, batched, direct, band): the
+# g4_slicing field must salt nothing at its default.
 _SHIPPED_NAMES = {
     (
         "gfx942",
@@ -1872,7 +1882,7 @@ _SHIPPED_NAMES = {
         "gfx1151",
         128,
         8,
-    ): "rocke_attn_bwd_main_bf16_d128_batched_direct_band_sv8_041c3d0a66",
+    ): "rocke_attn_bwd_main_bf16_d128_batched_direct_band_sv8_9dd72c63d8",
     (
         "gfx1201",
         128,

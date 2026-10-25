@@ -264,7 +264,7 @@ def _split(x: np.ndarray):
 
 
 def _launch(kernel: KernelDef, values, *, wave_size: int):
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.runtime.code_object import build_hsaco_from_llvm_ir
     from rocke.runtime.launcher import (
         KernelLauncher,
         LaunchConfig,

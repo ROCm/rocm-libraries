@@ -53,8 +53,17 @@ endif()
 #   this is a well-known false positive for `{0}` and cannot leave a field
 #   uninitialized. Naming every field (or switching to `{}`, a C++-only form)
 #   would add noise without removing any bug class. (Part of -Wextra.)
-add_compile_options(-Wall -Wextra -Werror
-                    -Wno-comment -Wno-missing-field-initializers)
+#
+# cl.exe does not accept these spellings (-Wextra is a hard D8021 error), so MSVC
+# gets its own: /utf-8 keeps the UTF-8 sources' string literals byte-exact, and
+# /bigobj lifts the per-object section limit the largest instance TUs exceed.
+# clang-cl reports CMAKE_CXX_COMPILER_ID Clang and keeps the flags above.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  add_compile_options(/W3 /utf-8 /bigobj)
+else()
+  add_compile_options(-Wall -Wextra -Werror
+                      -Wno-comment -Wno-missing-field-initializers)
+endif()
 
 # On Windows the MSVC CRT marks standard C functions (getenv/strcpy/fopen/
 # fscanf/...) as "deprecated" via __declspec(deprecated); rocKE's -Werror would
@@ -89,6 +98,8 @@ if(ROCKE_SANITIZE)
 endif()
 
 option(ROCKE_BUILD_PYBIND "Build the rocke_engine Python extension module" OFF)
+option(ROCKE_BUILD_RUST_CODEOBJ
+       "Build the direct Rust gfx1151 GEMM code-object compiler (no LLVM)" OFF)
 option(ROCKE_INSTALL_PYTHON_PACKAGE "Install the rocke Python frontend" ON)
 option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadata" ON)
 option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
@@ -154,6 +165,94 @@ else()
 endif()
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
+
+if(ROCKE_BUILD_RUST_CODEOBJ)
+  find_program(ROCKE_CARGO_EXECUTABLE cargo REQUIRED)
+  set(_ROCKE_CODEOBJ_MANIFEST
+      "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/Cargo.toml")
+  set(_ROCKE_CODEOBJ_TARGET_DIR
+      "${CMAKE_CURRENT_BINARY_DIR}/rust-target")
+  if(WIN32)
+    set(_ROCKE_CODEOBJ_FFI
+        "${_ROCKE_CODEOBJ_TARGET_DIR}/release/rocke_codeobj_ffi.dll")
+    set(_ROCKE_CODEOBJ_IMPLIB
+        "${_ROCKE_CODEOBJ_TARGET_DIR}/release/rocke_codeobj_ffi.dll.lib")
+  elseif(APPLE)
+    set(_ROCKE_CODEOBJ_FFI
+        "${_ROCKE_CODEOBJ_TARGET_DIR}/release/librocke_codeobj_ffi.dylib")
+  else()
+    set(_ROCKE_CODEOBJ_FFI
+        "${_ROCKE_CODEOBJ_TARGET_DIR}/release/librocke_codeobj_ffi.so")
+  endif()
+  file(GLOB_RECURSE _ROCKE_CODEOBJ_SOURCES CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/src/*.rs")
+  set(_ROCKE_CODEOBJ_ASSETS
+      "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/src/gfx1151_wmma_gemm.hex"
+      "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/src/gfx1151_wmma_gemm.ir")
+  add_custom_command(
+    OUTPUT "${_ROCKE_CODEOBJ_FFI}"
+    BYPRODUCTS ${_ROCKE_CODEOBJ_IMPLIB}
+    COMMAND "${ROCKE_CARGO_EXECUTABLE}" build
+            --manifest-path "${_ROCKE_CODEOBJ_MANIFEST}"
+            --target-dir "${_ROCKE_CODEOBJ_TARGET_DIR}"
+            --release
+            --locked
+    DEPENDS
+      "${_ROCKE_CODEOBJ_MANIFEST}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/Cargo.lock"
+      ${_ROCKE_CODEOBJ_SOURCES}
+      ${_ROCKE_CODEOBJ_ASSETS}
+    COMMENT "Building the rocKE direct Rust code-object compiler"
+    VERBATIM)
+  add_custom_target(
+    rocke_codeobj_direct ALL
+    DEPENDS "${_ROCKE_CODEOBJ_FFI}"
+    COMMENT "Ensuring the rocKE direct code-object compiler is built")
+  add_library(rocke_codeobj_ffi_bridge INTERFACE)
+  add_dependencies(rocke_codeobj_ffi_bridge rocke_codeobj_direct)
+  if(WIN32)
+    target_link_libraries(rocke_codeobj_ffi_bridge
+      INTERFACE "${_ROCKE_CODEOBJ_IMPLIB}")
+  else()
+    target_link_libraries(rocke_codeobj_ffi_bridge
+      INTERFACE "${_ROCKE_CODEOBJ_FFI}")
+  endif()
+  # Links an executable against the Rust code-object library (the entry points
+  # in cpp/include/rocke/code_object_ffi.h). Windows has no rpath, so the DLL is
+  # also copied beside the executable.
+  function(rocke_link_codeobj_ffi target)
+    target_link_libraries(${target} PRIVATE rocke_codeobj_ffi_bridge)
+    add_dependencies(${target} rocke_codeobj_direct)
+    if(WIN32)
+      add_custom_command(
+        TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ROCKE_CODEOBJ_FFI}" "$<TARGET_FILE_DIR:${target}>"
+        COMMENT "Copying the Rust code-object FFI beside ${target}"
+        VERBATIM)
+    endif()
+  endfunction()
+  add_custom_target(
+    rocke_codeobj_test
+    COMMAND "${ROCKE_CARGO_EXECUTABLE}" test
+            --manifest-path "${_ROCKE_CODEOBJ_MANIFEST}"
+            --target-dir "${_ROCKE_CODEOBJ_TARGET_DIR}"
+            --locked
+    DEPENDS
+      "${_ROCKE_CODEOBJ_MANIFEST}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/rust/rocke-codeobj/Cargo.lock"
+      ${_ROCKE_CODEOBJ_SOURCES}
+      ${_ROCKE_CODEOBJ_ASSETS}
+    COMMENT "Testing the rocKE direct Rust code-object compiler"
+    VERBATIM)
+  if(WIN32)
+    install(FILES "${_ROCKE_CODEOBJ_FFI}"
+            TYPE BIN)
+  else()
+    install(FILES "${_ROCKE_CODEOBJ_FFI}"
+            TYPE LIB)
+  endif()
+endif()
 
 # Sources live under cpp/, in subfolders mirroring the rocke Python package
 # (cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, cpp/helpers, cpp/instances/{common,gfxNNNN},

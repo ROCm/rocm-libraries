@@ -27,7 +27,7 @@ import pandas as pd
 from rocke.instances import FusedMoeSpec
 from rocke.instances.common import fused_moe as fm
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.packing import pack_args
 

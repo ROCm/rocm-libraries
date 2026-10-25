@@ -177,6 +177,15 @@ class ISABackend:
         instructions do not exist, so ``s_wait_asynccnt`` lowers to nothing."""
         return False
 
+    @property
+    def splits_global_address(self) -> bool:
+        """Whether a global access indexed by wave-uniform terms plus one
+        per-lane term is emitted as a GEP chain, uniform terms first, so the
+        AMDGPU backend can address it with an SGPR base and a VGPR offset
+        (see ``_Lowerer._global_gep``). Only the RDNA backend turns it on, per
+        target; elsewhere every global address stays one GEP."""
+        return False
+
     def ds_tr16_b128_spec(self, elem_type: str = "f16"):
         """``(need_key, intrinsic, llvm_ret_ty)`` for the wide 16-bit
         transpose-LDS read (logical element ``elem_type``) used to feed the
@@ -394,11 +403,21 @@ _GFX1250_WMMA_FP8 = {
 }
 
 
+# RDNA targets whose global addresses are split (splits_global_address). A
+# target joins once its codegen with the split has been measured; the C++
+# engine's backend rows in cpp/core/lower_llvm/core.cpp carry the same flag.
+_GLOBAL_ADDRESS_SPLIT_TARGETS = frozenset({"gfx1151"})
+
+
 class Gfx11RdnaBackend(ISABackend):
     """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151 Strix Halo). **wave32**, **WMMA**
     (no MFMA), and a distinct ``s_waitcnt`` layout from gfx9/10. Datalayout +
     triple are identical to CDNA on the ROCm releases we target (clang-verified
     on gfx1151), so those are inherited unchanged."""
+
+    @property
+    def splits_global_address(self) -> bool:
+        return self.arch.gfx in _GLOBAL_ADDRESS_SPLIT_TARGETS
 
     @property
     def buffer_rsrc_word3(self) -> int:

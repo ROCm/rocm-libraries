@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from ._ctypes_bind import _LazyFn
+from .code_object import CodeObjectError, CodeObjectProcessDied
 from .runtime_coexistence import (
     _IS_WINDOWS,
     _add_dll_dir,
@@ -67,11 +68,11 @@ AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x4
 AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7
 
 
-class ComgrError(RuntimeError):
+class ComgrError(CodeObjectError):
     pass
 
 
-class ComgrProcessDied(ComgrError):
+class ComgrProcessDied(ComgrError, CodeObjectProcessDied):
     """The process compiling one module (``fresh_process=True``) died before
     it reported a result or an error: a toolchain crash, not a compile error."""
 
@@ -897,8 +898,9 @@ def _build_hsaco(
 
     try:
         # Input data set (LLVM IR text wrapped as SOURCE).
-        in_set = _DataSet()
-        _check(_create_data_set(ctypes.byref(in_set)), "create_data_set(in)")
+        created_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(created_set)), "create_data_set(in)")
+        in_set = created_set
         for index, ir_text in enumerate(ir_texts):
             src = _Data()
             _check(
@@ -913,8 +915,9 @@ def _build_hsaco(
             _check(_data_set_add(in_set, src), "data_set_add(src)")
 
         # Action info.
-        info = _ActionInfo()
-        _check(_create_action_info(ctypes.byref(info)), "create_action_info")
+        created_info = _ActionInfo()
+        _check(_create_action_info(ctypes.byref(created_info)), "create_action_info")
+        info = created_info
         _check(_action_info_set_isa_name(info, isa.encode("utf-8")), "set_isa")
         _check(_action_info_set_language(info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang")
         opt_array = (ctypes.c_char_p * len(options))(
@@ -925,8 +928,9 @@ def _build_hsaco(
         timings = ComgrTimings()
 
         # Stage 1: LLVM IR (text/source) -> BC, one per module.
-        bc_set = _DataSet()
-        _check(_create_data_set(ctypes.byref(bc_set)), "create_data_set(bc)")
+        created_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(created_set)), "create_data_set(bc)")
+        bc_set = created_set
         t0 = time.perf_counter()
         _check(
             _do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, info, in_set, bc_set),
@@ -940,8 +944,9 @@ def _build_hsaco(
             _require_count(
                 bc_set, AMD_COMGR_DATA_KIND_BC, len(ir_texts), "COMPILE_SOURCE_TO_BC"
             )
-            linked_set = _DataSet()
-            _check(_create_data_set(ctypes.byref(linked_set)), "create_data_set(link)")
+            created_set = _DataSet()
+            _check(_create_data_set(ctypes.byref(created_set)), "create_data_set(link)")
+            linked_set = created_set
             t0 = time.perf_counter()
             _check(
                 _do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, info, bc_set, linked_set),
@@ -952,8 +957,9 @@ def _build_hsaco(
             codegen_input = linked_set
 
         # Stage 2: BC -> relocatable ELF
-        reloc_set = _DataSet()
-        _check(_create_data_set(ctypes.byref(reloc_set)), "create_data_set(reloc)")
+        created_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(created_set)), "create_data_set(reloc)")
+        reloc_set = created_set
         t0 = time.perf_counter()
         _check(
             _do_action(
@@ -967,8 +973,9 @@ def _build_hsaco(
         timings.relocatable = time.perf_counter() - t0
 
         # Stage 3: relocatable -> executable (HSACO).
-        exe_set = _DataSet()
-        _check(_create_data_set(ctypes.byref(exe_set)), "create_data_set(exe)")
+        created_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(created_set)), "create_data_set(exe)")
+        exe_set = created_set
         t0 = time.perf_counter()
         _check(
             _do_action(

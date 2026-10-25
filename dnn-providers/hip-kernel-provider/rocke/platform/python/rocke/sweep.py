@@ -47,7 +47,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .core.arch import arch_from_isa
 from .core.lower_llvm import lower_kernel_to_llvm
-from .runtime.comgr import build_hsaco_from_llvm_ir
+from .runtime.code_object import build_hsaco_from_llvm_ir
 from .instances import UniversalGemmSpec, build_universal_gemm
 
 
@@ -93,6 +93,12 @@ def _spec_to_dict(spec: UniversalGemmSpec) -> Dict[str, object]:
 
 def _spec_hash(spec: UniversalGemmSpec) -> str:
     d = _spec_to_dict(spec)
+    from .runtime.code_object import compiler_identity
+
+    try:
+        d["code_object_compiler"] = compiler_identity()
+    except Exception as error:  # hash records unavailability; compile reports it
+        d["code_object_compiler"] = f"<unavailable:{type(error).__name__}:{error}>"
     blob = json.dumps(d, sort_keys=True).encode()
     return hashlib.sha1(blob).hexdigest()[:12]
 

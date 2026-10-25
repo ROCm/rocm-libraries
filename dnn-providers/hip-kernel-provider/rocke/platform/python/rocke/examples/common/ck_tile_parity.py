@@ -36,7 +36,7 @@ import torch  # noqa: E402
 
 from rocke.core.arch import ArchTarget  # noqa: E402
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
-from rocke.runtime.comgr import build_hsaco_from_llvm_ir  # noqa: E402
+from rocke.runtime.code_object import build_hsaco_from_llvm_ir  # noqa: E402
 from rocke.runtime.hip_module import get_device_arch  # noqa: E402
 from rocke.runtime.launcher import (  # noqa: E402
     KernelLauncher,

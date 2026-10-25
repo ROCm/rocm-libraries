@@ -1237,7 +1237,7 @@ def compile_fn(
     # handles fp16 + bf16 calls interchangeably, with the autotuner
     # storing separate winners per dtype.
     from ..core.lower_llvm import lower_kernel_to_llvm
-    from ..runtime.comgr import build_hsaco_from_llvm_ir
+    from ..runtime.code_object import build_hsaco_from_llvm_ir
     from ..runtime.launcher import (
         KernelLauncher,
         LaunchConfig,

@@ -22,6 +22,7 @@ Standard library only.
 
 from __future__ import annotations
 
+from marshal import dumps as _marshal_dumps
 from typing import Any, Dict, List, Optional
 
 from .ir import (
@@ -48,6 +49,17 @@ _INDENT = "  "
 
 
 def _escape(s: str) -> str:
+    if type(s) is str:
+        # Backslashes first, so the ones the other escapes add stay single.
+        if "\\" in s:
+            s = s.replace("\\", "\\\\")
+        if '"' in s:
+            s = s.replace('"', '\\"')
+        if "\n" in s:
+            s = s.replace("\n", "\\n")
+        if "\t" in s:
+            s = s.replace("\t", "\\t")
+        return s
     out = []
     for ch in s:
         if ch == "\\":
@@ -145,6 +157,11 @@ def _parse_type(s: str) -> Type:
 
 
 def _encode_attr_value(v: Any) -> str:
+    t = type(v)
+    if t is int:
+        return f"i:{v}"
+    if t is str:
+        return f's:"{_escape(v)}"'
     # bool MUST be checked before int (bool is an int subclass).
     if isinstance(v, bool):
         return "b:true" if v else "b:false"
@@ -157,7 +174,7 @@ def _encode_attr_value(v: Any) -> str:
     if isinstance(v, dict):
         return _encode_attr_map(v)
     if isinstance(v, (list, tuple)):
-        return "l:[ " + ", ".join(_encode_attr_value(e) for e in v) + " ]"
+        return "l:[ " + ", ".join([_encode_attr_value(e) for e in v]) + " ]"
     raise ValueError(f"cannot serialize attr value of type {type(v).__name__}: {v!r}")
 
 
@@ -166,6 +183,20 @@ def _encode_attr_map(attrs: Dict[str, Any]) -> str:
         return "{ }"
     parts = [f"{k} = {_encode_attr_value(attrs[k])}" for k in sorted(attrs.keys())]
     return "{ " + ", ".join(parts) + " }"
+
+
+# An op's attr map is memoized under its ``marshal`` bytes: marshal records the
+# exact type of every key and value (``1``, ``True`` and ``1.0`` differ, and a
+# float is stored bit for bit, so ``0.0`` and ``-0.0`` do too) and rejects
+# subclasses. It writes any buffer object as bytes, though, so only maps of
+# these exact scalar types are memoized.
+_MEMO_TYPES = frozenset((bool, int, float, str))
+
+
+def _memoizable(attrs: Dict[str, Any]) -> bool:
+    return _MEMO_TYPES.issuperset(map(type, attrs)) and _MEMO_TYPES.issuperset(
+        map(type, attrs.values())
+    )
 
 
 # --- attr parsing (a small recursive-descent scanner) ---
@@ -321,35 +352,56 @@ def serialize(kernel: KernelDef) -> str:
             line += " " + _encode_attr_map(p.attrs)
         lines.append(line)
     lines.append(f"{_INDENT}}}")
-    _serialize_region(kernel.body, 1, lines)
+    _serialize_region(kernel.body, 1, lines, {})
     lines.append("}")
-    return "\n".join(lines) + "\n"
+    lines.append("")
+    return "\n".join(lines)
 
 
-def _serialize_region(region: Region, depth: int, lines: List[str]) -> None:
+def _serialize_region(
+    region: Region, depth: int, lines: List[str], attr_text: Dict[bytes, str]
+) -> None:
+    """Append ``region`` and its ops, the op lines indented one level deeper.
+    ``attr_text`` memoizes the `` {...}`` suffix of the op lines per attr map,
+    for one ``serialize`` call."""
     pad = _INDENT * depth
-    lines.append(f"{pad}region @{region.label} {{")
+    op_pad = pad + _INDENT
+    append = lines.append
+    memoized = attr_text.get
+    append(f"{pad}region @{region.label} {{")
     for op in region.ops:
-        _serialize_op(op, depth + 1, lines)
-    lines.append(f"{pad}}}")
-
-
-def _serialize_op(op: Op, depth: int, lines: List[str]) -> None:
-    pad = _INDENT * depth
-    head = pad
-    if op.results:
-        head += (
-            ", ".join(f"{r.name} : {_encode_type(r.type)}" for r in op.results) + " = "
-        )
-    head += op.name
-    head += " ( " + ", ".join(o.name for o in op.operands) + " )"
-    if op.attrs:
-        head += " " + _encode_attr_map(op.attrs)
-    if op.loc is not None:
-        head += f' @loc "{_escape(op.loc)}"'
-    lines.append(head)
-    for region in op.regions:
-        _serialize_region(region, depth + 1, lines)
+        operands = op.operands
+        names = ", ".join([o.name for o in operands]) if operands else ""
+        attrs = op.attrs
+        if attrs:
+            try:
+                key = _marshal_dumps(attrs)
+            except ValueError:  # not marshalable, so not memoizable either
+                text = " " + _encode_attr_map(attrs)
+            else:
+                text = memoized(key)
+                if text is None:
+                    text = " " + _encode_attr_map(attrs)
+                    if _memoizable(attrs):
+                        attr_text[key] = text
+        else:
+            text = ""
+        results = op.results
+        if len(results) == 1:
+            r = results[0]
+            line = f"{op_pad}{r.name} : {r.type.name} = {op.name} ( {names} ){text}"
+        elif results:
+            defs = ", ".join([f"{r.name} : {r.type.name}" for r in results])
+            line = f"{op_pad}{defs} = {op.name} ( {names} ){text}"
+        else:
+            line = f"{op_pad}{op.name} ( {names} ){text}"
+        if op.loc is not None:
+            line += f' @loc "{_escape(op.loc)}"'
+        append(line)
+        if op.regions:
+            for sub in op.regions:
+                _serialize_region(sub, depth + 2, lines, attr_text)
+    append(f"{pad}}}")
 
 
 # --------------------------------------------------------------------------

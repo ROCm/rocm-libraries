@@ -13,10 +13,12 @@ import hashlib
 import itertools
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
+from benchmarks.common import kernel_cache as kernel_cache_module
 from benchmarks.common.kernel_cache import KernelCache
 from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -32,6 +34,24 @@ from rocke.runtime.packing import compile_packer
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
 _WAVE32_ONLY = {DIRECT_DGRAD_WMMA}
+
+
+def test_code_object_key_separates_compiler_builds(monkeypatch):
+    compiler_input = SimpleNamespace(
+        llvm_text="define amdgpu_kernel void @kernel() { ret void }",
+        kernel_name="kernel",
+        isa="amdgcn-amd-amdhsa--gfx950",
+        options=("-O3",),
+    )
+    monkeypatch.setattr(
+        kernel_cache_module, "current_compiler_id", lambda: "comgr:oracle"
+    )
+    first_key = kernel_cache_module.code_object_input_key(compiler_input)
+    monkeypatch.setattr(
+        kernel_cache_module, "current_compiler_id", lambda: "comgr:other-build"
+    )
+    other_key = kernel_cache_module.code_object_input_key(compiler_input)
+    assert other_key != first_key
 
 
 @pytest.fixture(scope="module")

@@ -2076,10 +2076,10 @@
         },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
-          "bytes": 3011,
+          "bytes": 3071,
           "family": "moe",
           "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
-          "sha256": "4edb1b920370d66e6950354f0bbca3830db87e791d896f024cd7ea73307ea888",
+          "sha256": "5d1f14600e1484fb9b5cdb5c26b5b234a18d1750bee9cb80fbe05a49af69856f",
           "status": "ok"
         },
         "moe_sort/gfx1201/hist_t32_k2_e8": {
@@ -4280,10 +4280,10 @@
         },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
-          "bytes": 3018,
+          "bytes": 3078,
           "family": "moe",
           "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
-          "sha256": "d030d8dd5605adac789160dcb538808d3cde00fc0291ea5fb2fc03b8055c40f8",
+          "sha256": "a99013119ec55a76a2971c90dda494a368e8e4060ef5716953e2093394f25ac0",
           "status": "ok"
         },
         "moe_sort/gfx1201/hist_t32_k2_e8": {
@@ -6532,10 +6532,10 @@
         },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
-          "bytes": 3082,
+          "bytes": 3142,
           "family": "moe",
           "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
-          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "sha256": "b1fc9736b3f4e489342d4b4577c9a56a4a97918b3f97091d4efa0b7c0baf07fc",
           "status": "ok"
         },
         "moe_sort/gfx1201/hist_t32_k2_e8": {

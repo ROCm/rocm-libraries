@@ -80,42 +80,51 @@ def current_emitter_digest() -> str:
 
 
 @functools.lru_cache(maxsize=None)
-def current_comgr_id() -> str:
-    """Identity of the COMGR library this process compiles with.
+def current_compiler_id() -> str:
+    """Identity of the selected code-object compiler.
 
-    The same LLVM IR compiled by another COMGR is another binary, so the
-    binary key has to change when the library does. Path plus size and
-    modification time is enough to tell installs apart without loading it.
+    The same LLVM IR compiled by another compiler build is another binary,
+    so the binary key changes with its probed build identity.
     """
-    from rocke.runtime.comgr import resolved_lib_path
+    from rocke.runtime.code_object import compiler_identity
 
-    path = resolved_lib_path()
-    if not path:
-        return "<no-comgr>"
-    real = os.path.realpath(path)
     try:
-        st = os.stat(real)
-    except OSError:
-        return real
-    return f"{real}:{st.st_size}:{st.st_mtime_ns}"
+        return compiler_identity()
+    except Exception as error:  # recorded in a cache key, not a compile verdict
+        return f"<compiler-unavailable:{type(error).__name__}:{error}>"
 
 
-def comgr_input_key(comgr_input) -> str:
-    """Content key of the binary a :class:`rocke.helpers.compile.ComgrInput`
+def current_comgr_id() -> str:
+    """Compatibility alias for the compiler-neutral identity."""
+    return current_compiler_id()
+
+
+def code_object_input_key(code_object_input) -> str:
+    """Content key of a :class:`rocke.helpers.compile.CodeObjectInput`
     compiles to.
 
-    The HSACO is a function of the LLVM IR, the ISA, the COMGR options and the
-    COMGR library. The kernel's own name is normalised out of the IR, so two
-    identities whose code differs only in its name (an alias pipeline, a
-    split-K degree that rides a kernarg) share one binary -- each keeps its
-    own entry, which records the symbol to launch.
+    The HSACO is a function of LLVM IR, ISA, options, and compiler identity.
+    The kernel's own name is normalised out so aliases can share one binary.
     """
     h = hashlib.sha256()
-    h.update(comgr_input.llvm_text.replace(comgr_input.kernel_name, "@K@").encode())
-    for part in (comgr_input.isa, *comgr_input.options, current_comgr_id()):
+    h.update(
+        code_object_input.llvm_text.replace(
+            code_object_input.kernel_name, "@K@"
+        ).encode()
+    )
+    for part in (
+        code_object_input.isa,
+        *code_object_input.options,
+        current_compiler_id(),
+    ):
         h.update(b"\0")
         h.update(str(part).encode())
     return h.hexdigest()
+
+
+def comgr_input_key(comgr_input) -> str:
+    """Compatibility alias for :func:`code_object_input_key`."""
+    return code_object_input_key(comgr_input)
 
 
 # ---------------------------------------------------------------------------

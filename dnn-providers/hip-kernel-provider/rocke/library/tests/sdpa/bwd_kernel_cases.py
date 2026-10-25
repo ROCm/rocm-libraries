@@ -1316,6 +1316,7 @@ KNOB_SMOKE_REFUSED = {
     ("sched_stage_table_atomics_setprio", "gfx1151", _GQA4): "scratch+vgpr_spill",
     ("xt_lds", "gfx1151", _BR33): "LAYOUT_SPILLING_COMBOS",
     ("xt_lds", "gfx1151", _HKV): "scratch+vgpr_spill",
+    ("lds_swizzle_xor", "gfx1151", _GQA4): "scratch+vgpr_spill",
     ("sched_iglp1", "gfx1201", _GQA4): "scratch+vgpr_spill",
     ("sched_stage_table_atomics", "gfx1201", _GQA4): "scratch+vgpr_spill",
     ("sched_stage_table_atomics_setprio", "gfx1201", _GQA4): "scratch+vgpr_spill",
@@ -1328,7 +1329,6 @@ KNOB_SMOKE_REFUSED = {
 # test skips exactly these cells with the reason;
 # test_attention_bwd_kernel_cases.py pins the table to the planner.
 LAYOUT_TWIN_REFUSED = {
-    ("xt_all_xor", "gfx1151", _GQA4): "set: scratch+vgpr_spill",
     ("xt_padded_kt_stage", "gfx1151", _HKV): "set: scratch+vgpr_spill",
 }
 

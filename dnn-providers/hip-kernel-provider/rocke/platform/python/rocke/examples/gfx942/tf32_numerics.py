@@ -130,7 +130,10 @@ def launch(blob, name, a, b, c):
 
 
 def run(output_dir, backend="both", shapes=(16, 32)):
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir, resolved_lib_path
+    from rocke.runtime.code_object import (
+        build_hsaco_from_llvm_ir,
+        loaded_compiler_info,
+    )
     from rocke.runtime.hip_module import get_device_arch
 
     arch = get_device_arch()
@@ -323,7 +326,12 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                     raise RuntimeError(
                         f"m={m} variant={variant}: backend parity mismatch (python, cpp)"
                     )
-    summary["comgr"] = resolved_lib_path()
+    compiler = loaded_compiler_info()
+    summary["code_object_compiler"] = (
+        compiler.describe() if compiler is not None else "unavailable"
+    )
+    if compiler is not None and compiler.backend == "comgr":
+        summary["comgr"] = compiler.path
     summary["status"] = "pass"
     (output_dir / "results.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary

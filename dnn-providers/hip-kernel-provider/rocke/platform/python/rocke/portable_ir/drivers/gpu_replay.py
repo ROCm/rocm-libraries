@@ -334,7 +334,7 @@ def _replay(cbor_path: str, arch: str) -> Tuple[str, bytes, Dict[str, float]]:
     """Phase 2 (no Python IR): CBOR file -> C recipe VM -> .ll -> HSACO."""
     from rocke.core.arch import ArchTarget
     from rocke.portable_ir.src import online
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.runtime.code_object import build_hsaco_from_llvm_ir
 
     with open(cbor_path, "rb") as f:
         cbor = f.read()
@@ -432,15 +432,15 @@ def _run_case(case: Case, arch: str, outdir: str) -> Result:
 
 # ---------------------------------------------------------------------
 def _resolve_flavor(requested: str) -> str:
-    """The flavor to lower at. 'auto' asks the loaded comgr what it can accept.
+    """The flavor to lower at. Auto asks the selected compiler what it accepts.
 
-    comgr rejects IR from the wrong LLVM generation, so on a device run the
-    flavor is not a free choice -- it is dictated by the loaded compiler.
+    A compiler rejects IR from the wrong LLVM generation, so on a device run
+    the flavor is dictated by the selected code-object compiler.
     """
     if requested != "auto":
         return requested
     from rocke.core.lower_llvm import _flavor_for_llvm, _resolve_llvm_flavor
-    from rocke.runtime.comgr import loaded_compiler_info
+    from rocke.runtime.code_object import loaded_compiler_info
 
     info = loaded_compiler_info()
     if info is not None and info.llvm_version is not None:
@@ -458,7 +458,7 @@ def main() -> int:
     ap.add_argument(
         "--flavor",
         default="auto",
-        help="LLVM flavor; 'auto' matches the installed comgr",
+        help="LLVM flavor; 'auto' matches the selected code-object compiler",
     )
     ap.add_argument("--only", default="", help="substring filter on case labels")
     ap.add_argument("--verbose", action="store_true")

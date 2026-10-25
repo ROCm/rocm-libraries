@@ -190,7 +190,8 @@ static const rocke_isa_backend_t LL_BACKEND_GFX950
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1151
+    = {.gfx = "gfx1151", LL_BACKEND_RDNA_DEFAULTS, .splits_global_address = true};
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
@@ -2341,6 +2342,7 @@ static void ll_lower_into(rocke_lower_t* L,
     /* Pre-pass + lowering. */
     rocke_ll_collect_smem(L, kernel->body);
     rocke_ll_compute_smem_layout(L);
+    rocke_ll_collect_index_facts(L);
     rocke_ll_lower_region(L, kernel->body);
 
     rocke_strbuf_t sb;
