@@ -173,6 +173,37 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
 
+    # pytest-style suites (fixtures, parametrize), so they run under -m pytest
+    # rather than as scripts; a bare `python file.py` would collect nothing.
+    add_test(
+        NAME hipdnn_bundle_discovery_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_bundle_discovery.py
+    )
+    set(HIPDNN_IT_BUNDLE_DISCOVERY_TEST hipdnn_bundle_discovery_python_tests)
+
+    add_test(
+        NAME hipdnn_support_matrix_renderer_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_render_support_matrix.py
+    )
+    set(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST hipdnn_support_matrix_renderer_python_tests)
+
+    add_test(
+        NAME hipdnn_support_features_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_features.py
+    )
+    set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
+
+    # None of these suites uses a third-party plugin; don't let a broken one
+    # installed in the developer's environment fail them.
+    set_tests_properties(
+        hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
+        hipdnn_support_features_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+
     # Skips itself when PyTorch, which the generator needs, is not installed.
     add_test(
         NAME hipdnn_golden_generator_python_tests
@@ -326,6 +357,15 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
     endif()
     if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})

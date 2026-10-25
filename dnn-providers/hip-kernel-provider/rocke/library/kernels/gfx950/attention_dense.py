@@ -90,6 +90,7 @@ from typing import Optional, Tuple
 from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
+from rocke.helpers.spec import align_up as _align_up
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
@@ -2829,8 +2830,10 @@ _DENSE_LAUNCHER_CACHE: dict = {}
 
 
 def align_up(n: int, mult: int) -> int:
-    """Round ``n`` up to the next multiple of ``mult`` (kernel tile alignment)."""
-    return ((int(n) + mult - 1) // mult) * mult
+    """Round ``n`` up to the next multiple of ``mult`` (kernel tile alignment;
+    :func:`rocke.helpers.spec.align_up` of ``int(n)``). ``mult`` must be
+    integer-like: a ``float`` raises ``TypeError``."""
+    return _align_up(int(n), mult)
 
 
 def run_attention_dense_torch(

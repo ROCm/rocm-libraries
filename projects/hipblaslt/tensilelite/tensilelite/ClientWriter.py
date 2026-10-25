@@ -194,11 +194,14 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
       for lc in config[0:]:
         if "ActivationArgs" in lc:
           activationEnums = lc["ActivationArgs"]
-          break
         if "FactorDimArgs" in lc:
           factorDimEnums = lc["FactorDimArgs"]
         if "ICacheFlush" in lc:
           icacheFlushArgs = lc["ICacheFlush"]
+        if "BiasTypeArgs" in lc and biasTypeArgs:
+          biasTypeArgs = BiasTypeArgs(problemType, lc["BiasTypeArgs"])
+        if "GateTypeArgs" in lc and gateTypeArgs:
+          gateTypeArgs = GateTypeArgs(problemType, lc["GateTypeArgs"])
     isForAll = True if problemType["ActivationType"] in ['all', 'hipblaslt_all'] else False
     activationArgs = ActivationArgs(problemType, activationEnums) if isForAll else ""
     factorDimArgs = FactorDimArgs(problemType, factorDimEnums)
@@ -219,7 +222,8 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   deviceId=deviceId,
                                   gfxName=gfxName,
                                   tileAwareSelection=False,
-                                  libraryFile=libraryList[0]))
+                                  libraryFile=libraryList[0],
+                                  gateTypeArgs=gateTypeArgs))
 
   forBenchmark = False
   problemSizes = None
@@ -724,6 +728,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         for key,value in dataInitParams(problemType):
             param(key, value)
+        if globalParameters["MXDataGenerator"] is not None:
+            param("mx-data-generator", int(globalParameters["MXDataGenerator"]))
 
         param("c-equal-d",                globalParameters["CEqualD"])
 
@@ -881,7 +887,7 @@ def getClientExecutablePath():
 
   if not os.path.isfile(clientExe):
     raise FileNotFoundError(
-        f"Tensile client executable not found at '{clientExe}'.\n"
+        f"TensileLite client executable not found at '{clientExe}'.\n"
         "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
         "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
         "For custom cmake build instructions, please refer to the README in next-cmake."

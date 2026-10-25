@@ -370,6 +370,19 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct EnumTraits<ContractionProblemGemm::Int4Encoding, IO>
+        {
+            using Encoding = ContractionProblemGemm::Int4Encoding;
+            using iot      = IOTraits<IO>;
+
+            static void enumeration(IO& io, Encoding& value)
+            {
+                iot::enumCase(io, value, "Signed", Encoding::Signed);
+                iot::enumCase(io, value, "UnsignedBias8", Encoding::UnsignedBias8);
+            }
+        };
+
+        template <typename IO>
         struct EnumTraits<CustomArgType, IO>
         {
             using iot = IOTraits<IO>;

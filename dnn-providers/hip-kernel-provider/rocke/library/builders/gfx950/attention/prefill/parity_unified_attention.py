@@ -1689,6 +1689,12 @@ def _run_rocke(
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
         num_cus=120,
+        # The "2d" lane builds its spec with _tiled_spec_from_problem and skips
+        # run_unified_attention_torch, which is what normally fills num_kv_blocks
+        # from the K cache. Without it, _enable_i64_kv_addr keeps i32 addressing,
+        # which reads zeros past the i32 buffer range, just under 2 GiB
+        # (num_kv_heads=8 with 32768 blocks is 4 GiB).
+        num_kv_blocks=int(data["key_cache"].shape[0]),
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
         waves_per_eu=force_wpe,
         causal_top_left=s.causal_top_left,
@@ -1716,6 +1722,7 @@ def _run_rocke(
         from kernels.common.attention_unified import (
             _attn_signature,
             _attn_values,
+            _spec_kv_addr_limit,
             _select_2d_compile_backend,
             _d256_gfx950_fast,
             _tiled_spec_from_problem,
@@ -1780,6 +1787,7 @@ def _run_rocke(
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
                 include_qq_bias_stride=True,
+                kv_addr_limit=_spec_kv_addr_limit(problem, spec),
             )
             block_q = spec.block_q
             total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
@@ -1848,6 +1856,7 @@ def _run_rocke(
             qq_bias=qq_bias,
             qq_bias_stride_0=qq_bias_stride_0,
             include_qq_bias_stride=True,
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         block_q = spec.block_q
         total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)

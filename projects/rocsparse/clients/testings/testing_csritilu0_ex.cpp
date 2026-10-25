@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,9 +88,7 @@ static rocsparse_status csrilu0(rocsparse_handle          handle_,
         return status;
     }
 
-    rocsparse_csrilu0_clear(handle_, info_);
-
-    return rocsparse_status_success;
+    return rocsparse_csrilu0_clear(handle_, info_);
 }
 
 void testing_csritilu0_ex_extra(const Arguments& arg) {}

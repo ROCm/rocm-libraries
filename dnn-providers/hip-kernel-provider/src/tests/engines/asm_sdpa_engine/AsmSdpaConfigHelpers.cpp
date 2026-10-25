@@ -195,14 +195,12 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         attributes.set_diagonal_band_left_bound(-1);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-        attributes.set_causal_mask(true);
         break;
 
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         attributes.set_diagonal_band_left_bound(-1);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-        attributes.set_causal_mask_bottom_right(true);
         break;
 
     case MaskType::SLIDING_WINDOW:

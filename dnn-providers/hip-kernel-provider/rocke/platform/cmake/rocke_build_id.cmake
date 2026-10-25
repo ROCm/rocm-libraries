@@ -1,31 +1,46 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# rocke_build_id.cmake -- compute a deterministic, git-independent content hash of
-# the engine source tree. The hash changes if and only if a tracked source byte
-# changes; it is stable across rebuilds of the same sources, across machines,
-# and regardless of any version-control state.
+# rocke_build_id.cmake -- compute a deterministic, git-independent content hash
+# of the portable-IR native artifact bundle. The hash covers the inputs owned by
+# this repository that determine the shared engine and replay CLI. It deliberately
+# does not identify the compiler, toolchain, or final binary bytes.
 #
 # rocke_compute_build_id(<out_var> <root_dir>)
-#   Hashes the sorted concatenation of every src/**/*.cpp and include/**/*.h*
-#   under <root_dir>. Each file contributes its repo-relative path followed by a
-#   SHA-256 of its bytes; the per-file lines are sorted (locale-independent) and
-#   the whole list is hashed once more to yield the build-id. Including the path
-#   means a rename alone changes the id; including per-file content means an edit
-#   to any byte changes it.
+#   Hashes the engine C++ sources and headers, replay CLI source, and CMake build
+#   recipes that produce those artifacts. Each file contributes its repo-relative
+#   path followed by a SHA-256 of its bytes; the sorted list is hashed again to
+#   yield the build-id. A rename or byte edit therefore changes the ID.
 
-# Compute a deterministic build id for the rocKE C++ source tree.
+# Collect repository-owned inputs to the shared-engine/replay-CLI bundle.
+function(rocke_build_id_inputs out_var root_dir)
+  # Private headers are engine inputs too. pybind sources are not: CMake excludes
+  # cpp/bindings from rocke_core, and neither bundle artifact compiles them.
+  file(GLOB_RECURSE _rocke_all
+       "${root_dir}/cpp/*.cpp"
+       "${root_dir}/cpp/*.h"
+       "${root_dir}/cpp/*.hpp")
+  list(FILTER _rocke_all EXCLUDE REGEX "/cpp/bindings/")
+
+  # Include the CLI frontend and the build recipes that select, stamp, compile,
+  # and link the two native artifacts. Keep this list mirrored in online.py.
+  foreach(_rocke_input
+          "tests/portable_ir/replay_cli.cpp"
+          "CMakeLists.txt"
+          "tests/CMakeLists.txt"
+          "cmake/rocke_build_id.cmake"
+          "cmake/generate_rocke_build_id.cmake")
+    if(EXISTS "${root_dir}/${_rocke_input}")
+      list(APPEND _rocke_all "${root_dir}/${_rocke_input}")
+    endif()
+  endforeach()
+  list(SORT _rocke_all)
+  set(${out_var} "${_rocke_all}" PARENT_SCOPE)
+endfunction()
+
+# Compute the stable short digest over the complete native bundle source surface.
 function(rocke_compute_build_id out_var root_dir)
-  # Collect the tracked source surface. GLOB (not GLOB_RECURSE with
-  # CONFIGURE_DEPENDS) is fine here: this runs at configure time, and the
-  # top-level CMakeLists already re-globs sources with CONFIGURE_DEPENDS, so a
-  # newly added file triggers a reconfigure and thus a recompute.
-  file(GLOB_RECURSE _rocke_src
-       "${root_dir}/cpp/*.cpp")
-  file(GLOB_RECURSE _rocke_hdr
-       "${root_dir}/cpp/include/*.h"
-       "${root_dir}/cpp/include/*.hpp")
-  set(_rocke_all ${_rocke_src} ${_rocke_hdr})
+  rocke_build_id_inputs(_rocke_all "${root_dir}")
 
   set(_rocke_lines "")
   foreach(_f IN LISTS _rocke_all)

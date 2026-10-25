@@ -4,7 +4,7 @@
 ################################################################################
 # P7 DESIGNED config for gfx950 LocalReadMFMA ConvertAfterDS (FP8->FP16) paths.
 #
-# Target missing ranges in Tensile/Components/LocalRead.py:
+# Target missing ranges in tensilelite/Components/LocalRead.py:
 #   1163-1320 : ConvertAfterDS + (bpe != bpeDS) + UnrollMajorLDS arms:
 #     1169-1199 : UnrollMajorLDS path with Hascvtf16_fp8_sf32 / HasCvtFP8toF16 / fallback
 #     1200-1229 : lrvwTileA==1 / lrvwTileB==1 single-vgpr conversion arm

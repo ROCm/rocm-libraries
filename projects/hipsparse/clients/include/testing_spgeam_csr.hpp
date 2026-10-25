@@ -45,7 +45,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
     // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int64_t              m         = 100;
     int64_t              n         = 100;
@@ -293,7 +293,7 @@ template <typename T>
 void testing_spgeam_csr(Arguments argus)
 {
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int                  m        = argus.M;
     int                  n        = argus.N;

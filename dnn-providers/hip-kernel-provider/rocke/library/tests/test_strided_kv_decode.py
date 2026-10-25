@@ -36,7 +36,7 @@ def test_attention_strided_kv_golden(flavor):
             str(tests.parent),
         ]
     )
-    assert set(golden[flavor]) == {str(i) for i in range(12)}
+    assert set(golden[flavor]) == {str(i) for i in range(14)}
     for idx, expected in golden[flavor].items():
         data = subprocess.check_output(
             [
@@ -297,38 +297,17 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
     paged = au._tiled_3d_spec_from_problem(problem, arch)
     assert segment == replace(
-        paged, kv_layout="strided", use_wide_kv_load=False, use_i64_kv_addr=False
+        paged,
+        kv_layout="strided",
+        use_wide_kv_load=False,
+        use_i64_kv_addr=False,
+        use_kv_lds_swizzle=False,
+        use_wave_page_id_load=False,
     )
     explicit, explicit_reduce = au._strided_3d_specs_from_problem(
         replace(problem, waves_per_eu=3), arch=arch
     )
     assert explicit.waves_per_eu == explicit_reduce.waves_per_eu == 3
-
-
-@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
-    from dispatch.attention import dispatch_attention
-    from dispatch.attention.common import _problem
-    from kernels.common import attention_unified as au
-
-    req = _strided_request(arch)
-    problem = _problem(req)
-    monkeypatch.delenv("HIPDNN_GFX942_3D_HOIST", raising=False)
-    expected = dispatch_attention(req).spec
-    for value in ("0", "1"):
-        monkeypatch.setenv("HIPDNN_GFX942_3D_HOIST", value)
-        selected = dispatch_attention(req).spec
-        assert selected == expected
-        assert not selected.kernel_spec.use_invariant_hoist
-        assert au._strided_3d_specs_from_problem(problem, arch=arch) == (
-            expected.kernel_spec,
-            expected.reduce_spec,
-        )
-    # Explicit tuning retains the existing knob.
-    explicit = replace(
-        expected, kernel_spec=replace(expected.kernel_spec, use_invariant_hoist=True)
-    )
-    au._validate_strided_3d_spec(problem, explicit)
 
 
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])

@@ -85,6 +85,13 @@ on a packaged build would select nothing and pass. The packaged entries are not 
 `MIOPEN_NO_GPU`, which describes the build machine; packages are often built without a GPU and
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
+With the flag on, the packaged tests' scripts, data files, `forwarding_failure_probe` and the
+fake hipDNN backend install under `bin/miopen_wrapper_tests/`, and the test list refers to
+them as `../miopen_wrapper_tests/…`. `miopen_gtest` stays in `bin/`. The files share one
+folder so that packagers can keep the fake backend, which has the real backend's file name,
+out of runtime packages with a single pattern. TheRock's `ml-libs/artifact-miopen.toml` names
+the folder; change both together.
+
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
 two built libraries. It also checks the wrapper's list of required shared libraries
 (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
@@ -145,3 +152,32 @@ To add one, run the harness, copy the failing line's test name, the device it ra
 outcomes into the file, and write down the reason. The list's own rules are covered by
 `test_forwarding_parity_scripts`, or by hand with
 `python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.
+
+## Forwarding failure modes
+
+`forwarding_failure_modes` checks what a flag-ON build does when forwarding is turned on but
+hipDNN cannot be used: the status each call returns, the lines printed to stderr, and what
+`miopenGetLastForwardedError` and `miopenGetErrorString` report. It also checks the routing trace
+and that `MIOPEN_DISABLE_HIPDNN_FOR` keeps calls off a broken hipDNN. The switches involved are
+read once per process, so each case runs a fresh process:
+
+- `forwarding_failure_probe` links only the public `libMIOpen.so`, as an application would. It
+  runs the steps named on its command line, such as `conv_forward` or `last_forwarded`, and prints
+  one result line per step.
+- A fake hipDNN backend stands in for a broken installation. It has the real backend's file name
+  but no version, so hipDNN loads it and then refuses it. Every case points
+  `HIPDNN_BACKEND_LIBRARY_PATH` at it, so no case can reach a real backend. It prints a marker
+  line to stderr when it is loaded, which shows whether a case loaded it at all.
+- `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
+  each environment and checks its output.
+
+Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
+
+A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
+without the backend, hipDNN moves on to its next search location and may find the real backend
+there. The fake is the closest stand-in: hipDNN refuses it, which takes MIOpen down the same path
+as a missing backend.
+
+The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
+is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
+load the fake. A `MODULE` library goes to its own directory on every platform.

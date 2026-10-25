@@ -56,6 +56,7 @@ from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    kv_addr_width_for_builder,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
     # queried without probing. Copying the numbers would drift in the one
@@ -198,11 +199,13 @@ class AttentionRequest(OperatorRequest):
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
-    # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
+    # candidates whose kernels implement it (dense, RDNA WMMA, and the
+    # gfx942/gfx950 unified split-KV path) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
-    # are the bucket maxima, and any multiple-of-16 widths up to them run at
-    # launch. Reported as the ``runtime_head_dims`` feature, so only candidates
+    # are the bucket maxima, and any widths the kernel takes up to them (RDNA
+    # WMMA: multiples of 8) run at launch, as does the ``v`` tensor's head
+    # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
 
@@ -797,6 +800,7 @@ def _problem_with_num_cus(
         target_ctas=int(req.target_ctas),
         causal_top_left=top_left,
         right_bound=right_bound,
+        emit_lse=bool(req.emit_lse),
     )
 
 
@@ -811,10 +815,18 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     A tuning candidate already fixes path and geometry, so it does not consume
     the live-device CU heuristic used by production routing. Keep its base a
     pure function of the request: honor an explicit ``num_cus`` and otherwise
-    use the deterministic cross-compile fallback.
+    take the arch's full-part CU count (the static table the split-K heuristics
+    use). Only the split-rule segment count and the dispatcher's K/V layout
+    knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
+    from rocke.helpers.split_k import _ARCH_NUM_CUS
+
     num_cus = int(req.num_cus)
-    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
+    if num_cus <= 0:
+        if req.arch not in _ARCH_NUM_CUS:
+            raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
+        num_cus = _ARCH_NUM_CUS[req.arch]
+    return _problem_with_num_cus(req, num_cus)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch
@@ -855,6 +867,27 @@ class AttentionSpec:
     right_bound: int = 0
     # Left bound, part of kernel_name() for every mask.
     sliding_window: int = 0
+    # The optional LSE output is a distinct kernel (the split-KV reduce takes one
+    # more pointer), so it must not collapse onto the LSE-off kernel_name /
+    # spec_hash either. LSE-off leaves both exactly as before the field existed
+    # (see :meth:`identity`).
+    emit_lse: bool = False
+
+    def __post_init__(self) -> None:
+        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
+        # (1, "yes") would silently produce an LSE identity: refuse it instead.
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
+
+    def identity(self) -> dict:
+        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
+        so an LSE-off spec keeps the hash that stored caches already hold."""
+        payload = asdict(self)
+        if not self.emit_lse:
+            del payload["emit_lse"]
+        return payload
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -877,6 +910,8 @@ class AttentionSpec:
             parts.append("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
         if self.sliding_window > 0:
             parts.append(f"sw{self.sliding_window}")
+        if self.emit_lse:
+            parts.append("lse")
         return kernel_name_join(*parts)
 
 
@@ -900,14 +935,18 @@ class AttentionTuningSpec:
     builder choice, compile backend, and optional 3D reduce spec are
     serializable and therefore participate in dispatch/cache identity. ``path``
     is ``"2d"`` / ``"3d"`` for the unified tiled kernels, ``"dense"`` for the
-    standalone dense kernel and ``"wmma"`` for the RDNA WMMA forward kernel.
+    standalone dense kernel, ``"wmma"`` for the RDNA WMMA prefill and
+    ``"wmma_decode"`` for the RDNA split-KV decode (decode + merge kernels).
 
-    It is also the whole launch contract the runtime needs:
-    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
-    under :meth:`cache_key` and launches with :meth:`launch_grid` /
-    :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
-    dense runner reads ``kernel_spec`` directly. ``allow_unsupported`` skips the
-    unified runtime's problem-shape support check.
+    For the unified and dense paths it is also the whole launch contract the
+    runtime needs: ``run_unified_attention_torch(tuning_spec=...)`` compiles
+    :meth:`build` under :meth:`cache_key` and launches with :meth:`launch_grid`
+    / :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
+    RDNA ``"wmma"`` / ``"wmma_decode"`` specs launch through their candidate's
+    grid (``gfx1151.py``), which depends on the live device, so
+    :meth:`launch_grid` refuses them. The dense runner reads ``kernel_spec``
+    directly. ``allow_unsupported`` skips the unified runtime's problem-shape
+    support check.
 
     Two identities, for two consumers. ``tuning_id`` / ``config_key`` name the
     configuration -- ``variant_id`` plus the canonical ``knobs`` -- and are the
@@ -952,7 +991,13 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+            # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
+            # spec_hash taken over it) is the one stored before the field existed.
+            return tuple(
+                (f.name, repr(getattr(spec, f.name)))
+                for f in fields(spec)
+                if not (f.name == "emit_lse" and not spec.emit_lse)
+            )
 
         return (
             "explicit",
@@ -964,7 +1009,8 @@ class AttentionTuningSpec:
         )
 
     def build(self, arch: str | None = None):
-        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        """IR for this spec: one kernel for 2D, dense and RDNA prefill;
+        ``(segment, reduce)`` for 3D; ``(decode, merge)`` for RDNA decode."""
         from .tuning_specs import (
             build_explicit_attention_2d,
             build_explicit_attention_3d,
@@ -976,9 +1022,13 @@ class AttentionTuningSpec:
                 self.kernel_spec, arch=arch
             )
         if self.path == "wmma":
-            from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+            from kernels.gfx1151.wmma_fmha_fwd_v2 import build_wmma_fmha_fwd_v2
 
-            return build_wmma_fmha_fwd(self.kernel_spec, arch=arch)
+            return build_wmma_fmha_fwd_v2(self.kernel_spec, arch=arch)
+        if self.path == "wmma_decode":
+            from .gfx1151 import build_decode_kernels
+
+            return build_decode_kernels(self.kernel_spec, arch)
         if self.path == "3d":
             return build_explicit_attention_3d(
                 self.kernel_spec, self.reduce_spec, arch=arch
@@ -996,21 +1046,16 @@ class AttentionTuningSpec:
         if self.path == "dense":
             # The dense spec bakes (or declares) its whole problem shape.
             return tuple(_dense_kernel_module(self.arch).attention_dense_grid(ks))
-        if self.path == "wmma":
-            # Runtime-shape kernel: the problem supplies rows, heads and batch.
-            from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid
-
-            return tuple(
-                wmma_fmha_fwd_grid(
-                    ks,
-                    seqlen_q=int(problem.max_seqlen_q),
-                    num_query_heads=int(problem.num_query_heads),
-                    batch=int(problem.num_seqs),
-                )
+        if self.path in ("wmma", "wmma_decode"):
+            # The RDNA candidates own their launch grid (gfx1151.py).
+            raise ValueError(
+                f"{self.path!r} specs launch through their candidate's grid"
             )
         if self.path == "3d":
+            from kernels.common.attention_unified import _num_q_blocks
+
             block_q = max(1, 16 // problem.num_queries_per_kv)
-            qblocks = problem.total_q // block_q + problem.num_seqs
+            qblocks = _num_q_blocks(problem, block_q, decode_grid=ks.use_decode_grid)
             return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
         if self.builder_kind == "gfx942_4warp_gqa":
             from kernels.common.attention_unified import gfx942_4warp_launch_grid
@@ -1033,6 +1078,8 @@ class AttentionTuningSpec:
                 _dense_kernel_module(self.arch).attention_dense_block(self.kernel_spec)
             )
         if self.path == "wmma":
+            return (int(self.kernel_spec.threads), 1, 1)
+        if self.path == "wmma_decode":
             return (int(self.kernel_spec.block_size), 1, 1)
         if self.path == "3d":
             return (64, 1, 1)
@@ -1062,7 +1109,13 @@ class AttentionTuningSpec:
             * int(kernel_spec.head_size)
             * elem_bytes
         )
-        use_i64 = count > 0 and count * block_stride > 0x8000_0000
+        # A builder with no i64 path (gfx942 4-warp GQA) shares its spec class
+        # with the default builder, so no __post_init__ can refuse the flag the
+        # way the gfx942 3D spec does. It stays i32 up to its element limit and
+        # is refused at bind time past that, not at compile.
+        use_i64 = kv_addr_width_for_builder(
+            self.builder_kind, count, block_stride, elem_bytes
+        )
         return replace(
             self,
             kernel_spec=replace(kernel_spec, use_i64_kv_addr=use_i64),

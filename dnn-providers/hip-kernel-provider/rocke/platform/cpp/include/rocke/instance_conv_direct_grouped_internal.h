@@ -276,6 +276,46 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
 } rocke_dconv_16c_ctx_t;
 
+/* Upper bound on the 4c fused-dgrad LDS staging passes; mirrors
+ * DCONV4C_MAX_WL_PASSES in the Python emitter and is enforced by
+ * rocke_direct_conv_4c_is_valid_spec. */
+#define ROCKE_DCONV4C_MAX_WL_PASSES 32
+/* Upper bound on 4c filter taps KH*KW: sizes the 4c ctx weights[] and
+ * s_consts[] arrays; mirrors DCONV4C_MAX_TAPS in the Python emitter and is
+ * enforced by rocke_direct_conv_4c_is_valid_spec. */
+#define ROCKE_DCONV4C_MAX_TAPS 16
+/* Most threads in one 4c workgroup (stage_rows with waves_q > 1); mirrors
+ * DCONV4C_MAX_THREADS in the Python emitter. */
+#define ROCKE_DCONV4C_MAX_THREADS 1024
+/* Upper bound on the stage_rows input-row staging passes; mirrors
+ * DCONV4C_MAX_ROW_PASSES and is enforced by rocke_direct_conv_4c_is_valid_spec. */
+#define ROCKE_DCONV4C_MAX_ROW_PASSES 8
+
+/* LDS geometry of the stage_rows 4c kernel (Python _staged_4c_geometry);
+ * element counts are in the io dtype. */
+typedef struct rocke_dconv4c_staged_geo
+{
+    int bc;
+    int lds_w;
+    int vpc;
+    int row_stride;
+    int nchunk;
+    int passes;
+    int row_elems;
+    int lds_bytes;
+} rocke_dconv4c_staged_geo_t;
+
+void rocke_dconv4c_staged_geometry(const rocke_direct_conv_4c_spec_t* spec,
+                                   rocke_dconv4c_staged_geo_t* geo);
+
+/* Python _stage_rows_reject_reason: true (and the reason) when stage_rows /
+ * waves_q are illegal on spec. The reason text is the one shared by
+ * rocke_direct_conv_4c_validate (prefixed "DirectConv4cSpec ") and
+ * rocke_direct_conv_4c_is_valid_spec. */
+bool rocke_dconv4c_stage_rows_reject(const rocke_direct_conv_4c_spec_t* spec,
+                                     char* reason,
+                                     size_t reason_cap);
+
 /* ===================================================================== *
  *  rocke_dconv_4c_ctx_t  --  shared state for build_direct_conv_4c.
  *
@@ -291,6 +331,8 @@ typedef struct rocke_dconv_4c_ctx
 
     int q_tiles_per_wave; /* block_q // 4                              */
     int n_iters; /* H + KH - 1                                */
+    const rocke_type_t* io_type; /* _io_type(p.dtype): f16 or bf16       */
+    int is_bf16; /* p.dtype == "bf16"                         */
 
     /* ---- kernel params (Values) -- */
     rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
@@ -308,7 +350,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec(io_type, 4)                  */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -334,14 +376,14 @@ typedef struct rocke_dconv_4c_ctx
     /* ---- weights (per (r,s) per lane; length KH*KW <= 9) -- */
     const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,cpg] naive   */
     rocke_value_t* k_out_val; /* g*kpg + lane_q               */
-    rocke_value_t* weights[16];
+    rocke_value_t* weights[ROCKE_DCONV4C_MAX_TAPS];
     int n_weights;
 
     /* ---- descriptors + precomputed loop-invariant locals -- */
     const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,total_c] + 2 embeds  */
     const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive       */
     rocke_value_t* c_val_groupc; /* g * cpg                      */
-    rocke_value_t* s_consts[16]; /* const_i32(s) for s in KW     */
+    rocke_value_t* s_consts[ROCKE_DCONV4C_MAX_TAPS]; /* const_i32(s) for s in KW */
     int n_s_consts; /* KW                           */
 
     /* ---- accumulator iter-state across the unrolled H-loop -- *
@@ -441,6 +483,15 @@ void rocke_dconv4c_load_weights(rocke_dconv_4c_ctx_t* ctx);
  * and d_desc (naive), seed acc_tiles to zero_acc, precompute c_val_groupc and
  * s_consts[]. */
 void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx);
+
+/* spec.validate() + is_valid_spec_4c gate shared by both 4c builders: on a
+ * rejected spec sets the builder error and returns false. */
+bool rocke_dconv4c_check_spec(rocke_dconv_4c_ctx_t* ctx);
+
+/* The whole row-staged 4c kernel (Python _build_direct_conv_4c_staged), run
+ * when spec.stage_rows. Checks the spec itself (rocke_dconv4c_check_spec);
+ * returns the kernel or NULL with the builder error set. */
+rocke_kernel_def_t* rocke_dconv4c_build_staged(rocke_dconv_4c_ctx_t* ctx);
 
 /* The unrolled H-row loop (lines 967-1031): for each of n_iters rows, load the
  * per-(qt,s) OOB-safe A inputs, run the per-(qt,r,s) 4x4x4 MFMA chain into the
