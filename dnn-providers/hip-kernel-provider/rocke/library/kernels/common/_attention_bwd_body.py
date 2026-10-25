@@ -3,7 +3,9 @@
 
 """Shared inner body of the attention backward kernels (dQ, dK, dV).
 
-Family glue for the backward kernels (Python-only, no C++ twin; packs pin
+Family glue for the backward kernels (C++ twin:
+``helper_rocke.instances.common._attention_bwd_body.h``, byte-identical by
+``tests/parity/attention_bwd_body_emit``; the packs still pin
 ``ROCKE_BACKEND=python``). One :class:`BwdTileStep` emits the work of one q
 step (``kM0`` query rows of one query head) against the CTA's resident key
 tile (``kN0`` keys), on a multi-wave CTA:
