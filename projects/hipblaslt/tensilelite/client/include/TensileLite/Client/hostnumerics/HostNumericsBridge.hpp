@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -50,14 +51,14 @@ namespace TensileLite::Client
         struct DescriptorFailure
         {
             std::variant<DescriptorError,
-                         roc::hostnumerics::detail::LayoutError,
+                         roc::hostnumerics::detail::LayoutFailure,
                          roc::hostnumerics::detail::StorageFailure>
                 cause;
             DescriptorFailure(DescriptorError error) noexcept
                 : cause(error)
             {
             }
-            DescriptorFailure(roc::hostnumerics::detail::LayoutError error) noexcept
+            DescriptorFailure(roc::hostnumerics::detail::LayoutFailure error) noexcept
                 : cause(error)
             {
             }
@@ -93,9 +94,17 @@ namespace TensileLite::Client
             }
             return "Unknown descriptor failure.";
         }
-        inline constexpr std::string_view message(const DescriptorFailure& failure) noexcept
+        inline std::string message(const DescriptorFailure& failure)
         {
-            return std::visit([](auto error) { return message(error); }, failure.cause);
+            return std::visit(
+                [](const auto& error) -> std::string {
+                    if constexpr(std::is_same_v<std::decay_t<decltype(error)>,
+                                                roc::hostnumerics::detail::LayoutFailure>)
+                        return error.message();
+                    else
+                        return std::string(message(error));
+                },
+                failure.cause);
         }
     }
 
