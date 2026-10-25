@@ -16,10 +16,14 @@
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include "get_handle.hpp"
+#include "../workspace.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 #include <cmath>
 #include <type_traits>
