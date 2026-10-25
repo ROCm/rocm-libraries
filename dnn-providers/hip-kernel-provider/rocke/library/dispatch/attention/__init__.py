@@ -369,7 +369,8 @@ def _dense_auto_pin(req: AttentionRequest) -> Optional[AttentionRequest]:
 
     Contiguous tensors are the only layout the dense kernels read, so a paged
     (or unspecified) layout never reaches them. Single-row (decode) requests
-    stay on the unified route.
+    go to the strided split-KV decode kernel, which reads contiguous K/V as a
+    strided view.
     """
     if any(
         str(getattr(req, field, "auto")).strip().lower() not in ("auto", "")
@@ -398,9 +399,10 @@ def dispatch_attention(
     Unpinned (``algorithm`` / ``spec_id`` left at ``auto``) it returns the
     unified 2D-tiled or 3D split-KV path, a pure function of the problem whose
     CTA geometry the instance builder resolves (see :mod:`.common`). The one
-    exception is a request for contiguous tensors (``layout='dense'``) with
-    more than one query row on an arch with a dense kernel: it gets that
-    kernel's default spec (see :func:`_dense_auto_pin`). Otherwise a tuned
+    exception is a request for contiguous tensors (``layout='dense'``): with
+    more than one query row on an arch with a dense kernel it gets that
+    kernel's default spec (see :func:`_dense_auto_pin`), and with one query
+    row on gfx942/gfx950 the strided split-KV decode kernel. Otherwise a tuned
     kernel -- a dense candidate or a unified tuning geometry -- is selected only
     by pinning ``algorithm`` + ``spec_id``; ``tuning_id`` (with the knobs
     recorded next to it in ``tuning_knobs``) then names one configuration of

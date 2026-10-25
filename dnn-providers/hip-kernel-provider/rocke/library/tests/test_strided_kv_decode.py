@@ -386,6 +386,132 @@ def test_strided_dispatch_rejects_what_the_kernel_gate_rejects(arch, monkeypatch
         dispatch_attention(req)
 
 
+def _dense_decode_request(arch, **changes):
+    return replace(_strided_request(arch), kv_layout="paged", layout="dense", **changes)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("tensor_layout", ["auto", "bshd", "bhsd"])
+@pytest.mark.parametrize("mask", [0, 2])
+def test_dense_decode_dispatches_to_strided(arch, tensor_layout, mask):
+    """A single-row contiguous request takes the strided decode kernel with
+    the spec a ``kv_layout='strided'`` request of the same shape gets."""
+    from dispatch.attention import (
+        attention_candidates,
+        attention_execution_candidates,
+        dispatch_attention,
+    )
+
+    req = _dense_decode_request(arch, tensor_layout=tensor_layout, mask_type=mask)
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    strided = dispatch_attention(replace(_strided_request(arch), mask_type=mask))
+    assert result.spec == strided.spec
+    assert result.spec.kernel_spec.kv_layout == "strided"
+    for candidates in (attention_candidates(), attention_execution_candidates()):
+        assert [c.name for c in candidates if c.admits(req)[0]] == [
+            "attention_strided_decode"
+        ]
+    replay = dispatch_attention(result.request)
+    assert replay.candidate is result.candidate
+    assert replay.spec == result.spec
+    assert replay.kernel_id == result.kernel_id
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_dense_decode_route_keeps_strided_limits(arch):
+    from dispatch.attention.strided_decode import make_candidate
+
+    candidate = make_candidate()
+    req = _dense_decode_request(arch)
+    assert candidate.admits(req)[0]
+    for changes in (
+        dict(seqlen_q=2),
+        dict(mask_type=1),
+        dict(use_sinks=True),
+        dict(use_fp8=True),
+        dict(layout="paged"),
+        dict(layout="ragged"),
+        dict(arch="gfx1250"),
+    ):
+        assert not candidate.admits(replace(req, **changes))[0], changes
+    # Without the contiguous layout a paged request stays on the paged kernels.
+    assert not candidate.admits(replace(req, layout="auto"))[0]
+
+
+def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
+    import torch
+
+    def make(heads, rows):
+        shape = (
+            (batch, rows, heads, dim) if order == "bshd" else (batch, heads, rows, dim)
+        )
+        return torch.zeros(shape, dtype=torch.bfloat16)
+
+    return {
+        "q": make(heads_q, 1),
+        "k": make(heads_k, seqlen),
+        "v": make(heads_k, seqlen),
+        "out": make(heads_q, 1),
+    }
+
+
+@pytest.mark.parametrize("order", ["bshd", "bhsd"])
+def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
+    import torch
+
+    from dispatch.attention import dispatch_attention
+    from kernels.common import attention_unified as au
+
+    req = _dense_decode_request("gfx950", tensor_layout=order)
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors(order)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    binding = result.candidate.bind_torch(result.request, result.spec, tensors)
+    binding.launch()
+    (call,) = calls
+    assert call["kv_layout"] == "strided"
+    assert call["block_table"] is None
+    assert call["tuning_spec"] == result.spec
+    for name in ("q", "out"):
+        assert tuple(call[name].shape) == (3, 8, 128)
+        assert call[name].data_ptr() == tensors[name].data_ptr()
+    for name in ("k", "v"):
+        view = call[name]
+        assert tuple(view.shape) == (3, 2, 65, 128)
+        assert view.data_ptr() == tensors[name].data_ptr()
+        expected = tensors[name].transpose(1, 2) if order == "bshd" else tensors[name]
+        assert view.stride() == expected.stride()
+    assert call["cu_seqlens_q"].dtype == torch.int32
+    assert call["cu_seqlens_q"].tolist() == [0, 1, 2, 3]
+    assert call["seqused_k"].dtype == torch.int32
+    assert call["seqused_k"].tolist() == [65, 65, 65]
+
+
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda t: t.pop("v"), "missing attention tensors: v"),
+        (lambda t: t.update(seqused_k=t["q"]), "unsupported dense decode tensors"),
+        (lambda t: t.update(k=t["k"][:, :64]), "k must have BSHD shape"),
+        (lambda t: t.update(out=t["out"][:2]), "out must have the shape of q"),
+        (lambda t: t.update(q=t["q"][:, :, :4]), "q shape must be"),
+    ],
+)
+def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
+    from dispatch.attention import dispatch_attention
+
+    req = _dense_decode_request("gfx950", tensor_layout="bshd")
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors("bshd")
+    mutate(tensors)
+    with pytest.raises(ValueError, match=match):
+        result.candidate.bind_torch(result.request, result.spec, tensors)
+
+
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
 def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import _problem

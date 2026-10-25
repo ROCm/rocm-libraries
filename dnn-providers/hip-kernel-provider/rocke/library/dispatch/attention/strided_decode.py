@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Non-paged input admission for the existing tiled split-KV decode kernels."""
+"""Non-paged input admission for the existing tiled split-KV decode kernels.
+
+Two request forms reach these kernels: ``kv_layout='strided'`` with Q/O
+``[B,Hq,D]`` and K/V logical ``[B,Hkv,S,D]`` views, and single-row
+``layout='dense'`` (contiguous BSHD or BHSD tensors, the dense ABI), whose K/V
+are valid strided views of the same cache.
+"""
 
 from __future__ import annotations
 
@@ -27,13 +33,70 @@ from .common import (
 )
 
 
+def _dense_layout(req) -> bool:
+    layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
+    return layout == "dense"
+
+
+def _dense_as_strided(request, tensors):
+    """Dense-ABI decode tensors as the strided runner's views and metadata.
+
+    Q/O ``[B,1,Hq,D]`` (or ``[B,Hq,1,D]``) become ``[B,Hq,D]`` views, K/V
+    become logical ``[B,Hkv,S,D]`` views of the caller's storage, and every
+    sequence takes one query row and ``seqlen_k`` keys.
+    """
+    import torch
+
+    from .bindings import _dense_axis_order, _shape
+
+    required = {"q", "k", "v", "out"}
+    if missing := required - tensors.keys():
+        raise ValueError("missing attention tensors: " + ", ".join(sorted(missing)))
+    if unknown := tensors.keys() - required - {"problem"}:
+        raise ValueError(
+            "unsupported dense decode tensors: " + ", ".join(sorted(unknown))
+        )
+    q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
+    _, _, order = _dense_axis_order(request, q)
+    if _shape(out, "out") != _shape(q, "q"):
+        raise ValueError("dense decode out must have the shape of q")
+    batch, heads, dim = int(request.batch), int(request.nhead_q), int(request.hdim_q)
+    kv_shape = (int(request.seqlen_k), int(request.nhead_k), dim)
+    if order == "bhsd":
+        kv_shape = (kv_shape[1], kv_shape[0], dim)
+    for name, tensor in (("k", k), ("v", v)):
+        if _shape(tensor, name) != (batch, *kv_shape):
+            raise ValueError(
+                f"{name} must have {order.upper()} shape {(batch, *kv_shape)}, "
+                f"got {_shape(tensor, name)}"
+            )
+    try:
+        q3 = q.view(batch, heads, dim)
+        out3 = out.view(batch, heads, dim)
+    except RuntimeError as exc:
+        raise ValueError(f"dense decode q/out must be contiguous: {exc}") from exc
+    adapted = {
+        "q": q3,
+        "out": out3,
+        "k": k.transpose(1, 2) if order == "bshd" else k,
+        "v": v.transpose(1, 2) if order == "bshd" else v,
+        "cu_seqlens_q": torch.arange(batch + 1, dtype=torch.int32, device=q.device),
+        "seqused_k": torch.full(
+            (batch,), int(request.seqlen_k), dtype=torch.int32, device=q.device
+        ),
+    }
+    if "problem" in tensors:
+        adapted["problem"] = tensors["problem"]
+    return adapted
+
+
 def make_candidate() -> KernelCandidate:
     def support(req):
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
-        if req.kv_layout != "strided":
-            return False, "requires non-paged strided KV input"
+        if req.kv_layout != "strided" and not _dense_layout(req):
+            return False, "requires non-paged strided KV or layout='dense' input"
         if (
             _parse_attention_mask_type(req.mask_type)
             == AttentionMaskType.TOP_LEFT_CAUSAL
@@ -86,6 +149,8 @@ def make_candidate() -> KernelCandidate:
         ok, why = candidate.admits(request)
         if not ok:
             raise ValueError(why)
+        if _dense_layout(request):
+            tensors = _dense_as_strided(request, tensors)
         problem = tensors.get("problem")
         if problem is None:
             problem = _problem(request)
@@ -163,7 +228,14 @@ def make_candidate() -> KernelCandidate:
                 ShapeRange("kv_block_size", allowed=(16, 32, 64)),
             ),
             supports_features=frozenset(
-                {"strided_kv", "causal", "causal_bottom_right", "sliding_window"}
+                {
+                    "strided_kv",
+                    "layout_dense",
+                    "layout_bhsd",
+                    "causal",
+                    "causal_bottom_right",
+                    "sliding_window",
+                }
             ),
         ),
         _supports=support,
