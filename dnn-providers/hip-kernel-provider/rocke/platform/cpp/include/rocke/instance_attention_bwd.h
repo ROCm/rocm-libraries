@@ -28,6 +28,8 @@
  *   validate_attn_bwd_spec               rocke_attn_bwd_validate_spec
  *   static_unit_mults                    rocke_attn_bwd_static_unit_mults
  *   attn_bwd_params / KERNARG_FORMATS    rocke_attn_bwd_params
+ *   build_attn_bwd_main (_declare_main   rocke_build_attn_bwd_main_new
+ *     .. _store_dkv_quads)               (attention_bwd_main.cpp)
  *
  * Spec encoding. Strings carry the Python spellings (NULL is None for an
  * Optional[str]). An Optional[int] or Optional[bool] is ROCKE_ATTN_BWD_NONE
@@ -63,16 +65,28 @@
  * - Optional int. ROCKE_ATTN_BWD_NONE (INT32_MIN) is None, not 0, so None and
  *   an explicit 0 stay distinct (asm_tail_nop, waves_per_eu, ...).
  *
- * Mirrored constants. STAGE_ORDERS, G4_SLICINGS, COPY_ORDERS (body), SCHEDS
- * and the deferred-knob texts (sched) are file-static copies in
- * attention_bwd.cpp until those modules are ported; the unit that ports each
- * module must replace the copy with its export.
+ * Mirrored constants. STAGE_ORDERS, G4_SLICINGS, COPY_ORDERS and SCHEDS,
+ * STAGE_TABLE_SCHEDS, FENCED_SCHEDS and the deferred-knob texts come from the
+ * body and sched helper headers' exports (ROCKE_ATTN_BWD_*); attention_bwd.cpp
+ * keeps no copies of its own.
+ *
+ * The main builder (rocke_build_attn_bwd_main_new) builds the kernel of
+ * _emit_main(spec, arch, main_kernel_refusals=False): the recorded
+ * resource-gate refusals stay in Python, so it builds the RESOURCE_REFUSED
+ * specs that Python's public build_attn_bwd_main (main_kernel_refusals=True)
+ * refuses; a caller that launches the kernel must consult Python's
+ * resource_refusal first. _kv_tile's dense-shell hooks (mask.static_runs and
+ * the epilogue= callback) are not ported. Also, _not_built's one refusal
+ * (dkv_sink="last_cta" in atomic mode) is the same NotImplementedError
+ * (ROCKE_ERR_NOTIMPL). The builder runs the body unit's full
+ * BwdTileGeometry.from_spec check (lane-map proofs included).
  *
  * Not ported (host-only or other units): INERT_KNOBS, DECLARATION_ONLY,
  * NOT_YET_EFFECTIVE_KNOBS (sweep bookkeeping), AttnBwdSpec.dq_spec (the split
- * dQ kernel's spec, P8), _not_built / _main_noalias and the builder itself
- * (_declare_main through build_attn_bwd_main, P7), the lane-map proofs of
- * BwdTileGeometry.check (P4 / P7), BwdLdsRequest.from_geometry.
+ * dQ kernel's spec, P8), the lane-map proofs of BwdTileGeometry.check inside
+ * validate (the builder runs them), BwdLdsRequest.from_geometry, and the
+ * pass-1 root copies of _emit_main other than the "stash" one (the
+ * _MIRROR_FRESH_ROOTS constant selects it, so the others are dead code).
  */
 #ifndef ROCKE_INSTANCE_ATTENTION_BWD_H
 #define ROCKE_INSTANCE_ATTENTION_BWD_H
@@ -327,6 +341,18 @@ rocke_status_t rocke_attn_bwd_params(const char* stage,
                                      const char* formats[ROCKE_ATTN_BWD_PARAMS_MAX],
                                      int* n_out,
                                      rocke_attn_bwd_err_t* err);
+
+/* _emit_main(spec, arch, main_kernel_refusals=False), NOT the public
+ * build_attn_bwd_main: RESOURCE_REFUSED specs build here. The
+ * layout-general backward main kernel (rocke.attn_bwd.v3) into b, which this
+ * initialises with the validated spec's kernel_name("main"). spec must have
+ * passed rocke_attn_bwd_spec_init (Python's builder takes a constructed
+ * AttnBwdSpec). A spec the
+ * validator refuses is ROCKE_ERR_VALUE (b initialised with a placeholder
+ * name). NULL and the builder's sticky error on any failure. */
+rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
+                                                  const rocke_attn_bwd_spec_t* spec,
+                                                  const char* arch);
 
 #ifdef __cplusplus
 }
