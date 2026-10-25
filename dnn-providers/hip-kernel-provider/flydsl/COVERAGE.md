@@ -1021,3 +1021,13 @@ objects, with the 96/160/192/224 buckets below) and `hipkernel:flydsl_sdpa_cdna_
 - **Found on the way:** without the KV global prefetch, bf16 at `head_dim` 64 with 128
   rows and 128 with 256 rows did not trace (an upstream loader mismatch, fixed by
   vendored-kernel modification 25, on gfx942 too).
+
+---
+
+## 8. Known deviations from the descriptor RFCs
+
+Approved for this integration, each to move to the shared mechanism once it exists.
+
+| Deviation | What FlyDSL does instead | What replaces it |
+|---|---|---|
+| **Two-launch objects carry their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | §15.1 `sources` (or its successor, the multi-launch slot work in progress), once the packer accepts `hsaco` entries there: the UKDs name both launches, the handlers declare `launchNames()`, and the metadata fields go. The objects do not change. |
