@@ -2812,6 +2812,108 @@ void expectCdnaSinkIsTheCpuReference(const SdpaCpuReferenceProblem& problem,
         lseTolerance);
 }
 
+/// A packed (THD) launch's O and LSE, read back from @p packedODevice and @p packedStatsDevice
+/// (Q's tokens end to end at @p offsetsQ, then a guard of Sq rows) and unpacked into the dense
+/// @p o (laid out by @p oStrides) and @p stats, so the dense oracle checks them unchanged. Every
+/// guard element must still hold the fill's NaN.
+template <typename T>
+void unpackCdnaPackedOutputs(const SdpaGraphSpec& spec,
+                             const std::vector<int32_t>& offsetsQ,
+                             const std::vector<int64_t>& oStrides,
+                             const void* packedODevice,
+                             const void* packedStatsDevice,
+                             bool withStats,
+                             std::vector<T>& o,
+                             std::vector<float>& stats)
+{
+    const int64_t b = spec.batch;
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    const int64_t tokensQ = offsetsQ.back() + s;
+    const auto packedOCount = static_cast<size_t>(tokensQ * h * dv);
+    const auto packedStatsCount = static_cast<size_t>(tokensQ * h);
+    std::vector<T> packedO(packedOCount);
+    std::vector<float> packedStats(packedStatsCount);
+    ASSERT_EQ(
+        hipSuccess,
+        hipMemcpy(packedO.data(), packedODevice, packedOCount * sizeof(T), hipMemcpyDeviceToHost));
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(packedStats.data(),
+                        packedStatsDevice,
+                        packedStatsCount * sizeof(float),
+                        hipMemcpyDeviceToHost));
+    for(int64_t bi = 0; bi < b; ++bi)
+    {
+        const int64_t first = offsetsQ[static_cast<size_t>(bi)];
+        for(int64_t si = 0; si < spec.packedSeqLensQ[static_cast<size_t>(bi)]; ++si)
+        {
+            for(int64_t hi = 0; hi < h; ++hi)
+            {
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    o[static_cast<size_t>(bi * oStrides[0] + hi * oStrides[1] + si * oStrides[2]
+                                          + e * oStrides[3])]
+                        = packedO[static_cast<size_t>(((first + si) * h + hi) * dv + e)];
+                }
+                if(withStats)
+                {
+                    const auto statsIndex
+                        = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+                    stats[static_cast<size_t>(statsIndex)]
+                        = packedStats[static_cast<size_t>((first + si) * h + hi)];
+                }
+            }
+        }
+    }
+    // The guard: every element still the fill's NaN.
+    int64_t guardWrites = 0;
+    for(int64_t t = offsetsQ.back(); t < tokensQ; ++t)
+    {
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t e = 0; e < dv; ++e)
+            {
+                guardWrites += std::isnan(static_cast<float>(
+                                   packedO[static_cast<size_t>((t * h + hi) * dv + e)]))
+                                   ? 0
+                                   : 1;
+            }
+            guardWrites += std::isnan(packedStats[static_cast<size_t>(t * h + hi)]) ? 0 : 1;
+        }
+    }
+    EXPECT_EQ(guardWrites, 0) << "packed O or LSE written past the last sequence";
+}
+
+/// Whether padded row @p row (batch, head, query) holds O = 0 and LSE = -inf exactly, on a sink
+/// object too: it is padding, not a row no key reached.
+template <typename T>
+bool cdnaPaddedRowIsExact(const SdpaGraphSpec& spec,
+                          const std::vector<T>& o,
+                          const std::vector<int64_t>& oStrides,
+                          const std::vector<float>& stats,
+                          bool withStats,
+                          const std::array<int64_t, 3>& row)
+{
+    const auto [bi, hi, si] = row;
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    bool exact = true;
+    for(int64_t e = 0; e < dv; ++e)
+    {
+        exact = exact && CdnaHostOperands<T>::at(o, oStrides, 0, bi, hi, si, e) == 0.0;
+    }
+    if(withStats)
+    {
+        const auto statsIndex
+            = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+        const auto lse = stats[static_cast<size_t>(statsIndex)];
+        exact = exact && std::isinf(lse) && lse < 0.0F;
+    }
+    return exact;
+}
+
 /// Runs each of @p kernels for @p spec through prepare() and launch() and checks every
 /// output element against a double-precision reference, in the memory layout @p spec names:
 /// BSHD, BHSD, or Q, K and V as views into one packed buffer. The inputs and the reference
@@ -3518,63 +3620,11 @@ void expectCandidatesMatchReference(const MatchContext& context,
                     stats.data(), statsDevice, statsCount * sizeof(float), hipMemcpyDeviceToHost));
         }
         // Packed: O and the LSE unpacked into the dense tensors, and the guard rows checked.
-        int64_t guardWrites = 0;
         if(packed)
         {
-            std::vector<T> packedO(packedOCount);
-            std::vector<float> packedStats(packedStatsCount);
-            ASSERT_EQ(hipSuccess,
-                      hipMemcpy(packedO.data(),
-                                packedODevice,
-                                packedOCount * sizeof(T),
-                                hipMemcpyDeviceToHost));
-            ASSERT_EQ(hipSuccess,
-                      hipMemcpy(packedStats.data(),
-                                packedStatsDevice,
-                                packedStatsCount * sizeof(float),
-                                hipMemcpyDeviceToHost));
-            for(int64_t bi = 0; bi < b; ++bi)
-            {
-                const int64_t first = offsetsQ[static_cast<size_t>(bi)];
-                for(int64_t si = 0; si < spec.packedSeqLensQ[static_cast<size_t>(bi)]; ++si)
-                {
-                    for(int64_t hi = 0; hi < h; ++hi)
-                    {
-                        for(int64_t e = 0; e < dv; ++e)
-                        {
-                            o[static_cast<size_t>(bi * oStrides[0] + hi * oStrides[1]
-                                                  + si * oStrides[2] + e * oStrides[3])]
-                                = packedO[static_cast<size_t>(((first + si) * h + hi) * dv + e)];
-                        }
-                        if(withStats)
-                        {
-                            const auto statsIndex = spec.statsSequenceMajor
-                                                        ? (bi * s + si) * h + hi
-                                                        : (bi * h + hi) * s + si;
-                            stats[static_cast<size_t>(statsIndex)]
-                                = packedStats[static_cast<size_t>((first + si) * h + hi)];
-                        }
-                    }
-                }
-            }
-            // The guard: every element still the fill's NaN.
-            for(int64_t t = offsetsQ.back(); t < tokensQ; ++t)
-            {
-                for(int64_t hi = 0; hi < h; ++hi)
-                {
-                    for(int64_t e = 0; e < dv; ++e)
-                    {
-                        guardWrites += std::isnan(static_cast<float>(
-                                           packedO[static_cast<size_t>((t * h + hi) * dv + e)]))
-                                           ? 0
-                                           : 1;
-                    }
-                    guardWrites
-                        += std::isnan(packedStats[static_cast<size_t>(t * h + hi)]) ? 0 : 1;
-                }
-            }
+            ASSERT_NO_FATAL_FAILURE(unpackCdnaPackedOutputs<T>(
+                spec, offsetsQ, oStrides, packedODevice, packedStatsDevice, withStats, o, stats));
         }
-        EXPECT_EQ(guardWrites, 0) << "packed O or LSE written past the last sequence";
         // The RNG dump: the oracle's mask bit for bit at every element, padded rows and keys
         // past a batch's length included, with hipDNN's keep-rate check; and O as hipDNN's CPU
         // reference computes it with the dump as its explicit mask.
@@ -3620,20 +3670,8 @@ void expectCandidatesMatchReference(const MatchContext& context,
                     }
                     if(rowKind[row] == Row::PADDED)
                     {
-                        bool exact = true;
-                        for(int64_t e = 0; e < dv; ++e)
-                        {
-                            exact = exact && at(o, oStrides, 0, bi, hi, si, e) == 0.0;
-                        }
-                        if(withStats)
-                        {
-                            const auto statsIndex = spec.statsSequenceMajor
-                                                        ? (bi * s + si) * h + hi
-                                                        : (bi * h + hi) * s + si;
-                            const auto lse = stats[static_cast<size_t>(statsIndex)];
-                            exact = exact && std::isinf(lse) && lse < 0.0F;
-                        }
-                        if(!exact)
+                        if(!cdnaPaddedRowIsExact<T>(
+                               spec, o, oStrides, stats, withStats, {bi, hi, si}))
                         {
                             ++paddedRowMisses;
                             wherePadded = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
@@ -3659,8 +3697,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
                             lseError = std::isinf(lse) && lse < 0.0 ? 0.0 : 1e30;
                         }
                         else if(rowKind[row] == Row::KEYLESS && floatSink
-                                && static_cast<float>(lse)
-                                       != static_cast<float>(expectedLse[row]))
+                                && static_cast<float>(lse) != static_cast<float>(expectedLse[row]))
                         {
                             // The sink itself: an f32 sink's bits exactly, so one read as
                             // 16-bit is a full miss.
