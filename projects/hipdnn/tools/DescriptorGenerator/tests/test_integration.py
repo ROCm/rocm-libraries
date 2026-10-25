@@ -7,6 +7,8 @@ Tests exercise the full pipeline from config loading through template rendering,
 covering generator.py render methods and generate.py's _preview_files function.
 """
 
+import re
+
 import pytest
 from pathlib import Path
 
@@ -2597,3 +2599,153 @@ class TestMissingRequiredInputTestsAreParameterized:
         from_node = generator._render_template("test_from_node.cpp.j2", matmul_config)
         assert "public ::testing::WithParamInterface<int64_t>" in from_node
         assert "MissingTensorCase" not in from_node
+
+
+# ---------------------------------------------------------------------------
+# Work model: schema annotations and FLOP fragments
+# ---------------------------------------------------------------------------
+
+HIPDNN_SCHEMAS_DIR = Path(__file__).resolve().parents[3] / "flatbuffers_sdk" / "schemas"
+# Every config on disk, not only ALL_CONFIG_NAMES: a stale annotation in any of them
+# would be copied into a new op modelled on it.
+ON_DISK_CONFIG_NAMES = sorted(
+    p.name for p in (Path(__file__).resolve().parents[1] / "configs").glob("*.yaml")
+)
+
+
+def _schema_declarations(schema_text: str) -> dict[str, str]:
+    """Map each field of a .fbs file to its whitespace-normalized declaration."""
+    declarations = {}
+    for line in schema_text.splitlines():
+        code = line.split("//", 1)[0]
+        match = re.match(r"\s*(\w+)\s*:([^;]*);", code)
+        if match:
+            body = " ".join(match.group(2).split())
+            declarations[match.group(1)] = f"{match.group(1)}: {body}"
+    return declarations
+
+
+class TestWorkModelFragments:
+    """The backend run emits the work-model fragments a new op needs: the
+    annotated schema fields, a ``nodeFlops`` stub, a ``logicalFlops`` case and
+    the per-op entry of TestEngineFeatures' every-node-type test."""
+
+    def test_backend_run_writes_the_work_model_fragments(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        written = generator.render_backend(convolution_fwd_config, tmp_path)
+        for name in (
+            "fbs_tensor_fields.txt",
+            "node_flops_overload.txt",
+            "logical_flops_case.txt",
+            "work_model_test_case.txt",
+        ):
+            assert f"fragments/{name}" in written
+            assert (tmp_path / "fragments" / name).read_text().strip()
+
+    def test_node_flops_stub_is_visibly_uncounted(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/node_flops_overload.j2", convolution_fwd_config
+        )
+        assert (
+            "    nodeFlops([[maybe_unused]] const Graph& graph,\n"
+            "              [[maybe_unused]] const hipdnn_flatbuffers_sdk::data_objects::"
+            "ConvolutionFwdAttributes& op)\n"
+        ) in rendered
+        body = rendered.split("{", 1)[1]
+        assert "// TODO" in body
+        assert "    return std::nullopt;\n}" in body
+
+    def test_logical_flops_case_dispatches_to_the_overload(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/logical_flops_case.j2", convolution_fwd_config
+        )
+        assert (
+            "    case NodeAttributes::ConvolutionFwdAttributes:\n"
+            "        return flopsOf(graph, "
+            "node.attributes_as_ConvolutionFwdAttributes());\n"
+        ) in rendered
+        # The alternative decision: a NO_COUNTING_CONVENTION entry with a reason.
+        assert "NO_COUNTING_CONVENTION" in rendered
+        assert "    NodeAttributes::ConvolutionFwdAttributes,\n" in rendered
+
+    def test_work_model_test_entry_builds_a_one_node_graph(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/work_model_test_case.j2", convolution_fwd_config
+        )
+        assert "EveryNodeTypeHasDeclaredWorkOrNoCountingConvention" in rendered
+        assert (
+            "             ConvolutionFwdAttributesT op;\n"
+            "             op.x_tensor_uid = 1;\n"
+            "             op.w_tensor_uid = 2;\n"
+            "             op.y_tensor_uid = 3;\n"
+            "             return single({{1, 3, 32, 32}, {64, 3, 3, 3}, "
+            "{1, 64, 32, 32}}, op);\n"
+        ) in rendered
+        # Work is never published as 0, so the unfilled entry fails the test.
+        assert "         0.0 /* TODO: expected FLOPs */},\n" in rendered
+
+    def test_work_model_test_entry_sets_only_required_tensors(
+        self, batchnorm_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/work_model_test_case.j2", batchnorm_config
+        )
+        assert "op.y_tensor_uid = 5;" in rendered
+        assert "prev_running_mean_tensor_uid" not in rendered
+
+    def test_schema_fragment_annotates_work_data_dependent_fields(
+        self, load_test_config, generator
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rendered = generator._render_template("fragments/fbs_tensor_fields.j2", config)
+        assert 'attribute "work_data_dependent";' in rendered
+        assert (
+            "    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);\n"
+            in rendered
+        )
+        assert "    token_index_tensor_uid: long = null (cache_uid);\n" in rendered
+
+    def test_schema_fragment_omits_the_annotation_when_no_field_needs_it(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/fbs_tensor_fields.j2", convolution_fwd_config
+        )
+        assert "work_data_dependent;" not in rendered
+        assert "(cache_uid, work_data_dependent)" not in rendered
+        assert "    x_tensor_uid: long (cache_uid);\n" in rendered
+
+    def test_node_flops_stub_names_work_data_dependent_operands(
+        self, load_test_config, generator
+    ):
+        config = load_test_config("sdpa.yaml")
+        rendered = generator._render_template(
+            "fragments/node_flops_overload.j2", config
+        )
+        assert (
+            "// Work-data-dependent operands: seq_len_q_tensor_uid, "
+            "seq_len_kv_tensor_uid, page_table_k_tensor_uid, "
+            "page_table_v_tensor_uid, block_mask_tensor_uid.\n"
+        ) in rendered
+
+    @pytest.mark.parametrize("config_name", ON_DISK_CONFIG_NAMES)
+    def test_tensor_declarations_match_the_in_tree_schema(
+        self, config_name, load_test_config
+    ):
+        """Each config's emitted tensor declarations, annotations included, match
+        its schema, so a schema field annotated ``work_data_dependent`` that the
+        YAML does not flag (or the reverse) fails here."""
+        config = load_test_config(config_name)
+        schema = HIPDNN_SCHEMAS_DIR / config.fbs_schema_filename
+        declared = _schema_declarations(schema.read_text(encoding="utf-8"))
+        for field in [*config.tensor_fields, *config.tensor_array_fields]:
+            assert (
+                declared.get(field.fbs_field) == field.fbs_declaration
+            ), f"{config_name}: {field.fbs_field}"

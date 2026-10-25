@@ -936,7 +936,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             //Number of threads per block
             static constexpr int NB = 256;
-            dim3                 gemvt_grid(n, 1, batches);
+            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
             dim3                 gemvt_threads(NB);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -968,19 +968,21 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             //Number of threads per block
             static constexpr int NB = 256;
-            dim3                 gemvt_grid(n, 1, batches);
+            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
             dim3                 gemvt_threads(NB);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_kernel<CONJ, NB>), gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_kernel<CONJ, NB>), gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(*alpha, *beta));
             }
         }
 
@@ -990,7 +992,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             //Number of threads per block
             static constexpr int NB = 1024;
-            dim3                 gemvt_grid(n, 1, batches);
+            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
             dim3                 gemvt_threads(NB);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -1299,18 +1301,20 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             //Number of threads per block
             static constexpr int NB = 256;
-            dim3                 gemvt_grid(n, 1, batches);
+            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
             dim3                 gemvt_threads(NB);
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_kernel<CONJ, NB>), gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_kernel<CONJ, NB>), gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(*alpha, *beta));
             }
         }
         //Using kernel code with warp reduction.
@@ -1319,7 +1323,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             //Number of threads per block
             static constexpr int NB = 1024;
-            dim3                 gemvt_grid(n, 1, batches);
+            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
             dim3                 gemvt_threads(NB);
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {

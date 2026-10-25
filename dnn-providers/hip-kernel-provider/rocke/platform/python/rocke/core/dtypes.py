@@ -39,17 +39,21 @@ _DTYPE_ALIASES = {
     "fp6e3m2": "fp6e3m2",
     "fp4": "fp4e2m1",
     "fp4e2m1": "fp4e2m1",
-    # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
-    # (signedness is an instruction operand, not the dtype); "i32" is the
-    # integer accumulator. Scalar int spellings pass through for completeness.
-    "iu8": "iu8",
-    "iu4": "iu4",
+    # Integers. RDNA integer WMMA instructions call their 8- and 4-bit operands
+    # "iu8"/"iu4" in the instruction name only; their operand dtypes are i8 / i4,
+    # because signedness is an instruction operand, not a property of the data.
+    # "i32" is the integer accumulator.
     "i8": "i8",
     "int8": "i8",
     "i4": "i4",
     "int4": "i4",
     "i32": "i32",
     "int32": "i32",
+    # Unsigned integers (logical types; no unsigned arithmetic yet).
+    "u8": "u8",
+    "uint8": "u8",
+    "u4": "u4",
+    "uint4": "u4",
 }
 
 
@@ -98,9 +102,9 @@ _DTYPE_INFO = {
             DTypeCategory.INTEGER,
             (
                 ("i4", 4),
-                ("iu4", 4),
                 ("i8", 8),
-                ("iu8", 8),
+                ("u4", 4),
+                ("u8", 8),
                 ("i16", 16),
                 ("i32", 32),
                 ("i64", 64),

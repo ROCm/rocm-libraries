@@ -4,8 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -56,6 +59,12 @@ class TestIngestorLruCacheEvictionOrder : public ::testing::TestWithParam<LruEvi
 {
 };
 
+/// visit() with a visitor that only reports the hit.
+bool visitKey(LruCache<int, std::string>& cache, int key)
+{
+    return cache.visit(key, [](const std::string& /*value*/) { return true; }).has_value();
+}
+
 TEST_P(TestIngestorLruCacheEvictionOrder, EvictsByRecencyNotInsertionOrder)
 {
     const auto& testCase = GetParam();
@@ -93,6 +102,14 @@ INSTANTIATE_TEST_SUITE_P(EvictionOrder,
                                                                cache.put(1, "one");
                                                                cache.put(2, "two");
                                                                cache.put(1, "uno");
+                                                           },
+                                                           /*expectedEvicted=*/2,
+                                                           /*expectedSurvivor=*/1},
+                                           LruEvictionCase{"VisitingAnEntryProtectsItFromEviction",
+                                                           [](LruCache<int, std::string>& cache) {
+                                                               cache.put(1, "one");
+                                                               cache.put(2, "two");
+                                                               ASSERT_TRUE(visitKey(cache, 1));
                                                            },
                                                            /*expectedEvicted=*/2,
                                                            /*expectedSurvivor=*/1}),
@@ -161,6 +178,115 @@ TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
 
     EXPECT_TRUE(cache.get(1).has_value());
     EXPECT_FALSE(cache.get(2).has_value());
+}
+
+TEST(TestIngestorLruCache, VisitReturnsTheVisitorsResultOnAHit)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+
+    const auto length = cache.visit(1, [](const std::string& value) { return value.size(); });
+
+    ASSERT_TRUE(length.has_value());
+    EXPECT_EQ(*length, 3U);
+}
+
+TEST(TestIngestorLruCache, VisitReportsAMissWithoutCallingTheVisitor)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    bool visited = false;
+
+    const auto result = cache.visit(42, [&visited](const std::string& /*value*/) {
+        visited = true;
+        return 0;
+    });
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(visited);
+}
+
+/// Counts copy constructions through a shared counter; moves are free, so only a real
+/// copy of the cached value moves the count. The cache never copy-assigns a value.
+struct CopyCountingValue
+{
+    CopyCountingValue(std::shared_ptr<int> copyCount, int payloadValue)
+        : copies(std::move(copyCount))
+        , payload(payloadValue)
+    {
+    }
+
+    CopyCountingValue(const CopyCountingValue& other)
+        : copies(other.copies)
+        , payload(other.payload)
+    {
+        ++*copies;
+    }
+
+    CopyCountingValue& operator=(const CopyCountingValue&) = delete;
+
+    CopyCountingValue(CopyCountingValue&&) noexcept = default;
+    CopyCountingValue& operator=(CopyCountingValue&&) noexcept = default;
+    ~CopyCountingValue() = default;
+
+    std::shared_ptr<int> copies;
+    int payload;
+};
+
+/// The point of visit() over get(): a hot-path probe of a large cached value (a whole
+/// catalog) must read it in place rather than copy it out.
+TEST(TestIngestorLruCache, VisitReadsTheCachedValueWithoutCopyingIt)
+{
+    const auto copies = std::make_shared<int>(0);
+    LruCache<int, CopyCountingValue> cache(2);
+    cache.put(1, CopyCountingValue(copies, 7));
+    *copies = 0;
+
+    const auto payload
+        = cache.visit(1, [](const CopyCountingValue& value) { return value.payload; });
+
+    ASSERT_TRUE(payload.has_value());
+    EXPECT_EQ(*payload, 7);
+    EXPECT_EQ(*copies, 0);
+}
+
+using Batch = std::vector<std::pair<int, std::string>>;
+
+/// Key 1's newer value comes first and gets evicted; its older duplicate must still not be
+/// admitted. A miss is acceptable.
+TEST(TestIngestorLruCache, MergeAbsentNeverAdmitsAnOlderDuplicate)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "newer"}, {3, "three"}, {2, "two"}, {1, "older"}});
+
+    const auto found = cache.get(1);
+    ASSERT_TRUE(found.has_value()) << "the newest entries are the resident ones";
+    EXPECT_EQ(*found, "newer");
+}
+
+/// A key already cached is newer than the whole batch: it may be evicted, never replaced.
+TEST(TestIngestorLruCache, MergeAbsentNeverReplacesAKeyThatWasPresent)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "in memory");
+
+    cache.mergeAbsent(Batch{{2, "two"}, {3, "three"}, {1, "from batch"}});
+
+    const auto found = cache.get(1);
+    EXPECT_TRUE(!found.has_value() || *found == "in memory");
+}
+
+TEST(TestIngestorLruCache, MergeAbsentKeepsTheEarliestBatchEntriesWhenItOverflows)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "one"}, {2, "two"}, {3, "three"}});
+
+    EXPECT_EQ(cache.size(), 2U);
+    EXPECT_TRUE(cache.get(1).has_value());
+    EXPECT_TRUE(cache.get(2).has_value());
+    EXPECT_FALSE(cache.get(3).has_value());
 }
 
 } // namespace

@@ -70,22 +70,27 @@ namespace rocsparse
         if(hyb->ell_col_ind)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_col_ind, handle->stream));
+            hyb->ell_col_ind = nullptr;
         }
         if(hyb->ell_val)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_val, handle->stream));
+            hyb->ell_val = nullptr;
         }
         if(hyb->coo_row_ind)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_row_ind, handle->stream));
+            hyb->coo_row_ind = nullptr;
         }
         if(hyb->coo_col_ind)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_col_ind, handle->stream));
+            hyb->coo_col_ind = nullptr;
         }
         if(hyb->coo_val)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_val, handle->stream));
+            hyb->coo_val = nullptr;
         }
 
         return rocsparse_status_success;

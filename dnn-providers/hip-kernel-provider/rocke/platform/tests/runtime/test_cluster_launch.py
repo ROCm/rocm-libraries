@@ -77,7 +77,7 @@ def hip():
     ), mock.patch.object(
         hip_module, "_hipStreamSynchronize", return_value=0
     ), mock.patch.object(
-        hip_module, "_current_device", return_value=0
+        hip_module, "current_device", return_value=0
     ), mock.patch.object(
         hip_module, "device_supports_cluster_launch", return_value=True
     ):
@@ -185,7 +185,7 @@ def test_bad_cluster_is_refused_before_hip(hip, grid, cluster, msg):
 def test_unsupported_device_is_refused(hip):
     with mock.patch.object(
         hip_module, "device_supports_cluster_launch", return_value=False
-    ), mock.patch.object(hip_module, "_current_device", return_value=3):
+    ), mock.patch.object(hip_module, "current_device", return_value=3):
         with pytest.raises(HipError, match="device 3 does not support cluster launch"):
             Runtime().launch(
                 object(), (2, 1, 1), (64, 1, 1), b"", stream=_STREAM, cluster=(2, 1, 1)

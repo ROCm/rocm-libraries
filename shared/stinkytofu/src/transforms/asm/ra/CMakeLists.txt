@@ -10,11 +10,14 @@ target_sources(stinkytofu_objs PRIVATE
     AllocationVerifier.cpp
     AllocatorRegistry.cpp
     LegacyColoring.cpp
+    RegisterAllocationConfig.cpp
     RegisterAllocationPass.cpp
     RegisterBudget.cpp
     RegisterSymbolSync.cpp
     allocators/LegacyIdentityAllocator.cpp
     allocators/GreedyAllocator.cpp
+    allocators/FreedomOrderedGreedyAllocator.cpp
+    allocators/OrderedGreedyAllocators.cpp
 )
 
 add_subdirectory(target)

@@ -15,7 +15,8 @@ changes.
 > `ROCKE_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
 > Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
 > to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
-> stack (older ROCm needs `ROCKE_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
+> stack. AUTO queries the loaded COMGR compiler’s LLVM version; select an
+> explicit flavor for offline emission, not from the ROCm release label.
 
 ## Two engines at a glance
 

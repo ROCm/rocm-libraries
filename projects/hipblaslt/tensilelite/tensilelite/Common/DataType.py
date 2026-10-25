@@ -225,6 +225,8 @@ class DataType:
         return self.value == DataTypeEnum.BFloat6.value
     def isFloat4(self):
         return self.value == DataTypeEnum.Float4.value
+    def isInt4(self):
+        return self.value == DataTypeEnum.Int4.value
     def isNone(self):
         return self.value == None
 

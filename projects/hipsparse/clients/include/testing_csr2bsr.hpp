@@ -60,8 +60,8 @@ void testing_csr2bsr_bad_arg(const Arguments& argus)
     std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
     hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     auto csr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (safe_size + 1)), device_free};
@@ -385,8 +385,8 @@ void testing_csr2bsr(Arguments argus)
     std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
     hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     srand(12345ULL);
 

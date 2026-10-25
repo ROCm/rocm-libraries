@@ -5,6 +5,8 @@
 agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
 import json
+import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -46,15 +48,38 @@ def compile_env():
             "this checkout -- cannot attempt a real compile"
         )
 
-    # Vendored flatbuffers headers: prefer an installed ROCm's, since this
-    # repo does not vendor flatbuffers itself.
-    fb_vendor = None
-    for candidate in (Path("/opt/rocm/include"),):
-        if (candidate / "flatbuffers" / "array.h").is_file():
-            fb_vendor = candidate
-            break
-    if fb_vendor is None:
-        pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
+    # HIPDNN_INGESTOR_STUB_INCLUDE_FILE (written by tools/CMakeLists.txt) lists the flatbuffers
+    # and HIP include dirs, one per line; a bad value fails rather than skips. Unset, probe an
+    # installed ROCm and skip when it is absent.
+    raw = os.environ.get("HIPDNN_INGESTOR_STUB_INCLUDE_FILE")
+    if raw is not None:
+        include_file = Path(raw)
+        if not include_file.is_file():
+            pytest.fail(
+                f"HIPDNN_INGESTOR_STUB_INCLUDE_FILE is set to {raw!r}, "
+                "which is not an existing file"
+            )
+        stub_includes = [
+            Path(line.strip())
+            for line in include_file.read_text().splitlines()
+            if line.strip()
+        ]
+        for header in ("flatbuffers/array.h", "hip/hip_runtime.h"):
+            if not any((d / header).is_file() for d in stub_includes):
+                pytest.fail(
+                    f"HIPDNN_INGESTOR_STUB_INCLUDE_FILE {raw!r} lists no include "
+                    f"directory containing {header}"
+                )
+    else:
+        # Vendored flatbuffers headers: prefer an installed ROCm's, since this
+        # repo does not vendor flatbuffers itself.
+        stub_includes = []
+        for candidate in (Path("/opt/rocm/include"),):
+            if (candidate / "flatbuffers" / "array.h").is_file():
+                stub_includes.append(candidate)
+                break
+        if not stub_includes:
+            pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
 
     gen_dir = Path(tempfile.mkdtemp(prefix="ingestor_gen_include_"))
     configure_targets = {
@@ -102,6 +127,22 @@ def compile_env():
     table_out.parent.mkdir(parents=True, exist_ok=True)
     table_out.write_text(table_text)
 
+    # version.h includes version_number.h; both come from the same CMake templates
+    # hipdnn_generate_version_header (cmake/VersionUtils.cmake) configures.
+    number_in = (data_sdk / ".." / ".." / "cmake" / "version_number.h.in").resolve()
+    if not number_in.is_file():
+        pytest.skip(f"missing version template {number_in}")
+    number_template = number_in.read_text()
+
+    def configure(text: str, subs: dict, out: Path) -> None:
+        for key, value in subs.items():
+            text = text.replace(f"@{key}@", str(value))
+        # A placeholder left behind means a template grew a variable this stand-in
+        # does not know; fail here rather than with a confusing compile error.
+        assert not re.search(r"@\w+@", text), f"unfilled placeholder in {out}"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+
     for name, root, version_vals in (
         (
             "hipdnn_data_sdk",
@@ -122,13 +163,22 @@ def compile_env():
         in_path = (root / ".." / "version.h.in").resolve()
         if not in_path.is_file():
             pytest.skip(f"missing version template {in_path}")
-        text = in_path.read_text()
         prefix = name.upper()
-        for key, value in version_vals.items():
-            text = text.replace(f"@{prefix}_VERSION_{key}@", str(value))
-        out = gen_dir / name / "version.h"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text)
+        configure(
+            in_path.read_text(),
+            {f"{prefix}_VERSION_{k}": v for k, v in version_vals.items()},
+            gen_dir / name / "version.h",
+        )
+        configure(
+            number_template,
+            {
+                "_VERSION_PREFIX": prefix,
+                "_VERSION_MAJOR": version_vals["MAJOR"],
+                "_VERSION_MINOR": version_vals["MINOR"],
+                "_VERSION_PATCH": version_vals["PATCH"],
+            },
+            gen_dir / name / "version_number.h",
+        )
 
     return {
         "gxx": gxx,
@@ -138,7 +188,7 @@ def compile_env():
             data_sdk,
             flatbuffers_sdk,
             provider_src,
-            fb_vendor,
+            *stub_includes,
         ],
     }
 

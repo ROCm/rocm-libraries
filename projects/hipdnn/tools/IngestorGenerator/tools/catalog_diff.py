@@ -98,11 +98,25 @@ def _load(path: str, label: str) -> dict:
         where = f"the {label} KDP kernelDescriptors[{index}]"
         if not isinstance(entry, dict):
             raise CatalogDiffError(f"{where} must be an object")
+        if "kernel_source" in entry and "sources" in entry:
+            raise CatalogDiffError(
+                f"{where} carries both 'kernel_source' and 'sources'; a UKD names "
+                f"its kernels one way"
+            )
         source = entry.get("kernel_source", {})
         if not isinstance(source, dict):
             raise CatalogDiffError(f"{where} 'kernel_source' must be an object")
         if not isinstance(source.get("spec", {}), dict):
             raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
+        sources = entry.get("sources", {})
+        if not isinstance(sources, dict) or not all(
+            isinstance(launch, dict) and isinstance(launch.get("spec", {}), dict)
+            for launch in sources.values()
+        ):
+            raise CatalogDiffError(
+                f"{where} 'sources' must be an object of launch name to a "
+                f"kernel_source object whose 'spec' is an object"
+            )
         if "name" in entry and not isinstance(entry["name"], str):
             raise CatalogDiffError(f"{where} 'name' must be a string")
         for scalar in ("priority", "version"):
@@ -141,12 +155,23 @@ def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def _entry_sources(entry: dict) -> list[dict]:
+    """The kernel_source objects an entry names: its ``kernel_source``, or every
+    launch of its ``sources`` map. Every reader goes through here so none sees
+    one spelling and misses the other."""
+    if "sources" in entry:
+        return list(entry["sources"].values())
+    return [entry.get("kernel_source", {})]
+
+
 def _spec_fields(kdp: dict) -> frozenset:
-    """Every ``kernel_source.spec`` field name any entry of ``kdp`` carries."""
+    """Every ``kernel_source.spec`` field name any entry of ``kdp`` carries, in
+    any of its launches."""
     return frozenset().union(
         *(
-            (e.get("kernel_source", {}).get("spec") or {}).keys()
+            (source.get("spec") or {}).keys()
             for e in kdp["kernelDescriptors"]
+            for source in _entry_sources(e)
         )
     )
 
@@ -169,12 +194,23 @@ def binary_identity(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What names the kernel an entry ships: its whole ``kernel_source`` (every key,
     whatever the kind) with the spec reduced to ``spec_keys`` (``None``: the full
     spec), and the entry's ``arch``."""
-    source = dict(entry.get("kernel_source") or {})
-    spec = source.get("spec") or {}
-    if spec_keys is not None:
-        spec = {k: v for k, v in spec.items() if k in spec_keys}
-    source["spec"] = spec
-    return (_canonical(source), _canonical(entry.get("arch")))
+
+    def reduced(source: dict) -> dict:
+        source = dict(source or {})
+        spec = source.get("spec") or {}
+        if spec_keys is not None:
+            spec = {k: v for k, v in spec.items() if k in spec_keys}
+        source["spec"] = spec
+        return source
+
+    if "sources" in entry:
+        # Every launch is part of the identity, keyed by its name.
+        named = {name: reduced(s) for name, s in entry["sources"].items()}
+        return (_canonical({"sources": named}), _canonical(entry.get("arch")))
+    return (
+        _canonical(reduced(entry.get("kernel_source"))),
+        _canonical(entry.get("arch")),
+    )
 
 
 def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
