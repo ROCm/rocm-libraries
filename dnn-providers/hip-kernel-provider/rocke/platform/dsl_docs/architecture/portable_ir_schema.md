@@ -95,8 +95,13 @@ objects:
 untagged `1` is ambiguous between an int and a bool, and that ambiguity is
 exactly the kind of drift this path exists to prevent. Double attrs preserve
 IEEE non-finite values using Python `json.dumps` spellings (`NaN`, `Infinity`,
-and `-Infinity`), which both native JSON decoders accept. Attr keys are sorted
-for diff-stable artifacts.
+and `-Infinity`), which both native JSON decoders accept. Integer-valued fields
+consumed by the native JSON and CBOR paths are currently limited to the safe
+integer range `[-(2^53 - 1), 2^53 - 1]`: both native DOMs store numbers as
+doubles, and reject values outside that range rather than silently rounding an
+adjacent integer spelling. Supporting the full int64 wire domain requires an
+integer-preserving DOM representation and is deferred. Attr keys are sorted for
+diff-stable artifacts.
 
 **Ops and regions.** An op carries `opcode`, `operands`, `results`, `attrs`, and
 nested `regions`; a region carries a `label` and its `ops`.

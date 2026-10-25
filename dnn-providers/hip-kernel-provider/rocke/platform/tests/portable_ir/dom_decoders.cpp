@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
@@ -216,6 +217,27 @@ void test_concrete_importer_preserves_nonfinite_float_attrs()
     }
 }
 
+void test_concrete_importer_rejects_invalid_integer_attrs()
+{
+    for(const char* spelling : {"NaN", "Infinity", "-Infinity", "9007199254740993"})
+    {
+        char artifact[512];
+        std::snprintf(
+            artifact,
+            sizeof artifact,
+            R"json({"schema":"rocke.ir/v1","kernel":{"name":"bad_int_attr","attrs":{"bad":{"t":"i","v":%s}},"params":[],"body":{"label":"entry","ops":[]}}})json",
+            spelling);
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[128] = {};
+        const rocke_status_t status
+            = rocke_import_kernel_from_json(artifact, nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, "concrete invalid integer attr is rejected");
+        check(std::strstr(err, "not an integer") != nullptr,
+              "concrete invalid integer attr has a diagnostic");
+    }
+}
+
 void test_malformed_input_is_rejected(rocke_arena_t* a)
 {
     char err[128];
@@ -269,6 +291,7 @@ int main()
     test_json_cbor_equivalence(&a);
     test_nonfinite_json_numbers(&a);
     test_concrete_importer_preserves_nonfinite_float_attrs();
+    test_concrete_importer_rejects_invalid_integer_attrs();
     test_malformed_input_is_rejected(&a);
     test_recipe_shaped_map(&a);
     rocke_arena_destroy(&a);
