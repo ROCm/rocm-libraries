@@ -91,11 +91,20 @@ struct Strides
     int64_t seq = 0;
 };
 
+/// What an engine opts into when it asks for the match.
+struct MatchOptions
+{
+    /// Accept FLOAT (fp32) data tensors, bias and dBias. Off, FLOAT declines [data_type] (DT-2).
+    bool acceptFloat = false;
+};
+
 /// What the graph match computes, once, for every engine that serves the graph.
 struct SdpaBwdProblem
 {
-    /// f16 or bf16, on every tensor.
+    /// f16 or bf16 on every tensor; FLOAT when the engine accepts it (MatchOptions).
     data_objects::DataType dtype = data_objects::DataType::UNSET;
+    /// Width of one element of dtype: 2 for f16 and bf16, 4 for FLOAT.
+    uint32_t elementBytes = 0;
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
@@ -180,6 +189,8 @@ inline constexpr uint32_t DIM_AXIS = 3;
 inline constexpr int64_t INT32_LIMIT = 2147483647LL;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 inline constexpr int64_t STATS_BYTES_PER_ELEMENT = 4; // stats is FLOAT
+inline constexpr int64_t INT32_BYTES = 4;
+inline constexpr int64_t INT64_BYTES = 8;
 inline constexpr int64_t REQUIRED_ALIGNMENT_BYTES = 16;
 inline constexpr int64_t MAX_HEAD_DIM = 512;
 inline constexpr int64_t VECTOR_ELEMENTS = 8;
@@ -264,18 +275,47 @@ inline bool elementsDoNotOverlap(const Tensor& tensor)
     return true;
 }
 
-inline int64_t ceilToVector(int64_t value)
+/// @p value rounded up to a multiple of @p vector elements: the 16-bit vector of 8 by default,
+/// 4 for FLOAT.
+inline int64_t ceilToVector(int64_t value, int64_t vector = VECTOR_ELEMENTS)
 {
-    return (value + VECTOR_ELEMENTS - 1) / VECTOR_ELEMENTS * VECTOR_ELEMENTS;
+    return (value + vector - 1) / vector * vector;
 }
 
-inline std::optional<data_objects::DataType> servedDataType(data_objects::DataType dataType)
+/// Bytes per element of a data type the matcher serves, 0 for one it does not.
+inline uint32_t servedElementBytes(data_objects::DataType dataType, bool acceptFloat)
 {
     if(dataType == data_objects::DataType::HALF || dataType == data_objects::DataType::BFLOAT16)
     {
-        return dataType;
+        return 2;
     }
-    return std::nullopt;
+    return acceptFloat && dataType == data_objects::DataType::FLOAT ? 4 : 0;
+}
+
+/// Whether every stride of @p tensor is the dense row-major stride of its dims.
+inline bool stridesAreDense(const Tensor& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
+    {
+        return false;
+    }
+    int64_t expected = 1;
+    for(flatbuffers::uoffset_t axis = dims->size(); axis > 0; --axis)
+    {
+        if(strides->Get(axis - 1) != expected)
+        {
+            return false;
+        }
+        const auto next = checkedProduct({expected, dims->Get(axis - 1)});
+        if(!next.has_value())
+        {
+            return false;
+        }
+        expected = *next;
+    }
+    return true;
 }
 
 template <typename Range>
@@ -355,9 +395,11 @@ class BackwardMatcher
 {
 public:
     BackwardMatcher(const MatchContext& context,
-                    const data_objects::SdpaBackwardAttributes& attributes)
+                    const data_objects::SdpaBackwardAttributes& attributes,
+                    const MatchOptions& options)
         : _context(context)
         , _attributes(attributes)
+        , _options(options)
     {
     }
 
@@ -399,11 +441,18 @@ private:
 
     const MatchContext& _context;
     const data_objects::SdpaBackwardAttributes& _attributes;
+    const MatchOptions _options;
     SdpaBwdProblem _problem;
     std::array<Operand, 8> _operands{};
     Operand _stats{"stats", NO_UID};
     /// The head dim each operand carries: Qk for Q, K, dQ, dK; V's for V, O, dO, dV.
     std::array<int64_t, 8> _headDims{};
+
+    /// Elements of one 16-byte vector in the problem's dtype: 8 for f16 and bf16, 4 for FLOAT.
+    int64_t vectorElements() const
+    {
+        return REQUIRED_ALIGNMENT_BYTES / static_cast<int64_t>(_problem.elementBytes);
+    }
 
     int64_t dim(size_t operand, uint32_t axis) const
     {
@@ -606,24 +655,26 @@ private:
         return std::nullopt;
     }
 
-    /// DT-1: one dtype, f16 or bf16, on all eight tensors. DT-2 (fp32) and DT-3 (FP8) decline
-    /// [data_type] through the same check.
+    /// DT-1: one dtype, f16 or bf16, on all eight tensors. DT-2: FLOAT is served only when the
+    /// engine opts in (MatchOptions::acceptFloat), under the same uniformity; otherwise, like
+    /// DT-3 (FP8), it declines [data_type] through the same check.
     Verdict checkDataTypes()
     {
-        const auto dtype = servedDataType(_operands[Q].tensor->data_type());
-        if(!dtype.has_value())
+        const auto dtype = _operands[Q].tensor->data_type();
+        const uint32_t elementBytes = servedElementBytes(dtype, _options.acceptFloat);
+        if(elementBytes == 0)
         {
             return Decline{"data_type",
-                           describe(_operands[Q]) + " is "
-                               + typeName(_operands[Q].tensor->data_type()) + ", not f16/bf16"};
+                           describe(_operands[Q]) + " is " + typeName(dtype) + ", not "
+                               + (_options.acceptFloat ? "f16/bf16/FLOAT" : "f16/bf16")};
         }
         for(const auto& operand : _operands)
         {
-            if(operand.tensor->data_type() != *dtype)
+            if(operand.tensor->data_type() != dtype)
             {
                 return Decline{"data_type",
                                describe(operand) + " is " + typeName(operand.tensor->data_type())
-                                   + ", but Q is " + typeName(*dtype)};
+                                   + ", but Q is " + typeName(dtype)};
             }
         }
         if(_stats.tensor->data_type() != data_objects::DataType::FLOAT)
@@ -632,7 +683,8 @@ private:
                            describe(_stats) + " is " + typeName(_stats.tensor->data_type())
                                + ", not FLOAT"};
         }
-        _problem.dtype = *dtype;
+        _problem.dtype = dtype;
+        _problem.elementBytes = elementBytes;
         return std::nullopt;
     }
 
@@ -687,24 +739,26 @@ private:
     }
 
     /// DT-9: whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the
-    /// last @p width elements wide, fits the kernels' 32-bit byte offsets. DT-7: this is the
+    /// last @p width elements wide, fits the kernels' 32-bit byte offsets at the problem's
+    /// element width. DT-7: this is the
     /// only bound on sequence length and tensor size; a tensor larger than 4 GiB in total is
     /// served when every slab fits.
-    static bool slabFits(int64_t rows, int64_t rowStride, int64_t width)
+    bool slabFits(int64_t rows, int64_t rowStride, int64_t width) const
     {
         const auto reach = checkedProduct({rows, rowStride});
         if(!reach.has_value() || *reach > INT32_LIMIT)
         {
             return false;
         }
-        return (*reach + width) * BYTES_PER_ELEMENT <= INT32_LIMIT;
+        return (*reach + width) * static_cast<int64_t>(_problem.elementBytes) <= INT32_LIMIT;
     }
 
     /// LY-2: the last stride is 1, the others are independent. LY-3: every stride of an axis of
-    /// more than one element is a non-negative multiple of 8 elements. LY-6: a sequence axis of
+    /// more than one element is a non-negative multiple of 8 elements (4 for FLOAT). LY-6: a sequence axis of
     /// more than one row has a non-zero stride on every operand (padding rows read zero through
     /// the row bound, and an aliased row would feed them data). DT-8: a head dim that is not a
-    /// multiple of 8 needs a smallest stride of at least ceil8(D). DT-9: the per-head slab
+    /// multiple of 8 (4 for FLOAT) needs a smallest stride of at least ceil8(D) (ceil4(D)).
+    /// DT-9: the per-head slab
     /// fits. LY-5: output elements do not overlap.
     Verdict checkTensorLayout(const Operand& operand, int64_t headDim, bool isOutput)
     {
@@ -724,13 +778,14 @@ private:
                 continue;
             }
             const int64_t stride = strides.Get(axis);
-            if(stride < 0 || stride % VECTOR_ELEMENTS != 0)
+            if(stride < 0 || stride % vectorElements() != 0)
             {
                 return Decline{"layout",
                                describe(operand) + " stride " + std::to_string(stride) + " on axis "
                                    + std::to_string(axis) + " (extent "
                                    + std::to_string(dims.Get(axis))
-                                   + ") is not a non-negative multiple of 8 elements"};
+                                   + ") is not a non-negative multiple of "
+                                   + std::to_string(vectorElements()) + " elements"};
             }
             if(axis == SEQ_AXIS && stride == 0)
             {
@@ -744,13 +799,14 @@ private:
                 smallest = std::min(smallest, stride);
             }
         }
-        const int64_t padded = ceilToVector(headDim);
-        if(headDim % VECTOR_ELEMENTS != 0
+        const int64_t padded = ceilToVector(headDim, vectorElements());
+        if(headDim % vectorElements() != 0
            && (smallest == std::numeric_limits<int64_t>::max() || smallest < padded))
         {
             return Decline{"layout",
                            describe(operand) + " head dim " + std::to_string(headDim)
-                               + " is not a multiple of 8 and its smallest row stride "
+                               + " is not a multiple of " + std::to_string(vectorElements())
+                               + " and its smallest row stride "
                                + (smallest == std::numeric_limits<int64_t>::max()
                                       ? std::string("does not exist")
                                       : std::to_string(smallest))
@@ -797,11 +853,21 @@ private:
         return std::nullopt;
     }
 
-    /// SS-1: stats is packed (B*H, Sq) (HT) or packed (B, Sq, H) (TH); the kernels take no
-    /// stats strides, so any other layout declines. The kernels also address one batch's H*Sq
-    /// FLOAT rows through a 32-bit byte range, so a batch whose stats span exceeds it declines.
+    /// SS-3: stats declares the 16-byte alignment the kernels assume for every data tensor
+    /// (the forward's check at the f32 element size is weaker). SS-1: stats is packed (B*H, Sq)
+    /// (HT) or packed (B, Sq, H) (TH); the kernels take no stats strides, so any other layout
+    /// declines. Both packed layouts address every element once, so SS-1 already excludes
+    /// overlapping stats. The kernels also address one batch's H*Sq FLOAT rows through a 32-bit
+    /// byte range, so a batch whose stats span exceeds it declines.
     Verdict checkStats()
     {
+        if(!declaresAlignment(*_stats.tensor, REQUIRED_ALIGNMENT_BYTES))
+        {
+            return Decline{"operand",
+                           describe(_stats) + " declares alignment "
+                               + std::to_string(_stats.tensor->alignment()) + " bytes, below the "
+                               + std::to_string(REQUIRED_ALIGNMENT_BYTES) + " the kernels assume"};
+        }
         const auto& strides = stridesOf(_stats);
         const int64_t batch = _problem.batch;
         const int64_t heads = _problem.numHeads;
@@ -912,8 +978,30 @@ private:
         return std::nullopt;
     }
 
+    /// A device integer tensor the kernels read one element of per batch (PV-11, DR-8): dense
+    /// strides and a declared alignment of at least @p elementBytes, else a decline under
+    /// @p cause.
+    static Verdict
+        checkScalarMemory(const Operand& operand, int64_t elementBytes, const char* cause)
+    {
+        if(!stridesAreDense(*operand.tensor))
+        {
+            return Decline{cause,
+                           describe(operand) + " strides " + listOf(stridesOf(operand))
+                               + " are not dense for dims " + listOf(dimsOf(operand))};
+        }
+        if(!declaresAlignment(*operand.tensor, elementBytes))
+        {
+            return Decline{cause,
+                           describe(operand) + " declares alignment "
+                               + std::to_string(operand.tensor->alignment())
+                               + " bytes, below its element size " + std::to_string(elementBytes)};
+        }
+        return std::nullopt;
+    }
+
     /// PV-4, PV-7: a seq_len tensor is a device INT32 [B, 1, 1, 1] tensor without a ragged
-    /// offset.
+    /// offset. PV-11: it is dense and declares an alignment of at least its element size.
     Verdict checkSeqLen(const char* label, int64_t uid)
     {
         Operand operand{label, uid};
@@ -949,7 +1037,7 @@ private:
                            describe(operand) + " batch stride "
                                + std::to_string(strides->Get(BATCH_AXIS)) + " is not 1"};
         }
-        return std::nullopt;
+        return checkScalarMemory(operand, INT32_BYTES, "varlen");
     }
 
     /// PV-1: padding_mask with both seq_len tensors is accepted. PV-2: the flag without
@@ -1039,7 +1127,9 @@ private:
     /// BI-3: a bias broadcast over batch or head with dBias is accepted. BI-4: dBias with a
     /// row-broadcast bias declines. BI-5, BI-7: dBias has the bias's dims and dtype. PV-8: a
     /// ragged offset on bias or dBias declines. PV-10: bias with padding_mask declines. MW-10:
-    /// bias with a mask declines. LY-1, DT-9: bias and dBias alignment and slab bounds.
+    /// bias with a mask declines. LY-1, DT-9: bias and dBias alignment and slab bounds. BI-9:
+    /// every non-unit stride of dBias other than the last is a multiple of 8 elements (4 for
+    /// FLOAT), as LY-3 asks of the other outputs.
     Verdict checkBias()
     {
         const auto& a = _attributes;
@@ -1169,6 +1259,19 @@ private:
             return verdict;
         }
         const auto& dbiasStrides = stridesOf(dbias);
+        for(flatbuffers::uoffset_t axis = 0; axis + 1 < dbiasDims.size(); ++axis)
+        {
+            const int64_t stride = dbiasStrides.Get(axis);
+            if(dbiasDims.Get(axis) > 1 && stride % vectorElements() != 0)
+            {
+                return Decline{"layout",
+                               describe(dbias) + " stride " + std::to_string(stride) + " on axis "
+                                   + std::to_string(axis) + " (extent "
+                                   + std::to_string(dbiasDims.Get(axis))
+                                   + ") is not a non-negative multiple of "
+                                   + std::to_string(vectorElements()) + " elements"};
+            }
+        }
         BiasView dbiasView;
         for(uint32_t axis = 0; axis < SDPA_RANK; ++axis)
         {
@@ -1194,7 +1297,8 @@ private:
     }
 
     /// DR-4: INT32 and INT64 seed and offset tensors are accepted; the width is recorded. DR-6:
-    /// a device tensor or a pass-by-value one is accepted.
+    /// a device tensor or a pass-by-value one is accepted. DR-8: a device tensor is dense and
+    /// declares an alignment of at least its element size; a pass-by-value one has no memory.
     Verdict checkSeedTensor(Operand& operand, SeedWidth& width, SeedForm& form)
     {
         if(auto verdict = resolveOperand(_context, operand, "dropout", true))
@@ -1230,6 +1334,11 @@ private:
         form = hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(operand.tensor)
                    ? SeedForm::PASS_BY_VALUE
                    : SeedForm::DEVICE;
+        if(form == SeedForm::DEVICE)
+        {
+            return checkScalarMemory(
+                operand, width == SeedWidth::INT32 ? INT32_BYTES : INT64_BYTES, "dropout");
+        }
         return std::nullopt;
     }
 
@@ -1409,13 +1518,15 @@ private:
 
 /**
  * @brief Matches a single SdpaBackwardAttributes graph, returning the problem every engine
- *        shares or the reason the graph is declined.
+ *        shares or the reason the graph is declined. @p options are what the calling engine
+ *        opts into; the default is the 16-bit match.
  *
  * Decline causes: node, operand, data_type, head_size, gqa, shape, layout, mask, alibi_mask,
  * varlen, attn_mask, dbias, dropout, scale. The detail names the field and its value.
  */
 inline std::variant<SdpaBwdProblem, Decline>
-    matchSdpaBackward(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+    matchSdpaBackward(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                      const MatchOptions& options = {})
 {
     // ST-1: a graph that is not exactly one SdpaBackwardAttributes node declines [node].
     if(context.graph.nodeCount() != 1)
@@ -1446,8 +1557,8 @@ inline std::variant<SdpaBwdProblem, Decline>
     {
         return Decline{"node", "node compute type is " + detail::typeName(computeType)};
     }
-    detail::BackwardMatcher matcher(context,
-                                    node.attributesAs<data_objects::SdpaBackwardAttributes>());
+    detail::BackwardMatcher matcher(
+        context, node.attributesAs<data_objects::SdpaBackwardAttributes>(), options);
     return matcher.run();
 }
 
