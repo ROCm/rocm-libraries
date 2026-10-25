@@ -256,6 +256,52 @@ inline void RecordServed(const std::string& case_name, bool served)
     ::testing::Test::RecordProperty("parity_served_" + case_name, served ? "true" : "false");
 }
 
+// FNV-1a over the raw bytes of a test's GPU outputs. A tolerance check passes for two
+// kernels that round differently, so it cannot tell whether forwarding ran the same
+// kernel MIOpen would have; the hash can, because the parity comparison needs it to be
+// identical in both modes. Not a security hash: it only has to change when a bit does.
+class OutputHash
+{
+public:
+    template <typename T>
+    void Add(const std::vector<T>& values)
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "hashing raw bytes");
+        const auto* bytes = reinterpret_cast<const unsigned char*>(values.data());
+        for(std::size_t i = 0; i < values.size() * sizeof(T); ++i)
+        {
+            state_ ^= bytes[i];
+            state_ *= kFnvPrime;
+        }
+    }
+
+    std::string Hex() const
+    {
+        static constexpr char digits[] = "0123456789abcdef";
+        std::string text(16, '0');
+        for(int i = 15, shift = 0; i >= 0; --i, shift += 4)
+            text[i] = digits[(state_ >> shift) & 0xfU];
+        return text;
+    }
+
+private:
+    // The published 64-bit FNV-1a parameters. std::hash is not used because it only has
+    // to be stable within one process, and the two hashes come from separate runs.
+    static constexpr std::uint64_t kFnvOffsetBasis = 0xcbf29ce484222325ULL;
+    static constexpr std::uint64_t kFnvPrime       = 0x100000001b3ULL;
+
+    std::uint64_t state_ = kFnvOffsetBasis;
+};
+
+// Recorded only by tests both modes serve: a test that one mode declines has no output
+// to hash, and a property present in one run alone reads as a divergence.
+inline void RecordOutputHash(const OutputHash& hash, const std::string& case_name = "")
+{
+    ::testing::Test::RecordProperty(case_name.empty() ? std::string("parity_output_hash")
+                                                      : "parity_output_hash_" + case_name,
+                                    hash.Hex());
+}
+
 // For a case neither mode serves. Records the enum name, because miopenGetErrorString's text
 // always differs between the modes.
 inline void RecordStatus(const std::string& case_name, miopenStatus_t status)

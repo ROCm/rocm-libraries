@@ -19,6 +19,7 @@
 #include "hipdnn_shim_helpers.hpp"
 
 #include <cmath>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -326,6 +327,70 @@ bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, c
     return served;
 }
 
+// Each derived suite records a hash of everything its fixture reads back. The CPU
+// reference check runs in the base TearDown and passes within kTol; the hash goes
+// further, because the parity comparison needs it to match bit for bit, which only
+// holds if the forwarded call ran the same kernel with the same configuration that
+// MIOpen picks. Whether to hash is decided before the base TearDown runs, because
+// that is where a skipped or failed test returns before reading anything back.
+template <typename Base>
+struct HashTrainOutputs : Base
+{
+    void TearDown() override
+    {
+        const bool read = !this->test_skipped && !this->HasFailure();
+        Base::TearDown();
+        if(!read || this->HasFailure())
+            return;
+        const auto& d = this->bn_fwd_train_test_data;
+        hs::OutputHash hash;
+        hash.Add(d.output.data);
+        hash.Add(d.saveMean.data);
+        hash.Add(d.saveVariance.data);
+        hash.Add(d.runMean.data);
+        hash.Add(d.runVariance.data);
+        if(this->api_type == BNApiType::testBNAPIV3)
+        {
+            hash.Add(d.nextRunMean.data);
+            hash.Add(d.nextRunVariance.data);
+        }
+        hs::RecordOutputHash(hash);
+    }
+};
+
+template <typename Base>
+struct HashInferOutputs : Base
+{
+    void TearDown() override
+    {
+        const bool read = !this->test_skipped && !this->HasFailure();
+        Base::TearDown();
+        if(!read || this->HasFailure())
+            return;
+        hs::OutputHash hash;
+        hash.Add(this->bn_infer_test_data.output.data);
+        hs::RecordOutputHash(hash);
+    }
+};
+
+template <typename Base>
+struct HashBwdOutputs : Base
+{
+    void TearDown() override
+    {
+        const bool read = !this->test_skipped && !this->HasFailure();
+        Base::TearDown();
+        if(!read || this->HasFailure())
+            return;
+        const auto& d = this->bn_bwd_test_data;
+        hs::OutputHash hash;
+        hash.Add(d.output.data);
+        hash.Add(d.dScale.data);
+        hash.Add(d.dBias.data);
+        hs::RecordOutputHash(hash);
+    }
+};
+
 } // namespace
 
 // The derived suites below use the Smoke prefix, like hipdnn_shim_conv*.cpp. The
@@ -335,27 +400,33 @@ bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, c
 // Forward training
 
 struct GPU_HipdnnShimBNFwdTrain_FP32
-    : BNFwdTrainTest<float, float, float, float, float, double, BN2DTestCase>
+    : HashTrainOutputs<BNFwdTrainTest<float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
-struct GPU_HipdnnShimBNFwdTrain_FP16
-    : BNFwdTrainTest<half_float::half, half_float::half, float, float, float, double, BN2DTestCase>
+struct GPU_HipdnnShimBNFwdTrain_FP16 : HashTrainOutputs<BNFwdTrainTest<half_float::half,
+                                                                       half_float::half,
+                                                                       float,
+                                                                       float,
+                                                                       float,
+                                                                       double,
+                                                                       BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNFwdTrain_BFP16
-    : BNFwdTrainTest<bfloat16, bfloat16, float, float, float, double, BN2DTestCase>
+    : HashTrainOutputs<
+          BNFwdTrainTest<bfloat16, bfloat16, float, float, float, double, BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNFwdTrain3D_FP32
-    : BNFwdTrainTest<float, float, float, float, float, double, BN3DTestCase>
+    : HashTrainOutputs<BNFwdTrainTest<float, float, float, float, float, double, BN3DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNFwdTrainRelu_FP32
-    : BNFwdTrainTest<float, float, float, float, float, double, BN2DTestCase>
+    : HashTrainOutputs<BNFwdTrainTest<float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
@@ -433,22 +504,27 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // Forward inference
 
 struct GPU_HipdnnShimBNInfer_FP32
-    : BNInferTest<float, float, float, float, float, double, BN2DTestCase>
+    : HashInferOutputs<BNInferTest<float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
-struct GPU_HipdnnShimBNInfer_FP16
-    : BNInferTest<half_float::half, half_float::half, float, float, float, double, BN2DTestCase>
+struct GPU_HipdnnShimBNInfer_FP16 : HashInferOutputs<BNInferTest<half_float::half,
+                                                                 half_float::half,
+                                                                 float,
+                                                                 float,
+                                                                 float,
+                                                                 double,
+                                                                 BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNInfer_BFP16
-    : BNInferTest<bfloat16, bfloat16, float, float, float, double, BN2DTestCase>
+    : HashInferOutputs<BNInferTest<bfloat16, bfloat16, float, float, float, double, BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNInferRelu_FP32
-    : BNInferTest<float, float, float, float, float, double, BN2DTestCase>
+    : HashInferOutputs<BNInferTest<float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
@@ -500,28 +576,29 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // Backward
 
 struct GPU_HipdnnShimBNBwd_FP32
-    : BNBwdTest<float, float, float, float, float, float, double, BN2DTestCase>
+    : HashBwdOutputs<BNBwdTest<float, float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
-struct GPU_HipdnnShimBNBwd_FP16 : BNBwdTest<half_float::half,
-                                            half_float::half,
-                                            half_float::half,
-                                            float,
-                                            float,
-                                            float,
-                                            double,
-                                            BN2DTestCase>
+struct GPU_HipdnnShimBNBwd_FP16 : HashBwdOutputs<BNBwdTest<half_float::half,
+                                                           half_float::half,
+                                                           half_float::half,
+                                                           float,
+                                                           float,
+                                                           float,
+                                                           double,
+                                                           BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNBwd_BFP16
-    : BNBwdTest<bfloat16, bfloat16, bfloat16, float, float, float, double, BN2DTestCase>
+    : HashBwdOutputs<
+          BNBwdTest<bfloat16, bfloat16, bfloat16, float, float, float, double, BN2DTestCase>>
 {
 };
 
 struct GPU_HipdnnShimBNBwdRelu_FP32
-    : BNBwdTest<float, float, float, float, float, float, double, BN2DTestCase>
+    : HashBwdOutputs<BNBwdTest<float, float, float, float, float, float, double, BN2DTestCase>>
 {
 };
 
@@ -565,6 +642,26 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({testBNAPIV1}),
                                           testing::ValuesIn({miopenActivationRELU})),
                          TestNameGenerator<BN2DTestCase>());
+
+// ---------------------------------------------------------------------------
+// Output hash
+
+// The published FNV-1a 64 test vectors. They pin the constants and the byte order of
+// OutputHash, and the split case shows that hashing in several Add calls is the same as
+// hashing the joined bytes, which the multi-output parity hashes rely on.
+TEST(CPU_HipdnnShimOutputHash_NONE, MatchesPublishedFnv1aVectors)
+{
+    const auto hash_of = [](std::initializer_list<std::string> parts) {
+        hs::OutputHash hash;
+        for(const auto& part : parts)
+            hash.Add(std::vector<char>(part.begin(), part.end()));
+        return hash.Hex();
+    };
+    EXPECT_EQ(hash_of({}), "cbf29ce484222325");
+    EXPECT_EQ(hash_of({"a"}), "af63dc4c8601ec8c");
+    EXPECT_EQ(hash_of({"foobar"}), "85944171f73967e8");
+    EXPECT_EQ(hash_of({"foo", "bar"}), "85944171f73967e8");
+}
 
 // ---------------------------------------------------------------------------
 // Plan key, in-place running stats and null outputs
