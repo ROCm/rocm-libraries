@@ -42,13 +42,13 @@ namespace TensileLite
     {
         void SolveCPU(ContractionProblem const*                           contraction,
                       ProblemInputs const*                                inputs,
-                      std::span<const roc::hostnumerics::OutputSelection> outputSelections);
+                      std::span<const roc::hostnumerics::IndexSelection> outputSelections);
 
         // Specialized solver for ungrouped GEMM problems. Automatic execution
         // selects among the component-owned implementations.
         void SolveGemmCPU(ContractionProblemGemm const&      problem,
                           ContractionInputs const&           inputs,
-                          roc::hostnumerics::OutputSelection outputSelection);
+                          roc::hostnumerics::IndexSelection outputSelection);
 
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
@@ -59,7 +59,7 @@ namespace TensileLite
         // staged outputs to caller storage.
         void executeReferenceGemm(ContractionProblemGemm const&      problem,
                                   ContractionInputs const&           inputs,
-                                  roc::hostnumerics::OutputSelection outputSelection,
+                                  roc::hostnumerics::IndexSelection outputSelection,
                                   roc::hostnumerics::GemmBackend     backend);
 
         void executeReferenceGemm(ContractionProblemGemm const&  problem,

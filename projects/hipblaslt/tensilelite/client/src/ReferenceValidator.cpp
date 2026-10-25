@@ -103,7 +103,7 @@ namespace TensileLite
                 if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
                 {
                     if(!m_freivalds)
-                        m_outputSelections.push_back(referenceOutputSelection(
+                        m_outputSelections.push_back(referenceIndexSelection(
                             gemm->d(), static_cast<size_t>(m_elementsToValidate)));
                     size_t M          = gemm->freeSizeA(0);
                     size_t N          = gemm->freeSizeB(0);
@@ -124,7 +124,7 @@ namespace TensileLite
                     {
                         auto& g = grouped->gemms[i];
                         if(!m_freivalds)
-                            m_outputSelections.push_back(referenceOutputSelection(
+                            m_outputSelections.push_back(referenceIndexSelection(
                                 g.d(), static_cast<size_t>(m_elementsToValidate)));
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
@@ -227,7 +227,7 @@ namespace TensileLite
                 if(!problem.stridedBatched())
                     throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
                 auto translated = hostnumerics::translateGemmInvocation(
-                    problem, inputs, OutputSelection::all({}));
+                    problem, inputs, IndexSelection::allLastDimensionFastest());
                 if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
                     throw std::invalid_argument("Freivalds: " + failure->reason);
                 const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
@@ -311,7 +311,7 @@ namespace TensileLite
                                             output.d,
                                             output.maxElements.at(index),
                                             output.gpu,
-                                            OutputSelection::explicitIndices({}, {}),
+                                            IndexSelection::explicitIndicesLastDimensionFastest({}),
                                             -1);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());
@@ -396,7 +396,7 @@ namespace TensileLite
             void const*                               resPtr,
             size_t                                    maxElements,
             bool                                      isgpu,
-            const roc::hostnumerics::OutputSelection& outputSelection,
+            const roc::hostnumerics::IndexSelection& outputSelection,
             double                                    threshold)
         {
             const roc::hostnumerics::ScalarType scalarType
@@ -623,7 +623,7 @@ namespace TensileLite
         bool ReferenceValidator::validate(ContractionProblemGemm const&             problem,
                                           ContractionInputs const&                  reference,
                                           ContractionInputs const&                  result,
-                                          const roc::hostnumerics::OutputSelection& outputSelection)
+                                          const roc::hostnumerics::IndexSelection& outputSelection)
         {
             if(problem.tensors().empty())
                 return false;
@@ -657,11 +657,11 @@ namespace TensileLite
                     continue;
 
                 const auto tensorRole = static_cast<ContractionProblemGemm::TENSOR>(i);
-                const roc::hostnumerics::OutputSelection comparisonSelection
+                const roc::hostnumerics::IndexSelection comparisonSelection
                     = tensorRole == ContractionProblemGemm::TENSOR::D
                               || tensorRole == ContractionProblemGemm::TENSOR::E
                           ? outputSelection
-                          : referenceOutputSelection(tensor,
+                          : referenceIndexSelection(tensor,
                                                      static_cast<size_t>(m_elementsToValidate));
 
                 void const* refPtr = nullptr;

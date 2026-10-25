@@ -10,7 +10,9 @@
 
 namespace roc::hostnumerics::detail {
 ComparisonAccumulator::ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape)
-    : m_options(options), m_shape(&shape) {
+    : m_options(options),
+      m_shape(&shape),
+      m_indexOrder(options.selection.indexOrder(shape.rank())) {
     m_result.allCloseEvaluated = m_options.allClose;
     m_result.frobeniusEvaluated = m_options.relativeFrobeniusTolerance.has_value();
     m_result.ulpEvaluated = m_options.maximumUlpTolerance.has_value();
@@ -186,10 +188,7 @@ void ComparisonAccumulator::observe(size_t logicalIndex, ptrdiff_t observedOffse
         m_options.allClose && !close &&
         m_result.reportedMismatches.size() < m_options.maxReportedMismatches;
     if (reportComparison || reportMismatch) {
-        std::vector<size_t> coordinates =
-            m_options.selection.indexOrder().empty()
-                ? m_shape->coordinates(logicalIndex)
-                : m_shape->coordinates(logicalIndex, m_options.selection.indexOrder());
+        std::vector<size_t> coordinates = m_shape->coordinates(logicalIndex, m_indexOrder);
         const Mismatch sample{
             logicalIndex,
             std::move(coordinates),

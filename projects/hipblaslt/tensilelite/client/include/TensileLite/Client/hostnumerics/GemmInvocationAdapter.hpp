@@ -86,7 +86,7 @@ namespace TensileLite::Client::hostnumerics
         {
             std::span<std::byte>               destination;
             roc::hostnumerics::Tensor          source;
-            roc::hostnumerics::OutputSelection selection;
+            roc::hostnumerics::IndexSelection selection = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
         };
 
         struct BiasReduction
@@ -135,7 +135,7 @@ namespace TensileLite::Client::hostnumerics
         std::optional<roc::hostnumerics::Tensor> scaleAlpha;
         std::optional<roc::hostnumerics::Tensor> scaleA;
         std::optional<roc::hostnumerics::Tensor> scaleB;
-        roc::hostnumerics::OutputSelection       outputSelection;
+        roc::hostnumerics::IndexSelection       outputSelection = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
         std::optional<BoundEpilogue>             epilogue;
         std::optional<BiasReduction>             biasReduction;
         std::vector<CopyBack>                    copyBacks;
@@ -187,7 +187,7 @@ namespace TensileLite::Client::hostnumerics
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
             translateGemmInvocation(ContractionProblemGemm const&      problem,
                                     ContractionInputs const&           inputs,
-                                    roc::hostnumerics::OutputSelection outputSelection);
+                                    roc::hostnumerics::IndexSelection outputSelection);
 
         std::unique_ptr<const State> m_state;
     };
@@ -195,7 +195,7 @@ namespace TensileLite::Client::hostnumerics
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const&      problem,
                                 ContractionInputs const&           inputs,
-                                roc::hostnumerics::OutputSelection outputSelection);
+                                roc::hostnumerics::IndexSelection outputSelection);
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,

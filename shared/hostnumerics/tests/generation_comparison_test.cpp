@@ -7,8 +7,8 @@ namespace hostnumerics_test {
 void testGenerationAndComparison() {
     using namespace roc::hostnumerics;
 
-    const GenerationRecipe binaryGeneration =
-        GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {-1.0, 1.0}}), {.seed = 42});
+    const GenerationRecipe binaryGeneration = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::choice({.values = {-1.0, 1.0}}), 42);
     Tensor a(ScalarType::Float32, Shape{32});
     Tensor b(ScalarType::Float32, Shape{32});
     generate(a, binaryGeneration);
@@ -70,8 +70,8 @@ void testGenerationAndComparison() {
             "Matrix generation modified padding.");
 
     Tensor runtimeExpected(ScalarType::Float32, Shape{2, 3});
-    const GenerationRecipe runtimeGeneration = GenerationRecipe::realOnly(
-        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = 7});
+    const GenerationRecipe runtimeGeneration = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), 7);
     generate(runtimeExpected, runtimeGeneration);
     Tensor runtimeObserved = runtimeExpected.deepCopy();
     runtimeObserved.storeFrom({1, 2}, runtimeExpected.loadAs<float>({1, 2}) + 1.0f);

@@ -23,12 +23,12 @@
 
 namespace roc::hostnumerics::detail {
 template <typename Function>
-void forEachSelectedIndex(const Shape& shape, const OutputSelection& selection,
+void forEachSelectedIndex(const Shape& shape, const IndexSelection& selection,
                           Function&& function) {
-    const IndexIteration iteration(shape, selection.indexOrder());
+    const IndexIteration iteration(shape, selection.indexOrder(shape.rank()));
     const size_t total = iteration.count();
     std::vector<size_t> coordinates(shape.rank(), 0);
-    if (selection.kind() == OutputSelectionKind::Explicit) {
+    if (selection.kind() == IndexSelectionKind::Explicit) {
         for (const size_t logicalIndex : selection.indices(total)) {
             iteration.coordinates(logicalIndex, coordinates);
             function(logicalIndex, std::span<const size_t>(coordinates));

@@ -104,7 +104,7 @@ namespace
         auto storage = hn::generate(
             type,
             hn::Shape{batches * batchStride},
-            hn::GenerationRecipe::realOnly(hn::GenerationRecipe::constant({.value = 40}), {}));
+            hn::GenerationRecipe::realOnlyLastDimensionFastest(hn::GenerationRecipe::constant({.value = 40}), 0));
         return storage.shareStorageWithLayout(hn::Layout(
             hn::Shape{batches, rows, cols}, {ptrdiff_t(batchStride), rowStride, columnStride}, 0));
     }
@@ -156,10 +156,9 @@ namespace
                 const size_t first  = s == 0 ? 0 : k / 2;
                 const size_t length = s == 0 ? k / 2 : k - k / 2;
                 auto         recipe = [&](uint64_t seed) {
-                    return hn::GenerationRecipe::realOnly(
+                    return hn::GenerationRecipe::realOnlyLastDimensionFastest(
                         floating ? hn::GenerationRecipe::uniformReal({.lower = -1, .upper = 1})
-                                 : hn::GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}),
-                        {.seed = seed});
+                                 : hn::GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), seed);
                 };
                 auto at = hn::generate(hn::ScalarType::BFloat16,
                                        hn::Shape{periodsA[s], length},

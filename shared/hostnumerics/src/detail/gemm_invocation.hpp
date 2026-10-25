@@ -23,7 +23,7 @@ struct GemmSupportInfo {
 // coefficient, addend, bias, activation, and output conversion operations.
 struct GemmInvocation : MatmulOptions {
     GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor, const MatmulOptions& options,
-                   OutputSelection selection)
+                   IndexSelection selection)
         : MatmulOptions(options),
           a(std::move(aTensor)),
           b(std::move(bTensor)),
@@ -33,7 +33,7 @@ struct GemmInvocation : MatmulOptions {
     Tensor a;
     Tensor b;
     Tensor d;
-    OutputSelection outputSelection;
+    IndexSelection outputSelection = IndexSelection::allLastDimensionFastest();
 };
 
 struct GemmExecutionInfo {

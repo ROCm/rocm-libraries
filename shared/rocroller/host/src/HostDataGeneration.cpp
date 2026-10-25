@@ -159,14 +159,14 @@ namespace rocRoller::hostnumerics
             if(descriptor.stride(0) == descriptor.stride(1))
             {
                 if(descriptor.size(0) == 1)
-                    return std::vector<size_t>{};
+                    return std::vector<size_t>{0, 1};
                 if(descriptor.size(1) == 1)
                     return std::vector<size_t>{1, 0};
                 throw std::runtime_error(
                     "rocRoller GEMM generation requires non-overlapping matrix strides.");
             }
             return descriptor.stride(0) < descriptor.stride(1) ? std::vector<size_t>{1, 0}
-                                                               : std::vector<size_t>{};
+                                                               : std::vector<size_t>{0, 1};
         }
 
         GenerationRecipe generationRecipe(TensorDescriptor const&   descriptor,

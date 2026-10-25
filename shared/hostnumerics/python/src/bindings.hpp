@@ -14,6 +14,7 @@ Tensor tensorOperand(nanobind::handle value, ScalarType scalarType);
 void registerShapeBindings(nanobind::module_& module);
 void registerLayoutBindings(nanobind::module_& module);
 void registerCoreBindings(nanobind::module_& module);
+void registerIndexSelectionBindings(nanobind::module_& module);
 void registerSelectionBindings(nanobind::module_& module);
 void registerComparisonBindings(nanobind::module_& module);
 void registerGenerationBindings(nanobind::module_& module);

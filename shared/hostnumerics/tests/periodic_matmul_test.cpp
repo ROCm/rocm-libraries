@@ -13,8 +13,8 @@ using namespace roc::hostnumerics;
 
 PeriodicMatmulSegment segment(size_t m, size_t n, size_t begin, size_t k, size_t p, size_t q,
                               uint64_t seed) {
-    auto recipe = GenerationRecipe::realOnly(
-        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = seed});
+    auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), seed);
     auto a = generate(ScalarType::BFloat16, Shape{p, k}, recipe);
     auto b = generate(ScalarType::BFloat16, Shape{k, q}, recipe);
     return {begin, PeriodicInitialization(a, Shape{m, k}), PeriodicInitialization(b, Shape{k, n})};

@@ -22,7 +22,7 @@ struct GenerationRecipeSettings {
     // regardless of traversal order or thread count.
     uint64_t seed = 0;
 
-    // Owned axes from slowest to fastest. Empty means NumPy/C identity order.
+    // Owned axes from slowest to fastest; empty is valid only for rank zero.
     // Indexed recipes and generateAt use this coordinate-to-index mapping.
     std::vector<size_t> indexOrder;
 };
@@ -314,11 +314,20 @@ class GenerationRecipe {
                                                     GenerationRecipeSettings settings);
 
     [[nodiscard]] uint64_t seed() const noexcept;
-    // Borrows this recipe's owned order; valid while the recipe is alive and unmodified.
-    [[nodiscard]] std::span<const size_t> indexOrder() const noexcept;
+    [[nodiscard]] static GenerationRecipe realOnlyLastDimensionFastest(Component component,
+                                                                       uint64_t seed);
+    [[nodiscard]] static GenerationRecipe replicatedLastDimensionFastest(Component component,
+                                                                         uint64_t seed);
+    [[nodiscard]] static GenerationRecipe cartesianLastDimensionFastest(Component real,
+                                                                        Component imaginary,
+                                                                        uint64_t seed);
+
+    // Returns the chosen order for the supplied rank, checking explicit orders.
+    [[nodiscard]] std::vector<size_t> indexOrder(size_t rank) const;
     [[nodiscard]] GenerationRecipe withSeed(uint64_t seed) const;
     // Copies the axes; the returned recipe does not borrow the supplied span.
     [[nodiscard]] GenerationRecipe withIndexOrder(std::span<const size_t> order) const;
+    [[nodiscard]] GenerationRecipe withLastDimensionFastestIndexOrder() const;
 
    private:
     struct BoundComponent {
@@ -340,6 +349,7 @@ class GenerationRecipe {
     GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy);
 
     GenerationRecipeSettings settings_;
+    bool lastDimensionFastest_ = false;
     ComplexPolicy complexPolicy_;
 
     friend struct detail::GenerationRecipeAccess;

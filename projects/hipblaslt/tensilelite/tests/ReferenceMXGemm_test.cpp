@@ -74,7 +74,7 @@ namespace
         using namespace roc::hostnumerics;
 
         const auto recipe
-            = GenerationRecipe::realOnly(std::move(component), {.seed = seed + stream});
+            = GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), seed + stream);
         Tensor generated(type, Layout::contiguousLastDimensionFastest(Shape{values.size()}));
         generate(generated, recipe);
 

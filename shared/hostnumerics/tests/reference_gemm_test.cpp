@@ -57,7 +57,7 @@ void testRuntimeReferenceGemm() {
     const Layout owningLayout(Shape{2, 2}, {7, 2}, 1);
     Tensor owned(ScalarType::Float32, owningLayout);
     matmulInto(operandA, operandB, owned, MatmulOptions(ScalarType::Float32),
-               OutputSelection::explicitIndices({0, 1}, {}), GemmBackend::Blocked);
+               IndexSelection::explicitIndicesLastDimensionFastest({0, 1}), GemmBackend::Blocked);
     require(owned.layout() == owningLayout && owned.loadAs<float>({0, 0}) == 58.0f &&
                 owned.loadAs<float>({0, 1}) == 64.0f && owned.loadAs<float>({1, 0}) == 0 &&
                 owned.loadAs<float>({1, 1}) == 0,
@@ -198,7 +198,7 @@ void testBlockedUnalignedScaleSegments() {
     Tensor automaticOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
     matmulInto(operandA, operandB, automaticOutput, options,
-               OutputSelection::explicitIndices({1}, {}), GemmBackend::Automatic);
+               IndexSelection::explicitIndicesLastDimensionFastest({1}), GemmBackend::Automatic);
 
     const Tensor expected =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});

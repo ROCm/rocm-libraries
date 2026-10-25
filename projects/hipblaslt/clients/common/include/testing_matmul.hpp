@@ -1709,11 +1709,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                   const auto seed   = initializationSeed(sequence);
                   if(small)
                   {
-                      return roc::hostnumerics::GenerationRecipe::realOnly(
+                      return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                           roc::hostnumerics::GenerationRecipe::uniformInteger(
                               {.lower = 1, .upper = 10})
-                              .withAffineValueMapping({.scale = 0.1}),
-                          {.seed = seed});
+                              .withAffineValueMapping({.scale = 0.1}), seed);
                   }
                   return hipblaslt::hostnumerics::initializationRecipe(
                       scalar,
@@ -2275,8 +2274,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(hAmaxD_gold[i],
                                      Talpha,
                                      roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
-                                     roc::hostnumerics::GenerationRecipe::realOnly(
-                                         roc::hostnumerics::GenerationRecipe::zero(), {}));
+                                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                                         roc::hostnumerics::GenerationRecipe::zero(), 0));
 
             if(arg.scaleE)
                 initializeHostTensor(
@@ -3753,7 +3752,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                               referenceB,
                                               referenceD,
                                               matmulOptions,
-                                              roc::hostnumerics::OutputSelection::all({}));
+                                              roc::hostnumerics::IndexSelection::allLastDimensionFastest());
                 }
                 else
                 {
@@ -3773,7 +3772,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                   referenceB,
                                                   referenceAccumulator,
                                                   matmulOptions,
-                                                  roc::hostnumerics::OutputSelection::all({}));
+                                                  roc::hostnumerics::IndexSelection::allLastDimensionFastest());
                         conversion.inputScale = alpha;
                     }
                     if(betaValue != std::complex<double>(0.0, 0.0))

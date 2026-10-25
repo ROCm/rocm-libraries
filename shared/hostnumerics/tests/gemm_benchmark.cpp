@@ -25,8 +25,8 @@ using Clock = std::chrono::steady_clock;
 using roc::hostnumerics::GemmBackend;
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
+using roc::hostnumerics::IndexSelection;
 using roc::hostnumerics::Layout;
-using roc::hostnumerics::OutputSelection;
 using roc::hostnumerics::ScalarType;
 using roc::hostnumerics::Shape;
 using roc::hostnumerics::Tensor;
@@ -158,12 +158,10 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     const Shape outputShape{rows, columns};
+    const auto indexOrder = problem.outputSelection.indexOrder(problem.d.shape().rank());
     for (const size_t logicalIndex :
          problem.outputSelection.indices(problem.d.shape().elementCount())) {
-        const auto coordinates =
-            problem.outputSelection.indexOrder().empty()
-                ? problem.d.shape().coordinates(logicalIndex)
-                : problem.d.shape().coordinates(logicalIndex, problem.outputSelection.indexOrder());
+        const auto coordinates = problem.d.shape().coordinates(logicalIndex, indexOrder);
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         Accumulator accumulation = Accumulator(0);
@@ -236,11 +234,11 @@ int main(int argc, char** argv) {
         const Options options = parseOptions(argc, argv);
         const NumericProfile profile = numericProfile(options.profile);
         const size_t outputElements = options.rows * options.columns;
-        const OutputSelection selection =
+        const IndexSelection selection =
             options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? OutputSelection::all({})
-                : OutputSelection::primeStride(outputElements, outputElements,
-                                               options.selectedOutputs, {});
+                ? IndexSelection::allLastDimensionFastest()
+                : IndexSelection::primeStrideLastDimensionFastest(outputElements, outputElements,
+                                                                  options.selectedOutputs);
 
         const ptrdiff_t aLeadingDimension =
             static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));
@@ -287,9 +285,10 @@ int main(int argc, char** argv) {
             milliseconds.push_back(std::chrono::duration<double, std::milli>(end - start).count());
         }
 
-        const OutputSelection validationSelection =
+        const IndexSelection validationSelection =
             selection.selectsAll() && outputElements > 128
-                ? OutputSelection::primeStride(outputElements, outputElements, 128, {})
+                ? IndexSelection::primeStrideLastDimensionFastest(outputElements, outputElements,
+                                                                  128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;

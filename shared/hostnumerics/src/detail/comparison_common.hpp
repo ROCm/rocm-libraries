@@ -144,13 +144,13 @@ bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
 
 template <typename Function>
 void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
-                               const OutputSelection& selection, Function&& function) {
+                               const IndexSelection& selection, Function&& function) {
     if (observedLayout.shape() != expectedLayout.shape())
         throw std::runtime_error("Comparison offset traversal shape mismatch.");
     const Shape& shape = observedLayout.shape();
-    const IndexIteration iteration(shape, selection.indexOrder());
+    const IndexIteration iteration(shape, selection.indexOrder(shape.rank()));
     const size_t total = iteration.count();
-    if (selection.kind() == OutputSelectionKind::Explicit) {
+    if (selection.kind() == IndexSelectionKind::Explicit) {
         std::vector<size_t> coordinates(shape.rank(), 0);
         for (const size_t logicalIndex : selection.indices(total)) {
             iteration.coordinates(logicalIndex, coordinates);
@@ -173,7 +173,7 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     if (selection.selectsAll() || (selection.first() == 0 && selection.stride() == 1)) {
         const size_t selectedTotal =
             selection.selectsAll() ? total : std::min(total, selection.maxElements());
-        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, selection.indexOrder(), 0,
+        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, iteration.axes(), 0,
                                      selectedTotal, std::forward<Function>(function));
         return;
     }
@@ -191,9 +191,8 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
             ++selected;
             ++logicalIndex;
             if (logicalIndex >= total || selected >= selection.maxElements()) break;
-            if (!advanceCoordinates(coordinates, shape, selection.indexOrder(),
-                                    observedLayout.strides(), expectedLayout.strides(),
-                                    observedOffset, expectedOffset))
+            if (!advanceCoordinates(coordinates, shape, iteration.axes(), observedLayout.strides(),
+                                    expectedLayout.strides(), observedOffset, expectedOffset))
                 break;
         }
         return;

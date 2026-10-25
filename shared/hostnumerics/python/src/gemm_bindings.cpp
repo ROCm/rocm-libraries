@@ -33,7 +33,7 @@ Tensor matmulOwned(Tensor a, Tensor b, ScalarType outputType, MatmulOptions opti
 }
 
 void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
-                     OutputSelection selection, GemmBackend backend) {
+                     IndexSelection selection, GemmBackend backend) {
     validatePythonGemmBackend(backend);
     matmulInto(a, b, std::move(output), options, std::move(selection), backend);
 }

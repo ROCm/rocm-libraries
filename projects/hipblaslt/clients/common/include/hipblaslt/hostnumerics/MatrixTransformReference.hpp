@@ -78,20 +78,20 @@ namespace hipblaslt::hostnumerics
                     scaledB,
                     expected,
                     ScalarType::Float32,
-                    roc::hostnumerics::OutputSelection::all({}));
+                    roc::hostnumerics::IndexSelection::allLastDimensionFastest());
         }
         else if(a)
             multiplyInto(*a,
                          Tensor::scalar(ScalarType::Float32, alpha),
                          expected,
                          ScalarType::Float32,
-                         roc::hostnumerics::OutputSelection::all({}));
+                         roc::hostnumerics::IndexSelection::allLastDimensionFastest());
         else if(b)
             multiplyInto(*b,
                          Tensor::scalar(ScalarType::Float32, beta),
                          expected,
                          ScalarType::Float32,
-                         roc::hostnumerics::OutputSelection::all({}));
+                         roc::hostnumerics::IndexSelection::allLastDimensionFastest());
         else
             throw std::runtime_error("MatrixTransform reference requires A or B.");
 

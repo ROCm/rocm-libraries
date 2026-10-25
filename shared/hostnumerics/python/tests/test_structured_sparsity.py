@@ -14,6 +14,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                     hv.ScalarType.Float32, shape, b"", strides=[0, 0, 0], offset=0
                 )
                 pattern = hv.StructuredSparsityPattern()
+                pattern.index_order = [0, 1, 2]
                 pattern.axis = 2
                 pattern.fixed_positions = [1, 3]
                 result = hv.apply_structured_sparsity(tensor, pattern, True)
@@ -47,6 +48,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
         for retained_positions in retained_position_sets:
             with self.subTest(retained_positions=retained_positions):
                 pattern = hv.StructuredSparsityPattern()
+                pattern.index_order = [0, 1]
                 pattern.axis = 1
                 pattern.fixed_positions = list(retained_positions)
                 result = hv.apply_structured_sparsity(
@@ -95,6 +97,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
     def test_structured_sparsity_random_is_deterministic_and_self_consistent(self):
         values = np.arange(1, 65, dtype=np.float32).reshape(4, 16)
         pattern = hv.StructuredSparsityPattern()
+        pattern.index_order = [0, 1]
         pattern.axis = 1
         pattern.selection = hv.StructuredSparsitySelection.Random
         pattern.seed = 0x12345678
@@ -152,6 +155,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32, [2, 8], storage.tobytes(), [10, 1], offset=0
         )
         pattern = hv.StructuredSparsityPattern()
+        pattern.index_order = [0, 1]
         pattern.axis = 1
         pattern.fixed_positions = [1, 3]
         observed = hv.apply_structured_sparsity(

@@ -50,8 +50,8 @@ TEST(Freivalds, PortableArithmeticAgainstPythonIntegers) {
 
 TEST(Freivalds, DenseIntegerOracleWithScalesBiasRoundingAndSaturation) {
     constexpr size_t m = 13, n = 11, k = 129;
-    const auto recipe = GenerationRecipe::realOnly(
-        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = 10553});
+    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), 10553);
     auto a = generate(ScalarType::BFloat16, Shape{m, k}, recipe);
     auto b = generate(ScalarType::BFloat16, Shape{k, n}, recipe);
     auto c = generate(ScalarType::Float32, Shape{m, n}, recipe);

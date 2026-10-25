@@ -11,8 +11,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         serial = hv.generate_tensor(
             hv.ScalarType.Float32,
             [2, 3],
-            real_generation_recipe(
-                hv.GenerationRecipe.serial_index(), seed=0, index_order=()
+            real_generation_recipe_last_dimension_fastest(
+                hv.GenerationRecipe.serial_index(), seed=0
             ),
         )
         np.testing.assert_array_equal(
@@ -20,10 +20,10 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             np.arange(6, dtype=np.float32).reshape((2, 3), order="C"),
         )
 
-        complex_recipe = hv.GenerationRecipe.cartesian(
+        complex_recipe = hv.GenerationRecipe.cartesian_last_dimension_fastest(
             hv.GenerationRecipe.sine(),
             hv.GenerationRecipe.cosine(),
-            settings=hv.GenerationRecipeSettings(0, []),
+            seed=0,
         )
         complex_values = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32, [2, 3], complex_recipe
@@ -39,8 +39,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         identity = hv.generate_tensor(
             hv.ScalarType.Float32,
             [3, 4],
-            real_generation_recipe(
-                hv.GenerationRecipe.identity(), seed=0, index_order=()
+            real_generation_recipe_last_dimension_fastest(
+                hv.GenerationRecipe.identity(), seed=0
             ),
         )
         np.testing.assert_array_equal(
@@ -51,10 +51,10 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         random_component = hv.GenerationRecipe.uniform_integer(
             hv.UniformIntegerGenerationParameters(lower=-3, upper=3)
         )
-        random_recipe = hv.GenerationRecipe.cartesian(
+        random_recipe = hv.GenerationRecipe.cartesian_last_dimension_fastest(
             random_component,
             random_component,
-            hv.GenerationRecipeSettings(seed=seed, index_order=[]),
+            seed,
         )
         random_values = hv.to_numpy(
             hv.generate_tensor(
@@ -94,12 +94,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
 
         candidates = np.asarray([-6.0, -1.5, 0.0, 4.0], dtype=np.float32)
         seed = 37
-        candidate_recipe = real_generation_recipe(
+        candidate_recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.choice(
                 hv.ChoiceGenerationParameters(values=candidates.tolist())
             ),
             seed=seed,
-            index_order=(),
         )
         selected = hv.to_numpy(
             hv.generate_tensor(hv.ScalarType.Float32, [2, 4], candidate_recipe),
@@ -119,10 +118,9 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.GenerationRecipe.choice(hv.ChoiceGenerationParameters(values=[]))
 
         point = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3, 2]))
-        first_point_recipe = real_generation_recipe(
+        first_point_recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=9.0)),
             seed=0,
-            index_order=(),
         )
         hv.generate_at(point, 3, first_point_recipe)
         expected_point = np.zeros((2, 3, 2), dtype=np.float32)
@@ -153,7 +151,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float32,
                 [2, 3, 2],
-                real_generation_recipe(affine_component, seed=0, index_order=()),
+                real_generation_recipe_last_dimension_fastest(affine_component, seed=0),
             ),
             dtype=None,
         )
@@ -164,8 +162,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         np.testing.assert_array_equal(affine, expected_affine)
 
     def test_type_derived_generation(self):
-        maximum_recipe = real_generation_recipe(
-            hv.GenerationRecipe.type_maximum(), seed=0, index_order=()
+        maximum_recipe = real_generation_recipe_last_dimension_fastest(
+            hv.GenerationRecipe.type_maximum(), seed=0
         )
         maximum_cases = (
             (hv.ScalarType.Float16, np.finfo(np.float16).max),
@@ -194,8 +192,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float4E2M1,
                 [2],
-                real_generation_recipe(
-                    hv.GenerationRecipe.type_denormal_minimum(), seed=0, index_order=()
+                real_generation_recipe_last_dimension_fastest(
+                    hv.GenerationRecipe.type_denormal_minimum(), seed=0
                 ),
             ),
             dtype=None,
@@ -208,8 +206,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float8E4M3Fnuz,
                 [2],
-                real_generation_recipe(
-                    hv.GenerationRecipe.type_nan(), seed=0, index_order=()
+                real_generation_recipe_last_dimension_fastest(
+                    hv.GenerationRecipe.type_nan(), seed=0
                 ),
             ),
             dtype=None,
@@ -220,16 +218,16 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float8E5M2,
                 [2],
-                real_generation_recipe(
-                    hv.GenerationRecipe.type_infinity(), seed=0, index_order=()
+                real_generation_recipe_last_dimension_fastest(
+                    hv.GenerationRecipe.type_infinity(), seed=0
                 ),
             ),
             dtype=None,
         )
         self.assertTrue(np.isposinf(infinity).all())
 
-        type_range_recipe = real_generation_recipe(
-            hv.GenerationRecipe.uniform_type_range(), seed=23, index_order=()
+        type_range_recipe = real_generation_recipe_last_dimension_fastest(
+            hv.GenerationRecipe.uniform_type_range(), seed=23
         )
         low_precision = hv.to_numpy(
             hv.generate_tensor(
@@ -252,12 +250,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             )
         )
 
-        absolute_integer_recipe = real_generation_recipe(
+        absolute_integer_recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.absolute_uniform_integer(
                 hv.UniformIntegerGenerationParameters(lower=-3, upper=3)
             ),
             seed=23,
-            index_order=(),
         )
         unsigned_scale_values = hv.to_numpy(
             hv.generate_tensor(
@@ -271,7 +268,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             np.all((0 <= unsigned_scale_values) & (unsigned_scale_values <= 3))
         )
 
-        encoded_exponent_recipe = real_generation_recipe(
+        encoded_exponent_recipe = real_generation_recipe_last_dimension_fastest(
             hv.GenerationRecipe.random_encoded_exponent(
                 hv.RandomEncodedExponentGenerationParameters(
                     lower_unbiased_exponent=-3,
@@ -280,7 +277,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 )
             ),
             seed=29,
-            index_order=(),
         )
         narrow = hv.to_numpy(
             hv.generate_tensor(
@@ -307,12 +303,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         raw_serial = hv.generate_tensor(
             hv.ScalarType.Float16,
             [2, 3],
-            real_generation_recipe(
+            real_generation_recipe_last_dimension_fastest(
                 hv.GenerationRecipe.raw_serial_dimension(
                     hv.DimensionGenerationParameters(dimension=1)
                 ),
                 seed=0,
-                index_order=(),
             ),
         )
         np.testing.assert_array_equal(
@@ -323,12 +318,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         raw_zero = hv.generate_tensor(
             hv.ScalarType.E8M0,
             [4],
-            real_generation_recipe(
+            real_generation_recipe_last_dimension_fastest(
                 hv.GenerationRecipe.raw_constant(
                     hv.RawConstantGenerationParameters(bits=0)
                 ),
                 seed=0,
-                index_order=(),
             ),
         )
         np.testing.assert_array_equal(
@@ -339,12 +333,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         raw_fp4 = hv.generate_tensor(
             hv.ScalarType.Float4E2M1,
             [65],
-            real_generation_recipe(
+            real_generation_recipe_last_dimension_fastest(
                 hv.GenerationRecipe.uniform_raw_integer(
                     hv.UniformIntegerGenerationParameters(lower=0, upper=14)
                 ),
                 seed=31,
-                index_order=(),
             ),
         )
         fp4_nibbles = np.frombuffer(raw_fp4.storage, dtype=np.uint8)
@@ -353,8 +346,8 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         )[:65]
         self.assertTrue(np.all(fp4_nibbles <= 14))
 
-        raw_bits_recipe = real_generation_recipe(
-            hv.GenerationRecipe.random_raw_bits(), seed=41, index_order=()
+        raw_bits_recipe = real_generation_recipe_last_dimension_fastest(
+            hv.GenerationRecipe.random_raw_bits(), seed=41
         )
         raw_bits = hv.generate_tensor(hv.ScalarType.UInt32, [32], raw_bits_recipe)
         raw_bits_repeat = hv.generate_tensor(
@@ -373,7 +366,9 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float32,
                 [64],
-                real_generation_recipe(scaled_component, seed=37, index_order=()),
+                real_generation_recipe_last_dimension_fastest(
+                    scaled_component, seed=37
+                ),
             ),
             dtype=None,
         )
@@ -390,7 +385,9 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float32,
                 [64],
-                real_generation_recipe(positive_component, seed=37, index_order=()),
+                real_generation_recipe_last_dimension_fastest(
+                    positive_component, seed=37
+                ),
             ),
             dtype=None,
         )
@@ -409,7 +406,9 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float32,
                 [2, 3, 2],
-                real_generation_recipe(alternating_component, seed=0, index_order=()),
+                real_generation_recipe_last_dimension_fastest(
+                    alternating_component, seed=0
+                ),
             ),
             dtype=None,
         )
@@ -427,7 +426,9 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             hv.generate_tensor(
                 hv.ScalarType.Float32,
                 [2, 3],
-                real_generation_recipe(opposite_component, seed=0, index_order=()),
+                real_generation_recipe_last_dimension_fastest(
+                    opposite_component, seed=0
+                ),
             ),
             dtype=None,
         )
@@ -443,8 +444,8 @@ class PermutationGenerationTests(unittest.TestCase):
             for scalar_type in (hv.ScalarType.Float32, hv.ScalarType.Float6E2M3):
                 layout = hv.Layout(hv.Shape(dimensions), [-20, 5, 1], 20)
                 component = hv.GenerationRecipe.serial_index()
-                recipe = hv.GenerationRecipe.real_only(
-                    component, settings=hv.GenerationRecipeSettings(0, [])
+                recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+                    component, seed=0
                 ).with_index_order(order)
                 whole = hv.generate_tensor(scalar_type, layout, recipe)
                 pointwise = hv.Tensor(scalar_type, layout)
@@ -472,28 +473,28 @@ class PermutationGenerationTests(unittest.TestCase):
         observed_values[tuple(point)] = 9
         observed = hv.from_numpy(observed_values)
         options = hv.ComparisonOptions()
-        options.selection = hv.OutputSelection.explicit_indices([13], index_order=order)
+        options.selection = hv.IndexSelection.explicit_indices([13], index_order=order)
         report = hv.compare(observed, expected, options)
         self.assertFalse(report.passed)
         self.assertEqual(report.reported_mismatches[0].coordinates, point)
         for invalid in ([0, 1], [0, 0, 2], [0, 1, 3]):
-            recipe = hv.GenerationRecipe.real_only(
-                hv.GenerationRecipe.serial_index(),
-                settings=hv.GenerationRecipeSettings(0, []),
-            ).with_index_order(invalid)
             with self.assertRaises(RuntimeError):
+                recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+                    hv.GenerationRecipe.serial_index(),
+                    seed=0,
+                ).with_index_order(invalid)
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
-            options.selection = hv.OutputSelection.all(index_order=invalid)
             with self.assertRaises(RuntimeError):
+                options.selection = hv.IndexSelection.all(index_order=invalid)
                 hv.compare(observed, expected, options)
 
     def test_contiguous_axis_order_conversion_and_selections(self):
         dimensions = (2, 3, 4)
         order = [1, 0, 2]
         layout = hv.Layout(hv.Shape(dimensions), [4, 8, 1], 0)
-        recipe = hv.GenerationRecipe.real_only(
+        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
             hv.GenerationRecipe.serial_index(),
-            settings=hv.GenerationRecipeSettings(0, []),
+            seed=0,
         ).with_index_order(order)
         source = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
         expected = np.arange(24, dtype=np.float32).reshape(3, 2, 4).transpose(1, 0, 2)
@@ -501,11 +502,11 @@ class PermutationGenerationTests(unittest.TestCase):
         converted = source.to(hv.ScalarType.Float64)
         np.testing.assert_array_equal(hv.to_numpy(converted, dtype=None), expected)
         for selection in (
-            hv.OutputSelection.all(index_order=order),
-            hv.OutputSelection.strided(
+            hv.IndexSelection.all(index_order=order),
+            hv.IndexSelection.strided(
                 2, 3, index_order=order, max_elements=sys.maxsize * 2 + 1
             ),
-            hv.OutputSelection.explicit_indices([1, 13, 23], index_order=order),
+            hv.IndexSelection.explicit_indices([1, 13, 23], index_order=order),
         ):
             options = hv.ComparisonOptions()
             options.selection = selection
@@ -517,12 +518,12 @@ class PermutationGenerationTests(unittest.TestCase):
         for dimensions in ((2, 3, 4), (2, 0, 4), ()):
             tensor = hv.Tensor(hv.ScalarType.Float32, hv.Shape(dimensions))
             options = hv.ComparisonOptions()
-            for selection in (
-                hv.OutputSelection.all(index_order=[0, 0, 2]),
-                hv.OutputSelection.explicit_indices([], index_order=[0, 0, 2]),
+            for factory in (
+                lambda: hv.IndexSelection.all(index_order=[0, 0, 2]),
+                lambda: hv.IndexSelection.explicit_indices([], index_order=[0, 0, 2]),
             ):
-                options.selection = selection
                 with self.assertRaises(RuntimeError):
+                    options.selection = factory()
                     hv.compare(tensor, tensor, options)
 
     def test_prepared_type_generation_matches_checked_pointwise(self):
@@ -540,18 +541,18 @@ class PermutationGenerationTests(unittest.TestCase):
             ),
         )
         for component in components:
-            recipe = hv.GenerationRecipe.real_only(
+            recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
                 component.with_zero_outside_main_diagonal(),
-                settings=hv.GenerationRecipeSettings(0, []),
+                seed=0,
             ).with_index_order([1, 0])
             whole = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
             pointwise = hv.Tensor(hv.ScalarType.Float32, layout)
             for index in range(6):
                 hv.generate_at(pointwise, index, recipe)
             self.assertEqual(whole.storage, pointwise.storage)
-        recipe = hv.GenerationRecipe.real_only(
+        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
             hv.GenerationRecipe.uniform_finite_encoded_value(),
-            settings=hv.GenerationRecipeSettings(0, []),
+            seed=0,
         )
         whole = hv.generate_tensor(hv.ScalarType.Float6E2M3, layout, recipe)
         pointwise = hv.Tensor(hv.ScalarType.Float6E2M3, layout)

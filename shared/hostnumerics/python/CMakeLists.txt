@@ -23,6 +23,7 @@ nanobind_add_module(
     NB_STATIC
     src/bindings.cpp
     src/core_bindings.cpp
+    src/index_selection_bindings.cpp
     src/shape_bindings.cpp
     src/layout_bindings.cpp
     src/comparison_bindings.cpp

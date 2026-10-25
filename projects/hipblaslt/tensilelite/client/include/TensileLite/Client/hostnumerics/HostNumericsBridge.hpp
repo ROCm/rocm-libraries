@@ -344,11 +344,11 @@ namespace TensileLite::Client
         return options;
     }
 
-    inline hostnumerics::detail::Expected<roc::hostnumerics::OutputSelection,
+    inline hostnumerics::detail::Expected<roc::hostnumerics::IndexSelection,
                                           hostnumerics::detail::DescriptorFailure>
-        getReferenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
+        getReferenceIndexSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
-        using roc::hostnumerics::OutputSelection;
+        using roc::hostnumerics::IndexSelection;
         const auto logicalCount
             = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
         if(!logicalCount)
@@ -360,7 +360,7 @@ namespace TensileLite::Client
         for(size_t axis = 0; axis < order.size(); ++axis)
             order[axis] = order.size() - 1 - axis;
         if(elementsToValidate == 0 || elementsToValidate >= *logicalCount)
-            return OutputSelection::all(order);
+            return IndexSelection::all(order);
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
         const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
@@ -369,13 +369,13 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::PrimeStrideOverflow));
         }
-        return OutputSelection::strided(0, *stride, std::numeric_limits<size_t>::max(), order);
+        return IndexSelection::strided(0, *stride, std::numeric_limits<size_t>::max(), order);
     }
 
-    inline roc::hostnumerics::OutputSelection
-        referenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
+    inline roc::hostnumerics::IndexSelection
+        referenceIndexSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
-        auto selection = getReferenceOutputSelection(descriptor, elementsToValidate);
+        auto selection = getReferenceIndexSelection(descriptor, elementsToValidate);
         if(!selection)
             throw std::runtime_error(std::string(hostnumerics::detail::message(selection.error())));
         return std::move(*selection);

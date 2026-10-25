@@ -13,7 +13,6 @@ struct ShapeAccess {
     }
 
     static bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
-        if (order.empty()) return true;
         if (order.size() != rank) return false;
         std::vector<bool> seen(rank, false);
         for (size_t axis : order) {

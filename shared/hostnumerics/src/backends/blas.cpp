@@ -5,7 +5,7 @@
 
 namespace roc::hostnumerics {
 void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
-                               const MatmulOptions& options, OutputSelection selection) {
+                               const MatmulOptions& options, IndexSelection selection) {
     (void)detail::executeBlasGemm(
         GemmInvocation(a, b, std::move(output), options, std::move(selection)),
         GemmBackend::Automatic);
@@ -26,7 +26,7 @@ Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType output
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulIntoWithBlasBackend(a, b, output, options, OutputSelection::all({}));
+    matmulIntoWithBlasBackend(a, b, output, options, IndexSelection::allLastDimensionFastest());
     return output;
 }
 
