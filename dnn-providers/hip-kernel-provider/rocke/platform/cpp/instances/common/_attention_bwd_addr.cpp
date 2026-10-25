@@ -1040,3 +1040,181 @@ void rocke_attn_bwd_packed_rows_locate(const rocke_attn_bwd_packed_rows_t* p,
     *out_row = row;
     *out_ok = ok;
 }
+
+/* ====================================================================== *
+ * Main-kernel unit additions
+ * ====================================================================== */
+
+rocke_value_t* rocke_attn_bwd_strided_tensor_addr_offset_bytes(
+    const rocke_attn_bwd_strided_tensor_addr_t* t, rocke_attn_bwd_iv_t h, rocke_attn_bwd_iv_t row0)
+{
+    rocke_ir_builder_t* b = t->b;
+    rocke_value_t* off = t->seq_base;
+    if(!rocke_attn_bwd_iv_is_int(h, 0))
+    {
+        rocke_value_t* h64 = rocke_attn_bwd_as_i64(b, h, false);
+        rocke_value_t* term = scaled64(b, h64, t->strides[1]);
+        off = off == NULL ? term : rocke_b_add(b, off, term);
+    }
+    if(!rocke_attn_bwd_iv_is_int(row0, 0))
+    {
+        rocke_value_t* r32 = rocke_attn_bwd_as_i32(b, row0);
+        rocke_value_t* r64 = rocke_attn_bwd_as_i64(b, rocke_attn_bwd_iv_val(r32), false);
+        rocke_value_t* term = scaled64(b, r64, t->strides[2]);
+        off = off == NULL ? term : rocke_b_add(b, off, term);
+    }
+    if(off == NULL)
+        return rocke_b_const_i64(b, 0);
+    rocke_value_t* es = rocke_b_const_i64(b, t->esize);
+    return rocke_b_mul(b, off, es);
+}
+
+rocke_value_t*
+    rocke_attn_bwd_strided_tensor_addr_stride_bytes(const rocke_attn_bwd_strided_tensor_addr_t* t,
+                                                    char which)
+{
+    rocke_ir_builder_t* b = t->b;
+    rocke_attn_bwd_iv_t st;
+    if(which == 'h')
+        st = t->strides[1];
+    else if(which == 't')
+        st = t->strides[2];
+    else
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "'%c'", which);
+    rocke_value_t* s64 = rocke_attn_bwd_as_i64(b, st, false);
+    return scaled64(b, s64, rocke_attn_bwd_iv_int(t->esize));
+}
+
+rocke_attn_bwd_row_slab_t
+    rocke_attn_bwd_strided_tensor_addr_slab_at(const rocke_attn_bwd_strided_tensor_addr_t* t,
+                                               rocke_value_t* off,
+                                               rocke_value_t* row0,
+                                               bool clamp)
+{
+    rocke_ir_builder_t* b = t->b;
+    rocke_attn_bwd_row_slab_t s;
+    memset(&s, 0, sizeof(s));
+    rocke_value_t* ptr = rocke_b_global_ptr_add(b, t->base, off);
+    s.b = b;
+    s.ptr = ptr;
+    s.dtype = t->dtype;
+    s.t_stride = t->strides[2];
+    s.base_row = row0;
+    s.last = clamp ? t->seq.last : NULL;
+    s.stage_vec = t->stage_vec;
+    s.narrow = t->narrow_vec;
+    s.has_parts = true;
+    s.parts_base = t->base;
+    s.parts_off = off;
+    return s;
+}
+
+/* cond = row_ok(r) if ok is None else land(row_ok(r), ok) */
+static rocke_value_t*
+    row_cond(const rocke_attn_bwd_ws_slab_t* s, rocke_value_t* r, rocke_value_t* ok)
+{
+    rocke_value_t* rk = rocke_attn_bwd_ws_slab_row_ok(s, r);
+    return ok == NULL ? rk : rocke_b_land(s->b, rk, ok);
+}
+
+/* base if x is the literal 0 else base + as_i32(x) */
+static rocke_value_t* col_index(rocke_ir_builder_t* b, rocke_value_t* base, rocke_attn_bwd_iv_t x)
+{
+    if(rocke_attn_bwd_iv_is_int(x, 0))
+        return base;
+    rocke_value_t* xv = rocke_attn_bwd_as_i32(b, x);
+    return rocke_b_add(b, base, xv);
+}
+
+/* The predicated row of atomic_add_row (atomic) / store_row. */
+static void ws_row_branch(const rocke_attn_bwd_ws_slab_t* s,
+                          rocke_value_t* r,
+                          const rocke_attn_bwd_iv_t* xs,
+                          rocke_value_t* const* vs,
+                          int n,
+                          rocke_value_t* ok,
+                          bool atomic)
+{
+    rocke_ir_builder_t* b = s->b;
+    rocke_value_t* cond = row_cond(s, r, ok);
+    rocke_if_t f = rocke_b_scf_if(b, cond);
+    if(f.op == NULL)
+        return;
+    rocke_b_region_enter(b, f.then_region);
+    rocke_value_t* base = scaled32(b, r, s->row_stride);
+    for(int i = 0; i < n; ++i)
+    {
+        rocke_value_t* idx = col_index(b, base, xs[i]);
+        if(atomic)
+            rocke_b_global_atomic_add_f32(b, s->ptr, idx, vs[i]);
+        else
+            rocke_b_global_store(b, s->ptr, idx, vs[i], 4);
+    }
+    rocke_b_region_leave(b);
+}
+
+void rocke_attn_bwd_ws_slab_atomic_add_row(const rocke_attn_bwd_ws_slab_t* s,
+                                           rocke_value_t* r,
+                                           const rocke_attn_bwd_iv_t* xs,
+                                           rocke_value_t* const* vs,
+                                           int n,
+                                           rocke_value_t* ok)
+{
+    ws_row_branch(s, r, xs, vs, n, ok, true);
+}
+
+void rocke_attn_bwd_ws_slab_atomic_add_row_select(const rocke_attn_bwd_ws_slab_t* s,
+                                                  rocke_value_t* r,
+                                                  const rocke_attn_bwd_iv_t* xs,
+                                                  rocke_value_t* const* vs,
+                                                  int n,
+                                                  rocke_value_t* ok)
+{
+    rocke_ir_builder_t* b = s->b;
+    rocke_value_t* cond = row_cond(s, r, ok);
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    rocke_value_t* lr = rocke_attn_bwd_ws_slab_local_row(s, r);
+    rocke_value_t* base = scaled32(b, lr, s->row_stride);
+    for(int i = 0; i < n; ++i)
+    {
+        rocke_value_t* idx = col_index(b, base, xs[i]);
+        rocke_value_t* v = rocke_b_select(b, cond, vs[i], zero);
+        rocke_b_global_atomic_add_f32(b, s->ptr, idx, v);
+    }
+}
+
+void rocke_attn_bwd_ws_slab_store_row(const rocke_attn_bwd_ws_slab_t* s,
+                                      rocke_value_t* r,
+                                      const rocke_attn_bwd_iv_t* xs,
+                                      rocke_value_t* const* vs,
+                                      int n,
+                                      rocke_value_t* ok)
+{
+    ws_row_branch(s, r, xs, vs, n, ok, false);
+}
+
+void rocke_attn_bwd_ws_slab_store_vec_in_row(const rocke_attn_bwd_ws_slab_t* s,
+                                             rocke_value_t* r,
+                                             rocke_attn_bwd_iv_t x,
+                                             rocke_value_t* v)
+{
+    rocke_ir_builder_t* b = s->b;
+    if(!rocke_ir_builder_ok(b) || v == NULL)
+        return;
+    const int n = v->type->count;
+    rocke_value_t* base = scaled32(b, r, s->row_stride);
+    rocke_value_t* idx = col_index(b, base, x);
+    if(n == 1)
+    {
+        rocke_value_t* e = rocke_b_vec_extract(b, v, 0);
+        rocke_b_global_store(b, s->ptr, idx, e, 4);
+        return;
+    }
+    if(n != 2 && n != 4 && n != 8)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "workspace row stores take 1, 2, 4 or 8 floats, not %d", n);
+        return;
+    }
+    rocke_b_global_store_vN(b, s->ptr, idx, v, n, 4 * n < 16 ? 4 * n : 16);
+}
