@@ -3,8 +3,9 @@
 /*
  * helper_rocke.instances.common._attention_bwd_band.cpp -- C port of
  * library/kernels/common/_attention_bwd_band.py: q_tile_range,
- * tile_inside_band, is_edge_tile, tile_class, interior_q_range, dkv_store_rule
- * and the RuntimeBand / NoMaskKTail mask policies.
+ * tile_inside_band, is_edge_tile, tile_class, interior_q_range, dkv_store_rule,
+ * the RuntimeBand / NoMaskKTail mask policies, and the host-side (HostInt)
+ * evaluation of q_tile_range / is_edge_tile behind static_kv_tile_plan.
  *
  * Builder calls are made in the order Python makes them, so the emitted IR is
  * byte-identical; nested Python call arguments are bound to locals in Python's
@@ -671,4 +672,179 @@ Value* rocke_attn_bwd_mask_keep_in(Builder* b, Value* lo, Value* hi, Value* k)
         Value* clamped = rocke_b_smin(b, above, hi);
         return rocke_b_cmp_eq(b, clamped, k);
     });
+}
+
+/* ====================================================================== *
+ * Host-side (compile-time) evaluation: the formulas above on HostInt
+ * ====================================================================== */
+
+namespace
+{
+
+void put_err(char* err, size_t cap, const char* msg)
+{
+    if(err != NULL && cap > 0)
+        snprintf(err, cap, "%s", msg);
+}
+
+/* HostInt.div: sdiv, truncating toward zero. */
+int64_t host_div(int64_t x, int64_t y)
+{
+    int64_t ax = x < 0 ? -x : x;
+    int64_t ay = y < 0 ? -y : y;
+    int64_t q = ax / ay;
+    return (x >= 0) == (y > 0) ? q : -q;
+}
+
+int64_t host_min(int64_t x, int64_t y)
+{
+    return x < y ? x : y;
+}
+
+int64_t host_max(int64_t x, int64_t y)
+{
+    return x > y ? x : y;
+}
+
+} // namespace
+
+rocke_status_t rocke_attn_bwd_host_band_init(rocke_attn_bwd_host_band_t* out,
+                                             int64_t s_q,
+                                             int64_t s_kv,
+                                             int64_t off,
+                                             int64_t left,
+                                             int64_t right,
+                                             char* err,
+                                             size_t err_cap)
+{
+    /* AttnRuntimeBounds.__post_init__ */
+    if(left < -1)
+    {
+        char m[96];
+        snprintf(m, sizeof(m), "left_bound must be >= -1 (got %lld)", (long long)left);
+        put_err(err, err_cap, m);
+        return ROCKE_ERR_VALUE;
+    }
+    if(right < -1)
+    {
+        char m[96];
+        snprintf(m, sizeof(m), "right_bound must be >= -1 (got %lld)", (long long)right);
+        put_err(err, err_cap, m);
+        return ROCKE_ERR_VALUE;
+    }
+    out->sq = s_q;
+    out->sk = s_kv;
+    out->sk_minus1 = s_kv - 1;
+    out->has_off = off != 0;
+    out->off = off;
+    /* _is_static_unbounded: an int below 0 */
+    out->has_left = left >= 0;
+    out->left = left;
+    out->has_right = right >= 0;
+    out->right = right;
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_attn_bwd_host_band_q_tile_range(const rocke_attn_bwd_host_band_t* band,
+                                                     int64_t k0,
+                                                     int k_n0,
+                                                     int k_m0,
+                                                     int64_t* out_qt_start,
+                                                     int64_t* out_n_qt)
+{
+    if(k_n0 < 1 || k_m0 < 1)
+        return ROCKE_ERR_VALUE;
+    const int64_t zero = 0, cm = k_m0;
+    int64_t k_last = host_min(k0 + (k_n0 - 1), band->sk_minus1);
+    int64_t sq_m1 = band->sq - 1;
+    int64_t k_first_c = band->has_off ? k0 - band->off : k0;
+    int64_t k_last_c = band->has_off ? k_last - band->off : k_last;
+    int64_t q_lo = zero;
+    if(band->has_right)
+        q_lo = host_max(k_first_c - band->right, zero);
+    int64_t q_hi = sq_m1;
+    if(band->has_left)
+        q_hi = host_min(k_last_c + band->left, sq_m1);
+    bool dead = (k_last < k0) | (q_hi < q_lo);
+    q_hi = dead ? -1 : q_hi;
+    int64_t qt_start = host_div(q_lo, cm);
+    int64_t qt_stop = host_div(host_max(q_hi, -1) + cm, cm);
+    *out_qt_start = qt_start;
+    *out_n_qt = host_max(qt_stop - qt_start, zero);
+    return ROCKE_OK;
+}
+
+bool rocke_attn_bwd_host_band_is_edge_tile(
+    const rocke_attn_bwd_host_band_t* band, int64_t qt, int64_t k0, int k_m0, int k_n0, bool masked)
+{
+    int64_t q_first = qt * k_m0;
+    int64_t q_last = q_first + (k_m0 - 1);
+    int64_t k_last = k0 + (k_n0 - 1);
+    bool interior = (q_last < band->sq) & (k_last < band->sk);
+    if(masked)
+    {
+        /* tile_inside_band */
+        bool inside = true; /* cmp_le(0, 0) when no side is bounded */
+        bool any = false;
+        if(band->has_right)
+        {
+            int64_t centre = band->has_off ? q_first + band->off : q_first;
+            inside = k_last <= centre + band->right;
+            any = true;
+        }
+        if(band->has_left)
+        {
+            int64_t centre = band->has_off ? q_last + band->off : q_last;
+            bool ok = k0 >= centre - band->left;
+            inside = any ? (inside & ok) : ok;
+        }
+        interior = interior & inside;
+    }
+    return !interior;
+}
+
+int64_t rocke_attn_bwd_static_kv_tile_plan_n_interior(const rocke_attn_bwd_static_kv_tile_plan_t* p)
+{
+    return p->n_qt - p->n_edge;
+}
+
+rocke_status_t rocke_attn_bwd_static_kv_tile_plan(int64_t s_q,
+                                                  int64_t s_kv,
+                                                  int64_t k0,
+                                                  int k_m0,
+                                                  int k_n0,
+                                                  int64_t left,
+                                                  int64_t right,
+                                                  bool bottom_right,
+                                                  bool masked,
+                                                  rocke_attn_bwd_static_kv_tile_plan_t* out,
+                                                  char* err,
+                                                  size_t err_cap)
+{
+    if(left < -1 || right < -1)
+    {
+        put_err(err, err_cap, "band bounds must be >= -1");
+        return ROCKE_ERR_VALUE;
+    }
+    int64_t off = bottom_right ? s_kv - s_q : 0;
+    rocke_attn_bwd_host_band_t band;
+    rocke_status_t st = rocke_attn_bwd_host_band_init(
+        &band, s_q, s_kv, off, masked ? left : -1, masked ? right : -1, err, err_cap);
+    if(st != ROCKE_OK)
+        return st;
+    int64_t qt_start = 0, n_qt = 0;
+    if(rocke_attn_bwd_host_band_q_tile_range(&band, k0, k_n0, k_m0, &qt_start, &n_qt) != ROCKE_OK)
+    {
+        put_err(err, err_cap, "tile sizes must be positive");
+        return ROCKE_ERR_VALUE;
+    }
+    int64_t n_edge = 0;
+    for(int64_t qt = qt_start; qt < qt_start + n_qt; ++qt)
+        if(rocke_attn_bwd_host_band_is_edge_tile(&band, qt, k0, k_m0, k_n0, masked))
+            ++n_edge;
+    out->k0 = k0;
+    out->qt_start = qt_start;
+    out->n_qt = n_qt;
+    out->n_edge = n_edge;
+    return ROCKE_OK;
 }

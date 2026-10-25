@@ -16,6 +16,7 @@
 
 #include <vector>
 
+#include "rocke/helper_rocke.instances.common._attention_dense_bwd_shell.h" /* BufferRowSlab */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ====================================================================== *
@@ -346,6 +347,8 @@ rocke_value_t* rocke_attn_bwd_row_slab_load(const rocke_attn_bwd_row_slab_t* s,
                                             rocke_value_t* row,
                                             rocke_attn_bwd_iv_t col)
 {
+    if(s->rsrc != NULL)
+        return rocke_attn_bwd_buffer_row_slab_load(s, row, col);
     const int esize = elem_bytes(s->b, s->dtype);
     rocke_value_t* idx = rocke_attn_bwd_row_slab_index(s, row, col);
     return rocke_b_global_load(s->b, s->ptr, idx, s->dtype, esize);
@@ -375,6 +378,8 @@ rocke_value_t* rocke_attn_bwd_row_slab_load_vec(const rocke_attn_bwd_row_slab_t*
                                                 rocke_attn_bwd_iv_t col0,
                                                 int n)
 {
+    if(s->rsrc != NULL)
+        return rocke_attn_bwd_buffer_row_slab_load_vec(s, row, col0, n);
     rocke_ir_builder_t* b = s->b;
     if(n < 1)
     {
@@ -540,6 +545,7 @@ rocke_attn_bwd_row_slab_t
     rocke_ir_builder_t* b = t->b;
     rocke_attn_bwd_row_slab_t s;
     memset(&s, 0, sizeof(s));
+    clamp = clamp && !t->never_clamp;
     rocke_value_t* r0 = rocke_attn_bwd_as_i32(b, row0);
     const bool static_zero = rocke_attn_bwd_iv_is_int(row0, 0);
     rocke_value_t* base_row = (clamp && !static_zero) ? rocke_b_smin(b, r0, t->seq.last) : r0;
