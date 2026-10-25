@@ -1828,6 +1828,9 @@ bool CDNA5ReadyQueue::promoteDuePrefetchProducer() {
     for (int kind : {kValu, kOther}) {
         for (DAGNode* n : kind == kValu ? valuQueue : otherQueue) {
             if (n->id >= needByWindow_.size() || needByWindow_[n->id] == INT_MAX) continue;
+            // A window below 0 can no longer be met. Promoting then only takes the slot of a ds
+            // the pacer has released, with nothing gained.
+            if (needByWindow_[n->id] < 0) continue;
             if (wmmaIssuedCountThisRegion_ < needByWindow_[n->id]) continue;
             if (best && needByWindow_[n->id] >= needByWindow_[best->id]) continue;
             if (!feedsPrefetch(n, 2) || !issuableNow(n)) continue;
