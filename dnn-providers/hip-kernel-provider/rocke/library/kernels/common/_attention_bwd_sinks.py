@@ -3,7 +3,9 @@
 
 """dQ sinks of the attention backward tile step.
 
-Family glue for the backward kernels (Python-only, no C++ twin).  The tile
+Family glue for the backward kernels (C++ twin:
+``helper_rocke.instances.common._attention_bwd_sinks.h``, byte-identical by
+``tests/parity/attention_bwd_sinks_emit``).  The tile
 step hands each q step's partial ``dQ = dS K`` fragment to a sink:
 
     sink.begin_head(b, h)                  # i64 rebase when the head changes
