@@ -4,7 +4,9 @@ HostNumerics-owned terminal errors throw `std::runtime_error`. Catch them only
 to report the failure, to clean up and rethrow, or to pass the exception from a
 worker to the thread that joins it; never to retry or fall back.
 Expected support and compatibility failures should use explicit results
-or checks. Allocation, system, dependency and visitor errors retain their
+or checks. New fallible queries should follow this result convention; existing
+throwing conveniences, such as `Shape::linearIndex`, report terminal failures.
+Allocation, system, dependency and visitor errors retain their
 original types. Dispatch rejects invalid enum values before invoking the visitor
 or moving its arguments. This policy does not promise exceptions-disabled builds.
 

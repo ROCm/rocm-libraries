@@ -38,6 +38,7 @@ target_sources(hostnumerics-core
             include/roc/hostnumerics/shape.hpp
             include/roc/hostnumerics/expected.hpp
             include/roc/hostnumerics/layout.hpp
+            include/roc/hostnumerics/detail/index_order.hpp
 )
 
 # hostnumerics will add input generation, reference operations, and comparison.

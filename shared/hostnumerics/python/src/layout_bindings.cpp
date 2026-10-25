@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
 #include <roc/hostnumerics/layout.hpp>
@@ -38,6 +39,9 @@ Layout() is a scalar with zero offset. Invalid ranks, coordinates, orders, and
 arithmetic overflow raise RuntimeError. Negative axes or coordinates, and other
 values that do not fit size_t or ptrdiff_t, raise TypeError. Layouts are
 immutable and compare and hash by shape, strides, and offset.
+Contiguous factories require each extent and running stride product, including
+the final element count, to fit ptrdiff_t. Even empty shapes can overflow before
+the traversal reaches a zero extent.
 )doc")
         .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
@@ -69,6 +73,16 @@ immutable and compare and hash by shape, strides, and offset.
              "Return the signed stride at a nonnegative axis less than rank.")
         .def_prop_ro("offset", &Layout::offset)
         .def(
+            "element_bounds",
+            [](const Layout& layout) {
+                const auto result = layout.getElementBounds();
+                if (!result) throw std::runtime_error(result.error().message());
+                return nb::make_tuple(result->first, result->second);
+            },
+            "Return inclusive minimum and maximum reachable element offsets. Empty shapes "
+            "return (0, -1), and scalars return (offset, offset). Raises RuntimeError if "
+            "an intermediate product or sum does not fit ptrdiff_t.")
+        .def(
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {
                 const auto result = layout.elementOffset(indices);
@@ -78,6 +92,17 @@ immutable and compare and hash by shape, strides, and offset.
             "indices"_a,
             "Return offset + sum(indices[d] * strides[d]). Raises RuntimeError if any "
             "coordinate is out of range or any partial result does not fit ptrdiff_t.")
+        .def("__repr__",
+             [](const Layout& layout) {
+                 const auto strides = layout.strides();
+                 const nb::tuple strideValues =
+                     nb::tuple(nb::cast(std::vector<ptrdiff_t>(strides.begin(), strides.end())));
+                 return "Layout(" +
+                        nb::cast<std::string>(
+                            nb::repr(nb::cast(layout.shape(), nb::rv_policy::copy))) +
+                        ", " + nb::cast<std::string>(nb::repr(strideValues)) + ", " +
+                        std::to_string(layout.offset()) + ")";
+             })
         .def("__hash__",
              [](const Layout& layout) {
                  const auto dimensions = layout.shape().dimensions();

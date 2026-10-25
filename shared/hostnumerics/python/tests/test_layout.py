@@ -54,11 +54,24 @@ class LayoutTests(unittest.TestCase):
         left = hn.Layout(hn.Shape([2, 3]), [5, -1], 2)
         equal = hn.Layout(hn.Shape([2, 3]), [5, -1], 2)
         different = hn.Layout(hn.Shape([2, 3]), [5, -1], 3)
-        expected = hash(((2, 3), (5, -1), 2))
-        self.assertEqual(hash(left), expected)
-        self.assertEqual(hash(equal), expected)
+        self.assertEqual(hash(left), hash(equal))
         self.assertEqual(len({left, equal, different}), 2)
         self.assertEqual({left: "value"}[equal], "value")
+
+    def test_repr(self):
+        self.assertEqual(
+            repr(hn.Layout(hn.Shape([2, 3]), [5, -1], 2)),
+            "Layout(Shape((2, 3)), (5, -1), 2)",
+        )
+        for layout in (
+            hn.Layout(),
+            hn.Layout(hn.Shape(), [], PTRDIFF_MIN),
+            hn.Layout(hn.Shape([2, 0]), [0, 1], PTRDIFF_MAX),
+            hn.Layout(hn.Shape([3]), [-1], 2),
+        ):
+            self.assertEqual(
+                eval(repr(layout), {"Layout": hn.Layout, "Shape": hn.Shape}), layout
+            )
 
     def test_contiguous_orders_match_numpy(self):
         factories = (
@@ -124,6 +137,10 @@ class LayoutTests(unittest.TestCase):
                 hn.Layout.contiguous(shape, order)
         with self.assertRaises(RuntimeError):
             hn.Layout.contiguous(hn.Shape(), [0])
+        with self.assertRaisesRegex(RuntimeError, "order rank 2.*shape rank 3"):
+            hn.Layout.contiguous(shape, [0, 1])
+        with self.assertRaisesRegex(RuntimeError, "axis 0 at position 1.*\\[0, 3\\)"):
+            hn.Layout.contiguous(shape, [0, 0, 2])
         # Order validation precedes arithmetic, even when an extent is too large.
         with self.assertRaisesRegex(RuntimeError, "each dimension once"):
             hn.Layout.contiguous(hn.Shape([SIZE_MAX, 0]), [0, 0])
@@ -220,9 +237,34 @@ class LayoutTests(unittest.TestCase):
                 RuntimeError, f"offset {message} overflow"
             ):
                 hn.Layout(hn.Shape([3]), [stride], offset).element_offset([index])
-        # Each intermediate operation must fit even if a later term could cancel it.
+        # Checking each step keeps arithmetic in ptrdiff_t without a wider accumulator;
+        # later cancellation cannot rescue an overflowing partial sum.
         with self.assertRaises(RuntimeError):
             hn.Layout(hn.Shape([2, 2]), [1, -1], PTRDIFF_MAX).element_offset([1, 1])
+        self.assertEqual(
+            hn.Layout(hn.Shape([2, 2]), [-1, 1], PTRDIFF_MAX).element_offset([1, 1]),
+            PTRDIFF_MAX,
+        )
+
+    def test_element_bounds(self):
+        for dimensions in ([], [3], [2, 3], [2, 0, 3]):
+            for strides in itertools.product((-3, 0, 5), repeat=len(dimensions)):
+                layout = hn.Layout(hn.Shape(dimensions), strides, 7)
+                offsets = [
+                    7 + sum(i * s for i, s in zip(point, strides))
+                    for point in itertools.product(*(range(d) for d in dimensions))
+                ]
+                expected = (min(offsets), max(offsets)) if offsets else (0, -1)
+                self.assertEqual(layout.element_bounds(), expected)
+        for layout, message in (
+            (
+                hn.Layout(hn.Shape([2, 3]), [0, PTRDIFF_MAX], 0),
+                "multiplication.*dimension 1",
+            ),
+            (hn.Layout(hn.Shape([2, 2]), [0, 1], PTRDIFF_MAX), "addition.*dimension 1"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, message):
+                layout.element_bounds()
 
     def test_contiguous_overflow_and_empty_shapes(self):
         factories = (
@@ -234,6 +276,9 @@ class LayoutTests(unittest.TestCase):
             for dimensions in ([PTRDIFF_MAX + 1], [PTRDIFF_MAX, 2]):
                 with self.assertRaises(RuntimeError):
                     factory(hn.Shape(dimensions))
+            # The final product is checked even when every actual stride and offset fits.
+            with self.assertRaisesRegex(RuntimeError, "contiguous stride overflow"):
+                factory(hn.Shape([2, (PTRDIFF_MAX + 1) // 2]))
             for dimensions in ([0], [2, 0, 3]):
                 layout = factory(hn.Shape(dimensions))
                 self.assertEqual(layout.shape.dimensions, dimensions)

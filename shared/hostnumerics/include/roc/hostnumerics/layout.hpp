@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <roc/hostnumerics/detail/index_order.hpp>
 #include <roc/hostnumerics/expected.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
@@ -55,9 +57,9 @@ inline constexpr std::string_view message(LayoutError error) noexcept {
     return "Unknown LayoutError failure.";
 }
 
-// For CoordinateRankMismatch, value and limit are the coordinate and shape ranks.
-// For CoordinateOutOfRange, value is the coordinate on axis `dimension` and limit
-// is that axis's extent. Other errors leave these fields zero.
+// Rank failures carry the supplied and expected ranks in value and limit.
+// Other failures identify an axis, or an invalid order entry's position, in
+// dimension. Coordinate, extent and order failures also carry value and limit.
 struct LayoutFailure {
     LayoutError error;
     size_t dimension = 0;
@@ -66,6 +68,23 @@ struct LayoutFailure {
 
     std::string message() const {
         switch (error) {
+            case LayoutError::OrderRankMismatch:
+                return "Tensor layout order rank " + std::to_string(value) +
+                       " does not match shape rank " + std::to_string(limit) + ".";
+            case LayoutError::InvalidOrder:
+                return "Tensor layout order must contain each dimension once; axis " +
+                       std::to_string(value) + " at position " + std::to_string(dimension) +
+                       " is repeated or outside [0, " + std::to_string(limit) + ").";
+            case LayoutError::ExtentOutOfRange:
+                return "Tensor extent " + std::to_string(value) + " in dimension " +
+                       std::to_string(dimension) + " exceeds ptrdiff_t.";
+            case LayoutError::ContiguousStrideOverflow:
+            case LayoutError::OffsetMultiplyOverflow:
+            case LayoutError::OffsetAddOverflow: {
+                std::string result(detail::message(error));
+                result.pop_back();
+                return result + " in dimension " + std::to_string(dimension) + ".";
+            }
             case LayoutError::CoordinateRankMismatch:
                 return "Tensor coordinate rank " + std::to_string(value) +
                        " does not match shape rank " + std::to_string(limit) + ".";
@@ -126,54 +145,68 @@ class Layout {
     }
 
     // The result has zero offset. Order lists axes from slowest to fastest, as in
-    // Shape::linearIndex, so its last axis has unit stride. Invalid orders and
-    // extents or strides that do not fit ptrdiff_t are returned as errors;
-    // allocation can still throw.
-    static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(
+    // Shape::linearIndex, so its last axis has unit stride. Every extent and
+    // running stride product, including the final element count,
+    // must fit ptrdiff_t. An empty shape can overflow before reaching its zero
+    // extent, depending on order. Validation failures are returned; allocation
+    // can still throw.
+    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(
         const Shape& shape, std::span<const size_t> order) {
         using namespace detail;
-        if (order.size() != shape.rank()) return Unexpected(LayoutError::OrderRankMismatch);
+        if (order.size() != shape.rank())
+            return Unexpected(
+                LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
+        if (const auto position = getInvalidOrderPosition(order, shape.rank()))
+            return Unexpected(LayoutFailure{LayoutError::InvalidOrder, *position, order[*position],
+                                            shape.rank()});
 
         const auto dimensions = shape.dimensions();
-        std::vector<ptrdiff_t> strides(shape.rank(), -1);
-        // Use strides to find missing or repeated axes; -1 marks an axis not yet seen.
-        for (size_t axis : order) {
-            if (axis >= shape.rank() || strides[axis] != -1)
-                return Unexpected(LayoutError::InvalidOrder);
-            strides[axis] = 0;
-        }
+        std::vector<ptrdiff_t> strides(shape.rank());
         ptrdiff_t stride = 1;
         for (size_t position = shape.rank(); position > 0; --position) {
             const size_t axis = order[position - 1];
             strides[axis] = stride;
             if (!std::in_range<ptrdiff_t>(dimensions[axis])) {
-                return Unexpected(LayoutError::ExtentOutOfRange);
+                return Unexpected(
+                    LayoutFailure{LayoutError::ExtentOutOfRange, axis, dimensions[axis],
+                                  static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())});
             }
             const auto next = getOffsetMultiply(dimensions[axis], stride);
             if (!next) {
-                return Unexpected(LayoutError::ContiguousStrideOverflow);
+                return Unexpected(LayoutFailure{LayoutError::ContiguousStrideOverflow, axis});
             }
             stride = *next;
         }
         return Layout(shape, std::move(strides), 0);
     }
 
-    static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(const Shape& shape) {
+    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(
+        const Shape& shape, std::initializer_list<size_t> order) {
+        return getContiguousLayout(shape, std::span<const size_t>(order.begin(), order.size()));
+    }
+
+    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(const Shape& shape) {
         std::vector<size_t> order(shape.rank());
         std::iota(order.begin(), order.end(), size_t{0});
         return getContiguousLayout(shape, order);
     }
 
-    // Throwing forms of getContiguousLayout.
+    // Throwing forms of getContiguousLayout. The default order is C order, an
+    // alias of contiguousLastDimensionFastest; the explicit names make the
+    // first/last-fastest pair available without an order argument.
     static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
         auto result = getContiguousLayout(shape, order);
-        if (!result) throw std::runtime_error(std::string(message(result.error())));
+        if (!result) throw std::runtime_error(result.error().message());
         return std::move(*result);
+    }
+
+    static Layout contiguous(const Shape& shape, std::initializer_list<size_t> order) {
+        return contiguous(shape, std::span<const size_t>(order.begin(), order.size()));
     }
 
     static Layout contiguous(const Shape& shape) {
         auto result = getContiguousLayout(shape);
-        if (!result) throw std::runtime_error(std::string(message(result.error())));
+        if (!result) throw std::runtime_error(result.error().message());
         return std::move(*result);
     }
 
@@ -228,12 +261,35 @@ class Layout {
         ptrdiff_t result = m_offset;
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             const auto delta = getOffsetMultiply(indices[dimension], m_strides[dimension]);
-            if (!delta) return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow});
+            if (!delta)
+                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, dimension});
             const auto sum = getOffsetAdd(result, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow});
+            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, dimension});
             result = *sum;
         }
         return result;
+    }
+
+    // Inclusive minimum and maximum reachable element offsets, for validating
+    // storage once before an internal loop. Scalars return {offset, offset}; an
+    // empty shape returns {0, -1}. Every intermediate product and sum must fit
+    // ptrdiff_t. This query does not allocate or inspect a storage buffer.
+    detail::Expected<std::pair<ptrdiff_t, ptrdiff_t>, detail::LayoutFailure> getElementBounds()
+        const noexcept {
+        using namespace detail;
+        const auto dimensions = m_shape.dimensions();
+        if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
+            return std::pair<ptrdiff_t, ptrdiff_t>{0, -1};
+        ptrdiff_t lower = m_offset;
+        ptrdiff_t upper = lower;
+        for (size_t axis = 0; axis < dimensions.size(); ++axis) {
+            const auto delta = getOffsetMultiply(dimensions[axis] - 1, m_strides[axis]);
+            if (!delta) return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, axis});
+            const auto sum = getOffsetAdd(*delta < 0 ? lower : upper, *delta);
+            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, axis});
+            (*delta < 0 ? lower : upper) = *sum;
+        }
+        return std::pair{lower, upper};
     }
 
     bool operator==(const Layout&) const noexcept = default;
