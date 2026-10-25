@@ -9,12 +9,27 @@
 #include <cstring>
 #include <roc/hostnumerics/scalar_binary_float.hpp>
 #include <roc/hostnumerics/scalar_conversion.hpp>
+#include <roc/hostnumerics/scalar_type.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 namespace roc::hostnumerics::detail {
+// Storage decoding truncates and wraps when returning a native C++ value.
+inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {
+    return {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
+}
+
+// No-options storage conversion follows the native policy for byte-addressable
+// integers. Packed Int4 saturates because it has no native C++ cast whose
+// behavior can define the conversion.
+inline constexpr ScalarConversionOptions implicitStorageConversionOptions(ScalarType destination) {
+    const IntegerOverflow overflow =
+        destination == ScalarType::Int4 ? IntegerOverflow::Saturate : IntegerOverflow::ModuloWrap;
+    return {IntegerRounding::TowardZero, overflow};
+}
+
 inline uint32_t readPackedBits(std::span<const std::byte> storage, uint64_t bitOffset,
                                uint32_t bitCount) {
     if (bitCount == 0 || bitCount > 32)

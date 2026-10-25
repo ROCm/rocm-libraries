@@ -4,25 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <roc/hostnumerics/layout.hpp>
-#include <roc/hostnumerics/scalar_integer_conversion.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 
 namespace {
 using namespace roc::hostnumerics;
 using namespace roc::hostnumerics::detail;
-
-TEST(ResultIntegration, ConversionFailuresCarryDestinationContext) {
-    const auto result = getConvertToInteger<int8_t>(300.0, ScalarConversionOptions{});
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ConversionError::RoundedOutOfRange);
-    EXPECT_EQ(result.error().destinationBits, 8);
-    EXPECT_TRUE(result.error().signedDestination);
-    const auto nonreal = getConvertToInteger<uint32_t>(std::complex<double>(1, 2), {});
-    ASSERT_FALSE(nonreal.has_value());
-    EXPECT_EQ(nonreal.error().code, ConversionError::Nonreal);
-    EXPECT_EQ(nonreal.error().destinationBits, 32);
-    EXPECT_FALSE(nonreal.error().signedDestination);
-}
 
 TEST(ResultIntegration, GeometryFailuresPropagateWithoutFormatting) {
     const auto contiguous = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});

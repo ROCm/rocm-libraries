@@ -9,15 +9,14 @@ namespace roc::hostnumerics {
 enum class IntegerRounding : uint8_t {
     TowardZero,
     NearestEven,
-    Count,
 };
 
 enum class IntegerOverflow : uint8_t {
+    // Require the rounded value to be representable in the destination.
     Reject,
     Saturate,
     // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.
     ModuloWrap,
-    Count,
 };
 
 enum class BFloat16Rounding : uint8_t {
@@ -27,11 +26,14 @@ enum class BFloat16Rounding : uint8_t {
 };
 
 struct ScalarConversionOptions {
-    // Option-bearing conversions reject overflow by default. No-options
-    // Tensor and conversion APIs use the documented deterministic implicit policy.
-    IntegerRounding integerRounding = IntegerRounding::TowardZero;
-    IntegerOverflow integerOverflow = IntegerOverflow::Reject;
-    BFloat16Rounding bfloat16Rounding = BFloat16Rounding::NearestEven;
+    constexpr ScalarConversionOptions(
+        IntegerRounding rounding, IntegerOverflow overflow,
+        BFloat16Rounding bfloatRounding = BFloat16Rounding::NearestEven) noexcept
+        : integerRounding(rounding), integerOverflow(overflow), bfloat16Rounding(bfloatRounding) {}
+
+    IntegerRounding integerRounding;
+    IntegerOverflow integerOverflow;
+    BFloat16Rounding bfloat16Rounding;
 };
 
 }  // namespace roc::hostnumerics
