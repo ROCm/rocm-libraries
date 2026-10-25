@@ -718,6 +718,16 @@ table, the sequence extent still the longest sequence.
   launch always fills (§7.8). Whole tiles past the length still run no KV iteration.
 - **Keys past a batch's key length are masked** with the dense tail's own compare, so a
   batch with no key gives every row O = 0 and LSE = −inf.
+- **A bias under padding** is laid out over the launch's extents (`[.., Sq, Skv]`, the longest
+  sequence), and every family adds only each batch's real keys of it, whatever the bias holds past
+  them (NaN included). The RDNA prefill and decode objects read it one key at a time within a view
+  of the launch's extents; the aiw objects read 8-key vectors only on KV tiles wholly inside a
+  batch's keys and the tail tile one clamped key at a time; CDNA's vectorized bias objects read
+  4-key runs, with each batch's last real row viewed to the launch's key width (modification 37,
+  §7.8), so they serve a padded bias as they do a dense one. Tested at every key length mod 8
+  with NaN past each batch's keys and rows at the lowest finite value, −inf and NaN
+  (`TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch.PadsWithABiasAtEveryKeyLength*`,
+  `TestGpuFlydslSdpaRdnaDispatch.DecodesPaddedBatchesWithABiasAtEveryKeyLength`).
 - **The mask, per batch:** top-left masks and windows are the same literal bounds for every
   batch. A bottom-right diagonal sits at each batch's own `Skv_b − Sq_b`. The RDNA kernels
   compute that offset in the kernel for every bound. The aiw kernel resolves bottom-right
@@ -1219,6 +1229,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | Padding, dropout and packed THD (modifications 32-34), dense graphs | 9 interleaved rounds per arch, the objects before modification 32 against these. gfx942, 249 dense rows (prefill, decode, bias, sink): median +0.3%, geomean +0.5%, range −1.1% to +3.6%. gfx950, 248 rows: median +0.3%, geomean +0.6%, range −1.9% to +7.0%. gfx90a, 362 rows: median +0.2%, geomean +0.4%, range −4.7% to +4.8%. Every KV loop is instruction-identical between modifications 32 and 34; the outliers are scheduling and prologue. gfx942's `head_dim` 128 non-causal 128-row bias object is +3.2-3.6% on its three shapes: its KV loop now packs 22 bias adds and multiplies into `v_pk_*`, with 33 more hazard-wait cycles per iteration. The old object spilled 4 SGPRs inside that loop and the new one does not. gfx950's `head_dim` 128 causal 64-row tiles are +6.7% at one query row (item 14's objects; the decode objects serve that shape several times faster). gfx950's `head_dim` 128 non-causal 64-row bias object is +3.7% at S4096; its loop has the same size and waits as before, but with registers reassigned. Split decode objects at the shortest launches (12-40 µs) are +2-4% on every arch. The dual-wave objects are byte-identical and moved −2% to +3%, which is the noise floor on short launches | runtime, for coverage -- **deferred** (item 18) |
 | A FLOAT sink on the generic sink objects (A6, modification 36; the 24 prefill and 8 decode sink objects per arch change, every other object byte-identical) | 7 interleaved rounds against the objects before it, timed with query-dtype sinks (the arguments those objects had), bf16. gfx942: 46 sink object × shape rows (prefill and split decode, with and without a bias; 14 µs to 1.7 ms) median +0.03%, geomean +0.05%, range −0.69% to +0.98%, none past 2% with a repeating sign; the byte-identical plain objects, the control, median −0.03% (−0.88% to +0.78%). A FLOAT sink against a query-dtype one on the same object: median +0.00% (−1.3% to +0.55%). gfx950 and gfx90a run the same generic-kernel sink code (the dual-wave kernel builds no sink) and were not timed | shipped |
 | Padding, packed THD, dropout: the feature's own cost (the same rounds) | Padded at full lengths against the same object dense: median +0.4% (gfx90a), +0.5% (gfx942), +1.2% (gfx950); at most +5.6-8.9%, on the shortest decode launches (two length loads per workgroup). Packed at full lengths against dense: median +0.3%, +0.4%, +1.0%; at most +3.4-7.2%, on B1 S256 launches of 10-25 µs. Dropout objects at p = 0.1 against the fastest plain object at the same shape: gfx942 1.43-2.11x (median 1.75x), gfx90a 1.20-1.96x (1.57x), gfx950 1.62-3.54x (2.76x; there the fastest plain object is the dual-wave kernel's). The cost is one Philox4x32-10 per 4 scores | shipped |
+| A padded batch's bias viewed to the launch's key width (modification 37; per arch the 44 (gfx950, gfx942) or 60 (gfx90a) vectorized bias objects change outside their KV loops, every other object byte-identical) | 7 interleaved rounds against the objects before it, bf16, `head_dim` 64, 96 and 128, S512 to S4096 and batched decode. Dense graphs on the same object: gfx942, 57 object × shape rows, median +0.21%, geomean +0.29%, range −0.51% to +1.53% (the `head_dim` 64 causal 128-row bucket object +1.4% at B16 S512, 53 µs, its loop instruction-identical); the byte-identical objects, the control, median +0.03% (−1.94% to +0.92%). gfx950, 57 rows, median −0.05%, range −0.80% to +0.66%; control 88 rows +0.01% (−2.37% to +1.14%). gfx90a, 108 rows, median +0.01%, range −0.34% to +1.25% (the 160 bucket's non-causal 256-row object +1.1-1.3% at S512); control 105 rows −0.01% (−0.20% to +0.20%). Padded graphs with a bias, the fastest object before (a strided one) against after (a vectorized one): gfx942, 19 graphs, median 1.61x faster (1.11x to 2.76x): a per-head bias at `head_dim` 64 and S2048 2.5-2.8x; BERT's key-padding mask `[B, 1, 1, S]` at S512 1.2-1.4x (1.1x with a sink); `head_dim` 96 (a bucket) 1.5-1.6x; 128 1.6-1.8x; batched decode 1.3-1.6x. gfx950, 19 graphs, median 1.70x (1.00x to 2.80x): `head_dim` 64 at S2048 2.4-2.8x, 96 1.7-2.1x, 128 1.6-2.4x, batched decode 1.1-1.2x, BERT's mask at S512 1.0-1.1x (20-30 µs launches; with a sink the strided object stays the faster there). gfx90a, 19 graphs, median 1.68x (1.02x to 2.60x): `head_dim` 64 at S2048 2.2-2.5x, 96 2.5-2.6x, 128 1.6-2.1x, batched decode 1.1-1.4x, BERT's mask at S512 1.0-1.2x. Dropout with a bias under padding, declined before, runs on the dropout objects' bias builds | shipped |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -1309,9 +1320,14 @@ the harness's own bias. The measurements are kept outside the repository.
     bf16 objects do (an f32 vectorized bias object, or a unit-stride fast path inside the
     strided one for rows that stay aligned); a bias broadcast along the keys needs one load
     per row, not per score; and the bias could be staged through LDS with its K tile
-    (item 7).
+    (item 7). A padded graph's query-dtype bias no longer pays this: since modification 37
+    it runs on the vectorized objects as a dense one does (1.0-2.8x faster than on the
+    strided ones, median 1.6-1.7x per arch; the row above), so the strided objects serve only the biases the
+    vectorized ones cannot read.
 16. ~~*A sink with a bias the vectorized objects do not read*~~ Done: a strided build of
-    each prefill sink-and-bias tier, 8 objects per arch (§6.2).
+    each prefill sink-and-bias tier, 8 objects per arch (§6.2). Under padding a
+    query-dtype bias with a sink is back on the vectorized sink-and-bias objects
+    (modification 37).
 17. *gfx90a under modification 30.* The 160 and 64 buckets' causal tiles are 2-3% slower,
     and the `head_dim` 64 causal bias tile went from 158 to 192 VGPRs (5% slower at the long
     prefill shape, faster at decode shapes): a gfx90a tile retuned for the key cap, or a
@@ -1327,6 +1343,8 @@ the harness's own bias. The measurements are kept outside the repository.
     Philox draws; amortising them over the 4 scores each draw covers is already done, so a
     cheaper generator (fewer rounds, as some frameworks allow) is the remaining lever, and
     it would break bit parity with AOTriton.
+    Modification 37 (a padded batch's bias view) changes only the vectorized bias objects'
+    prologues and costs dense graphs nothing measurable (the row above).
 19. *Exact f32 (modification 35).* The first wave's tiles were picked by occupancy and a
     short timing (gfx942 and gfx950, a few tiles each), not the full AOT selection the 16-bit
     set went through (§7.6). On gfx942 and gfx90a the 256 objects split O's columns, so each
@@ -1459,12 +1477,15 @@ modification 32): 0 new objects.
   virtual or ragged lengths, and a base not declared 4-byte aligned decline.
 - **With dropout** (§7.9): served; each batch draws its mask at the graph's declared extents, so a
   padded batch's real rows get the dense graph's bits.
-- **A bias under padding runs on the strided objects** (`bias_kstrided`, modification 31), sink
-  included. A batch's key length need not be a multiple of the vectorized objects' 4-key runs. The
-  last real row's final run would then straddle the batch's bias view and read as zero; found on
-  the device at `Skv_b` 63. Dropout with a bias under padding declines, because no dropout object
-  reads a bias one key at a time. A kernel fix, giving the last row's view the launch's key width,
-  would restore the vectorized objects here.
+- **A bias under padding runs on the vectorized objects** wherever it does dense, sink and dropout
+  included, and on the strided ones (`bias_kstrided`, modification 31) as before. A batch's key
+  length need not be a multiple of the vectorized objects' 4-key runs: each batch's bias view keeps
+  its last real row at the launch's key width (modification 37), which ends on a whole run and lies
+  inside the bias, since the vectorized objects serve only a bias dense over `[.., Sq, Skv]` with
+  `Skv` a multiple of 4. Before it, that row's final run straddled the batch's view and read as
+  zero (found on the device at `Skv_b` 63), so padded graphs' biases ran on the strided objects
+  and dropout with a bias under padding declined. Keys from `Skv_b` on are masked by the batch's
+  key compare whatever the bias holds there (NaN included).
 - **Cost:** a padded launch loads two lengths per workgroup behind a flag; a dense launch loads
   nothing. Measured in §7.5.
 - **Tested** against a test-local per-batch reference until hipDNN's serves padding
@@ -1473,9 +1494,14 @@ modification 32): 0 new objects.
   full, past `S` and negative; batches with more queries than keys; both corners, a band and a
   window; GQA, BHSD, f16, a bucket head dim, a bias in the query's dtype and f32, a sink; decode
   over caches of different lengths with splits and the merge; O and the LSE filled with NaN
-  beforehand. Every gate: `Padding/TestFlydslSdpaCdnaFieldDeclines`,
+  beforehand. A bias at key lengths of every residue mod 4 and mod 8, NaN past each batch's keys,
+  rows at the lowest finite value, −inf and NaN, on every vectorized and strided object the
+  matcher admits, against hipDNN's CPU reference too
+  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`); with the objects before modification 37
+  it fails on the last real row of the 63-key batch. Every gate:
+  `Padding/TestFlydslSdpaCdnaFieldDeclines`,
   `TestFlydslSdpaCdnaKernelMatch.RunsPaddingOnlyOnObjectsThatReadEachBatchsLengths`,
-  `RanksAPaddedGraphOnTheMaskedDefaultTier`.
+  `RanksAPaddedGraphOnTheMaskedDefaultTier`, `RunsAPaddedGraphsBiasOnTheVectorizedObjects`.
 
 ### 7.9 Dropout (CDNA)
 
@@ -1514,14 +1540,17 @@ Dropout as §5.10 states it (`dropout_probability` with a seed and an offset ten
   bias without a spill. A bias only the strided objects read (f32, broadcast along the keys) finds
   no dropout object and declines at kernel match.
 - **Declined**, each a row of objects when a model needs it: dropout with a sink, with a strided
-  bias, with a bias under padding (§7.8), at bucket head dims, MLA, on the dual-wave and decode objects.
+  bias, at bucket head dims, MLA, on the dual-wave and decode objects. Dropout with a bias under
+  padding is served (§7.8, modification 37).
 - **Cost:** measured in §7.5.
 - **Tested** against the test-local oracle until hipDNN's reference serves dropout
   (`TestGpuFlydslSdpaCdnaDispatch.Drops*`, `ComputesTheUndroppedResultAtProbabilityZero`): the mask
   read off O bit for bit (Q zero, V the identity) on the aiw cases' graphs, the full output and the
   undropped LSE with GQA, BHSD, both dtypes, a key length no multiple of 4 or of the KV tile, a seed
   and offset by value (INT64 and INT32) and on the device; under padding, the dense mask bit for bit
-  and the full output with a batch of no keys and one of no queries. Every gate:
+  and the full output with a batch of no keys and one of no queries, and with a bias (key lengths
+  no multiple of 4, NaN past each batch's keys) the full output, the mask bit for bit and the RNG
+  dump. Every gate:
   `Dropout/TestFlydslSdpaCdnaFieldDeclines`, `TestFlydslSdpaCdnaKernelMatch.RunsADroppingGraphOnlyOnTheDropoutObjects`,
   `RunsAPaddedDroppingGraphOnTheDropoutObjects`.
 
