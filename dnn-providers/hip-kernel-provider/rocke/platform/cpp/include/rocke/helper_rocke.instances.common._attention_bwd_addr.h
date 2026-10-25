@@ -161,7 +161,12 @@ rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_thd(rocke_ir_builder_t* b,
 /* ------------------------------------------------------- strided tensors */
 
 /* RowSlab. last == NULL: rows are not clamped. parts_* mirror Python's
- * `parts` tuple (base, byte offset or NULL, ptr); has_parts false is None. */
+ * `parts` tuple (base, byte offset or NULL, ptr); has_parts false is None.
+ * rsrc != NULL makes it the dense shell's BufferRowSlab
+ * (helper_rocke.instances.common._attention_dense_bwd_shell.h): rows are
+ * absolute sequence rows read through the buffer resource rsrc at token
+ * stride t_stride (an int), and load / load_vec take the buffer path; ptr,
+ * base_row, last and parts are unused. */
 typedef struct rocke_attn_bwd_row_slab
 {
     rocke_ir_builder_t* b;
@@ -175,6 +180,7 @@ typedef struct rocke_attn_bwd_row_slab
     bool has_parts;
     rocke_value_t* parts_base;
     rocke_value_t* parts_off;
+    rocke_value_t* rsrc;
 } rocke_attn_bwd_row_slab_t;
 
 rocke_value_t* rocke_attn_bwd_row_slab_local_row(const rocke_attn_bwd_row_slab_t* s,
@@ -211,6 +217,11 @@ typedef struct rocke_attn_bwd_strided_tensor_addr
     int esize;
     rocke_value_t* base;
     rocke_value_t* seq_base; /* NULL in THD mode (folded into base) */
+    /* The dense shell's global view of a DenseFixedAddr whose rows cannot
+     * pass the sequence end: slab() never clamps (DenseFixedAddr.slab passes
+     * clamp=clamp and self._clamp). false (the init's value) is
+     * StridedTensorAddr itself. */
+    bool never_clamp;
 } rocke_attn_bwd_strided_tensor_addr_t;
 
 /* StridedTensorAddr.__init__. A Python ValueError raises (see Errors). */
