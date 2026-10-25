@@ -1,9 +1,107 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest.h>
+
 #include "_scalar_codec_test_support.hpp"
 
 namespace scalar_codec_test {
+TEST(ScalarConversionTutorial, Rounding) {
+    // Both integer policies are explicit. Reject requires the rounded result to fit;
+    // it does not check the input or report an error.
+    const ScalarConversionOptions towardZero{IntegerRounding::TowardZero, IntegerOverflow::Reject};
+    const ScalarConversionOptions nearestEven{IntegerRounding::NearestEven,
+                                              IntegerOverflow::Reject};
+
+    // TowardZero drops the fractional part; negative values move toward zero too.
+    EXPECT_EQ(convertScalar<int32_t>(3.75, towardZero), 3);
+    EXPECT_EQ(convertScalar<int32_t>(-3.75, towardZero), -3);
+
+    EXPECT_EQ(convertScalar<int32_t>(2.75, nearestEven), 3);
+    EXPECT_EQ(convertScalar<int32_t>(-2.75, nearestEven), -3);
+    // Halfway values choose the even integer, including on the negative side.
+    EXPECT_EQ(convertScalar<int32_t>(2.5, nearestEven), 2);
+    EXPECT_EQ(convertScalar<int32_t>(3.5, nearestEven), 4);
+    EXPECT_EQ(convertScalar<int32_t>(-2.5, nearestEven), -2);
+    EXPECT_EQ(convertScalar<int32_t>(-3.5, nearestEven), -4);
+}
+
+TEST(ScalarConversionTutorial, Overflow) {
+    const ScalarConversionOptions truncate{IntegerRounding::TowardZero, IntegerOverflow::Reject};
+    const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
+    const ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
+    const ScalarConversionOptions nearestSaturate{IntegerRounding::NearestEven,
+                                                  IntegerOverflow::Saturate};
+    const ScalarConversionOptions nearestWrap{IntegerRounding::NearestEven,
+                                              IntegerOverflow::ModuloWrap};
+
+    // int8_t spans [-128, 127]. Saturate clamps to that range; ModuloWrap keeps
+    // the low eight bits and interprets a signed result as two's complement.
+    EXPECT_EQ(convertScalar<int8_t>(128.75, saturate), 127);
+    EXPECT_EQ(convertScalar<int8_t>(128.75, wrap), -128);
+    EXPECT_EQ(convertScalar<uint8_t>(-1.75, saturate), 0);
+    EXPECT_EQ(convertScalar<uint8_t>(-1.75, wrap), 255);
+
+    // Rounding happens first: 127.5 truncates to 127 but rounds to 128 with
+    // NearestEven. The latter needs Saturate or ModuloWrap to satisfy the contract.
+    EXPECT_EQ(convertScalar<int8_t>(127.5, truncate), 127);
+    EXPECT_EQ(convertScalar<int8_t>(127.5, nearestSaturate), 127);
+    EXPECT_EQ(convertScalar<int8_t>(127.5, nearestWrap), -128);
+
+    // A negative fraction can still satisfy Reject for an unsigned destination:
+    // TowardZero produces zero before representability matters.
+    EXPECT_EQ(convertScalar<uint8_t>(-0.75, truncate), 0);
+}
+
+TEST(ScalarConversionTutorial, FloatingAndBooleanDestinations) {
+    const ScalarConversionOptions options{IntegerRounding::NearestEven, IntegerOverflow::Saturate};
+
+    // These policies control integer destinations. Floating-point destinations
+    // follow native casts and can lose precision: binary32 cannot represent 2^24 + 1.
+    EXPECT_EQ(convertScalar<double>(2.75f, options), 2.75);
+    EXPECT_EQ(convertScalar<float>(int32_t{16'777'217}, options), 16'777'216.0f);
+
+    // Boolean conversion tests whether the source is nonzero, even when integer
+    // rounding of the same value would produce zero. Negative zero is still zero.
+    EXPECT_EQ(convertScalar<int32_t>(0.25, options), 0);
+    EXPECT_TRUE(convertScalar<bool>(0.25, options));
+    EXPECT_FALSE(convertScalar<bool>(-0.0, options));
+}
+
+TEST(ScalarConversionTutorial, NonFiniteValues) {
+    const ScalarConversionOptions options{IntegerRounding::NearestEven, IntegerOverflow::Saturate};
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // Infinity can convert to a non-Boolean integer only with Saturate.
+    EXPECT_EQ(convertScalar<int8_t>(infinity, options), 127);
+    EXPECT_EQ(convertScalar<int8_t>(-infinity, options), -128);
+    EXPECT_EQ(convertScalar<uint8_t>(-infinity, options), 0);
+
+    // NaN is outside the domain for non-Boolean integer destinations, even with
+    // Saturate. Floating-point conversion preserves NaN; Boolean conversion sees nonzero.
+    EXPECT_TRUE(std::isnan(convertScalar<float>(nan, options)));
+    EXPECT_TRUE(convertScalar<bool>(nan, options));
+}
+
+TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
+    const ScalarConversionOptions options{IntegerRounding::NearestEven, IntegerOverflow::Reject};
+
+    // Real-to-complex supplies a zero imaginary part. Complex-to-complex converts
+    // both components; integer rounding policies do not round floating components.
+    EXPECT_EQ(convertScalar<std::complex<double>>(1.25f, options), std::complex<double>(1.25, 0.0));
+    EXPECT_EQ(convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5}, options),
+              std::complex<float>(1.25f, -2.5f));
+
+    // Complex-to-real requires a zero imaginary part, then converts the real part.
+    // A nonzero imaginary part violates an unchecked caller precondition.
+    EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, options), 4);
+
+    // A C++ enum source converts using its underlying numeric value.
+    enum class Sample : int16_t { Negative = -3 };
+    EXPECT_EQ(convertScalar<int32_t>(Sample::Negative, options), -3);
+}
+
 template <typename Source>
 concept ConvertsWithoutPolicies = requires(Source source) { convertScalar<int32_t>(source); };
 
