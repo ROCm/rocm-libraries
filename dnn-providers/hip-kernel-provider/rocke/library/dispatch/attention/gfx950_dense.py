@@ -140,38 +140,24 @@ def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
     return True, 0, True  # plain causal, compile-time shifted diagonal
 
 
-def _default_block_m(
-    req: AttentionRequest, variant: Gfx950DenseVariant, causal: bool, moving: bool
-) -> int:
+def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
     """Query tile of the variant's default spec.
 
-    The shared 256-row tile unless it leaves CTAs idle: when the full-tile work
-    count (query blocks x query heads x batch) does not exceed the persistent
-    CTA count (below it, for the grid body), a 128-row tile doubles the work
-    items and halves each causal item's KV loop. Measured on the 256-CU part at
-    D128, both dtypes, top-left causal without window or sinks: the 128-row tile
-    wins every shape below the threshold on both bodies, and every shape at it on
-    the persistent body, and loses at every larger work count. Other problems
-    keep the shared tile.
+    The shared 256-row tile, except on the wide-DMA body (the only one whose
+    ``block_m`` is recorded, so its tuning IDs already name the tile) when that
+    tile leaves CTAs idle: while the full-tile work count (query blocks x query
+    heads x batch) is at most the persistent CTA count, a 128-row tile doubles
+    the work items and halves each causal item's KV loop. Measured on the
+    256-CU part at D128, both dtypes, plain causal: the 128-row tile wins every
+    shape at or below that count and loses at every larger one.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
-    if (
-        int(req.hdim_q) != 128
-        or not causal
-        or moving
-        or int(req.sliding_window)
-        or bool(req.use_sinks)
-    ):
+    if not variant.wide_lds_dma or int(req.hdim_q) != 128:
         return bm
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
-    under_filled = (
-        work <= _DEFAULT_NUM_PERSISTENT
-        if variant.persistent
-        else work < _DEFAULT_NUM_PERSISTENT
-    )
-    return bm // 2 if under_filled else bm
+    return bm // 2 if work <= _DEFAULT_NUM_PERSISTENT else bm
 
 
 def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
@@ -186,12 +172,11 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
 def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     """The variant's default ``Gfx950AttentionDenseSpec`` for ``req``.
 
-    Persist and wide DMA come from the variant; the query tile comes from
-    :func:`_default_block_m` (so ``block_m`` is resolved per problem and
-    recorded), and every other tuning field starts at the shipped default and is
-    varied by the knob space. Wide DMA cannot take the ragged path, so where the
-    default tile would be ragged it starts at the first registered tile that is
-    not.
+    Persist and wide DMA come from the variant; the tile comes from
+    :func:`_default_block_m` and every other tuning field starts at the shipped
+    default; the knob space varies them. Wide DMA cannot take the ragged path,
+    so where its default tile would be ragged it starts at the first registered
+    tile that is not (its ``block_m`` is resolved per problem and recorded).
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx950.attention_dense import (
@@ -209,7 +194,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bn = int(geometry["block_n"])
     causal, right_bound, moving_bottom_right = _dense_band(req)
-    bm = _default_block_m(req, variant, causal and not right_bound, moving_bottom_right)
+    bm = _default_block_m(req, variant)
     ragged = _is_ragged(sq, sk, bm, bn)
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
@@ -263,7 +248,7 @@ def _make_gfx950_attention_dense_candidate(
         base_spec=lambda req: _base_spec(req, variant),
         supports=_supports,
         features=variant.features,
-        recorded=frozenset({"block_m"}),
+        recorded=frozenset({"block_m"}) if variant.wide_lds_dma else frozenset(),
         derived=_derived,
     )
 
