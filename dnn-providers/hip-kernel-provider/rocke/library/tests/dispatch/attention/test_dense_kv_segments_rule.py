@@ -27,7 +27,7 @@ def test_dense_kv_segments(work, cus, expected):
     assert dense_kv_segments(work, cus) == expected
 
 
-def _gfx950_grid_spec(sq, sk, hq, hkv=8, **over):
+def _gfx950_grid_spec(sq, sk, hq, hkv=8, num_cus=256, **over):
     req = attention.AttentionRequest(
         batch=1,
         nhead_q=hq,
@@ -40,7 +40,7 @@ def _gfx950_grid_spec(sq, sk, hq, hkv=8, **over):
         mask_type=2,
         kv_block_size=64,
         dtype="bf16",
-        num_cus=256,
+        num_cus=num_cus,
         **over,
     )
     cand = next(
@@ -74,7 +74,7 @@ def test_gfx950_split_is_off_with_sinks():
     assert _gfx950_grid_spec(512, 8192, 32, use_sinks=True).kv_segments == 1
 
 
-def _gfx942_spec(sq, sk, hq, hkv=8, mask_type=2, **over):
+def _gfx942_spec(sq, sk, hq, hkv=8, mask_type=2, num_cus=304, **over):
     req = attention.AttentionRequest(
         batch=1,
         nhead_q=hq,
@@ -87,7 +87,7 @@ def _gfx942_spec(sq, sk, hq, hkv=8, mask_type=2, **over):
         mask_type=mask_type,
         kv_block_size=64,
         dtype="bf16",
-        num_cus=304,
+        num_cus=num_cus,
         **over,
     )
     return attention.attention_tuning_spec(req, "gfx942_dense").kernel_spec
@@ -134,3 +134,42 @@ def test_gfx942_equal_length_keeps_default_geometry():
 )
 def test_dense_wave_segments(work, cus, expected):
     assert dense_wave_segments(work, cus) == expected
+
+
+# segm_output is [B*Sq, Hq, S, D] FP32 indexed in i32: at B=1, Sq=32768, D=128 the
+# extent reaches 2**31 at Hq*S = 512. A CU count large enough to ask for 8 segments
+# shows the rule falling back to the largest split that still fits.
+@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 4)])
+def test_gfx950_kv_split_stays_within_i32_workspace(hq, segments):
+    spec = _gfx950_grid_spec(32768, 65536, hq, num_cus=100000)
+    assert spec.kv_segments == segments
+
+
+@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 4)])
+def test_gfx942_kv_split_stays_within_i32_workspace(hq, segments):
+    spec = _gfx942_spec(32768, 65536, hq, num_cus=100000)
+    assert spec.kv_segments == segments
+
+
+@pytest.mark.parametrize(
+    "arch,make", [("gfx950", _gfx950_grid_spec), ("gfx942", _gfx942_spec)]
+)
+def test_supports_rejects_kv_segments_past_i32_workspace(arch, make):
+    import importlib
+
+    supports = importlib.import_module(
+        f"kernels.{arch}.attention_dense"
+    ).supports_attention_dense
+    spec = make(32768, 65536, 64, num_cus=100000)
+    assert supports(replace(spec, kv_segments=4))[0]
+    ok, why = supports(replace(spec, kv_segments=8))
+    assert not ok and "32-bit" in why
+
+
+def test_max_kv_segments_for_extent():
+    from kernels.common.attention_dense_kv_split import max_kv_segments_for_extent
+
+    assert max_kv_segments_for_extent(1, 32768, 64, 128, max_segments=8) == 4
+    assert max_kv_segments_for_extent(1, 32768, 32, 128, max_segments=8) == 8
+    assert max_kv_segments_for_extent(1, 512, 32, 128, max_segments=8) == 8
+    assert max_kv_segments_for_extent(1, 32768, 512, 128) == 1

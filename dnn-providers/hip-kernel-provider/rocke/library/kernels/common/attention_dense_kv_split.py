@@ -20,8 +20,35 @@ from __future__ import annotations
 
 from rocke.core.ir import F32, PtrType
 
+from kernels.common.attention_dense_spec import INT32_LIMIT
+
 SEGMENT_PARAMS = ("segm_output_ptr", "segm_max_ptr", "segm_expsum_ptr")
 MAX_KV_SEGMENTS = 64
+
+
+def segment_extent(batch, seqlen_q, num_query_heads, head_size, segments) -> int:
+    """Element count of ``segm_output``: the largest index the segment store and
+    the combine kernel compute in signed 32-bit arithmetic."""
+    return (
+        int(batch)
+        * int(seqlen_q)
+        * int(num_query_heads)
+        * int(segments)
+        * int(head_size)
+    )
+
+
+def max_kv_segments_for_extent(
+    batch, seqlen_q, num_query_heads, head_size, max_segments=MAX_KV_SEGMENTS
+) -> int:
+    """Largest power of two ``S <= max_segments`` whose workspace extent stays below
+    the 32-bit addressing limit (at least 1)."""
+    s = 1
+    while s * 2 <= max_segments and (
+        segment_extent(batch, seqlen_q, num_query_heads, head_size, s * 2) < INT32_LIMIT
+    ):
+        s *= 2
+    return s
 
 
 def check_kv_segments(spec) -> tuple[bool, str]:
@@ -42,6 +69,14 @@ def check_kv_segments(spec) -> tuple[bool, str]:
         return False, (
             "kv_segments > 1 runs on the default grid only, without sliding window, "
             "sinks, LSE output, ragged, varlen or paged"
+        )
+    extent = segment_extent(
+        spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size, s
+    )
+    if s > 1 and extent >= INT32_LIMIT:
+        return False, (
+            f"kv_segments={s} workspace extent is {extent} elements, at or past the "
+            f"32-bit addressing limit ({INT32_LIMIT})"
         )
     return True, ""
 

@@ -171,6 +171,10 @@ def _make_spec(
         # below the shifted diagonal. When the work items fill their last wave
         # poorly (short chunks, or a head count just past the CU count), the
         # non-persistent grid splits each work item's KV range across CTAs.
+        from kernels.common.attention_dense_kv_split import (
+            max_kv_segments_for_extent,
+        )
+
         from .dense_rules import dense_wave_segments
 
         diag_split = True
@@ -182,7 +186,13 @@ def _make_spec(
             and not req.emit_lse
             and not int(req.sliding_window)
         ):
-            kv_segments = dense_wave_segments(work, cus)
+            kv_segments = dense_wave_segments(
+                work,
+                cus,
+                max_segments=max_kv_segments_for_extent(
+                    req.batch, sq, req.nhead_q, head_size, max_segments=8
+                ),
+            )
             if kv_segments > 1:
                 persistent = False
     return Gfx942AttentionDenseSpec(
