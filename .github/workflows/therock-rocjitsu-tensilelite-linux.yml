@@ -22,17 +22,17 @@ on:
         type: string
         required: true
       workers:
-        type: number
-        default: 96
+        type: string
+        default: "96"
       dispatch_threads:
-        type: number
-        default: 1
+        type: string
+        default: "1"
       max_work:
-        type: number
-        default: 68719476736
+        type: string
+        default: "68719476736"
       per_job_seconds:
-        type: number
-        default: 600
+        type: string
+        default: "600"
       case_filter:
         type: string
         default: ""
@@ -40,8 +40,8 @@ on:
         type: number
         default: 35
       suite_seconds:
-        type: number
-        default: 1200
+        type: string
+        default: "1200"
 
 permissions:
   contents: read

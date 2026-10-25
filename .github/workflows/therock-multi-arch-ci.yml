@@ -12,29 +12,29 @@ on:
         description: "Existing rocm-libraries run providing the gfx125X artifacts"
         required: true
       workers:
-        type: number
+        type: string
         description: "Independent serial shape workers (at most the runner CPU count)"
-        default: 96
+        default: "96"
       dispatch_threads:
-        type: number
+        type: string
         description: "Inclusive dispatch width; 0 uses the artifact config, 1 is serial"
-        default: 1
+        default: "1"
       max_work:
-        type: number
+        type: string
         description: "Maximum logical GEMM work including batch; default is 4096 cubed"
-        default: 68719476736
+        default: "68719476736"
       per_job_seconds:
-        type: number
+        type: string
         description: "Maximum build and execution time for one admitted shape job"
-        default: 600
+        default: "600"
       case_filter:
         type: string
         description: "Required pytest -k expression defining the calibration workload"
         required: true
       suite_seconds:
-        type: number
+        type: string
         description: "Suite execution limit, excluding setup and reporting"
-        default: 1200
+        default: "1200"
 
 permissions:
   contents: read
