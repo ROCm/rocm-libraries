@@ -27,7 +27,9 @@
 #include "rocke/instance_attention_bwd_aux.h"
 
 /* attention_bwd_spec_extra_emit.c defines its own CONFIGS and includes this
- * file with ROCKE_ATTN_BWD_SPEC_EMIT_CONFIGS set. */
+ * file with ROCKE_ATTN_BWD_SPEC_EMIT_CONFIGS set; attention_bwd_body_emit.c
+ * also sets ROCKE_ATTN_BWD_SPEC_EMIT_PARSE_ONLY, which keeps the config
+ * parser (parse_config) and drops the dump and main. */
 #ifndef ROCKE_ATTN_BWD_SPEC_EMIT_CONFIGS
 static const char* const CONFIGS[] = {
     /* default gfx942 d32 fp16 sv8 */
@@ -952,6 +954,7 @@ static bool parse_config(const char* config, std::string* arch, rocke_attn_bwd_s
     return true;
 }
 
+#ifndef ROCKE_ATTN_BWD_SPEC_EMIT_PARSE_ONLY
 /* ------------------------------------------------------------------ dump */
 
 static void field_lines(Lines& out, const char* prefix, const rocke_attn_bwd_spec_t& s)
@@ -1371,3 +1374,4 @@ int main(int argc, char** argv)
     }
     return 0;
 }
+#endif /* ROCKE_ATTN_BWD_SPEC_EMIT_PARSE_ONLY */

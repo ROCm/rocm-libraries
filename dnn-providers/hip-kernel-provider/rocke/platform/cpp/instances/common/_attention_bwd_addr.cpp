@@ -968,6 +968,58 @@ void rocke_attn_bwd_ws_slab_atomic_add(const rocke_attn_bwd_ws_slab_t* s,
     rocke_b_global_atomic_add_f32(b, s->ptr, idx, val);
 }
 
+/* sgpr_ptr(b, ptr, parts) */
+static rocke_value_t*
+    sgpr_ptr(rocke_ir_builder_t* b, bool has_parts, rocke_value_t* base, rocke_value_t* off)
+{
+    if(!has_parts)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "the slab pointer was not formed from (base, offset)");
+    if(off == NULL)
+        return base;
+    rocke_value_t* u = rocke_b_readfirstlane(b, off);
+    return rocke_b_global_ptr_add(b, base, u);
+}
+
+rocke_value_t* rocke_attn_bwd_row_slab_sgpr_ptr(const rocke_attn_bwd_row_slab_t* s)
+{
+    return sgpr_ptr(s->b, s->has_parts, s->parts_base, s->parts_off);
+}
+
+rocke_value_t* rocke_attn_bwd_ws_slab_sgpr_ptr(const rocke_attn_bwd_ws_slab_t* s)
+{
+    return sgpr_ptr(s->b, s->has_parts, s->parts_base, s->parts_off);
+}
+
+rocke_value_t* rocke_attn_bwd_ws_slab_load(const rocke_attn_bwd_ws_slab_t* s,
+                                           rocke_value_t* r,
+                                           rocke_attn_bwd_iv_t x,
+                                           double neutral)
+{
+    /* py: v = b.global_load_f32(self.ptr, self.index(r, x))
+     *     return b.select(self.row_ok(r), v, b.const_f32(neutral)) */
+    rocke_value_t* v = rocke_attn_bwd_ws_slab_load_raw(s, r, x);
+    return rocke_attn_bwd_ws_slab_neutral(s, r, v, neutral);
+}
+
+rocke_value_t* rocke_attn_bwd_ws_slab_load_raw(const rocke_attn_bwd_ws_slab_t* s,
+                                               rocke_value_t* r,
+                                               rocke_attn_bwd_iv_t x)
+{
+    rocke_value_t* idx = rocke_attn_bwd_ws_slab_index(s, r, x);
+    return rocke_b_global_load_f32(s->b, s->ptr, idx, 4);
+}
+
+rocke_value_t* rocke_attn_bwd_ws_slab_neutral(const rocke_attn_bwd_ws_slab_t* s,
+                                              rocke_value_t* r,
+                                              rocke_value_t* v,
+                                              double neutral)
+{
+    rocke_value_t* ok = rocke_attn_bwd_ws_slab_row_ok(s, r);
+    rocke_value_t* n = rocke_b_const_f32(s->b, neutral);
+    return rocke_b_select(s->b, ok, v, n);
+}
+
 void rocke_attn_bwd_packed_rows_locate(const rocke_attn_bwd_packed_rows_t* p,
                                        rocke_ir_builder_t* b,
                                        rocke_attn_bwd_iv_t r,

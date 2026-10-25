@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,63 @@ bool rocke_attn_bwd_lds_operand_check(rocke_ir_builder_t* b, const rocke_attn_bw
         return false;
     }
     return true;
+}
+
+/* ====================================================================== *
+ * caps answers
+ * ====================================================================== */
+
+rocke_status_t rocke_attn_bwd_gemm_caps_fill(const char* arch,
+                                             const char* dtype,
+                                             int atom_k,
+                                             rocke_attn_bwd_gemm_caps_t* out,
+                                             rocke_attn_bwd_err_t* err)
+{
+    memset(out, 0, sizeof(*out));
+    /* the legal wave counts of each BWD_ARCHES entry (static storage). Each
+     * slot is written once, under the lock, so concurrent fills and readers
+     * of out->legal_waves never race. */
+    static std::mutex waves_mu;
+    static bool waves_set[ROCKE_ATTN_BWD_N_ARCHES];
+    static int waves[ROCKE_ATTN_BWD_N_ARCHES][ROCKE_ATTN_BWD_CAPS_TUPLE_MAX];
+    rocke_attn_bwd_caps_t caps;
+    rocke_status_t st = rocke_attn_bwd_arch_caps(arch, &caps, err);
+    if(st != ROCKE_OK)
+        return st;
+    int slot = 0;
+    while(slot < ROCKE_ATTN_BWD_N_ARCHES && strcmp(rocke_attn_bwd_arches[slot], caps.arch) != 0)
+        ++slot;
+    if(slot == ROCKE_ATTN_BWD_N_ARCHES)
+    {
+        if(err != NULL)
+        {
+            err->code = ROCKE_ERR_VALUE;
+            snprintf(err->msg, sizeof(err->msg), "unknown backward arch %s", arch);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    {
+        std::lock_guard<std::mutex> lock(waves_mu);
+        if(!waves_set[slot])
+        {
+            for(int i = 0; i < caps.n_legal_waves; ++i)
+                waves[slot][i] = caps.legal_waves[i];
+            waves_set[slot] = true;
+        }
+    }
+    out->wave_size = caps.wave_size;
+    out->legal_waves = waves[slot];
+    out->n_legal_waves = caps.n_legal_waves;
+    out->has_tr_read_b64 = caps.has_tr_read_b64;
+    out->asm_lead_wait = ROCKE_ATTN_BWD_ASM_MFMA_VALU_LEAD_WAIT_STATES;
+    out->asm_tail_nop = rocke_attn_bwd_agpr_asm_tail_nop(atom_k);
+    /* the raising lookups answer NULL (their callers refuse it) */
+    rocke_attn_bwd_err_t scratch;
+    out->op = rocke_attn_bwd_select_atom(arch, dtype, atom_k, &scratch);
+    out->asm_mnemonic = rocke_attn_bwd_mfma_asm_mnemonic(arch, dtype, atom_k, &scratch);
+    if(err != NULL)
+        err->code = ROCKE_OK;
+    return ROCKE_OK;
 }
 
 /* ====================================================================== *

@@ -171,6 +171,13 @@ bool rocke_attn_bwd_counted_waits_end_step(rocke_attn_bwd_counted_waits_t* w,
                                            rocke_ir_builder_t* b);
 /* barrier: s_waitcnt vmcnt(n) lgkmcnt(0), then s_barrier (bare); records n. */
 void rocke_attn_bwd_counted_waits_barrier(rocke_attn_bwd_counted_waits_t* w, rocke_ir_builder_t* b);
+/* barrier under a builder whose Python twin sets IRBuilder.fence_barriers:
+ * the bare barrier carries `fence` (rocke_b_s_barrier_bare_fence; NULL is the
+ * plain barrier, as above). The backward body passes
+ * ROCKE_ATTN_BWD_BARRIER_FENCE. */
+void rocke_attn_bwd_counted_waits_barrier_fence(rocke_attn_bwd_counted_waits_t* w,
+                                                rocke_ir_builder_t* b,
+                                                const char* fence);
 void rocke_attn_bwd_counted_waits_free(rocke_attn_bwd_counted_waits_t* w);
 
 #ifdef __cplusplus
