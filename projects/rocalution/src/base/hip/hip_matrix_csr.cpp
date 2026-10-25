@@ -3247,7 +3247,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_diag);
 
             assert(cast_vec_diag != NULL);
-            assert(cast_vec_diag->size_ >= this->nrow_);
+            assert(cast_vec_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int     nrow            = this->nrow_;
             int64_t avg_nnz_per_row = this->nnz_ / nrow;
@@ -3361,7 +3361,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_inv_diag);
 
             assert(cast_vec_inv_diag != NULL);
-            assert(cast_vec_inv_diag->size_ == this->nrow_);
+            assert(cast_vec_inv_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int  nrow = this->nrow_;
             dim3 BlockSize(this->local_backend_.HIP_block_size);
@@ -4245,7 +4245,7 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<ValueType>*>(&diag);
 
         assert(cast_diag != NULL);
-        assert(cast_diag->size_ == this->ncol_);
+        assert(cast_diag->size_ == this->nrow_);
 
         if(this->nnz_ > 0)
         {
