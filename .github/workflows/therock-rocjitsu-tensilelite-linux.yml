@@ -21,6 +21,21 @@ on:
       amdgpu_families:
         type: string
         required: true
+      artifact_run_id:
+        type: string
+        default: ""
+      workers:
+        type: number
+        default: 0
+      dispatch_threads:
+        type: number
+        default: 0
+      case_filter:
+        type: string
+        default: ""
+      suite_seconds:
+        type: number
+        default: 19800
 
 permissions:
   contents: read
@@ -42,7 +57,7 @@ jobs:
         shell: bash
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -51,13 +66,23 @@ jobs:
       # Some configs need well over an hour under emulation.
       PER_TEST_TIMEOUT: "10800"
       # Leave time within the 345-minute step for cleanup and report generation.
-      SUITE_TIMEOUT_SECONDS: "19800"
+      SUITE_TIMEOUT_SECONDS: ${{ inputs.suite_seconds }}
+      REQUESTED_WORKERS: ${{ inputs.workers }}
+      REQUESTED_DISPATCH_THREADS: ${{ inputs.dispatch_threads }}
+      CASE_FILTER: ${{ inputs.case_filter }}
       # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
       # engine wakeup behind the hipMemcpy hangs, and #13538, the aliased TDM
       # operand behind the gsuaad hang). If therock_ref's rocjitsu predates it,
       # the job builds rocjitsu at this commit instead; empty always uses TheRock's.
       ROCJITSU_MIN_REF: f52ec1d75506bbde7510257e25141e7e3c3db68d
     steps:
+      - name: Validate experiment inputs
+        if: ${{ inputs.artifact_run_id != '' }}
+        run: |
+          [[ -n "${CASE_FILTER}" ]] || { echo "::error::case_filter must explicitly select the workload"; exit 1; }
+          [[ "${SUITE_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || { echo "::error::suite_seconds must be an integer"; exit 1; }
+          (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -172,19 +197,26 @@ jobs:
           # Each xdist worker's clients run their own in-process emulator, so
           # split the host between workers instead of oversubscribing it.
           cores="$(nproc)"
-          workers=$(( cores < 16 ? cores : 16 ))
+          workers="${REQUESTED_WORKERS}"
+          [[ "${workers}" =~ ^[0-9]+$ ]] || { echo "::error::workers must be an integer"; exit 1; }
+          [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[0-9]+$ ]] || { echo "::error::dispatch_threads must be an integer"; exit 1; }
+          (( workers > 0 )) || workers=$(( cores < 16 ? cores : 16 ))
+          (( workers <= cores )) || { echo "::error::workers exceeds host CPU count"; exit 1; }
           budget=$(( cores / workers ))
           mkdir -p "${REPORT_DIR}/junit"
           python - "${config}" \
-              "${REPORT_DIR}/rocjitsu-config.json" "${budget}" <<'PY'
+              "${REPORT_DIR}/rocjitsu-config.json" "${budget}" "${REQUESTED_DISPATCH_THREADS}" <<'PY'
           import json, sys
-          source, destination, budget = sys.argv[1:]
+          source, destination, budget, dispatch = sys.argv[1:]
           config = json.load(open(source))
           config["cpu_thread_budget"] = int(budget)
           # With more than one engine thread, a StreamK ready flag is sometimes
           # left set after the kernel (caught by the Synchronizer check), so pin
           # one even when a larger runner's budget would allocate two.
           config["num_threads"] = 1
+          if int(dispatch):
+              config["cpu_dispatch_threads"] = int(dispatch)
+              config["async_helper_threads"] = 0
           json.dump(config, open(destination, "w"), indent=2)
           PY
 
@@ -241,7 +273,8 @@ jobs:
         run: |
           set -o pipefail
           cd "${REPORT_DIR}"
-          python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
+          TIMEFORMAT='wall_seconds=%R user_seconds=%U system_seconds=%S'
+          { time python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
             --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
             mirage run --profile "${MIRAGE_PROFILE}" --in-process \
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
@@ -250,13 +283,15 @@ jobs:
               --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
               --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \
               -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
+              -k "${CASE_FILTER}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
               --timeout="${PER_TEST_TIMEOUT}" \
               --junit-xml="${REPORT_DIR}/junit/tensilelite.xml" \
               --prebuilt-client="${TENSILELITE_CLIENT}" \
               --global-parameters="LibraryFormat='msgpack'" \
               "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
-            2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"
+            2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"; } \
+            2> "${REPORT_DIR}/suite-resource-time.txt"
 
       - name: Summarize test timings
         if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
@@ -278,7 +313,7 @@ jobs:
       # Tensile prints its fatal message to stdout, which xdist workers drop.
       # Rerun the failed ones without xdist so the message reaches the log.
       - name: Rerun failed ductile tests without xdist
-        if: ${{ !cancelled() && steps.tests.conclusion == 'failure' }}
+        if: ${{ !cancelled() && steps.tests.conclusion == 'failure' && inputs.artifact_run_id == '' }}
         continue-on-error: true
         timeout-minutes: 30
         run: |
