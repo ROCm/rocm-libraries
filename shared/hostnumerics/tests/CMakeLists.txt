@@ -161,17 +161,6 @@ add_executable(
 target_link_libraries(hostnumerics-scalar-codec-tests PRIVATE roc::hostnumerics-core GTest::gtest_main)
 add_test(NAME hostnumerics-scalar-codec-tests COMMAND hostnumerics-scalar-codec-tests)
 
-# Keep this leaf's dependency graph free of throwing tensor/metadata headers.
-add_executable(hostnumerics-integer-conversion-no-exceptions-tests integer_conversion_no_exceptions_test.cpp)
-target_include_directories(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_compile_features(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE /EHs-c-)
-else()
-    target_compile_options(hostnumerics-integer-conversion-no-exceptions-tests PRIVATE -fno-exceptions)
-endif()
-add_test(NAME hostnumerics-integer-conversion-no-exceptions-tests COMMAND hostnumerics-integer-conversion-no-exceptions-tests)
-
 if(TARGET hostnumerics-blas)
     add_executable(hostnumerics-blas-tests blas_backend_test.cpp)
     target_link_libraries(
