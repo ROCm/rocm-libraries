@@ -735,7 +735,7 @@ rocke_attn_bwd_ws_slab_t rocke_attn_bwd_workspace_addr_slab(
     rocke_value_t* base_ws = max64(b, lo, c0);
     /* py: _clamp64_to_i32(b, b.sub(rows64, base), b.const_i32(I32_FAR)) */
     rocke_value_t* left64 = rocke_b_sub(b, rows64, base);
-    rocke_value_t* far = rocke_b_const_i32(b, ROCKE_ATTN_BWD_I32_FAR);
+    rocke_value_t* far = rocke_b_const_i32(b, ROCKE_ATTN_I32_FAR);
     rocke_value_t* rows_left = clamp64_to_i32(b, left64, far);
     rocke_value_t* h64 = rocke_attn_bwd_as_i64(b, h, false);
     rocke_value_t* elem;
