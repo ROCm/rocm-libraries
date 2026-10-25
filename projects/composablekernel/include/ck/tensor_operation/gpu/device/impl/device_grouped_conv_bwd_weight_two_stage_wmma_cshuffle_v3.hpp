@@ -690,16 +690,6 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
-                // Limit auto split-K on gfx1250 to the squared per-CU occupancy.
-                // Smaller grids otherwise request excessive reduction partitions.
-                if(ck::is_gfx125_supported())
-                {
-                    const ck::index_t occupancy_k_batch_ceiling =
-                        active_workgroups_per_cu.max_occupancy_ *
-                        active_workgroups_per_cu.max_occupancy_;
-                    k_batch_ = std::min(k_batch_, occupancy_k_batch_ceiling);
-                }
-
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
                     std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
