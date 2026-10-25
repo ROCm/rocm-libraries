@@ -13,7 +13,15 @@ struct NamedBarrier
 {
     static constexpr bool IsEnabled    = Enable;
     static constexpr index_t num_waves = ThreadGroup::GetNumWaves();
-    using barrier_t                    = __amdgpu_named_workgroup_barrier_t;
+
+#if defined(__gfx125__)
+    using barrier_t = __amdgpu_named_workgroup_barrier_t;
+#else
+    struct barrier_t
+    {
+        barrier_t() = delete;
+    };
+#endif
 
     __device__ constexpr NamedBarrier() = delete;
 

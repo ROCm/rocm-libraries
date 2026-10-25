@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/ck.hpp"
+#include "ck/utility/number.hpp"
 
 namespace ck {
 
