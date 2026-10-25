@@ -171,6 +171,23 @@ TUNING_FIELDS = {
     "kv_addr_hoist",
 }
 
+# Engines whose catalog ranker has nothing to learn, so their UHD value is an engine
+# estimate (RFC 0019 §3.1 `predict_engine`, L1): the expected tflops of the engine's own
+# pick, which engine selection reads before any catalog is enumerated. Measured by the UHD
+# pipeline: on sdpa_cdna_decode every graph admits one object; on sdpa_cdna_dualwave the
+# native order is within ~1% of the best measured; on rmsnorm and rmsnorm_bwd the objects
+# differ only in graph-determined tier fields (N, n_max), which are no knob, so a ranker
+# cannot tell them apart.
+ENGINE_ESTIMATE_OPS = frozenset(
+    {"rmsnorm", "rmsnorm_bwd", "sdpa_cdna_decode", "sdpa_cdna_dualwave"}
+)
+
+# The estimate's slot until a trained model is promoted into it. No scorer is registered
+# under this symbol, so the loader disables the estimate and keeps the engine (RFC 0019
+# §11.2), exactly as an engine with no estimate behaves; `uhd_gen promote` replaces the
+# slot in place, matching it by its metric.
+ENGINE_ESTIMATE_METRIC = "tflops"
+
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
 # is itself derived from a URL rather than being a magic constant. The names are
@@ -322,6 +339,7 @@ class OpDescriptors:
         self.udd_id = _uuid(f"udd/{op}")
         self.ued_id = _uuid(f"ued/{op}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
+        self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
     def documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
@@ -346,6 +364,32 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
+        engine: dict[str, Any] = {
+            **ued,
+            "graph_match": {"native": f"{self.symbols}.graph_match"},
+            # The UHD that orders the engine's kernel catalog, on every arch.
+            "sort_kernel_catalog": {"default": self.uhd_id},
+        }
+        estimate: dict[str, dict[str, Any]] = {}
+        if self.op in ENGINE_ESTIMATE_OPS:
+            engine["predict_engine"] = {"default": self.estimate_uhd_id}
+            estimate[f"{self.stem}_engine_estimate.uhd.json"] = {
+                "version": DESCRIPTOR_VERSION,
+                "id": self.estimate_uhd_id,
+                "name": f"flydsl {self.op} engine estimate",
+                "provenance": (
+                    "Slot for a trained engine estimate; uhd_gen promote replaces it. "
+                    "No scorer is registered under its symbol, so until then the "
+                    "loader disables the estimate and keeps the engine."
+                ),
+                "adapter": "native",
+                "objective": "max",
+                "score": {"metric": ENGINE_ESTIMATE_METRIC},
+                "native": {"symbol": f"{self.symbols}.engine_estimate"},
+            }
+        engine["metadata"] = self.kmd_id
+        engine["knobs"] = [f for f in self.fields if f in TUNING_FIELDS]
+
         return {
             f"{self.stem}.kmd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -369,14 +413,8 @@ class OpDescriptors:
                 "name": f"flydsl {self.op} dispatch",
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
-            f"{self.stem}.ued.json": {
-                **ued,
-                "graph_match": {"native": f"{self.symbols}.graph_match"},
-                # The UHD that orders the engine's kernel catalog, on every arch.
-                "sort_kernel_catalog": {"default": self.uhd_id},
-                "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
-            },
+            f"{self.stem}.ued.json": engine,
+            **estimate,
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,

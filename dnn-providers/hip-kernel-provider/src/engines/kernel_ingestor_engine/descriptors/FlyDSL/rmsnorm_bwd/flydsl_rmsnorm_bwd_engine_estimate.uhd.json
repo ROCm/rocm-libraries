@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "65a6026c-17b9-57a0-bea5-162bd66698b0",
+  "name": "flydsl rmsnorm_bwd engine estimate",
+  "provenance": "Slot for a trained engine estimate; uhd_gen promote replaces it. No scorer is registered under its symbol, so until then the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_rmsnorm_bwd.engine_estimate"
+  }
+}
