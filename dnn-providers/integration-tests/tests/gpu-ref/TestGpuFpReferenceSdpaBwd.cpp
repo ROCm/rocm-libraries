@@ -53,6 +53,10 @@ std::string caseName(const ::testing::TestParamInfo<BwdCase>& info)
     return info.param.name;
 }
 
+// fp32 CPU-vs-GPU bound for O, dQ, dK, dV and dBias. Measured worst case on gfx942 across every
+// case in this file is 7.2e-7 (|values| up to ~2.7): different accumulation order and FMA
+// contraction in the GPU kernels. 1e-4 keeps over 100x margin for cross-architecture device-math
+// variation; a gap approaching it is a real divergence.
 constexpr float TOL_FP32 = 1e-4f;
 
 } // namespace
