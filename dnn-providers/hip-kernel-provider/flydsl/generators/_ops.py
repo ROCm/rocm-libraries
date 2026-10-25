@@ -19,13 +19,14 @@ from __future__ import annotations
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
-    # The RDNA kernels import the aiw directory's Philox (kernel modification 27, decision
-    # Q7: one source for the dropout stream), so it is an input of theirs too.
+    # The RDNA and CDNA kernels import the aiw directory's Philox (RDNA kernel modification
+    # 27, CDNA 38; decision Q7: one source for the dropout stream), so it is an input of
+    # theirs too.
     "sdpa_rdna": ("attention_rdna", "attention_rdna4/philox.py"),
     "sdpa_rdna_decode": ("attention_rdna", "attention_rdna4/philox.py"),
-    "sdpa_cdna": ("attention_cdna",),
-    "sdpa_cdna_dualwave": ("attention_cdna",),
-    "sdpa_cdna_decode": ("attention_cdna",),
+    "sdpa_cdna": ("attention_cdna", "attention_rdna4/philox.py"),
+    "sdpa_cdna_dualwave": ("attention_cdna", "attention_rdna4/philox.py"),
+    "sdpa_cdna_decode": ("attention_cdna", "attention_rdna4/philox.py"),
     "sdpa_aiw": ("attention_rdna4",),
     # The RNG dump's keep-mask writer draws the attention kernels' counters through the same
     # Philox, so that file is its input too; its own directory keeps it out of sdpa_aiw's.

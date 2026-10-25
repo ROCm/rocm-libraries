@@ -191,11 +191,19 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
         ("generators/_codeobject.py", set(OP_KERNEL_DIRS)),
         ("generators/_ops.py", set()),
         ("kernels_src/kernels/norm/rmsnorm_kernel.py", {"rmsnorm", "rmsnorm_bwd"}),
-        # The RDNA kernels and the RNG dump's mask writer import the aiw directory's Philox by
-        # file (decision Q7: one source for the dropout stream).
+        # The RDNA and CDNA kernels and the RNG dump's mask writer import the aiw directory's
+        # Philox by file (decision Q7: one source for the dropout stream).
         (
             "kernels_src/kernels/attention_rdna4/philox.py",
-            {"sdpa_aiw", "sdpa_rdna", "sdpa_rdna_decode", "sdpa_dropout_mask"},
+            {
+                "sdpa_aiw",
+                "sdpa_rdna",
+                "sdpa_rdna_decode",
+                "sdpa_cdna",
+                "sdpa_cdna_dualwave",
+                "sdpa_cdna_decode",
+                "sdpa_dropout_mask",
+            },
         ),
         # The mask writer's own directory restamps it alone.
         (

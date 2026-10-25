@@ -7,7 +7,8 @@ SPDX-License-Identifier:  MIT
 
 Vendored kernel sources for the `hipkernel:flydsl_sdpa_cdna` engine. The RDNA
 attention kernels are separate, under `../attention_rdna/`, and share nothing
-with these but the `kernels/common` helpers.
+with these but the `kernels/common` helpers and the dropout stream's Philox
+(`../attention_rdna4/philox.py`, modification 38).
 
 | File | Upstream | Serves |
 |---|---|---|
@@ -488,7 +489,7 @@ diff against upstream plus the modifications below.
     with AOTriton's mask (>= 0.15), bit for bit, through modification 32's appended
     arguments; every other build takes them unread and compiles as before.
     - **Philox4x32-10** (`_philox4x32`): the aiw kernel's `attention_rdna4/philox.py`
-      round (Triton's), restated here so these objects digest only this directory; the
+      round (Triton's), first restated here, now imported (modification 38); the
       provider's tests pin the mask to a host oracle and to AOTriton's own masks.
     - **The stream:** key (seed low, seed high), the 8-byte seed read at `DropoutSeed`'s
       base; each run of 4 keys of a row draws one counter, `offset1 + offset2 + ((b * Hq +
@@ -604,6 +605,26 @@ diff against upstream plus the modifications below.
       instructions). VGPR counts are unchanged but gfx942's `head_dim` 256 non-causal
       object's (439 to 441, the same occupancy). Every other object is byte-identical to
       modification 36's.
+    - Not yet upstream.
+38. **One Philox source** (`flash_attn_utils.py`; the dropout builds). `_philox4x32`
+    calls `Philox(width=32).words` from `attention_rdna4/philox.py`, the module the RDNA
+    and aiw objects and the RNG dump's mask writer draw from, instead of modification
+    33's restated round, so it is an input of the CDNA ops too (`generators/_ops.py`).
+    - **The same round, emitted in another order:** the restated round emitted its four
+      multiplies first, `philox.py` each output's multiply and XORs in turn. The values
+      are the same, so the mask is the same; LLVM schedules and allocates the block
+      differently. The restated round emitted in `philox.py`'s order gives objects
+      byte-identical to the import's.
+    - **Objects:** every dropout object is rebuilt (24 on gfx90a, 34 on gfx942, 28 on
+      gfx950); every other object is byte-identical to modification 37's. 80 of the 86
+      keep their instruction count and opcode mix, 79 their registers and spills too
+      (no VGPR spill on any). The rest: gfx942 bf16 `head_dim` 256 causal with a bias
+      418 -> 422 VGPRs (one wave per SIMD either way); gfx942 f16 128 non-causal 256-row
+      key-aligned 234 -> 233; gfx950 bf16 256 non-causal 374 -> 372 and its key-aligned
+      build 380 -> 378 (14 fewer instructions); gfx950 f16 256 non-causal and its
+      key-aligned build, the same registers with 14 fewer and 2 more instructions;
+      gfx950 f16 128 causal 264 -> 260 VGPRs and 15 -> 0 SGPR spills (18 fewer
+      instructions).
     - Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes

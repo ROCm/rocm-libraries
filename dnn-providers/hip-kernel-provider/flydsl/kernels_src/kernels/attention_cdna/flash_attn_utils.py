@@ -24,6 +24,7 @@ from flydsl.expr.rocdl import cdna3
 from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 from flydsl.expr.utils.arith import _to_raw as as_mlir_value
+from kernels.attention_rdna4.philox import Philox
 from kernels.common import buffer_ops
 from kernels.common.kernels_common import LOG2E as _LOG2E
 from kernels.common.kernels_common import dtype_to_elem_type
@@ -236,45 +237,19 @@ def _load_seq_lens(varlen_flags, seq_lens, batch_idx, seq_len, seq_len_kv):
     return [fx.Int32(r) for r in if_op.results]
 
 
-# Philox4x32-10, AOTriton's dropout RNG (modification 33): the round of the aiw kernel's
-# `attention_rdna4/philox.py` (Triton's, verbatim), restated here so the CDNA objects
-# digest only their own directory. The constants and the order of the round are the
-# stream's contract; the provider's tests pin the mask it draws bit for bit against a
-# host oracle and AOTriton's own masks.
-_PHILOX_MUL_A = 0xD2511F53
-_PHILOX_MUL_B = 0xCD9E8D57
-_PHILOX_KEY_A = 0x9E3779B9
-_PHILOX_KEY_B = 0xBB67AE85
-_PHILOX_ROUNDS = 10
+# Philox4x32-10, AOTriton's dropout RNG (modification 33): the aiw kernel's
+# `attention_rdna4/philox.py`, the one source of the dropout stream every FlyDSL SDPA
+# family draws (so it is an input of the CDNA ops too, generators/_ops.py). Pinned to
+# 32-bit lanes and 10 rounds, the stream's contract; the provider's tests pin the mask it
+# draws bit for bit against a host oracle and AOTriton's own masks.
+_PHILOX = Philox(width=32)
 
 
 def _philox4x32(c0, c1, k0, k1):
     """The four 32-bit words of Philox4x32-10 at counter (c0, c1, 0, 0) and key
-    (k0, k1). Raw ``arith`` ops wrap at 32 bits, which is the PRNG's arithmetic; the
-    ``fx`` operators would fold a constant key through unbounded Python ints."""
-    from flydsl._mlir.dialects import arith as _arith  # noqa: PLC0415
-
-    def i32(value):
-        return fx.Int32(value)
-
-    def raw(value):
-        return as_mlir_value(fx.Int32(value))
-
-    mul_a, mul_b = i32(_PHILOX_MUL_A), i32(_PHILOX_MUL_B)
-    key_a, key_b = i32(_PHILOX_KEY_A), i32(_PHILOX_KEY_B)
-    c2 = c3 = i32(0)
-    for _ in range(_PHILOX_ROUNDS):
-        hi_b = _arith.MulUIExtendedOp(raw(mul_b), raw(c2)).high
-        hi_a = _arith.MulUIExtendedOp(raw(mul_a), raw(c0)).high
-        lo_b = _arith.muli(raw(mul_b), raw(c2))
-        lo_a = _arith.muli(raw(mul_a), raw(c0))
-        c0 = i32(_arith.xori(_arith.xori(hi_b, raw(c1)), raw(k0)))
-        c2 = i32(_arith.xori(_arith.xori(hi_a, raw(c3)), raw(k1)))
-        c1 = i32(lo_b)
-        c3 = i32(lo_a)
-        k0 = i32(_arith.addi(raw(k0), raw(key_a)))
-        k1 = i32(_arith.addi(raw(k1), raw(key_b)))
-    return c0, c1, c2, c3
+    (k0, k1)."""
+    zero = fx.Int32(0)
+    return _PHILOX.words(c0, c1, zero, zero, k0, k1)
 
 
 def _load_u64_words(tensor):
