@@ -7,6 +7,7 @@ import hashlib
 import heapq
 import json
 import math
+import re
 from pathlib import Path
 from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack
 from tensilelite.Utilities.gemm_problem_for_solution import (
@@ -18,6 +19,45 @@ from tensilelite.Utilities.gemm_problem_bench import bench_yaml, UnsupportedBenc
 POLICY = "tile-depth-v1"
 CASES_PER_SOLUTION = 4
 REGULAR_POLICY = "regular-v1"
+
+# Keep these directed relationships aligned with ChipIdRegistry in
+# tensilelite/include/Tensile/AMDGPUPredicates.hpp.
+CHIP_FALLBACKS = {
+    chip: (0x75A0,) for chip in (0x75B0, 0x75A2, 0x75B2, 0x75A3, 0x75B3, 0x75A8, 0x75B8)
+}
+
+
+def validate_profile(config, target):
+    """Check that an explicitly supplied profile describes one device consistently."""
+    device = config["vm"]["gpu"]["device"]
+    if device["gfx_target_version"] != {"gfx942": 90402, "gfx950": 90500}[target]:
+        raise ValueError("Profile architecture does not match the requested target")
+    simds, per_cu = device["simd_count"], device["simd_per_cu"]
+    if min(simds, per_cu) <= 0 or simds % per_cu:
+        raise ValueError(
+            "Profile SIMD count must be a positive multiple of SIMD per CU"
+        )
+    cus = simds // per_cu
+    per_partition = (
+        device["num_shader_engines"]
+        * device["num_shader_arrays_per_engine"]
+        * device["num_cu_per_sh"]
+    )
+    if per_partition <= 0 or cus % per_partition:
+        raise ValueError("Profile CU count disagrees with shader resources")
+    if target == "gfx950" and device["device_id"] not in (0x75A0, *CHIP_FALLBACKS):
+        raise ValueError("Unregistered gfx950 PCI chip ID in profile")
+
+    def topology_cus(node):
+        match = re.search(r"\[(\d+):(\d+)\]$", node["name"])
+        repetitions = int(match[2]) - int(match[1]) if match else 1
+        if repetitions <= 0:
+            raise ValueError("Empty profile topology range")
+        children = sum(topology_cus(n) for n in node.get("children", []))
+        return repetitions * (1 if node["type"] == "compute_unit" else children)
+
+    if topology_cus(config["topology"]["root"]) != cus:
+        raise ValueError("Profile topology CU count disagrees with device resources")
 
 
 def regular_problem(solution, directory, target):
@@ -51,7 +91,12 @@ def matches_hardware(predicate, target, device):
     if kind == "Processor":
         return value == target
     if kind == "PciChipId":
-        return value == device["device_id"]
+        chip = device.get("device_id")
+        return (
+            target == "gfx950"
+            and chip is not None
+            and (value == chip or value in CHIP_FALLBACKS.get(chip, ()))
+        )
     if kind == "CUCount":
         return value == device["simd_count"] // device["simd_per_cu"]
     return False
@@ -245,7 +290,14 @@ def select_solutions(entries, count, seed):
 
 
 def make_plan(
-    library_dir, target, device, count, seed, solution_indices=None, policy=POLICY
+    library_dir,
+    target,
+    device,
+    count,
+    seed,
+    solution_indices=None,
+    policy=POLICY,
+    profiles=None,
 ):
     if policy not in (POLICY, REGULAR_POLICY):
         raise ValueError(f"Unknown case policy: {policy}")
@@ -265,6 +317,17 @@ def make_plan(
     names, eligible_names = set(), set()
     indices, requested = set(), {}
     wanted = set(solution_indices or [])
+    profiles = profiles or {"default": device}
+
+    def profile_for(solution):
+        return next(
+            (
+                name
+                for name, resources in profiles.items()
+                if matches_hardware(solution["hardwarePredicate"], target, resources)
+            ),
+            None,
+        )
 
     def inventory():
         for path in sorted(libraries.values()):
@@ -280,7 +343,7 @@ def make_plan(
                     requested[solution["index"]] = (path, solution)
                 name = hashlib.sha256(solution["kernelName"].encode()).digest()
                 names.add(name)
-                if not matches_hardware(solution["hardwarePredicate"], target, device):
+                if profile_for(solution) is None:
                     counts["other_or_unknown_hardware"] += 1
                 elif policy == REGULAR_POLICY:
                     # Only explicitly unimplemented features are coverage gaps.
@@ -324,6 +387,7 @@ def make_plan(
     for job_id, (metadata, s) in enumerate(selected):
         job = {
             "id": job_id,
+            "profile": profile_for(s),
             "library": str(metadata),
             "problem_type": s["problemType"],
             "hardware_predicate": s["hardwarePredicate"],
@@ -334,7 +398,8 @@ def make_plan(
             ],
         }
         try:
-            if not matches_hardware(s["hardwarePredicate"], target, device):
+            if job["profile"] is None:
+                job["planning_outcome"] = "EXCLUDED_HARDWARE"
                 raise ValueError(
                     "Requested solution does not match the emulated hardware"
                 )
@@ -367,6 +432,14 @@ def make_plan(
             UnsupportedSolution,
             UnsupportedBenchProblem,
         ) as error:
+            job.setdefault(
+                "planning_outcome",
+                (
+                    "UNSUPPORTED_FEATURE"
+                    if isinstance(error, (UnsupportedSolution, UnsupportedBenchProblem))
+                    else "INVALID_INPUT"
+                ),
+            )
             job["cases"] = [
                 {"id": label, "shape": None}
                 for label in (
@@ -389,6 +462,7 @@ def make_plan(
         for p in map(Path, job["code_objects"]):
             if not p.is_file():
                 job["planning_error"] = f"Missing selected code object: {p.name}"
+                job["planning_outcome"] = "MISSING_CODE_OBJECT"
             elif p.name not in inputs:
                 inputs[p.name] = sha256(p)
         jobs.append(job)
@@ -417,7 +491,7 @@ def make_plan(
 
 
 def make_batches(jobs, size, *, group_by_shard):
-    """Preserve selection IDs and order within each shard; allow boundary crossings."""
+    """Order shards within each profile and keep one profile per native process."""
     if size < 1:
         raise ValueError("Batch size must be positive")
     if group_by_shard:
@@ -429,4 +503,11 @@ def make_batches(jobs, size, *, group_by_shard):
             shard = job["library"]
             first_index[shard] = min(first_index.get(shard, index), index)
         jobs = sorted(jobs, key=lambda j: (first_index[j["library"]], j["library"]))
-    return [jobs[start : start + size] for start in range(0, len(jobs), size)]
+    groups = {}
+    for job in jobs:
+        groups.setdefault(job.get("profile", "default"), []).append(job)
+    return [
+        group[start : start + size]
+        for group in groups.values()
+        for start in range(0, len(group), size)
+    ]

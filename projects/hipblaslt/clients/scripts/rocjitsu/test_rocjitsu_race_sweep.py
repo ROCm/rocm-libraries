@@ -70,6 +70,7 @@ def job():
         "cases": plan.derive_cases(s),
         "problem_type": s["problemType"],
         "library": "library.dat",
+        "profile": "default",
     }
 
 
@@ -137,6 +138,295 @@ def failure_list():
 
 
 class SweepTests(unittest.TestCase):
+    def test_native_chip_fallback_is_directed_and_profile_batches_do_not_mix(self):
+        devices = {
+            "mi350": {"device_id": 0x75A0, "simd_count": 1024, "simd_per_cu": 4},
+            "mi355": {"device_id": 0x75A3, "simd_count": 1024, "simd_per_cu": 4},
+        }
+        for chip in (0x75A0, 0x75B0, 0x75A2, 0x75B2, 0x75A3, 0x75B3, 0x75A8, 0x75B8):
+            device = {**devices["mi355"], "device_id": chip}
+            self.assertTrue(
+                plan.matches_hardware(
+                    {"type": "PciChipId", "value": 0x75A0}, "gfx950", device
+                )
+            )
+            self.assertFalse(
+                plan.matches_hardware(
+                    {"type": "PciChipId", "value": 0x75A2}, "gfx950", devices["mi355"]
+                )
+            )
+        self.assertFalse(
+            plan.matches_hardware(
+                {"type": "PciChipId", "value": 0x75A3}, "gfx950", devices["mi350"]
+            )
+        )
+        self.assertFalse(
+            plan.matches_hardware(
+                {"type": "PciChipId", "value": 0x75A0}, "gfx942", devices["mi350"]
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(4)]
+            for i, record in enumerate(records):
+                record["hardwarePredicate"] = {
+                    "type": "And",
+                    "value": [
+                        {"type": "Processor", "value": "gfx950"},
+                        {"type": "PciChipId", "value": 0x75A0 if i % 2 else 0x75A3},
+                        {"type": "CUCount", "value": 256},
+                    ],
+                }
+            path = root / "library_gfx950.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"kernel")
+            manifest = plan.make_plan(
+                root,
+                "gfx950",
+                {},
+                4,
+                "0",
+                list(range(4)),
+                plan.REGULAR_POLICY,
+                profiles=devices,
+            )
+            self.assertEqual(
+                [j["profile"] for j in manifest["jobs"]],
+                ["mi355", "mi350", "mi355", "mi350"],
+            )
+            batches = plan.make_batches(manifest["jobs"], 64, group_by_shard=True)
+            self.assertEqual([[j["id"] for j in b] for b in batches], [[0, 2], [1, 3]])
+            single = plan.make_plan(
+                root,
+                "gfx950",
+                {},
+                4,
+                "0",
+                list(range(4)),
+                plan.REGULAR_POLICY,
+                profiles={"mi355": devices["mi355"]},
+            )
+            self.assertEqual(
+                len(plan.make_batches(single["jobs"], 64, group_by_shard=True)), 1
+            )
+
+    def test_explicit_profile_rejects_conflicting_device_and_topology_resources(self):
+        config = {
+            "vm": {
+                "gpu": {
+                    "device": {
+                        "device_id": 0x75A3,
+                        "gfx_target_version": 90500,
+                        "simd_count": 8,
+                        "simd_per_cu": 4,
+                        "num_shader_engines": 1,
+                        "num_shader_arrays_per_engine": 1,
+                        "num_cu_per_sh": 2,
+                    }
+                }
+            },
+            "topology": {
+                "root": {
+                    "name": "soc",
+                    "type": "soc",
+                    "children": [{"name": "cu[0:2]", "type": "compute_unit"}],
+                }
+            },
+        }
+        plan.validate_profile(config, "gfx950")
+        for field, value in (
+            ("gfx_target_version", 90402),
+            ("simd_count", 9),
+            ("num_cu_per_sh", 3),
+            ("device_id", 123),
+            ("simd_count", 16),
+        ):
+            bad = copy.deepcopy(config)
+            bad["vm"]["gpu"]["device"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                plan.validate_profile(bad, "gfx950")
+
+    def test_abort_retains_completed_record_and_distinguishes_launch_from_no_launch(
+        self,
+    ):
+        jobs = [job() for _ in range(4)]
+        for i, j in enumerate(jobs):
+            j.update(id=i, cases=j["cases"][:1], target_dispatches_per_case=1)
+            j["solutions"][0] = {
+                "index": i,
+                "name": f"solution-{i}",
+                "kernel": f"kernel-{i}",
+            }
+        text = (
+            bench_log(jobs[0])
+            + sweep.target_dispatch_line(jobs[1])
+            + "\n[rj warn] invalid encoding\n"
+        )
+        results = sweep.classify_bench_batch(jobs, text, 1)
+        self.assertEqual(results[0]["warnings"], {})
+        self.assertEqual(
+            [r["outcome"] for r in results],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "LAUNCHED_NO_RESULT",
+                "UNEXECUTED",
+                "UNEXECUTED",
+            ],
+        )
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 0, 0])
+        self.assertEqual(
+            results[0]["cases"][0]["numerical"],
+            {"norm_error": 0, "atol": 0.00001, "rtol": 0.00001},
+        )
+        self.assertFalse(results[0]["index_failed"])
+        self.assertFalse(results[2]["index_failed"])
+        self.assertEqual(results[0]["warnings"], {})
+        self.assertEqual(len(results[0]["process_diagnostics"]["warnings"]), 1)
+        ambiguous = sweep.classify_bench_batch(jobs, bench_log(jobs[2]), 1)
+        self.assertNotIn(
+            "UNEXECUTED", [c["status"] for r in ambiguous for c in r["cases"]]
+        )
+        wrong_symbol = text.replace('symbol="kernel-1"', 'symbol="wrong"')
+        self.assertNotIn(
+            "UNEXECUTED",
+            [r["outcome"] for r in sweep.classify_bench_batch(jobs, wrong_symbol, 1)],
+        )
+        rejected = sweep.classify_bench_batch(
+            jobs, bench_log(jobs[0]) + "error: NO solution found!\n", 0
+        )
+        self.assertEqual(
+            [r["outcome"] for r in rejected],
+            [
+                "VALIDATED_IN_FAILED_PROCESS",
+                "NATIVE_REJECTED",
+                "UNEXECUTED",
+                "UNEXECUTED",
+            ],
+        )
+
+    def test_recovery_reuses_profile_and_yaml_and_preserves_failed_process(self):
+        self.exercise_recovery()
+
+    def test_recovery_exception_preserves_other_indices_and_original_attempt(self):
+        self.exercise_recovery(recovery_error=True)
+
+    def exercise_recovery(self, recovery_error=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(4)]
+            for r in records:
+                r["hardwarePredicate"] = {"type": "Processor", "value": "gfx950"}
+            path = root / "library_gfx950.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            client = path.with_suffix(".co")
+            client.write_bytes(b"kernel")
+            for name in (
+                "hipblaslt_gentest.py",
+                "hipblaslt_template.yaml",
+                "hipblaslt_common.yaml",
+            ):
+                (root / name).write_bytes(b"converter")
+            config = root / "config.json"
+            config.write_text(json.dumps({"vm": {"gpu": {"device": {}}}}))
+            failures = root / "failures.yaml"
+            data = failure_list()
+            data["failures"] = []
+            failures.write_text(yaml.safe_dump(data))
+            args = SimpleNamespace(
+                reports=root / "reports",
+                backend="bench",
+                workers=1,
+                batch_size=64,
+                continue_on_failure=True,
+                recover_unexecuted=True,
+                policy=plan.REGULAR_POLICY,
+                timeout=120,
+                suite_timeout=1500,
+                seed="0",
+                target="gfx950",
+                library_dir=root,
+                solutions=4,
+                solution_indices=list(range(4)),
+                config=config,
+                rocjitsu=client,
+                client=client,
+                known_failures=failures,
+                rocjitsu_revision="a" * 40,
+                run_known_failures=True,
+            )
+            inputs, configs = [], []
+
+            def execute(command, log, timeout, env):
+                rows = yaml.safe_load(
+                    Path(command[-1]).with_suffix(".yaml").read_text()
+                )["Tests"]
+                inputs.append(rows)
+                configs.append(command[command.index("--config") + 1])
+                jobs = [
+                    {
+                        "id": row["solution_index"],
+                        "solutions": [
+                            {
+                                "index": row["solution_index"],
+                                "name": f"solution-{row['solution_index']}",
+                                "kernel": f"kernel-{row['solution_index']}",
+                            }
+                        ],
+                        "cases": [
+                            {
+                                "id": "regular",
+                                "shape": [
+                                    row[k] for k in ("M", "N", "batch_count", "K")
+                                ],
+                            }
+                        ],
+                        "target_dispatches_per_case": 1,
+                    }
+                    for row in rows
+                ]
+                if len(inputs) == 1:
+                    log.write_text(
+                        bench_log(jobs[0])
+                        + sweep.target_dispatch_line(jobs[1])
+                        + "\n[rj warn] invalid encoding\n"
+                    )
+                    return 1
+                if recovery_error and jobs[0]["id"] == 2:
+                    raise RuntimeError("recovery launch failed")
+                log.write_text(bench_log(jobs[0]))
+                return 0
+
+            with (
+                patch.object(sweep, "physical_cpus", return_value=[0]),
+                patch.object(sweep, "convert_bench_input", return_value=0),
+                patch.object(sweep, "execute_command", side_effect=execute),
+            ):
+                self.assertEqual(sweep.run(args), 1)
+            summary = json.loads((args.reports / "summary.json").read_text())
+            self.assertEqual([len(rows) for rows in inputs], [4, 1, 1])
+            self.assertEqual(inputs[1], [inputs[0][2]])
+            self.assertEqual(inputs[2], [inputs[0][3]])
+            self.assertEqual(len(set(configs)), 1)
+            self.assertEqual(
+                summary["outcome_counts"],
+                {
+                    "VALIDATED_IN_FAILED_PROCESS": 1,
+                    "LAUNCHED_NO_RESULT": 1,
+                    "PASS_RECOVERED": 1 if recovery_error else 2,
+                    **({"RECOVERY_ERROR": 1} if recovery_error else {}),
+                },
+            )
+            self.assertEqual(summary["recovered_indices"], [2, 3])
+            self.assertEqual(summary["failed_process_ids"], ["batch-000"])
+            self.assertEqual(summary["accounted_cases"], 4)
+            self.assertEqual(
+                [r["index"] for r in summary["index_outcomes"]], list(range(4))
+            )
+            self.assertEqual(
+                summary["results"][2]["attempts"][0]["outcome"], "UNEXECUTED"
+            )
+            self.assertFalse(summary["passed"])
+
     def test_batches_preserve_selection_and_group_shards_in_index_range_order(self):
         jobs = []
         for i, (shard, index) in enumerate(
@@ -224,8 +514,8 @@ class SweepTests(unittest.TestCase):
                     manifest, {"results": results, "passed": False}
                 )
                 self.assertIn("Failed batches: 1/1.", report)
-                self.assertIn("| 7 | BATCH FAILED | 1/1 |", report)
-                self.assertIn("| 8 | BATCH FAILED | 1/1 |", report)
+                self.assertIn("| 7 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
+                self.assertIn("| 8 | VALIDATED_IN_FAILED_PROCESS | 1/1 |", report)
                 self.assertNotIn("| FAIL |", report)
 
     def test_batch_queue_is_asynchronous_and_accounts_for_claimed_indices(self):
@@ -281,7 +571,8 @@ class SweepTests(unittest.TestCase):
                 )
                 if failure == "partial":
                     self.assertEqual(summary["counts"]["PASSED"], 2)
-                    self.assertEqual(len(summary["missing"]), 8)
+                    self.assertEqual(len(summary["missing"]), 0)
+                    self.assertEqual(summary["counts"]["UNEXECUTED"], 8)
                 self.assertEqual(summary["passed"], failure is None)
                 for result in summary["results"]:
                     saved = json.loads(
@@ -960,6 +1251,7 @@ class SweepTests(unittest.TestCase):
                 ["--batch-size", "16", "--workers", "8", "--continue-on-failure"],
                 16,
             ),
+            ("bench", ["--workers", "16", "--recover-unexecuted"], 32),
         ):
             with (
                 self.subTest(backend=backend, flags=flags),
@@ -968,11 +1260,14 @@ class SweepTests(unittest.TestCase):
             ):
                 self.assertEqual(sweep.main(), 0)
                 self.assertEqual(run.call_args.args[0].batch_size, size)
-                self.assertEqual(run.call_args.args[0].continue_on_failure, bool(flags))
+                self.assertEqual(
+                    run.call_args.args[0].continue_on_failure,
+                    "--continue-on-failure" in flags,
+                )
         for flags in (
             ["--backend", "tensile", "--batch-size", "2"],
             ["--backend", "bench", "--batch-size", "0"],
-            ["--backend", "bench", "--workers", "9"],
+            ["--backend", "bench", "--workers", "17"],
         ):
             with (
                 self.subTest(flags=flags),
@@ -1181,13 +1476,13 @@ class SweepTests(unittest.TestCase):
                     self.assertEqual(sweep.run(args), 1)
                     execute.assert_not_called()
                 summary = json.loads((args.reports / "summary.json").read_text())
-                self.assertEqual(summary["counts"], {"UNSUPPORTED_CASE": 4})
+                self.assertEqual(summary["counts"], {"INVALID_INPUT": 4})
                 self.assertEqual(len(summary["unstarted_cases"]), 4)
                 self.assertEqual(summary["missing"], [])
                 self.assertEqual(summary["accounted_cases"], 8)
                 self.assertFalse(summary["passed"])
                 report = (args.reports / "summary.md").read_text()
-                self.assertIn("| 7 | FAIL | 0/4 | 0/", report)
+                self.assertIn("| 7 | INVALID_INPUT | 0/4 | 0/", report)
                 self.assertIn("| 7 | NOT RUN |", report)
                 self.assertIn("Run status: FAIL.", report)
 
@@ -1229,7 +1524,7 @@ class SweepTests(unittest.TestCase):
 
                     def prepare(_):
                         clock[0] = 6 if phase == "preparation" else 2
-                        return manifest, Path("config")
+                        return manifest, {"default": Path("config")}
 
                     def execute(command, log, timeout, env):
                         # Preparation leaves only three of the five seconds.
@@ -1276,7 +1571,8 @@ class SweepTests(unittest.TestCase):
                         8 if phase == "preparation" else 4 if phase == "process" else 0,
                     )
                     self.assertEqual(
-                        len(summary["missing"]), 4 if phase == "process" else 0
+                        len(summary["missing"]),
+                        4 if phase == "process" and backend == "tensile" else 0,
                     )
                     if phase == "process":
                         self.assertIn(

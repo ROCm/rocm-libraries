@@ -4,6 +4,7 @@
 """Run packaged solution entries for the advisory rocJITsu race-check job."""
 
 import argparse
+import copy
 from collections import Counter
 import csv
 import html
@@ -18,7 +19,14 @@ import threading
 import time
 import math
 
-from rocjitsu_sweep_plan import make_batches, make_plan, sha256, POLICY, REGULAR_POLICY
+from rocjitsu_sweep_plan import (
+    make_batches,
+    make_plan,
+    sha256,
+    validate_profile,
+    POLICY,
+    REGULAR_POLICY,
+)
 from rocjitsu_known_failures import apply_known_failures
 
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
@@ -57,10 +65,10 @@ def solution_report(job, result, backend):
     planned = len(job["cases"])
     observed = sum(c["status"] == "PASSED" for c in result["cases"])
     skipped = [c for c in result["cases"] if c["status"] == "SKIPPED"]
-    state = "FAIL" if result["failed"] else "PASS"
-    if result.get("batch_errors"):
+    state = result.get("outcome", "FAIL" if result["failed"] else "PASS")
+    if result.get("batch_errors") and "outcome" not in result:
         state = "BATCH FAILED"
-    notes = "; ".join(result["errors"])
+    notes = "; ".join(result["errors"] + result.get("batch_errors", []))
     if skipped:
         if not result["failed"]:
             state = "SKIPPED" if len(skipped) == planned else "PASS WITH SKIPS"
@@ -83,7 +91,13 @@ def solution_report(job, result, backend):
 
 
 def failed_batch_ids(results):
-    return sorted({r.get("batch_id", r["id"]) for r in results if r["failed"]})
+    return sorted(
+        {
+            r.get("batch_id", r["id"])
+            for r in results
+            if r["failed"] and not r.get("planning_outcome")
+        }
+    )
 
 
 def render_report(manifest, summary):
@@ -107,8 +121,8 @@ def render_report(manifest, summary):
         "",
         "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit. "
         "SKIPPED cases did not run; PASS WITH SKIPS validates only the remaining cases.",
-        "BATCH FAILED means the process had a diagnostic or incomplete evidence; "
-        "it does not identify every member index as a source of failure.",
+        "VALIDATED_IN_FAILED_PROCESS retains completed per-index checks alongside a process failure. "
+        "UNEXECUTED and LAUNCHED_NO_RESULT distinguish absent launches from absent numerical results.",
         f"Failed batches: {len(failed_batch_ids(summary['results']))}/"
         f"{len({j.get('batch_id', j['id']) for j in manifest['jobs']})}.",
         f"Full shapes, identities, commands and logs are in the uploaded `sweep-{backend}/` artifacts.",
@@ -157,7 +171,33 @@ def render_report(manifest, summary):
 
 def prepare(args):
     begin = time.monotonic()
-    base = json.loads(args.config.read_text(encoding="utf-8"))
+    explicit_profiles = getattr(args, "hardware_profiles", None)
+    configs, profiles = {}, {}
+    for number, path in enumerate(explicit_profiles or [args.config]):
+        name = f"profile-{number:03}" if explicit_profiles else "default"
+        base = json.loads(path.read_text(encoding="utf-8"))
+        if explicit_profiles:
+            validate_profile(base, args.target)
+        base.update(
+            max_ticks=0,
+            num_threads=1,
+            cpu_dispatch_threads=1,
+            async_helper_threads=0,
+            cpu_thread_budget=1,
+        )
+        base["plugins"] = {"race": {}}
+        base["sinks"] = {"types": ["stderr"]}
+        config = args.reports / (
+            f"{name}.json" if explicit_profiles else "rocjitsu.json"
+        )
+        write_json(config, base)
+        configs[name] = config
+        profiles[name] = {
+            "source": str(path),
+            "sha256": sha256(path),
+            "config": str(config),
+            "device": base["vm"]["gpu"]["device"],
+        }
     manifest = make_plan(
         args.library_dir,
         args.target,
@@ -166,10 +206,12 @@ def prepare(args):
         args.seed,
         args.solution_indices,
         getattr(args, "policy", POLICY),
+        profiles={name: profile["device"] for name, profile in profiles.items()},
     )
     manifest.update(
         backend=args.backend,
         workers=args.workers,
+        profiles=profiles,
         tools={str(p): sha256(p) for p in (args.rocjitsu, args.client, args.config)},
     )
     if args.backend == "bench":
@@ -193,19 +235,8 @@ def prepare(args):
     )
     write_text(args.reports / "known_failures.yaml", failures)
     manifest["preparation_seconds"] = time.monotonic() - begin
-    base.update(
-        max_ticks=0,
-        num_threads=1,
-        cpu_dispatch_threads=1,
-        async_helper_threads=0,
-        cpu_thread_budget=1,
-    )
-    base["plugins"] = {"race": {}}
-    base["sinks"] = {"types": ["stderr"]}
-    config = args.reports / "rocjitsu.json"
-    write_json(config, base)
     write_json(args.reports / "manifest.json", manifest)
-    return manifest, config
+    return manifest, configs
 
 
 def client_options(job, results):
@@ -488,6 +519,9 @@ def classify_bench(job, text, returncode):
                 "shape": shape,
                 "status": "PASSED" if passed else "FAILED",
                 "target_dispatches": row["target_dispatches"],
+                "numerical": dict(zip(("norm_error", "atol", "rtol"), numeric)),
+                "solution_name": row["Solution name"],
+                "kernel": row["kernel name"],
             }
             if row["target_dispatches"] != job.get("target_dispatches_per_case", 2):
                 errors.append(
@@ -510,16 +544,26 @@ def classify_bench(job, text, returncode):
 
 
 def classify_bench_batch(jobs, text, returncode):
-    """Check ordered records individually and retain diagnostics for the whole process."""
-    ends = [m.end() for m in re.finditer(r"^\s*--kernel name:[^\n]*", text, re.M)]
-    expected_records = sum(len(j["cases"]) for j in jobs)
+    """Keep record identities, launch evidence and process diagnostics separate."""
+    expected_order = [j["solutions"][0]["index"] for j in jobs for c in j["cases"]]
+    chunks, record_order, start = {}, [], 0
     batch_errors = []
+    for end in re.finditer(r"^\s*--kernel name:[^\n]*", text, re.M):
+        chunk = text[start : end.end()]
+        start = end.end()
+        identity = re.findall(r"^\s*--Solution index:\s*(\d+)\s*$", chunk, re.M)
+        if len(identity) != 1:
+            batch_errors.append("Bench record has missing or ambiguous solution index")
+            continue
+        index = int(identity[0])
+        record_order.append(index)
+        chunks.setdefault(index, []).append(chunk)
+    if record_order != expected_order:
+        batch_errors.append(
+            f"Batch expected {len(expected_order)} ordered records, observed {len(record_order)}"
+        )
     if returncode:
         batch_errors.append(f"Batch client exited {returncode}")
-    if len(ends) != expected_records:
-        batch_errors.append(
-            f"Batch expected {expected_records} record boundaries, observed {len(ends)}"
-        )
     races = re.findall(r"^RACE .*", text, re.M)
     warnings = Counter(line for line in text.splitlines() if "[rj warn]" in line)
     if races:
@@ -528,31 +572,145 @@ def classify_bench_batch(jobs, text, returncode):
         batch_errors.append(
             f"Batch reported {sum(warnings.values())} emulator warnings"
         )
-    # A repeated kernel name may belong to several indices. Count every occurrence.
-    expected_dispatches = Counter()
-    for job in jobs:
-        expected_dispatches[job["solutions"][0]["kernel"]] += len(
-            job["cases"]
-        ) * job.get("target_dispatches_per_case", 2)
-    dispatches = Counter(
-        re.findall(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', text, re.M)
+
+    # Repeated names can identify different indices. Only a verified ordered
+    # prefix establishes which cases an aborted process left unexecuted.
+    expected_launches = [
+        (j["id"], c["id"], target_dispatch_line(j))
+        for j in jobs
+        for c in j["cases"]
+        for _ in range(j.get("target_dispatches_per_case", 2))
+    ]
+    target_kernels = {j["solutions"][0]["kernel"] for j in jobs}
+    observed_launches = []
+    for line in text.splitlines():
+        dispatch = re.match(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', line)
+        if dispatch and dispatch[1] in target_kernels:
+            observed_launches.append(line)
+    prefix = (
+        observed_launches
+        == [line for _, _, line in expected_launches[: len(observed_launches)]]
+        and len(observed_launches) <= len(expected_launches)
+        and record_order == expected_order[: len(record_order)]
     )
-    for kernel, wanted in expected_dispatches.items():
-        if dispatches[kernel] != wanted:
-            batch_errors.append(
-                f"Batch target dispatch mismatch for {kernel}: expected {wanted}, observed {dispatches[kernel]}"
-            )
-    results, start, record = [], 0, 0
+    if len(observed_launches) != len(expected_launches) or not prefix:
+        batch_errors.append(
+            f"Batch target dispatch order/count mismatch: expected {len(expected_launches)}, "
+            f"observed {len(observed_launches)}"
+        )
+    launches = (
+        Counter(
+            (job_id, case_id)
+            for job_id, case_id, _ in expected_launches[: len(observed_launches)]
+        )
+        if prefix
+        else Counter()
+    )
+    rejected_case = None
+    rejected = "error: NO solution found!" in text
+    if rejected:
+        batch_errors.append("Native client found no solution for a requested input")
+    if prefix and rejected:
+        ordered_cases = [(j["id"], c["id"]) for j in jobs for c in j["cases"]]
+        if len(record_order) < len(ordered_cases):
+            candidate = ordered_cases[len(record_order)]
+            if not launches[candidate]:
+                rejected_case = candidate
+    kernel_owners = Counter(j["solutions"][0]["kernel"] for j in jobs)
+    results = []
     for job in jobs:
-        record += len(job["cases"])
-        end = ends[record - 1] if record < len(ends) else len(text)
-        result = classify_bench(job, text[start:end], returncode)
-        result["batch_errors"] = batch_errors
-        result["errors"] += batch_errors
-        result["failed"] = bool(result["errors"])
+        index = job["solutions"][0]["index"]
+        # Process warnings and exit codes have no per-record identity. They stay
+        # in batch_errors; a completed record retains its own numerical evidence.
+        records = "\n".join(chunks.get(index, []))
+        records = "\n".join(
+            line
+            for line in records.splitlines()
+            if not line.startswith("RACE ") and "[rj warn]" not in line
+        )
+        result = classify_bench(job, records, 0)
+        observed = {c["case_id"]: c for c in result["cases"]}
+        for case in job["cases"]:
+            if case["id"] in observed:
+                continue
+            count = launches[job["id"], case["id"]] if prefix else None
+            status = (
+                "NATIVE_REJECTED"
+                if (job["id"], case["id"]) == rejected_case
+                else (
+                    "LAUNCHED_NO_RESULT"
+                    if count
+                    else (
+                        "UNEXECUTED"
+                        if prefix and (returncode or rejected)
+                        else "MISSING_RECORD"
+                    )
+                )
+            )
+            result["cases"].append(
+                {
+                    "case_id": case["id"],
+                    "index": index,
+                    "shape": case["shape"],
+                    "status": status,
+                    "target_dispatches": count,
+                }
+            )
+        if prefix:
+            result["target_dispatches"] = sum(
+                launches[job["id"], c["id"]] for c in job["cases"]
+            )
+        else:
+            result["target_dispatches"] = None
+        kernel = job["solutions"][0]["kernel"]
+        result["race_headers"] = [
+            r
+            for r in races
+            if kernel_owners[kernel] == 1
+            and re.search(r"(?:^| )kernel=" + re.escape(kernel) + r"(?: |$)", r)
+        ]
+        if result["race_headers"]:
+            result["errors"].append(
+                f"{len(result['race_headers'])} races naming this kernel"
+            )
+        result["index_failed"] = bool(result["errors"]) and any(
+            c["status"] != "UNEXECUTED" for c in result["cases"]
+        )
+        result["batch_errors"] = batch_errors.copy()
+        result["returncode"] = returncode
+        result["process_diagnostics"] = {
+            "race_headers": races,
+            "warnings": dict(warnings),
+        }
+        result["failed"] = result["index_failed"] or bool(batch_errors)
+        result["outcome"] = index_outcome(result)
         results.append(result)
-        start = end
     return results
+
+
+def index_outcome(result):
+    statuses = {c["status"] for c in result["cases"]}
+    for status in (
+        "EXCLUDED_HARDWARE",
+        "UNSUPPORTED_FEATURE",
+        "INVALID_INPUT",
+        "MISSING_CODE_OBJECT",
+        "NATIVE_REJECTED",
+        "LAUNCHED_NO_RESULT",
+        "UNEXECUTED",
+        "MISSING_RECORD",
+    ):
+        if status in statuses:
+            return status
+    if result.get("index_failed", result["failed"] and not result.get("batch_errors")):
+        return "FAIL"
+    if result.get("batch_errors"):
+        return "VALIDATED_IN_FAILED_PROCESS"
+    if statuses == {"SKIPPED"}:
+        return "SKIPPED"
+    if "SKIPPED" in statuses:
+        return "PASS_WITH_SKIPS"
+    return "PASS"
 
 
 def convert_bench_input(client, stem, timeout, env):
@@ -711,7 +869,7 @@ def run(args):
     deadline = suite_start + args.suite_timeout
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
-        manifest, config = prepare(args)
+        manifest, configs = prepare(args)
         batch_size = getattr(args, "batch_size", None)
         if batch_size is None:
             batch_size = DEFAULT_BATCH_SIZES[args.backend]
@@ -761,6 +919,7 @@ def run(args):
                 "backend": args.backend,
                 "batch_size": batch_size,
                 "continue_on_failure": getattr(args, "continue_on_failure", False),
+                "recover_unexecuted": getattr(args, "recover_unexecuted", False),
                 "library_dir": manifest["library_dir"],
                 "controlled_environment": {
                     k: env[k]
@@ -775,10 +934,14 @@ def run(args):
             },
         )
 
-        def execute(batch, slot):
+        def execute(batch, slot, recovery=False):
             begin = time.monotonic()
             batch_id = batch[0]["batch_id"]
             stem = args.reports / f"batch-{batch_id:03}"
+            if recovery:
+                stem = (
+                    args.reports / f"batch-{batch_id:03}-recovery-{batch[0]['id']:03}"
+                )
             completed, runnable = [], []
             for job in batch:
                 if "planning_error" in job:
@@ -787,13 +950,19 @@ def run(args):
                             "id": job["id"],
                             "failed": True,
                             "errors": [job["planning_error"]],
+                            "planning_outcome": job.get(
+                                "planning_outcome", "INVALID_INPUT"
+                            ),
+                            "outcome": job.get("planning_outcome", "INVALID_INPUT"),
                             "target_dispatches": 0,
                             "cases": [
                                 {
                                     "case_id": c["id"],
                                     "index": job["solutions"][0]["index"],
                                     "shape": c["shape"],
-                                    "status": "UNSUPPORTED_CASE",
+                                    "status": job.get(
+                                        "planning_outcome", "INVALID_INPUT"
+                                    ),
                                 }
                                 for c in job["cases"]
                             ],
@@ -823,6 +992,7 @@ def run(args):
             # Charge conversion and native execution to one shared batch deadline.
             batch_deadline = min(deadline, begin + args.timeout * len(runnable))
             conversion_seconds = native_seconds = 0
+            native_executed = False
             if runnable:
                 if args.backend == "tensile":
                     job = runnable[0]
@@ -880,13 +1050,14 @@ def run(args):
                         str(cpus[slot]),
                         str(args.rocjitsu),
                         "--config",
-                        str(config),
+                        str(configs[runnable[0]["profile"]]),
                         "--",
                         str(args.client),
                         *client_args,
                     ]
                     write_json(stem.with_suffix(".command.json"), command)
                     launch_begin = time.monotonic()
+                    native_executed = True
                     rc = execute_command(
                         command,
                         stem.with_suffix(".log"),
@@ -912,7 +1083,13 @@ def run(args):
                         result["failed"] = True
             seconds = time.monotonic() - begin
             for result in completed:
-                result.update(batch_id=batch_id, cpu=cpus[slot], batch_seconds=seconds)
+                result.update(
+                    batch_id=batch_id,
+                    attempt_id=stem.name,
+                    profile=batch[0].get("profile"),
+                    cpu=cpus[slot],
+                    batch_seconds=seconds,
+                )
             write_json(
                 stem.with_suffix(".result.json"),
                 {
@@ -921,9 +1098,57 @@ def run(args):
                     "seconds": seconds,
                     "conversion_seconds": conversion_seconds,
                     "native_seconds": native_seconds,
+                    "native_executed": native_executed,
+                    "profile": batch[0].get("profile"),
                     "results": completed,
                 },
             )
+            if (
+                not recovery
+                and args.backend == "bench"
+                and getattr(args, "recover_unexecuted", False)
+            ):
+                originals = {job["id"]: job for job in runnable}
+                for result in completed:
+                    if not result["cases"] or any(
+                        c["status"] != "UNEXECUTED" for c in result["cases"]
+                    ):
+                        continue
+                    if time.monotonic() >= deadline:
+                        break
+                    original = copy.deepcopy(result)
+                    try:
+                        retried = execute(
+                            [originals[result["id"]]], slot, recovery=True
+                        )[0]
+                    except Exception as error:
+                        retried = {
+                            "id": result["id"],
+                            "batch_id": batch_id,
+                            "profile": result["profile"],
+                            "attempt_id": f"batch-{batch_id:03}-recovery-{result['id']:03}",
+                            "failed": True,
+                            "index_failed": True,
+                            "outcome": "RECOVERY_ERROR",
+                            "errors": [repr(error)],
+                            "cases": [
+                                {
+                                    **case,
+                                    "status": "RECOVERY_ERROR",
+                                    "target_dispatches": None,
+                                }
+                                for case in result["cases"]
+                            ],
+                            "target_dispatches": None,
+                            "returncode": None,
+                            "batch_errors": [],
+                            "process_diagnostics": {},
+                        }
+                    result.update(retried)
+                    result["attempts"] = [original, copy.deepcopy(retried)]
+                    result["failed"] = original["failed"] or retried["failed"]
+                    if retried.get("outcome") == "PASS":
+                        result["outcome"] = "PASS_RECOVERED"
             return completed
 
         def progress(value):
@@ -933,6 +1158,8 @@ def run(args):
                 result["cases"] += [
                     c for c in skipped_cases(job) if c["case_id"] not in observed
                 ]
+                if result.get("outcome") in (None, "PASS"):
+                    result["outcome"] = index_outcome(result)
                 result["batch_id"] = job["batch_id"]
                 write_json(
                     args.reports / f"solution-{job['id']:03}.result.json", result
@@ -1004,6 +1231,64 @@ def run(args):
             missing=missing,
             unstarted_cases=unstarted,
             failed_batch_ids=failed_batch_ids(summary["results"]),
+            outcome_counts=dict(
+                Counter(
+                    r.get("outcome") or index_outcome(r) for r in summary["results"]
+                )
+            ),
+            recovered_indices=[
+                by_id[r["id"]]["solutions"][0]["index"]
+                for r in summary["results"]
+                if r.get("attempts")
+            ],
+        )
+        processes = []
+        for path in sorted(args.reports.glob("batch-*.result.json")):
+            process = json.loads(path.read_text(encoding="utf-8"))
+            if process["native_executed"]:
+                processes.append(
+                    {
+                        "id": path.name.removesuffix(".result.json"),
+                        "jobs": process["jobs"],
+                        "profile": process["profile"],
+                        "native_seconds": process["native_seconds"],
+                        "failed": any(r["failed"] for r in process["results"]),
+                        "diagnostics": next(
+                            (
+                                r.get("process_diagnostics", {})
+                                for r in process["results"]
+                                if "process_diagnostics" in r
+                            ),
+                            {},
+                        ),
+                    }
+                )
+        summary["processes"] = processes
+        summary["failed_process_ids"] = [p["id"] for p in processes if p["failed"]]
+        completed_by_id = {r["id"]: r for r in summary["results"]}
+        summary["index_outcomes"] = []
+        for job in manifest["jobs"]:
+            result = completed_by_id.get(job["id"])
+            if result is None:
+                result = {
+                    "id": job["id"],
+                    "outcome": "UNSTARTED",
+                    "cases": [
+                        {"case_id": c["id"], "shape": c["shape"], "status": "UNSTARTED"}
+                        for c in job["cases"]
+                    ],
+                }
+            summary["index_outcomes"].append(
+                {
+                    **result,
+                    "index": job["solutions"][0]["index"],
+                    "profile": job.get("profile"),
+                }
+            )
+        summary["outcome_counts"] = dict(
+            Counter(
+                r.get("outcome") or index_outcome(r) for r in summary["index_outcomes"]
+            )
         )
         summary["accounted_cases"] = (
             sum(counts.values()) + len(missing) + len(unstarted)
@@ -1043,6 +1328,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument(
+        "--hardware-profile",
+        dest="hardware_profiles",
+        type=Path,
+        action="append",
+        help="Complete emulator profile; repeat to select among profiles instead of --config",
+    )
+    parser.add_argument(
+        "--recover-unexecuted",
+        action="store_true",
+        help="Replay wholly unexecuted indices once, individually, retaining original process failures",
+    )
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument(
@@ -1126,13 +1423,13 @@ def main():
     if args.policy == REGULAR_POLICY and args.backend != "bench":
         parser.error("regular-v1 requires the bench backend")
     if (
-        not 1 <= args.workers <= 8
+        not 1 <= args.workers <= 16
         or args.solutions < 1
         or not 0 < args.timeout <= 120
         or not 0 < args.suite_timeout <= 1500
     ):
         parser.error(
-            "Limits: 1–8 workers, a positive solution count, process timeout at most "
+            "Limits: 1–16 workers, a positive solution count, process timeout at most "
             "120 seconds, suite timeout at most 1500 seconds"
         )
     if args.all_solutions:
