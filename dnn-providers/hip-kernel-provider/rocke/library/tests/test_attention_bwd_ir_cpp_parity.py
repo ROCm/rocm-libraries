@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: MIT
 """C++/Python lowerer byte-identity gate for the attention backward kernels.
 
-The backward kernels are authored in Python only (no C++ builder yet), so
-this is the lowerer axis of the engine parity rule: Python builds each
+This is the lowerer axis of the engine parity rule: Python builds each
 kernel, both engines lower it, and the ``.ll`` must match byte for byte.
+(The builder axis, C++ twins of the builders, is gated by the parity pairs
+under ``library/tests/parity``.)
 Same outcome classification as ``test_attention_ir_cpp_parity.py``.
 
 The cases are what the dispatcher can select:
