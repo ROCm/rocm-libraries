@@ -2187,6 +2187,29 @@ void testing_read_file_RSIO_mixed_precision()
 }
 
 template <typename T>
+void testing_write_file_RSIO_close_failure()
+{
+    // Writes to /dev/full are buffered and only fail when the file is closed
+    const std::string filename = "/dev/full";
+    FILE*             f        = fopen(filename.c_str(), "wb");
+    if(f == nullptr)
+    {
+        GTEST_SKIP() << filename << " is not available";
+    }
+    fclose(f);
+
+    LocalMatrix<T> matrix;
+    matrix.AllocateCSR("test", 5, 3, 3);
+
+    int row_offsets[4] = {0, 2, 3, 5};
+    int col_indices[5] = {0, 2, 1, 0, 2};
+    T   values[5]      = {1.0, 2.0, 3.0, 4.0, 5.0};
+    matrix.CopyFromCSR(row_offsets, col_indices, values);
+
+    EXPECT_EXIT(matrix.WriteFileRSIO(filename), ::testing::ExitedWithCode(1), "");
+}
+
+template <typename T>
 void testing_local_apply(Arguments argus)
 {
     LocalMatrix<T> matrix;

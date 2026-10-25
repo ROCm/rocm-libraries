@@ -446,6 +446,37 @@ def build_attention_reduce(
     return _build
 
 
+def build_attention_reduce_own_module(
+    name,
+    arch,
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    num_segments,
+    emit_lse=False,
+):
+    """Split-KV reduce built from ``arch``'s own module (``build_attention_reduce``
+    above always builds the gfx950 module), with or without the LSE output."""
+
+    def _build():
+        import importlib
+
+        mod = importlib.import_module(f"kernels.{arch}.attention_tiled_3d")
+        spec = mod.UnifiedAttentionReduceTiledSpec(
+            head_size=head_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            num_segments=num_segments,
+            emit_lse=emit_lse,
+        )
+        return mod.build_unified_attention_reduce_tiled(spec, arch=arch)
+
+    return _build
+
+
 def build_attention_scalar(name, arch, *, three_d=False, **problem):
     """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
 
@@ -3234,6 +3265,21 @@ def cases():
     )
     add(
         "attention",
+        "attention/gfx950/reduce_lse_bf16_d128",
+        "gfx950",
+        build_attention_reduce_own_module(
+            "irhash_attn_950_reduce_lse_bf16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            emit_lse=True,
+        ),
+    )
+    add(
+        "attention",
         "attention/gfx942/2d_fp16_d128_b64",
         "gfx942",
         build_attention_2d(
@@ -3310,6 +3356,35 @@ def cases():
         "gfx942",
         build_attention_reduce(
             "irhash_attn_942_reduce_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_lse_bf16_d128",
+        "gfx942",
+        build_attention_reduce_own_module(
+            "irhash_attn_942_reduce_lse_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            emit_lse=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_bf16_d128_own_module",
+        "gfx942",
+        build_attention_reduce_own_module(
+            "irhash_attn_942_reduce_bf16_own_module",
             "gfx942",
             head_size=128,
             num_query_heads=4,
@@ -4539,6 +4614,61 @@ def cases():
                 **_shape,
                 **{**_nongrouped_base, **_over},
             ),
+        )
+
+    # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
+    # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
+    # Every case needs llvm23 (TDM), so the other flavors record them as
+    # expected failures. The C++ twin is gated by
+    # library/tests/parity/conv_direct_dgrad_wmma_emit.*.
+    def build_direct_dgrad_wmma_case(dtype, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _over in (
+        ("bf16_default", "bf16", {}),
+        (
+            "fp16_tn2_st3_pf",
+            "fp16",
+            dict(
+                tiles_c=2,
+                tiles_p=2,
+                tile_w=8,
+                tile_n=2,
+                stages=3,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_case(_dtype, **_over),
         )
 
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
