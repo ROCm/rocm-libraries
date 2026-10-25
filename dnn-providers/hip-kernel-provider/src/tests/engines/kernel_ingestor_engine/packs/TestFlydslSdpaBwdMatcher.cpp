@@ -498,7 +498,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT9SlabAbove32BitByteOffsetsDeclines)
     EXPECT_TRUE(accepted(withBiasStride(1048576, true)));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT8Fp32HeadDimNotAMultipleOf4NeedsRowStrideOfThePaddedWidth)
+TEST(TestFlydslSdpaBwdMatcherFp32, DT8HeadDimNotAMultipleOf4NeedsRowStrideOfThePaddedWidth)
 {
     // A FLOAT vector is 4 elements: D = 60 needs no slack, D = 61 needs rows 64 apart.
     SdpaBwdSpec dim60 = fp32Spec();
@@ -531,7 +531,7 @@ TEST(TestFlydslSdpaBwdMatcher, DT8Fp32HeadDimNotAMultipleOf4NeedsRowStrideOfTheP
              ACCEPT_FLOAT);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, LY3Fp32StrideOfANonUnitAxisNeedsAMultipleOf4)
+TEST(TestFlydslSdpaBwdMatcherFp32, LY3StrideOfANonUnitAxisNeedsAMultipleOf4)
 {
     const auto withQRowStride = [](const SdpaBwdSpec& spec, int64_t rowStride) {
         return spec.withEdit([rowStride](SdpaBwdGraph& g) {
@@ -548,7 +548,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY3Fp32StrideOfANonUnitAxisNeedsAMultipleOf4)
     EXPECT_TRUE(accepted(withQRowStride(baseline(), 72)));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, DT9Fp32SlabIsBoundedByTheByteOffsetAtFourBytesPerElement)
+TEST(TestFlydslSdpaBwdMatcherFp32, DT9SlabIsBoundedByTheByteOffsetAtFourBytesPerElement)
 {
     // 15 rows at the stride plus the 64-element row: 4-byte elements reach 2^31 bytes at half
     // the stride 2-byte elements do, so 35791392 serves f16 and declines FLOAT.
