@@ -16,8 +16,10 @@
  * This mirrors _emit_main(spec, arch, main_kernel_refusals=False): the
  * recorded resource-gate refusals stay Python-only, so the C entry accepts
  * the RESOURCE_REFUSED specs that Python's public build_attn_bwd_main
- * refuses. _kv_tile's dense-shell hooks (mask.static_runs, epilogue=) are not
- * ported; the main kernel never uses them.
+ * refuses. _kv_tile and the types it shares with the dense backward shell
+ * (_attention_dense_bwd_shell.cpp) are declared in
+ * rocke/instance_attention_bwd_main_internal.h, with _kv_tile's dense-shell
+ * hooks (mask.static_runs, epilogue=, the dense slab sources).
  */
 #include "rocke/instance_attention_bwd.h"
 
@@ -42,10 +44,13 @@
 #include "rocke/helper_rocke.instances.common._attention_bwd_ring.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_sinks.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_worklist.h"
+#include "rocke/instance_attention_bwd_main_internal.h"
 #include "rocke/ir_internal.h"
 
 namespace rocke_attn_bwd
 {
+using namespace main_kernel;
+
 namespace
 {
 
@@ -262,20 +267,6 @@ rocke_attn_bwd_pending_dq_t
 
 /* ---------------------------------------------------------------- kernargs */
 
-/* The kernargs in declaration order; a static unit multiplier is NULL. */
-struct Kargs
-{
-    std::vector<std::string> order;
-    std::map<std::string, V> m;
-    V operator[](const std::string& k) const
-    {
-        auto it = m.find(k);
-        if(it == m.end())
-            throw ckc::KeyError("'" + k + "'");
-        return it->second;
-    }
-};
-
 /* _main_noalias(spec) membership */
 bool noalias_of(const rocke_attn_bwd_spec_t& s, const char* name)
 {
@@ -358,53 +349,10 @@ Kargs declare_main(B* b, const rocke_attn_bwd_spec_t& s, const rocke_type_t* io)
 
 /* ------------------------------------------------------------- the kernel */
 
-struct Main
-{
-    B* b;
-    rocke_attn_bwd_spec_t s;
-    std::string arch;
-    rocke_attn_bwd_arch_facts_t facts;
-    rocke_attn_bwd_tile_geometry_t geom;
-    rocke_attn_bwd_lds_plan_t plan;
-    const rocke_type_t* io;
-    int seq_guards;
-    bool sentinel;
-};
-
 int threads_of(const Main& m)
 {
     return m.geom.waves * m.facts.wave_size;
 }
-
-/* The decoded work and per-CTA objects of one kv-tile pass (_Cta and the
- * objects _cta_setup builds, owned here so their addresses are stable). */
-struct Cta
-{
-    B* b = NULL;
-    rocke_attn_bwd_cta_work_t work;
-    V ids[3];
-    rocke_attn_bwd_seq_info_t seq_q, seq_kv;
-    V hk, hv, h0, n_h;
-    rocke_attn_bwd_strided_tensor_addr_t q_addr, do_addr, k_addr, v_addr;
-    rocke_attn_bwd_workspace_addr_t ws_lse2, ws_dsum, ws_dq;
-    rocke_attn_bwd_stats_view_t stats;
-    rocke_attn_bwd_dq_sink_t sink;
-    bool has_sink = false;
-    rocke_attn_bwd_mask_policy_t mask;
-    rocke_attn_bwd_bwd_lds_t* lds = NULL;
-    rocke_attn_bwd_tile_step_t step;
-    bool has_step = false;
-    rocke_attn_bwd_q_ring_t ring;
-    bool has_ring = false;
-    V tid;
-    ~Cta()
-    {
-        if(has_step)
-            rocke_attn_bwd_tile_step_free(&step);
-        if(has_sink)
-            rocke_attn_bwd_dq_sink_free(&sink);
-    }
-};
 
 /* _decode_side(b, s, a, bz, side) */
 rocke_attn_bwd_seq_info_t decode_side(Main& m, const Kargs& a, V bz, bool q)
@@ -630,7 +578,7 @@ rocke_attn_bwd_row_slab_t
     B* b = m.b;
     const rocke_attn_bwd_spec_t& s = m.s;
     rocke_attn_bwd_strided_tensor_addr_t t;
-    IV strides[3] = {ivv(a[which + "_b"]), ivv(a[which + "_h"]), ivv(a[which + "_t"])};
+    IV strides[3] = {a.iv(which + "_b"), a.iv(which + "_h"), a.iv(which + "_t")};
     need(b,
          rocke_attn_bwd_strided_tensor_addr_init(&t,
                                                  b,
@@ -676,7 +624,7 @@ void atomic_epilogue(
              rocke_attn_bwd_workspace_addr_init(&w,
                                                 b,
                                                 a[o.ptr],
-                                                ivv(a["ws_rows_kv"]),
+                                                a.iv("ws_rows_kv"),
                                                 D,
                                                 c.seq_kv.ws_row0,
                                                 layout,
@@ -739,15 +687,10 @@ rocke_attn_bwd_ws_slab_t
     IV nhv = ivv(n_heads);
     rocke_attn_bwd_ws_layout_t layout
         = tok_major ? ROCKE_ATTN_BWD_WS_TOKEN_MAJOR : ROCKE_ATTN_BWD_WS_HEAD_MAJOR;
-    need(b,
-         rocke_attn_bwd_workspace_addr_init(&w,
-                                            b,
-                                            base,
-                                            ivv(a["ws_rows_kv"]),
-                                            D,
-                                            c.seq_kv.ws_row0,
-                                            layout,
-                                            tok_major ? &nhv : NULL));
+    need(
+        b,
+        rocke_attn_bwd_workspace_addr_init(
+            &w, b, base, a.iv("ws_rows_kv"), D, c.seq_kv.ws_row0, layout, tok_major ? &nhv : NULL));
     rocke_attn_bwd_ws_slab_t out = rocke_attn_bwd_workspace_addr_slab(&w, ivv(head), ivv(k0));
     need(b, true);
     return out;
@@ -1270,6 +1213,19 @@ V empty_asm(B* b, V v, const char* constraints, bool sideeffect, const char* hin
 
 /* ----------------------------------------------------------------- _kv_tile */
 
+/* x_addr.slab(h, row0, clamp=) of tensor `which` (SLAB_*): the dense shell's
+ * source when it set one, else the CTA's StridedTensorAddr. */
+rocke_attn_bwd_row_slab_t cta_slab(Cta& c, int which, IV h, IV row0, bool clamp)
+{
+    if(c.slab_fn)
+        return c.slab_fn(which, h, row0, clamp);
+    const rocke_attn_bwd_strided_tensor_addr_t* t = which == SLAB_Q    ? &c.q_addr
+                                                    : which == SLAB_DO ? &c.do_addr
+                                                    : which == SLAB_K  ? &c.k_addr
+                                                                       : &c.v_addr;
+    return rocke_attn_bwd_strided_tensor_addr_slab(t, h, row0, clamp);
+}
+
 struct KvTile
 {
     Main& m;
@@ -1459,8 +1415,8 @@ struct QSteps
         }
         bool clamp = edge || s.interior_clamp;
         in.has_slabs = true;
-        in.q_slab = rocke_attn_bwd_strided_tensor_addr_slab(&t.c.q_addr, ivv(h), ivv(q0), clamp);
-        in.do_slab = rocke_attn_bwd_strided_tensor_addr_slab(&t.c.do_addr, ivv(h), ivv(q0), clamp);
+        in.q_slab = cta_slab(t.c, SLAB_Q, ivv(h), ivv(q0), clamp);
+        in.do_slab = cta_slab(t.c, SLAB_DO, ivv(h), ivv(q0), clamp);
         need(b, true);
         return in;
     }
@@ -1851,7 +1807,11 @@ struct QSteps
 };
 
 /* _kv_tile(b, s, a, step, mask, kt=, ..., ring=, tag=) */
-void kv_tile(Main& m, const Kargs& a, Cta& c, V kt, const std::string& tag)
+} // namespace
+
+/* _kv_tile(b, s, a, step, mask, kt=, ..., epilogue=, ring=, tag=) */
+void main_kernel::kv_tile(
+    Main& m, const Kargs& a, Cta& c, V kt, const std::string& tag, const KvEpilogue* epilogue)
 {
     B* b = m.b;
     const rocke_attn_bwd_spec_t& s = m.s;
@@ -1865,10 +1825,8 @@ void kv_tile(Main& m, const Kargs& a, Cta& c, V kt, const std::string& tag)
     V k0 = rocke_b_mul(b, kt, ckn);
     t.k0 = k0;
     V live_ = rocke_b_cmp_lt(b, k0, c.seq_kv.length); /* CTA-uniform */
-    rocke_attn_bwd_row_slab_t k_slab
-        = rocke_attn_bwd_strided_tensor_addr_slab(&c.k_addr, ivv(c.hk), ivv(k0), true);
-    rocke_attn_bwd_row_slab_t v_slab
-        = rocke_attn_bwd_strided_tensor_addr_slab(&c.v_addr, ivv(c.hv), ivv(k0), true);
+    rocke_attn_bwd_row_slab_t k_slab = cta_slab(c, SLAB_K, ivv(c.hk), ivv(k0), true);
+    rocke_attn_bwd_row_slab_t v_slab = cta_slab(c, SLAB_V, ivv(c.hv), ivv(k0), true);
     need(b, true);
     need(b, rocke_attn_bwd_tile_step_stage_kv(&c.step, b, &k_slab, &v_slab, k0, live_));
 
@@ -1901,14 +1859,33 @@ void kv_tile(Main& m, const Kargs& a, Cta& c, V kt, const std::string& tag)
     if(s.edge_tiles == 1)
     {
         V i0, i1;
-        need_st(b, rocke_attn_bwd_mask_interior_q_range(&c.mask, b, k0, qt_start, n_qt, &i0, &i1));
+        if(c.has_static && !c.any_edge)
+        {
+            /* _StaticClassMixin.interior_q_range: no edge tile anywhere */
+            i0 = qt_start;
+            i1 = rocke_b_add(b, qt_start, n_qt);
+        }
+        else if(c.has_static && !c.any_interior)
+        {
+            i0 = qt_start;
+            i1 = qt_start;
+        }
+        else
+            need_st(b,
+                    rocke_attn_bwd_mask_interior_q_range(&c.mask, b, k0, qt_start, n_qt, &i0, &i1));
         if(t.pack_on != NULL)
             i1 = rocke_b_select(b, t.pack_on, i0, i1);
         ranges = {{qt_start, i0, true}, {i0, i1, false}, {i1, qt_end, true}};
-        /* Python's mask.static_runs filter (attention_bwd.py, _kv_tile) is
-         * not ported: only the dense backward shell's policy defines it, and
-         * the main kernel's runtime band policies keep all three runs. The
-         * unit that ports the dense shell must add the hook here. */
+        /* A policy that classified every tile at build time (the dense
+         * family's) drops the runs it proved empty (mask.static_runs). */
+        if(c.has_static)
+        {
+            std::vector<Range> kept;
+            for(const Range& r : ranges)
+                if(r.edge ? c.any_edge : c.any_interior)
+                    kept.push_back(r);
+            ranges = kept;
+        }
     }
     else
         ranges = {{qt_start, qt_end, true}};
@@ -2054,16 +2031,18 @@ void kv_tile(Main& m, const Kargs& a, Cta& c, V kt, const std::string& tag)
              rocke_attn_bwd_tile_step_flush_dq(&c.step, b, &pend)); /* the last step's dQ atomics */
     rocke_attn_bwd_dkdv_acc_t fin;
     need(b, rocke_attn_bwd_tile_step_finish(&c.step, b, &acc, &fin));
-    /* Python's _kv_tile(epilogue=) callback is not ported: only the dense
-     * backward shell passes it (the main kernel passes None). The unit that
-     * ports the dense shell must add it ahead of these branches. */
-    if(eq(s.dkv_mode, "atomic") && eq(s.dkv_sink, "slices"))
+    if(epilogue != NULL)
+        (*epilogue)(fin, k0, live_);
+    else if(eq(s.dkv_mode, "atomic") && eq(s.dkv_sink, "slices"))
         slices_epilogue(m, a, c, fin, k0, live_, c.tid);
     else if(eq(s.dkv_mode, "atomic"))
         atomic_epilogue(m, a, c, fin, k0, live_);
     else
         direct_epilogue(m, a, c, fin, k0, c.tid, hoist ? dkv_slabs : NULL);
 }
+
+namespace
+{
 
 /* ------------------------------------------------------ pass-1 roots */
 
@@ -2211,7 +2190,7 @@ rocke_kernel_def_t* emit_main(Main& m)
     std::unique_ptr<MirrorStash> stash;
     if(s.lb_mirror)
         stash.reset(new MirrorStash(b, a, cta->ids, m.facts.wave_size));
-    kv_tile(m, a, *cta, cta->work.first_kt, "");
+    kv_tile(m, a, *cta, cta->work.first_kt, "", NULL);
     if(s.lb_mirror)
     {
         V c2 = ci(b, 2);
@@ -2227,7 +2206,7 @@ rocke_kernel_def_t* emit_main(Main& m)
         need(b, true);
         std::unique_ptr<Cta> cta1(new Cta());
         cta_setup(m, a1, *cta1, tid1, lane1, wave1, ids1, cta->lds, NULL);
-        kv_tile(m, a1, *cta1, cta1->work.second_kt, "m1_");
+        kv_tile(m, a1, *cta1, cta1->work.second_kt, "m1_", NULL);
     }
     rocke_b_ret(b);
     need(b, true);
