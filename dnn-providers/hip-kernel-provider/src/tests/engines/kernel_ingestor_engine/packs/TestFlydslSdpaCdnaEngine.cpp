@@ -36,6 +36,7 @@
 // packedArchDeviceProperties() and reportUnstaged(): a device case that finds nothing staged
 // fails on an arch this build ships the op for, and skips elsewhere.
 #include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaCpuReferenceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaPhiloxOracle.hpp"
@@ -126,6 +127,8 @@ constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr const char* CDNA_DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 constexpr const char* CDNA_WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
+constexpr const char* CDNA_SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+constexpr const char* CDNA_SINK_FLOAT_TOKEN = "flydsl_sdpa_cdna.sink.float";
 constexpr int64_t CDNA_NO_WINDOW = -(int64_t{1} << 30);
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
@@ -264,6 +267,22 @@ std::vector<CdnaCase> acceptedCases()
     cases.push_back({"AttentionSink", sink});
     sink.sinkRank4 = true;
     cases.push_back({"AttentionSinkRank4", sink});
+    // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (vendored-kernel modification
+    // 36), rank 4 and rank 1, strided across heads.
+    sink.sinkDataType = DataType::FLOAT;
+    cases.push_back({"FloatSinkRank4", sink});
+    sink.sinkRank4 = false;
+    sink.sinkHeadStride = 3;
+    cases.push_back({"FloatSinkStridedAcrossHeads", sink});
+    // The int32 offset bound counts 16-bit halves: a query-dtype sink reaches 2^25 per head
+    // over 64 heads, where a FLOAT one declines.
+    auto limitSink = cdnaSpec();
+    limitSink.withSink = true;
+    limitSink.headDim = 64;
+    limitSink.heads = 64;
+    limitSink.kvHeads = 8;
+    limitSink.sinkHeadStride = int64_t{1} << 25;
+    cases.push_back({"SinkHeadOffsetsAtTheInt32Limit", limitSink});
     // Multi-head latent attention, un-absorbed: V narrower than Q and K.
     auto mla = cdnaSpec();
     mla.headDim = 192;
@@ -970,13 +989,14 @@ TEST_P(TestFlydslSdpaCdnaGraphDeclines, DeclinesTheGraph)
 std::vector<CdnaCase> declinedCases()
 {
     std::vector<CdnaCase> cases;
-    // A sink in another dtype than the query's.
-    auto f32Sink = cdnaSpec();
-    f32Sink.withSink = true;
-    f32Sink.sinkDataType = DataType::FLOAT;
-    cases.push_back({"SinkInAnotherDtype", f32Sink});
-    // A head's sink offset h * stride past int32: the kernels compute it in 32 bits, so heads
-    // 32 and up would read another head's logit.
+    // A sink in neither the query's dtype nor FLOAT.
+    auto halfSink = cdnaSpec();
+    halfSink.withSink = true;
+    halfSink.sinkDataType = DataType::HALF;
+    cases.push_back({"SinkInTheOther16BitDtype", halfSink});
+    // A head's sink offset h * stride past int32: the kernels compute it in 16-bit halves in
+    // 32 bits, so heads 32 and up would read another head's logit; a FLOAT sink's element is
+    // two halves, so 2^25 already reaches past it.
     auto wideSinkStride = cdnaSpec();
     wideSinkStride.withSink = true;
     wideSinkStride.headDim = 64;
@@ -984,6 +1004,9 @@ std::vector<CdnaCase> declinedCases()
     wideSinkStride.kvHeads = 8;
     wideSinkStride.sinkHeadStride = int64_t{1} << 26;
     cases.push_back({"SinkHeadOffsetsPastInt32", wideSinkStride});
+    wideSinkStride.sinkHeadStride = int64_t{1} << 25;
+    wideSinkStride.sinkDataType = DataType::FLOAT;
+    cases.push_back({"FloatSinkHeadOffsetsPastInt32", wideSinkStride});
     auto wideV = cdnaSpec();
     wideV.valueHeadDim = 256;
     cases.push_back({"ValueHeadDimWider", wideV});
@@ -1806,6 +1829,33 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
     EXPECT_FALSE(matchesCdnaKernel(plain.context(), withSink, *plainBound));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, ServesAFloatSinkOnTheSinkObjects)
+{
+    // A FLOAT sink (vendored-kernel modification 36) binds its dtype and its head stride in
+    // f32 elements, and runs on the sink objects, which read either dtype; a query-dtype sink
+    // binds 0.
+    auto spec = cdnaSpec();
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.sinkHeadStride = 3;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(1));
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_STRIDE_TOKEN), std::optional<int64_t>(3));
+    auto withSink = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    withSink.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), withSink, *bound));
+    EXPECT_FALSE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 64), *bound));
+    spec.sinkDataType.reset();
+    const GraphFixture query(buildFlydslSdpaRdnaGraph(spec));
+    const auto queryBound = matchesGraph(FLYDSL_SDPA_CDNA, query.context());
+    ASSERT_TRUE(queryBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*queryBound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(0));
+    EXPECT_TRUE(matchesCdnaKernel(query.context(), withSink, *queryBound));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPath)
 {
     auto spec = cdnaSpec();
@@ -2613,6 +2663,73 @@ void expectCdnaRngDump(const RngDumpReferenceProblem& reference,
         tolerance);
 }
 
+/// The sink logits a CDNA case binds, one per query head (none without a sink): random values
+/// in the query's dtype, held in @p sinkValues for a query-dtype sink; for a FLOAT sink (vendored-
+/// kernel modification 36) the same plus low bits no 16-bit dtype holds, so a sink read as 16-bit
+/// is caught; or every one the spec's value, or -inf.
+template <typename T>
+std::vector<float> cdnaSinkLogits(const SdpaGraphSpec& spec, std::vector<T>& sinkValues)
+{
+    const bool floatSink = spec.sinkDataType == DataType::FLOAT;
+    sinkValues
+        = spec.withSink ? fillValues<T>(static_cast<size_t>(spec.heads), 5U) : std::vector<T>{};
+    std::vector<float> logits(sinkValues.size());
+    for(size_t hi = 0; hi < sinkValues.size(); ++hi)
+    {
+        logits[hi] = static_cast<float>(sinkValues[hi])
+                     + (floatSink ? static_cast<float>((hi % 7) + 1) * 1.0e-3F : 0.0F);
+    }
+    if(spec.sinkValue)
+    {
+        std::fill(sinkValues.begin(), sinkValues.end(), T(*spec.sinkValue));
+        std::fill(logits.begin(),
+                  logits.end(),
+                  floatSink ? *spec.sinkValue : static_cast<float>(T(*spec.sinkValue)));
+    }
+    if(spec.sinkNegativeInfinity)
+    {
+        std::fill(sinkValues.begin(), sinkValues.end(), T(-std::numeric_limits<float>::infinity()));
+        std::fill(logits.begin(), logits.end(), -std::numeric_limits<float>::infinity());
+    }
+    return logits;
+}
+
+/// A CDNA sink case's O and LSE against hipDNN's CPU reference (FLOAT [1, Hq, 1, 1], SEM-022;
+/// FlydslSdpaCpuReferenceTestSupport.hpp), with the bias, band and padding @p problem holds.
+template <typename T, typename BiasAt>
+void expectCdnaSinkIsTheCpuReference(const SdpaCpuReferenceProblem& problem,
+                                     const CdnaHostOperands<T>& host,
+                                     BiasAt biasAt,
+                                     const std::vector<float>& stats,
+                                     bool statsSequenceMajor,
+                                     double tolerance,
+                                     double lseTolerance)
+{
+    using Host = CdnaHostOperands<T>;
+    expectSdpaIsTheCpuReference(
+        problem,
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.q, host.qStrides, 0, b, h, s, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.k, host.kvStrides, host.kStart, b, h, j, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.v, host.vStrides, host.vStart, b, h, j, e);
+        },
+        biasAt,
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.o, host.oStrides, 0, b, h, s, e);
+        },
+        [&](int64_t b, int64_t h, int64_t s) {
+            const auto index = statsSequenceMajor ? (b * problem.seqLenQ + s) * problem.heads + h
+                                                  : (b * problem.heads + h) * problem.seqLenQ + s;
+            return static_cast<double>(stats[static_cast<size_t>(index)]);
+        },
+        tolerance,
+        lseTolerance);
+}
+
 /// Runs each of @p kernels for @p spec through prepare() and launch() and checks every
 /// output element against a double-precision reference, in the memory layout @p spec names:
 /// BSHD, BHSD, or Q, K and V as views into one packed buffer. The inputs and the reference
@@ -2988,26 +3105,23 @@ void expectCandidatesMatchReference(const MatchContext& context,
     const auto biasAt = [&](int64_t bi, int64_t hi, int64_t si, int64_t j) {
         return static_cast<double>(biasValues[biasOffset(bi, hi, si, j)]);
     };
-    // The attention sink: one logit per query head, in the query's dtype, or every one the
-    // spec's value.
-    auto sinkValues = spec.withSink ? fillValues<T>(static_cast<size_t>(h), 5U) : std::vector<T>{};
-    if(spec.sinkValue)
-    {
-        std::fill(sinkValues.begin(), sinkValues.end(), T(*spec.sinkValue));
-    }
-    if(spec.sinkNegativeInfinity)
-    {
-        std::fill(sinkValues.begin(), sinkValues.end(), T(-std::numeric_limits<float>::infinity()));
-    }
+    // The attention sink: one logit per query head, in the query's dtype or, for a FLOAT sink
+    // (vendored-kernel modification 36), in f32 with low bits no 16-bit dtype holds, so a sink
+    // read as 16-bit is caught; or every one the spec's value.
+    const bool floatSink = spec.sinkDataType == DataType::FLOAT;
+    std::vector<T> sinkValues;
+    const auto sinkLogits = cdnaSinkLogits(spec, sinkValues);
     void* sinkDevice = nullptr;
     if(spec.withSink)
     {
-        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, static_cast<size_t>(h) * sizeof(T)));
+        const size_t sinkBytes = static_cast<size_t>(h) * (floatSink ? sizeof(float) : sizeof(T));
+        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
         allocations.push_back(sinkDevice);
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(sinkDevice,
-                            sinkValues.data(),
-                            static_cast<size_t>(h) * sizeof(T),
+                            floatSink ? static_cast<const void*>(sinkLogits.data())
+                                      : static_cast<const void*>(sinkValues.data()),
+                            sinkBytes,
                             hipMemcpyHostToDevice));
         buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sinkDevice});
     }
@@ -3214,9 +3328,9 @@ void expectCandidatesMatchReference(const MatchContext& context,
                 // The sink's logit joins the denominator of a row that reaches keys, and its
                 // max, so a row at a bias's lowest value beside a finite sink does not
                 // overflow; a row that reaches none has O = 0 and LSE = the sink.
-                const double sinkLogit = spec.withSink ? static_cast<double>(static_cast<float>(
-                                                             sinkValues[static_cast<size_t>(hi)]))
-                                                       : -std::numeric_limits<double>::infinity();
+                const double sinkLogit
+                    = spec.withSink ? static_cast<double>(sinkLogits[static_cast<size_t>(hi)])
+                                    : -std::numeric_limits<double>::infinity();
                 if(spec.withSink && !keyless && !nanRow)
                 {
                     maxScore = std::max(maxScore, sinkLogit);
@@ -3458,6 +3572,14 @@ void expectCandidatesMatchReference(const MatchContext& context,
                             // No sink, or a sink of -inf: the LSE is exactly -inf.
                             lseError = std::isinf(lse) && lse < 0.0 ? 0.0 : 1e30;
                         }
+                        else if(rowKind[row] == Row::KEYLESS && floatSink
+                                && static_cast<float>(lse)
+                                       != static_cast<float>(expectedLse[row]))
+                        {
+                            // The sink itself: an f32 sink's bits exactly, so one read as
+                            // 16-bit is a full miss.
+                            lseError = 1e30;
+                        }
                         if(!(lseError <= LSE_TOLERANCE))
                         {
                             worstLse = std::max(worstLse, std::isnan(lseError) ? 1e30 : lseError);
@@ -3511,6 +3633,44 @@ void expectCandidatesMatchReference(const MatchContext& context,
         EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
         EXPECT_EQ(paddedRowMisses, 0)
             << "padded rows not O = 0 and LSE = -inf, last at " << wherePadded;
+
+        // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
+        // the bias, the band and padding the graph has. Not packed, dropped or NaN: the
+        // reference's packed form, dropout and NaN rows are checked above.
+        if(spec.withSink && !packed && !drops && !spec.queryNanPosition && !spec.keyNanPosition)
+        {
+            SdpaCpuReferenceProblem reference{b,
+                                              h,
+                                              hk,
+                                              hk,
+                                              s,
+                                              skv,
+                                              d,
+                                              dv,
+                                              static_cast<float>(scale),
+                                              left.value_or(-1),
+                                              causal ? spec.rightBound.value_or(0) : -1,
+                                              !alignBottomRight,
+                                              {},
+                                              {},
+                                              sinkLogits,
+                                              spec.withBias,
+                                              withStats};
+            for(int64_t bi = 0; padded && bi < b; ++bi)
+            {
+                reference.seqLensQ.push_back(static_cast<int32_t>(lengthQ(bi)));
+                reference.seqLensKv.push_back(static_cast<int32_t>(lengthKv(bi)));
+            }
+            expectCdnaSinkIsTheCpuReference(
+                reference,
+                CdnaHostOperands<T>{
+                    q, k, v, o, qStrides, kvStrides, vStrides, oStrides, kStart, vStart},
+                biasAt,
+                stats,
+                spec.statsSequenceMajor,
+                absoluteTolerance,
+                LSE_TOLERANCE);
+        }
     }
 }
 
@@ -5013,6 +5173,89 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
     spec.headDim = 64;
     spec.withSink = true;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAFloatSink)
+{
+    // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (vendored-kernel modification 36),
+    // against the harness's reference and hipDNN's CPU reference: rank 1 and rank 4, rows no
+    // key reaches (LSE = the sink's f32 bits), a sink far above the scores, a sink of -inf,
+    // decode split across workgroups (the merge reads it), a bias the vectorized objects read
+    // and an f32 one only the strided objects do, and padding.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    {
+        SCOPED_TRACE("rank 1");
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("rank 4, f16, head_dim 128, rows no key reaches");
+        auto rank4 = spec;
+        rank4.sinkRank4 = true;
+        rank4.dataType = DataType::HALF;
+        rank4.headDim = 128;
+        rank4.seqLenKv = 64;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+        SCOPED_TRACE("a sink of -inf");
+        rank4.sinkNegativeInfinity = true;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+    {
+        // 200 + 2^-7: bf16 and f16 both round it to 200, past the LSE's tolerance.
+        SCOPED_TRACE("a sink far above the scores");
+        auto far = spec;
+        far.sinkValue = 200.0078125F;
+        expectCdnaMatchesReference(far, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("decode split across workgroups");
+        auto step = spec;
+        step.seqLenQ = 1;
+        step.seqLenKv = 20000;
+        expectCdnaMatchesReference(step, BF16_TOLERANCE);
+    }
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        SCOPED_TRACE("a bias and a sink, head_dim " + std::to_string(headDim));
+        auto biased = cdnaSpec();
+        biased.headDim = headDim;
+        biased.withBias = true;
+        biased.biasDataType = DataType::BFLOAT16;
+        biased.withSink = true;
+        biased.sinkDataType = DataType::FLOAT;
+        biased.seqLenQ = 200;
+        biased.seqLenKv = 264;
+        biased.biasDims = {1, 32, 200, 264};
+        biased.stats = SdpaStats::LSE;
+        biased.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        biased.biasMasksRows = true;
+        biased.biasNegativeInfinityLeadingKeys = 128;
+        expectCdnaMatchesReference(biased, BF16_TOLERANCE);
+        // An f32 bias: the strided sink-and-bias objects (modification 31).
+        biased.biasDataType = DataType::FLOAT;
+        biased.biasMasksRows = false;
+        biased.biasNegativeInfinityLeadingKeys = 0;
+        biased.sinkValue = 1.0e30F;
+        expectCdnaMatchesReference(biased, BF16_TOLERANCE);
+    }
+    {
+        // A padded row's LSE is -inf beside a sink; a batch with no keys is keyless, LSE the sink.
+        SCOPED_TRACE("padding");
+        auto padded = paddedGpuSpec();
+        padded.seqLensKv = {300, 0, 200};
+        padded.seqLensQ = {300, 129, 100};
+        padded.withSink = true;
+        padded.sinkDataType = DataType::FLOAT;
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, PadsAtABucketHeadDim)

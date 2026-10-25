@@ -89,6 +89,8 @@ constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_P_TOKEN = "flydsl_sdpa_rdna.dropo
 constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_SEED_TOKEN = "flydsl_sdpa_rdna.dropout_seed.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_rdna.dropout_offset.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_RNG_DUMP_TOKEN = "flydsl_sdpa_rdna.rng_dump.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_SINK_STRIDE_TOKEN = "flydsl_sdpa_rdna.sink.stride";
+constexpr const char* FLYDSL_SDPA_RDNA_SINK_FLOAT_TOKEN = "flydsl_sdpa_rdna.sink.float";
 constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_TOKEN
     = "flydsl_sdpa_rdna.ragged_offset_q.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_TOKEN
@@ -247,8 +249,8 @@ struct SdpaGraphSpec
     /// The LSE output laid out [B, Sq, H] rather than packed [B, H, Sq].
     bool statsSequenceMajor = false;
     bool withBias = false;
-    /// An attention sink: one logit per query head, in the query's dtype, rank 1 [Hq]
-    /// unless sinkRank4 asks for [1, Hq, 1, 1].
+    /// An attention sink: one logit per query head, in sinkDataType, rank 1 [Hq] unless
+    /// sinkRank4 asks for [1, Hq, 1, 1].
     bool withSink = false;
     bool sinkRank4 = false;
     /// The sink's dims as the graph declares them, packed row-major, over the [Hq] or
@@ -259,6 +261,8 @@ struct SdpaGraphSpec
     /// The sink's element stride across query heads, 1 (packed) when unset. Graph only: the
     /// device harnesses allocate a packed sink.
     std::optional<int64_t> sinkHeadStride;
+    /// The sink's dtype, the query's when unset. The device harnesses hold a FLOAT sink in
+    /// f32 (cuDNN's and hipDNN's reference's dtype) and any other in the query's dtype.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> sinkDataType;
     /// The bias as the graph declares it: rank 1 to 4, right-aligned to [B, H, Sq, Skv].
     /// Empty dims mean a packed [1, 1, Sq, Skv]; empty strides mean packed row-major.
@@ -1143,6 +1147,11 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     };
     const auto withStats = [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; };
     const auto withSink = [](SdpaGraphSpec& s) { s.withSink = true; };
+    // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (kernel modifications 31, 11, 36).
+    const auto withFloatSink = [](SdpaGraphSpec& s) {
+        s.withSink = true;
+        s.sinkDataType = data_objects::DataType::FLOAT;
+    };
     edit("AlibiMask", [](SdpaGraphSpec& s) { s.alibiMask = true; });
     edit("MmaCoreModeFp8",
          [](SdpaGraphSpec& s) { s.mmaCoreMode = data_objects::DataType::FP8_E4M3; });
@@ -1200,6 +1209,14 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             s.alignment[FLYDSL_SDPA_RDNA_SINK_UID] = 1;
         },
         withSink);
+    // A FLOAT sink's halves are read at its element, so it needs 4 bytes.
+    edit(
+        "FloatSinkAlignedTo2",
+        [withFloatSink](SdpaGraphSpec& s) {
+            withFloatSink(s);
+            s.alignment[FLYDSL_SDPA_RDNA_SINK_UID] = 2;
+        },
+        withFloatSink);
 
     // Operands that are not plain device tensors.
     for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
@@ -1236,15 +1253,27 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             },
             add);
     }
+    // The kernels read a sink in the query's dtype or FLOAT: the other 16-bit dtype, or any
+    // other, declines (shared servableSink); FLOAT is the control.
     edit(
-        "SinkInADifferentDtype",
+        "SinkInTheOther16BitDtype",
         [withSink](SdpaGraphSpec& s) {
             withSink(s);
-            s.sinkDataType = data_objects::DataType::FLOAT;
+            s.sinkDataType = s.dataType == data_objects::DataType::HALF
+                                 ? data_objects::DataType::BFLOAT16
+                                 : data_objects::DataType::HALF;
         },
-        withSink);
-    // The kernels compute a head's sink offset h * stride in 32 bits: with 64 heads, a
-    // stride of 2^26 puts heads 32 and up past it (shared servableSinkStride).
+        withFloatSink);
+    edit(
+        "SinkInDouble",
+        [withSink](SdpaGraphSpec& s) {
+            withSink(s);
+            s.sinkDataType = data_objects::DataType::DOUBLE;
+        },
+        withFloatSink);
+    // The kernels read a head's sink at h * stride 16-bit halves in 32 bits: with 64 heads, a
+    // stride of 2^26 puts heads 32 and up past it, and a FLOAT sink's 2^25 (two halves an
+    // element) heads 32 and up too (shared servableSink).
     const auto sixtyFourHeadsWithASink = [withSink](SdpaGraphSpec& s) {
         withSink(s);
         s.heads = 64;
@@ -1257,6 +1286,18 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             s.sinkHeadStride = int64_t{1} << 26;
         },
         sixtyFourHeadsWithASink);
+    const auto sixtyFourHeadsWithAFloatSink = [withFloatSink](SdpaGraphSpec& s) {
+        withFloatSink(s);
+        s.heads = 64;
+        s.kvHeads = 8;
+    };
+    edit(
+        "FloatSinkHeadOffsetsPastInt32",
+        [sixtyFourHeadsWithAFloatSink](SdpaGraphSpec& s) {
+            sixtyFourHeadsWithAFloatSink(s);
+            s.sinkHeadStride = int64_t{1} << 25;
+        },
+        sixtyFourHeadsWithAFloatSink);
 
     // Outputs whose elements share addresses: concurrent writes to one location race.
     const auto twoBatches = [](SdpaGraphSpec& s) { s.batch = 2; };
@@ -1376,7 +1417,7 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
          [](SdpaGraphSpec& s) { s.outputDataType = data_objects::DataType::HALF; });
 
     // A rank-4 sink is [1, Hq, 1, 1]: an extent past 1 on any other axis is a sink the
-    // kernels would read once per head (shared servableSinkStride).
+    // kernels would read once per head (shared servableSink).
     const auto rank4Sink = [withSink](SdpaGraphSpec& s) {
         withSink(s);
         s.sinkRank4 = true;
@@ -1442,6 +1483,10 @@ inline std::vector<SdpaFieldDecline> sdpaPassByValueDeclines()
     });
     withFeature(
         "PassByValueSink", FLYDSL_SDPA_RDNA_SINK_UID, [](SdpaGraphSpec& s) { s.withSink = true; });
+    withFeature("PassByValueFloatSink", FLYDSL_SDPA_RDNA_SINK_UID, [](SdpaGraphSpec& s) {
+        s.withSink = true;
+        s.sinkDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    });
     return cases;
 }
 
