@@ -4,6 +4,11 @@
 // Redundant with the CMake gate on purpose; see FlydslSdpaCdnaNative.cpp.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <hip/hip_runtime_api.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -11,6 +16,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -22,20 +36,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include <hip/hip_runtime_api.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
-#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-#include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
@@ -63,8 +63,9 @@
  * read in place, every other form is written into the shared region by the prep slot.
  *
  * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp) with FLOAT
- * accepted. The engine adds what only it knows: padded varlen is declined (SP-VL), and a
- * workspace whose regions cannot be proven to fit is declined (SP-WS). Which slot rows serve a
+ * accepted, padded varlen included: the graph's `seq_len_q` and `seq_len_kv` tensors are the
+ * kernels' per-batch lengths. The engine adds what only it knows: a workspace whose regions
+ * cannot be proven to fit is declined (SP-WS). Which slot rows serve a
  * graph is the kernel match of each slot, over the fields the slot's KMD carries. The graph
  * match publishes the shared workspace as bound tokens (`ws.*`); the handlers read them at
  * prepare() and check them against the layout they recompute.
@@ -174,6 +175,11 @@ constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256
 
 /// `varlen_bits` names the layout of the LSE: bit 16 is the (B, Sq, H) packing.
 constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
+/// Padded varlen: dense (B, H, S, D) tensors with a length per batch on each side, the
+/// layout's position implied by the batch index (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04, for the
+/// Q side in bits 0..7 and the K side in bits 8..15; the lengths go in `seqinfo_q0` /
+/// `seqinfo_k0`). The prep kernel decodes the Q side only.
+constexpr int32_t VARLEN_LENGTHS_BOTH_SIDES = 0x0404;
 
 /// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
 constexpr int32_t RT_FLAG_PADDED = 1;
@@ -379,8 +385,8 @@ int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
 
 /**
  * @brief Graph-scoped applicability: the shared backward matcher's contract with FLOAT
- *        accepted, less padded varlen (SP-VL), with the proven shared workspace (SP-WS) and
- *        what every kernel_match needs bound.
+ *        accepted, with the proven shared workspace (SP-WS) and what every kernel_match needs
+ *        bound.
  *
  * Each decline of a graph with an SDPA-backward node logs its rule or cause at INFO; any
  * other graph declines silently.
@@ -398,15 +404,6 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         return std::nullopt;
     }
     const auto& problem = std::get<bwd::SdpaBwdProblem>(matched);
-
-    // SP-VL: the matcher serves padded varlen; the split kernels' varlen path is not offered
-    // until a split varlen cell has passed.
-    if(problem.paddingMask || problem.seqLenQUid != bwd::NO_UID
-       || problem.seqLenKvUid != bwd::NO_UID)
-    {
-        logDecline("SP-VL", "padded varlen (padding_mask with seq_len tensors) is not served");
-        return std::nullopt;
-    }
 
     const auto dtype = dtypeName(problem.dtype);
     if(!dtype.has_value())
@@ -952,7 +949,8 @@ SplitPlan planFor(Slot slot,
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0;
+    plan.varlenBits = (problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0)
+                      | (problem.paddingMask ? VARLEN_LENGTHS_BOTH_SIDES : 0);
 
     plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
 
@@ -1276,7 +1274,9 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         prep.lse = buffer(plan.uids.stats);
         prep.lseWs = lseWorkspace;
         prep.delta = delta;
-        prep.seqinfoQ0 = unused;
+        // Unread slots stay O, as the harness passes them; a padded graph's lengths are its
+        // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0).
+        prep.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
         prep.seqinfoQ1 = unused;
         prep.varlenBits = plan.varlenBits;
         prep.numSeqlens = 0;
@@ -1318,7 +1318,9 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         d.dV = buffer(plan.uids.dV);
         d.lse = lseWorkspace;
         d.delta = delta;
-        d.seqinfoQ0 = d.seqinfoQ1 = d.seqinfoK0 = d.seqinfoK1 = unused;
+        d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
+        d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
+        d.seqinfoQ1 = d.seqinfoK1 = unused;
         d.varlenBits = plan.varlenBits;
         d.numSeqlens = 0;
         d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1356,7 +1358,9 @@ LaunchArguments launchArguments(const SplitPlan& plan,
     d.dQ = buffer(plan.uids.dQ);
     d.lse = lseWorkspace;
     d.delta = delta;
-    d.seqinfoQ0 = d.seqinfoQ1 = d.seqinfoK0 = d.seqinfoK1 = unused;
+    d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
+    d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
+    d.seqinfoQ1 = d.seqinfoK1 = unused;
     d.varlenBits = plan.varlenBits;
     d.numSeqlens = 0;
     d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
