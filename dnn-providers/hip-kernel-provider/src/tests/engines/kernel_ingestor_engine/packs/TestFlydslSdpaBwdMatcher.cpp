@@ -512,8 +512,9 @@ TEST(TestFlydslSdpaBwdMatcherFp32, DT8HeadDimNotAMultipleOf4NeedsRowStrideOfTheP
     half60.headDimQk = 60;
     half60.headDimV = 60;
     EXPECT_TRUE(accepted(half60));
-    declined(half60.withEdit(
-                 [](SdpaBwdGraph& g) { g.tensor("q").strides = {8 * 16 * 60, 16 * 60, 60, 1}; }),
+    declined(half60.withEdit([](SdpaBwdGraph& g) {
+        g.tensor("q").strides = {int64_t{8} * 16 * 60, int64_t{16} * 60, 60, 1};
+    }),
              "layout",
              "multiple of 8 elements");
 
@@ -523,8 +524,9 @@ TEST(TestFlydslSdpaBwdMatcherFp32, DT8HeadDimNotAMultipleOf4NeedsRowStrideOfTheP
     const auto padded = accepted(dim61, ACCEPT_FLOAT);
     ASSERT_TRUE(padded.has_value());
     EXPECT_EQ(padded->q.seq, 64);
-    declined(dim61.withEdit(
-                 [](SdpaBwdGraph& g) { g.tensor("q").strides = {8 * 16 * 60, 16 * 60, 60, 1}; }),
+    declined(dim61.withEdit([](SdpaBwdGraph& g) {
+        g.tensor("q").strides = {int64_t{8} * 16 * 60, int64_t{16} * 60, 60, 1};
+    }),
              "layout",
              "Q (uid 1) head dim 61 is not a multiple of 4 and its smallest row stride 60 is "
              "below the padded width 64",
@@ -535,7 +537,8 @@ TEST(TestFlydslSdpaBwdMatcherFp32, LY3StrideOfANonUnitAxisNeedsAMultipleOf4)
 {
     const auto withQRowStride = [](const SdpaBwdSpec& spec, int64_t rowStride) {
         return spec.withEdit([rowStride](SdpaBwdGraph& g) {
-            g.tensor("q").strides = {8 * 16 * rowStride, 16 * rowStride, rowStride, 1};
+            g.tensor("q").strides
+                = {int64_t{8} * 16 * rowStride, int64_t{16} * rowStride, rowStride, 1};
         });
     };
     EXPECT_TRUE(accepted(withQRowStride(fp32Spec(), 68), ACCEPT_FLOAT));
@@ -687,7 +690,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY3StrideOfANonUnitAxisNotAMultipleOf8Declines)
 TEST(TestFlydslSdpaBwdMatcher, LY4PackedQkvViewsAndOneBufferGradientsAccept)
 {
     // Q, K and V (and dQ, dK, dV) as strided views into one [B, S, 3, H, D] buffer.
-    const std::vector<int64_t> packed{16 * 3 * 8 * 64, 64, 3 * 8 * 64, 1};
+    const std::vector<int64_t> packed{int64_t{16} * 3 * 8 * 64, 64, int64_t{3} * 8 * 64, 1};
     const auto problem = accepted(baseline().withEdit([packed](SdpaBwdGraph& g) {
         for(const char* name : {"q", "k", "v", "dq", "dk", "dv"})
         {
@@ -772,7 +775,7 @@ TEST(TestFlydslSdpaBwdMatcher, SS1PackedStatsInEitherOrderAcceptAndOtherStridesD
     EXPECT_EQ(problem->statsLayout, StatsLayout::HT);
 
     problem = accepted(baseline().withEdit(
-        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {16 * 8, 1, 8, 1}; }));
+        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {int64_t{16} * 8, 1, 8, 1}; }));
     ASSERT_TRUE(problem.has_value());
     EXPECT_EQ(problem->statsLayout, StatsLayout::TH);
 
@@ -1223,7 +1226,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV11SeqLenMustBeDenseAndAlignedToItsElementSize)
         declined(
             withAlignment(2), "varlen", "declares alignment 2 bytes, below its element size 4");
     }
-    const auto withStrides = [](int64_t batch, std::vector<int64_t> strides) {
+    const auto withStrides = [](int64_t batch, const std::vector<int64_t>& strides) {
         SdpaBwdSpec spec;
         spec.batch = batch;
         return spec.withEdit([strides](SdpaBwdGraph& g) {
@@ -1471,26 +1474,27 @@ TEST(TestFlydslSdpaBwdMatcher, BI9DbiasStridesOfNonUnitAxesNeedAMultipleOfTheVec
     const auto withDbiasRowStride = [](const SdpaBwdSpec& spec, int64_t rowStride) {
         return spec.withEdit([rowStride](SdpaBwdGraph& g) {
             addBias(g);
-            addDbias(g).strides = {8 * 16 * rowStride, 16 * rowStride, rowStride, 1};
+            addDbias(g).strides
+                = {int64_t{8} * 16 * rowStride, int64_t{16} * rowStride, rowStride, 1};
         });
     };
     const auto problem = accepted(withDbiasRowStride(baseline(), 24));
     ASSERT_TRUE(problem.has_value());
-    expectStrides(problem->dbiasStrides, 8 * 16 * 24, 16 * 24, 24);
+    expectStrides(problem->dbiasStrides, int64_t{8} * 16 * 24, int64_t{16} * 24, 24);
     declined(withDbiasRowStride(baseline(), 20),
              "layout",
              "dBias (uid 12) stride 20 on axis 2 (extent 16) is not a non-negative multiple of 8 "
              "elements");
     // The input bias at the same stride is the engine's staging rule (BI-8), not the matcher's.
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
-        addBias(g).strides = {8 * 16 * 20, 16 * 20, 20, 1};
-        addDbias(g).strides = {8 * 16 * 24, 16 * 24, 24, 1};
+        addBias(g).strides = {int64_t{8} * 16 * 20, int64_t{16} * 20, 20, 1};
+        addDbias(g).strides = {int64_t{8} * 16 * 24, int64_t{16} * 24, 24, 1};
     })));
 
     // The batch and head strides are checked too.
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g);
-        addDbias(g).strides = {8 * 16 * 16 + 4, 16 * 16, 16, 1};
+        addDbias(g).strides = {int64_t{8} * 16 * 16 + 4, int64_t{16} * 16, 16, 1};
     }),
              "layout",
              "dBias (uid 12) stride 2052 on axis 0");
@@ -1503,7 +1507,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI9DbiasStridesOfNonUnitAxesNeedAMultipleOfTheVec
     // FLOAT vectors are 4 elements wide.
     const auto fp32 = accepted(withDbiasRowStride(fp32Spec(), 20), ACCEPT_FLOAT);
     ASSERT_TRUE(fp32.has_value());
-    expectStrides(fp32->dbiasStrides, 8 * 16 * 20, 16 * 20, 20);
+    expectStrides(fp32->dbiasStrides, int64_t{8} * 16 * 20, int64_t{16} * 20, 20);
     declined(withDbiasRowStride(fp32Spec(), 18),
              "layout",
              "dBias (uid 12) stride 18 on axis 2 (extent 16) is not a non-negative multiple of 4 "
@@ -1682,7 +1686,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR8DeviceSeedAndOffsetMustBeDenseAndAlignedToThei
                          + std::to_string(elementBytes));
         }
     }
-    const auto withStrides = [](std::vector<int64_t> strides) {
+    const auto withStrides = [](const std::vector<int64_t>& strides) {
         return baseline().withEdit([strides](SdpaBwdGraph& g) {
             addDropout(g);
             g.tensor("offset").strides = strides;
