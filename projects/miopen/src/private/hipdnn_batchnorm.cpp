@@ -24,6 +24,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace miopen {
@@ -227,16 +228,18 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle)
     return miopenStatusSuccess;
 }
 
-// What the MIOpen provider can run, whatever the kind.
-const char* CheckSupported(const BnProblem& problem)
+// What the MIOpen provider can run, whatever the kind. Empty when it can.
+std::string CheckSupported(const BnProblem& problem)
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
     const TensorInfo& x                    = tensors[kIdxX];
 
     if(problem.bnMode != miopenBNSpatial)
         return "hipDNN batchnorm supports only spatial mode";
-    if(problem.act != miopenActivationPASTHRU && problem.act != miopenActivationRELU)
-        return "hipDNN batchnorm supports only the RELU activation";
+    PointwiseActivation activation{};
+    if(problem.act != miopenActivationPASTHRU && !ToPointwiseActivation(problem.act, activation))
+        return std::string("hipDNN batchnorm does not support the ") +
+               ActivationModeName(problem.act) + " activation";
     if(x.dims.size() < 3 || x.dims.size() > 5)
         return "hipDNN batchnorm supports only 3 to 5 dimensions";
     // Before the packed test, so a truncated tensor is declined for the reason
@@ -261,7 +264,7 @@ const char* CheckSupported(const BnProblem& problem)
         if(tensors[index].dataType != miopenFloat)
             return "hipDNN batchnorm supports only FLOAT scale, bias and statistics";
     }
-    return nullptr;
+    return {};
 }
 
 int64_t DoubleBits(double value)
@@ -314,7 +317,7 @@ bool MarkOutput(const std::shared_ptr<fe::graph::TensorAttributes>& tensor,
     return true;
 }
 
-// Marks the batchnorm result as y. With RELU the result becomes an
+// Marks the batchnorm result as y. With an activation the result becomes an
 // intermediate, and the activation's result takes y's place.
 bool MarkResult(const BnProblem& problem,
                 fe::graph::Graph& graph,
@@ -324,15 +327,16 @@ bool MarkResult(const BnProblem& problem,
     const TensorInfo& yInfo = problem.tensors[kIdxY];
     if(out == nullptr)
         return false;
-    if(problem.act == miopenActivationRELU)
+    if(problem.act != miopenActivationPASTHRU)
     {
-        fe::PointwiseMode activation{};
+        PointwiseActivation activation{};
         if(!ToPointwiseActivation(problem.act, activation))
             return false;
         out->set_dim(yInfo.dims).set_stride(yInfo.strides);
 
         fe::graph::PointwiseAttributes activationAttributes;
-        activationAttributes.set_mode(activation).set_compute_data_type(fe::DataType::FLOAT);
+        activationAttributes.set_mode(activation.forward)
+            .set_compute_data_type(fe::DataType::FLOAT);
         out = graph.pointwise(out, activationAttributes);
     }
     return MarkOutput(out, yInfo, ioType, kUidY);
@@ -396,6 +400,9 @@ bool PopulateBackward(const BnProblem& problem, fe::DataType ioType, fe::graph::
     // The fused graph recomputes y from the saved statistics.
     if(fusedActivation && !problem.hasSavedStats)
         return false;
+    PointwiseActivation activation{};
+    if(fusedActivation && !ToPointwiseActivation(problem.act, activation))
+        return false;
 
     auto x     = MakeTensor(tensors[kIdxX], ioType, kUidX);
     auto dy    = MakeTensor(tensors[kIdxY], ioType, kUidDy);
@@ -423,7 +430,7 @@ bool PopulateBackward(const BnProblem& problem, fe::DataType ioType, fe::graph::
             y->set_dim(tensors[kIdxX].dims).set_stride(tensors[kIdxX].strides);
 
             fe::graph::PointwiseAttributes activationAttributes;
-            activationAttributes.set_mode(fe::PointwiseMode::RELU_BWD)
+            activationAttributes.set_mode(activation.backward)
                 .set_compute_data_type(fe::DataType::FLOAT);
             dy = graph.pointwise(dy, y, activationAttributes);
             if(dy == nullptr)
@@ -521,7 +528,7 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
        status != miopenStatusSuccess)
         return status;
 
-    if(const char* reason = CheckSupported(problem))
+    if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
     if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
         return status;
@@ -603,7 +610,7 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
        status != miopenStatusSuccess)
         return status;
 
-    if(const char* reason = CheckSupported(problem))
+    if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
 
     VariantPack variantPack{
@@ -674,11 +681,11 @@ miopenStatus_t Backward(miopenHandle_t handle,
     // MIOpen would write through these, so a null one has no behavior to match.
     if(dscale == nullptr || dbias == nullptr)
         return RecordFailure(miopenStatusBadParm, "dscale and dbias must not be null");
-    if(problem.act == miopenActivationRELU && bias == nullptr)
+    if(problem.act != miopenActivationPASTHRU && bias == nullptr)
         return RecordFailure(miopenStatusBadParm,
                              "batchnorm backward with an activation needs the bias");
 
-    if(const char* reason = CheckSupported(problem))
+    if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
     if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
         return status;

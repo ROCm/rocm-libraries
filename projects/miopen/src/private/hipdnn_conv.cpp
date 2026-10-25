@@ -243,13 +243,13 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
         add.set_mode(fe::PointwiseMode::ADD).set_compute_data_type(types[3]);
         out = graph.pointwise(out, bias, add);
 
-        fe::PointwiseMode activation{};
+        PointwiseActivation activation{};
         if(!ToPointwiseActivation(problem.act, activation))
             return false;
         out->set_dim(outInfo.dims).set_stride(outInfo.strides);
 
         fe::graph::PointwiseAttributes activationAttributes;
-        activationAttributes.set_mode(activation).set_compute_data_type(computeType);
+        activationAttributes.set_mode(activation.forward).set_compute_data_type(computeType);
         out = graph.pointwise(out, activationAttributes);
     }
 

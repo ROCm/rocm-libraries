@@ -777,23 +777,47 @@ TEST(GPU_HipdnnShimBNGaps_FP32, PerActivationMode)
     }
 }
 
+// Backward is covered as well as forward, because it is the direction that
+// takes the activation's gradient and so has the most to get wrong.
 TEST(GPU_HipdnnShimBNGaps_FP32, ClampActivation)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
+    const char* reason = "does not support the CLAMP activation";
 
-    TrainData d;
-    SetUpTrain(d);
-    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationCLAMP);
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        SetUpTrain(d);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationCLAMP);
 
-    hs::OwnedActivationDescriptor activ;
-    ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
-    ASSERT_EQ(
-        miopenSetActivationDescriptor(activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
-        miopenStatusSuccess);
+        hs::OwnedActivationDescriptor activ;
+        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetActivationDescriptor(
+                      activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+                  miopenStatusSuccess);
 
-    const auto result = hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
-    if(RecordOutcome("clamp_train", result, "supports only the RELU activation"))
-        CheckTrain(handle, d, true, true);
+        const auto result =
+            hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
+        if(RecordOutcome("clamp_train", result, reason))
+            CheckTrain(handle, d, true, true);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        SetUpBwd(d);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationCLAMP);
+
+        hs::OwnedActivationDescriptor activ;
+        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetActivationDescriptor(
+                      activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+                  miopenStatusSuccess);
+
+        const auto result =
+            hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
+        if(RecordOutcome("clamp_bwd", result, reason))
+            CheckBwd(handle, d);
+    }
 }
 
 // MIOpen silently runs training when the estimated stats are null; there is no
