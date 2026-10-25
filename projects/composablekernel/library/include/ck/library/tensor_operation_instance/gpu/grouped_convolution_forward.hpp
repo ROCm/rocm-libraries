@@ -11,6 +11,9 @@
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #include "ck/library/tensor_operation_instance/device_operation_instance_factory.hpp"
+#if defined(CK_USE_GFX1250) && defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+#include "grouped_conv_fwd/device_grouped_conv_fwd_nchw_pointwise_instance.hpp"
+#endif
 
 #ifdef DL_KERNELS
 #include "grouped_convolution_forward_dl.inc"
@@ -83,6 +86,16 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
     static auto GetInstances()
     {
         std::vector<std::unique_ptr<DeviceOp>> op_ptrs;
+#if defined(CK_USE_GFX1250) && defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+        if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NGCHW> &&
+                     is_same_v<WeiLayout, GKCYX> && is_same_v<OutLayout, NGKHW> &&
+                     is_same_v<InDataType, F16> && is_same_v<WeiDataType, F16> &&
+                     is_same_v<OutDataType, F16> && is_same_v<AComputeType, F16> &&
+                     is_same_v<BComputeType, F16>)
+        {
+            add_device_grouped_conv2d_fwd_nchw_pointwise_f16_instances(op_ptrs);
+        }
+#endif
 
 #ifdef DL_KERNELS
         if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, GNHWC> &&

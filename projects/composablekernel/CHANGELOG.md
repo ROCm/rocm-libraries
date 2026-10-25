@@ -1,5 +1,13 @@
 # Changelog for Composable Kernel
 
+## Unreleased
+
+### Added
+
+* Added gfx1250 native NCHW FP32 pointwise backward-data candidates for bounded tiny-reduction shapes, with direct stores, scalar tails, and no conversion or workspace.
+* Added a bounded gfx1250 native NCHW FP16 pointwise forward path using batched WMMA with broadcast weights and FP32 accumulation.
+
+
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
 ## Unreleased

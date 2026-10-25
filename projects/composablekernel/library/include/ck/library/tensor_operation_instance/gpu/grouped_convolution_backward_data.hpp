@@ -9,6 +9,9 @@
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #include "ck/library/tensor_operation_instance/device_operation_instance_factory.hpp"
+#if defined(CK_USE_GFX1250) && defined(CK_USE_WMMA) && defined(CK_ENABLE_FP32)
+#include "grouped_conv_bwd_data/device_grouped_conv_bwd_data_nchw_pointwise_instance.hpp"
+#endif
 
 #ifdef CK_USE_XDL
 #include "grouped_convolution_backward_data_xdl.inc"
@@ -67,6 +70,16 @@ struct DeviceOperationInstanceFactory<
     static auto GetInstances()
     {
         std::vector<std::unique_ptr<DeviceOp>> op_ptrs;
+#if defined(CK_USE_GFX1250) && defined(CK_USE_WMMA) && defined(CK_ENABLE_FP32)
+        if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NGCHW> &&
+                     is_same_v<WeiLayout, GKCYX> && is_same_v<OutLayout, NGKHW> &&
+                     is_same_v<InDataType, F32> && is_same_v<WeiDataType, F32> &&
+                     is_same_v<OutDataType, F32> && is_same_v<ComputeTypeA, F32> &&
+                     is_same_v<ComputeTypeB, F32>)
+        {
+            add_device_grouped_conv2d_bwd_data_nchw_pointwise_f32_instances(op_ptrs);
+        }
+#endif
 
 #ifdef CK_USE_XDL
         if constexpr(NumDimSpatial == 2)
