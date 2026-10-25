@@ -44,6 +44,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
@@ -76,6 +77,10 @@ namespace
 
 namespace bwd = flydsl_sdpa_bwd;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+namespace native = flydsl_sdpa_bwd_native;
+using native::GRID_YZ_LIMIT;
+using native::INT32_LIMIT;
+using native::toInt32;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
@@ -127,19 +132,8 @@ constexpr int64_t CLASS_PLAIN = 0;
 constexpr int64_t CLASS_CAUSAL = 1;
 constexpr int64_t CLASS_BIAS = 2;
 
-constexpr int64_t INT32_LIMIT = 2147483647LL;
-
-/// The largest y or z extent of a launch grid; the same limit as `GRID_YZ_LIMIT` in
-/// FlydslSdpaAiwNative.cpp.
-constexpr int64_t GRID_YZ_LIMIT = 65535;
-
 /// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds objects at.
 constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
-
-/// The mask sentinels the kernel resolves per sequence (`fmha_common_gfx1201.py`,
-/// WINDOW_TOPLEFT and WINDOW_BOTRIGHT).
-constexpr int32_t WINDOW_TOPLEFT = -2147483647;
-constexpr int32_t WINDOW_BOTRIGHT = -2147483646;
 
 /// `varlen_bits` names the layout of the LSE: bit 16 is the (B, Sq, H) packing.
 constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
@@ -148,42 +142,10 @@ constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
 constexpr int32_t RT_FLAG_PADDED = 1;
 constexpr int32_t RT_FLAG_DROPOUT = 2;
 
-/// The workspace's seed region, `[seed u64 | offset u64]`, and the alignment of the region
-/// after it.
-constexpr size_t SEED_REGION_BYTES = 16;
-constexpr size_t SEED_WORD_BYTES = 8;
-constexpr size_t WORKSPACE_ALIGNMENT = 256;
-constexpr int64_t WORKSPACE_ELEMENT_BYTES = 2; // bf16 and f16 only
-
-/// The reduce kernel's launch: 256 threads, each owning 8 consecutive columns of one row
-/// (`fmha_bwd_dbias_reduce_gfx950.py`, BLOCK_THREADS and VEC).
-constexpr unsigned int REDUCE_THREADS = 256;
-constexpr int64_t REDUCE_VECTOR = 8;
-
 [[noreturn]] void failBadParam(const std::string& message)
 {
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                    "flydsl_sdpa_bwd_merged: " + message);
-}
-
-void requireHip(hipError_t status, const char* what)
-{
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       std::string("flydsl_sdpa_bwd_merged: ")
-                                                           + what + " failed: "
-                                                           + hipGetErrorString(status));
-    }
-}
-
-int32_t toInt32(int64_t value, const char* what)
-{
-    if(value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max())
-    {
-        failBadParam(std::string(what) + " " + std::to_string(value) + " does not fit in int32");
-    }
-    return static_cast<int32_t>(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -645,108 +607,6 @@ double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
 // Launch values
 // ---------------------------------------------------------------------------
 
-/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above
-/// `(p - 0.5) * 2^32`. A port of `philox.dropout_threshold`, which truncates toward zero
-/// and clamps to int32; the same value AOTriton computes.
-int32_t dropoutThreshold(double p)
-{
-    const auto threshold = static_cast<int64_t>((p - 0.5) * 4294967295.0);
-    return static_cast<int32_t>(std::clamp<int64_t>(
-        threshold, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
-}
-
-/// The kernel's window bounds: `column j is kept for row i iff i - left <= j <= i + right`.
-struct Window
-{
-    int32_t left = 0;
-    int32_t right = 0;
-};
-
-/// The bounds a graph asks for in the kernel's convention. A graph without a mask passes 0, 0
-/// (the object has no window). Plain causal, no left bound and right 0, passes the
-/// sentinel of its alignment for both bounds, which the kernel resolves against each
-/// sequence's own lengths. Every other mask passes literals: cuDNN's right bound plus the
-/// diagonal offset, clamped to the key length; cuDNN's left bound less one and less the
-/// offset, clamped to the query length plus the offset's magnitude. A side the graph leaves
-/// unbounded is its clamp, and both clamps keep every value int32-safe.
-Window windowFor(const bwd::SdpaBwdProblem& problem)
-{
-    if(!problem.masked)
-    {
-        return {};
-    }
-    if(problem.windowLeft == bwd::NO_WINDOW && problem.windowRight == 0)
-    {
-        const int32_t sentinel = problem.alignBottomRight ? WINDOW_BOTRIGHT : WINDOW_TOPLEFT;
-        return {sentinel, sentinel};
-    }
-    const int64_t offset = problem.diagonalOffset;
-    const int64_t leftClamp = problem.seqLenQ + (offset < 0 ? -offset : offset);
-    const int64_t rightClamp = problem.seqLenKv;
-
-    int64_t left = leftClamp;
-    if(problem.windowLeft != bwd::NO_WINDOW && problem.windowLeft <= leftClamp + 1 + offset)
-    {
-        left = problem.windowLeft - 1 - offset;
-    }
-    int64_t right = rightClamp;
-    if(problem.windowRight != bwd::NO_WINDOW && problem.windowRight <= rightClamp - offset)
-    {
-        right = problem.windowRight + offset;
-    }
-    return {toInt32(left, "window_left"), toInt32(right, "window_right")};
-}
-
-/// Where the workspace's regions are: the one place its size and its offsets are decided,
-/// read by workspaceBytes() and by launch.
-///
-/// `[seed u64 | offset u64]` at offset 0 when the seed and offset are not 64-bit device
-/// tensors; the full-shape dBias buffer at the next 256-byte boundary when dBias is
-/// broadcast over batch or head. The dBias region is never zeroed: the dQ role writes
-/// every in-range element of it exactly once.
-struct WorkspaceLayout
-{
-    bool uploadsSeed = false;
-    bool reduces = false;
-    size_t dbiasOffset = 0;
-    /// (B, Hq, Sq, Sk) strides of the dBias region, in elements.
-    bwd::Strides dbiasStrides;
-    size_t totalBytes = 0;
-};
-
-WorkspaceLayout workspaceLayout(const bwd::SdpaBwdProblem& problem)
-{
-    WorkspaceLayout layout;
-    // A 64-bit device tensor is read in place; every other form is written here.
-    layout.uploadsSeed = problem.seedForm != bwd::SeedForm::NONE
-                         && !(problem.seedForm == bwd::SeedForm::DEVICE
-                              && problem.seedWidth == bwd::SeedWidth::INT64);
-    layout.totalBytes = layout.uploadsSeed ? SEED_REGION_BYTES : 0;
-
-    layout.reduces = problem.dbiasUid != bwd::NO_UID
-                     && (problem.biasBroadcastBatch || problem.biasBroadcastHead);
-    if(!layout.reduces)
-    {
-        return layout;
-    }
-    const auto plane = bwd::detail::checkedProduct({problem.seqLenQ, problem.seqLenKv});
-    const auto head = plane ? bwd::detail::checkedProduct({problem.numHeads, *plane})
-                            : std::optional<int64_t>{};
-    const auto elements
-        = head ? bwd::detail::checkedProduct({problem.batch, *head}) : std::optional<int64_t>{};
-    const auto bytes = elements ? bwd::detail::checkedProduct({*elements, WORKSPACE_ELEMENT_BYTES})
-                                : std::optional<int64_t>{};
-    if(!bytes)
-    {
-        failBadParam("the broadcast dBias workspace overflows int64");
-    }
-    layout.dbiasStrides = {*head, *plane, problem.seqLenKv};
-    layout.dbiasOffset
-        = (layout.totalBytes + WORKSPACE_ALIGNMENT - 1) / WORKSPACE_ALIGNMENT * WORKSPACE_ALIGNMENT;
-    layout.totalBytes = layout.dbiasOffset + static_cast<size_t>(*bytes);
-    return layout;
-}
-
 /// The tensor uids a matched graph binds.
 struct Uids
 {
@@ -769,21 +629,16 @@ struct MergedPlan
     Uids uids;
     unsigned int blockThreads = 0;
     unsigned int gridBlocks = 0;
-    Window window;
+    native::Window window;
     int32_t dropoutThreshold = 0;
     float dropoutScale = 1.0F;
     int32_t runtimeFlags = 0;
     int32_t varlenBits = 0;
-    WorkspaceLayout workspace;
-    /// Set for a tensor-form scale; the value form is problem.scaleValue.
-    std::optional<hipdnn_plugin_sdk::ScalarOperand> scale;
-    /// Set for a pass-by-value seed and offset.
-    std::optional<hipdnn_plugin_sdk::ScalarOperand> seed;
-    std::optional<hipdnn_plugin_sdk::ScalarOperand> offset;
+    native::WorkspaceLayout workspace;
+    native::ScalarOperands scalars;
     /// The reduce kernel's symbol and launch, when the graph's dBias is broadcast.
     std::string reduceSymbol;
-    unsigned int reduceGridX = 0;
-    unsigned int reduceGridY = 0;
+    native::ReduceGrid reduceGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -833,11 +688,11 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
                      attributes.dv_tensor_uid(),
                      attributes.stats_tensor_uid()};
 
-    plan.window = windowFor(problem);
+    plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
         const double p = static_cast<double>(problem.dropoutP);
-        plan.dropoutThreshold = dropoutThreshold(p);
+        plan.dropoutThreshold = native::dropoutThreshold(p);
         plan.dropoutScale = static_cast<float>(1.0 / (1.0 - p));
     }
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
@@ -845,18 +700,9 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
     plan.varlenBits = problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0;
 
-    const auto& tensors = context.graph.getTensorMap();
-    if(problem.scaleSource == bwd::ScaleSource::TENSOR)
-    {
-        plan.scale = hipdnn_plugin_sdk::makeScalarOperand(tensors, problem.scaleUid, "scale");
-    }
-    if(problem.seedForm == bwd::SeedForm::PASS_BY_VALUE)
-    {
-        plan.seed = hipdnn_plugin_sdk::makeScalarOperand(tensors, problem.seedUid, "seed");
-        plan.offset = hipdnn_plugin_sdk::makeScalarOperand(tensors, problem.offsetUid, "offset");
-    }
+    plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
 
-    plan.workspace = workspaceLayout(problem);
+    plan.workspace = native::workspaceLayout(problem);
     if(plan.workspace.reduces)
     {
         // Read only now: an object without a broadcast dBias never names a reduce kernel.
@@ -867,23 +713,7 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
             failBadParam("kernel '" + kernel.name
                          + "' serves a broadcast dBias but names no reduce kernel");
         }
-        const bool reduceBatch = problem.biasBroadcastBatch;
-        const bool reduceHead = problem.biasBroadcastHead;
-        const int64_t vectors = (problem.seqLenKv + REDUCE_VECTOR - 1) / REDUCE_VECTOR;
-        const auto items = bwd::detail::checkedProduct({problem.seqLenQ, vectors});
-        const auto planes = bwd::detail::checkedProduct(
-            {reduceBatch ? int64_t{1} : problem.batch, reduceHead ? int64_t{1} : problem.numHeads});
-        if(!items || !planes)
-        {
-            failBadParam("the dBias reduce launch overflows int64");
-        }
-        const int64_t gridX = (*items + REDUCE_THREADS - 1) / REDUCE_THREADS;
-        if(gridX > INT32_LIMIT || *planes > GRID_YZ_LIMIT)
-        {
-            failBadParam("the dBias reduce launch grid exceeds its limits");
-        }
-        plan.reduceGridX = static_cast<unsigned int>(gridX);
-        plan.reduceGridY = static_cast<unsigned int>(*planes);
+        plan.reduceGrid = native::reduceGridOf(problem);
     }
     return plan;
 }
@@ -1014,161 +844,22 @@ struct MergedKernargs
     }
 };
 
-/// The dBias reduce kernel's arguments (`_PARAMS["dbias_reduce"]`): the full-shape workspace
-/// and the user's dBias, the problem's extents, which axes are summed, and the strides of
-/// each tensor: 14 arguments, 88 bytes.
-struct ReduceKernargs
-{
-    void* workspace = nullptr;
-    void* dBias = nullptr;
-    int32_t numBatch = 0;
-    int32_t numHead = 0;
-    int32_t seqLenQ = 0;
-    int32_t seqLenK = 0;
-    int32_t reduceBatch = 0;
-    int32_t reduceHead = 0;
-    bwd::Strides strideWorkspace;
-    bwd::Strides strideOut;
-
-    auto tie() const
-    {
-        return std::tie(workspace,
-                        dBias,
-                        numBatch,
-                        numHead,
-                        seqLenQ,
-                        seqLenK,
-                        reduceBatch,
-                        reduceHead,
-                        strideWorkspace.batch,
-                        strideWorkspace.head,
-                        strideWorkspace.seq,
-                        strideOut.batch,
-                        strideOut.head,
-                        strideOut.seq);
-    }
-};
-
-/// The natural offset of the next argument of type @p T after @p offset.
-template <typename T>
-size_t alignedOffset(size_t offset)
-{
-    return (offset + alignof(T) - 1) / alignof(T) * alignof(T);
-}
-
-template <typename T>
-KernelArgument describeArgument(size_t& offset)
-{
-    const size_t at = alignedOffset<T>(offset);
-    offset = at + sizeof(T);
-    return KernelArgument{std::is_pointer_v<T> ? "global_buffer" : "by_value",
-                          static_cast<uint32_t>(sizeof(T)),
-                          static_cast<uint32_t>(at),
-                          ""};
-}
-
-template <typename Tuple, size_t... Index>
-std::vector<KernelArgument> signatureFromTuple(std::index_sequence<Index...>)
-{
-    size_t offset = 0;
-    // A braced list is evaluated left to right, so each offset follows the one before.
-    return std::vector<KernelArgument>{describeArgument<
-        std::remove_cv_t<std::remove_reference_t<std::tuple_element_t<Index, Tuple>>>>(offset)...};
-}
-
-template <typename Kernargs>
-std::vector<KernelArgument> signatureOf()
-{
-    using Tuple = decltype(std::declval<const Kernargs&>().tie());
-    return signatureFromTuple<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
-}
-
 const std::vector<KernelArgument>& mergedSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf<MergedKernargs>();
+    static const std::vector<KernelArgument> s_signature = native::signatureOf<MergedKernargs>();
     return s_signature;
-}
-
-const std::vector<KernelArgument>& reduceSignature()
-{
-    static const std::vector<KernelArgument> s_signature = signatureOf<ReduceKernargs>();
-    return s_signature;
-}
-
-template <typename Kernargs>
-std::vector<unsigned char> kernargImage(const Kernargs& kernargs)
-{
-    std::vector<unsigned char> image;
-    std::apply(
-        [&image](const auto&... argument) {
-            const auto append = [&image](const auto& value) {
-                using T = std::remove_cv_t<std::remove_reference_t<decltype(value)>>;
-                const size_t at = alignedOffset<T>(image.size());
-                image.resize(at + sizeof(T));
-                std::memcpy(image.data() + at, &value, sizeof(T));
-            };
-            (append(argument), ...);
-        },
-        kernargs.tie());
-    return image;
 }
 
 // ---------------------------------------------------------------------------
 // Launch arguments
 // ---------------------------------------------------------------------------
 
-/// How a seed and offset that are not 64-bit device tensors reach the workspace: the four
-/// 32-bit words of `[seed u64 | offset u64]` written as values (pass-by-value, either
-/// width), or, for 32-bit device tensors, the sources whose 4 bytes are copied into the low
-/// half of each zeroed word.
-struct SeedUpload
-{
-    std::array<uint32_t, 4> words{};
-    const void* seedSource = nullptr;
-    const void* offsetSource = nullptr;
-};
-
 struct LaunchArguments
 {
     MergedKernargs merged;
-    std::optional<ReduceKernargs> reduce;
-    std::optional<SeedUpload> seedUpload;
+    std::optional<native::ReduceKernargs> reduce;
+    std::optional<native::SeedUpload> seedUpload;
 };
-
-/// A pass-by-value integer as the low and high words of its 64-bit extension. A 32-bit value
-/// is zero-extended, so a negative int32 seed is its unsigned bit pattern.
-std::array<uint32_t, 2> wordsOf(const hipdnn_plugin_sdk::ScalarValue& value, const char* what)
-{
-    if(const auto* narrow = std::get_if<int32_t>(&value))
-    {
-        return {static_cast<uint32_t>(*narrow), 0U};
-    }
-    if(const auto* wide = std::get_if<int64_t>(&value))
-    {
-        const auto bits = static_cast<uint64_t>(*wide);
-        return {static_cast<uint32_t>(bits), static_cast<uint32_t>(bits >> 32)};
-    }
-    failBadParam(std::string("the ") + what + " is not an integer");
-}
-
-float resolveScale(const MergedPlan& plan,
-                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                   uint32_t numDeviceBuffers)
-{
-    if(!plan.scale.has_value())
-    {
-        return plan.problem.scaleValue;
-    }
-    const double value = hipdnn_plugin_sdk::toDouble(
-        hipdnn_plugin_sdk::resolveScalarOperand(*plan.scale, deviceBuffers, numDeviceBuffers));
-    // A pass-by-value scalar read from host memory: a constant scale was checked at match
-    // time, this one arrives now.
-    if(!std::isfinite(value) || std::fabs(value) > bwd::detail::MAX_SOFTMAX_SCALE)
-    {
-        failBadParam("the runtime softmax scale must be finite and at most 2^20 in magnitude");
-    }
-    return static_cast<float>(value);
-}
 
 /// Every argument of the launch, from the plan and the execute-time buffers; touches no
 /// device. @p workspace is the caller's, laid out as plan.workspace says.
@@ -1179,16 +870,10 @@ LaunchArguments launchArguments(const MergedPlan& plan,
 {
     const auto& problem = plan.problem;
     const auto& layout = plan.workspace;
-    if(workspace == nullptr && layout.totalBytes > 0)
-    {
-        failBadParam("the launch needs its " + std::to_string(layout.totalBytes)
-                     + " byte workspace");
-    }
+    native::requireWorkspace(layout, workspace);
     const auto buffer = [&](int64_t uid) {
         return hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
     };
-    const auto inWorkspace
-        = [&](size_t offset) { return static_cast<void*>(static_cast<char*>(workspace) + offset); };
 
     LaunchArguments arguments;
     auto& m = arguments.merged;
@@ -1217,39 +902,15 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     m.windowLeft = plan.window.left;
     m.windowRight = plan.window.right;
 
-    m.philoxSeed = m.o;
-    m.philoxOffset1 = m.o;
+    const auto seed = native::bindSeed(
+        problem, layout, plan.scalars, deviceBuffers, numDeviceBuffers, workspace, m.o);
+    m.philoxSeed = seed.seed;
+    m.philoxOffset1 = seed.offset;
+    arguments.seedUpload = seed.upload;
     if(problem.seedForm != bwd::SeedForm::NONE)
     {
         m.idropoutP = plan.dropoutThreshold;
         m.dropoutScale = plan.dropoutScale;
-        if(layout.uploadsSeed)
-        {
-            m.philoxSeed = inWorkspace(0);
-            m.philoxOffset1 = inWorkspace(SEED_WORD_BYTES);
-            SeedUpload upload;
-            if(problem.seedForm == bwd::SeedForm::PASS_BY_VALUE)
-            {
-                const auto seed = wordsOf(hipdnn_plugin_sdk::resolveScalarOperand(
-                                              *plan.seed, deviceBuffers, numDeviceBuffers),
-                                          "seed");
-                const auto offset = wordsOf(hipdnn_plugin_sdk::resolveScalarOperand(
-                                                *plan.offset, deviceBuffers, numDeviceBuffers),
-                                            "offset");
-                upload.words = {seed[0], seed[1], offset[0], offset[1]};
-            }
-            else
-            {
-                upload.seedSource = buffer(problem.seedUid);
-                upload.offsetSource = buffer(problem.offsetUid);
-            }
-            arguments.seedUpload = upload;
-        }
-        else
-        {
-            m.philoxSeed = buffer(problem.seedUid);
-            m.philoxOffset1 = buffer(problem.offsetUid);
-        }
     }
     // The one-offset API: the second Philox scalar is zero.
     m.philoxOffset2 = 0;
@@ -1258,28 +919,16 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     m.numHeadK = toInt32(problem.numKvHeads, "num_head_k");
     m.hdimQk = toInt32(problem.headDimQk, "hdim_qk");
     m.hdimVo = toInt32(problem.headDimV, "hdim_vo");
-    m.smScale = resolveScale(plan, deviceBuffers, numDeviceBuffers);
+    m.smScale = native::resolveScale(problem, plan.scalars, deviceBuffers, numDeviceBuffers);
 
-    // The matcher records 0 on a unit axis. A unit sequence axis keeps a row pitch instead:
-    // the kernels drop padding rows through the buffer bound rows * stride_seq, which a zero
-    // stride collapses onto row 0. The pitch is the head dim rounded to 8 elements, which
-    // keeps the 8-element alignment of every other stride. The matcher declines a zero
-    // sequence stride on a multi-row axis, so the substitution keys on the extent.
-    const auto rowPitch = [](bwd::Strides strides, int64_t rows, int64_t headDim) {
-        if(rows == 1)
-        {
-            strides.seq = bwd::detail::ceilToVector(headDim);
-        }
-        return strides;
-    };
-    m.strideQ = rowPitch(problem.q, problem.seqLenQ, problem.headDimQk);
-    m.strideK = rowPitch(problem.k, problem.seqLenKv, problem.headDimQk);
-    m.strideV = rowPitch(problem.v, problem.seqLenKv, problem.headDimV);
-    m.strideO = rowPitch(problem.o, problem.seqLenQ, problem.headDimV);
-    m.strideDO = rowPitch(problem.dO, problem.seqLenQ, problem.headDimV);
-    m.strideDK = rowPitch(problem.dK, problem.seqLenKv, problem.headDimQk);
-    m.strideDV = rowPitch(problem.dV, problem.seqLenKv, problem.headDimV);
-    m.strideDQ = rowPitch(problem.dQ, problem.seqLenQ, problem.headDimQk);
+    m.strideQ = native::rowPitchStrides(problem.q, problem.seqLenQ, problem.headDimQk);
+    m.strideK = native::rowPitchStrides(problem.k, problem.seqLenKv, problem.headDimQk);
+    m.strideV = native::rowPitchStrides(problem.v, problem.seqLenKv, problem.headDimV);
+    m.strideO = native::rowPitchStrides(problem.o, problem.seqLenQ, problem.headDimV);
+    m.strideDO = native::rowPitchStrides(problem.dO, problem.seqLenQ, problem.headDimV);
+    m.strideDK = native::rowPitchStrides(problem.dK, problem.seqLenKv, problem.headDimQk);
+    m.strideDV = native::rowPitchStrides(problem.dV, problem.seqLenKv, problem.headDimV);
+    m.strideDQ = native::rowPitchStrides(problem.dQ, problem.seqLenQ, problem.headDimQk);
     m.strideB = problem.biasUid != bwd::NO_UID ? problem.biasStrides : bwd::Strides{};
 
     // dBias: none requested leaves DB as O over zero strides, with which the kernel drops
@@ -1290,21 +939,11 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     {
         if(layout.reduces)
         {
-            m.dBias = inWorkspace(layout.dbiasOffset);
+            m.dBias = native::inWorkspace(workspace, layout.dbias.offset);
             m.strideDB = layout.dbiasStrides;
 
-            ReduceKernargs reduce;
-            reduce.workspace = m.dBias;
-            reduce.dBias = buffer(problem.dbiasUid);
-            reduce.numBatch = m.batchSize;
-            reduce.numHead = m.numHeadQ;
-            reduce.seqLenQ = m.maxSeqlenQ;
-            reduce.seqLenK = m.maxSeqlenK;
-            reduce.reduceBatch = problem.biasBroadcastBatch ? 1 : 0;
-            reduce.reduceHead = problem.biasBroadcastHead ? 1 : 0;
-            reduce.strideWorkspace = layout.dbiasStrides;
-            reduce.strideOut = problem.dbiasStrides;
-            arguments.reduce = reduce;
+            arguments.reduce
+                = native::reduceKernargsOf(problem, layout, m.dBias, buffer(problem.dbiasUid));
         }
         else
         {
@@ -1320,40 +959,6 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     }
     m.rtFlags = plan.runtimeFlags;
     return arguments;
-}
-
-/// Writes the seed and offset words into the front of @p workspace, ahead of the launch on
-/// @p stream: four word writes for a pass-by-value form; for a 32-bit device form the region
-/// is zeroed and the 4 bytes of each tensor copied into the low half of its word.
-void uploadSeed(const SeedUpload& upload, void* workspace, hipStream_t stream)
-{
-    auto* base = static_cast<char*>(workspace);
-    if(upload.seedSource == nullptr)
-    {
-        for(size_t word = 0; word < upload.words.size(); ++word)
-        {
-            requireHip(
-                hipMemsetD32Async(static_cast<hipDeviceptr_t>(base + word * sizeof(uint32_t)),
-                                  static_cast<int>(upload.words[word]),
-                                  1,
-                                  stream),
-                "hipMemsetD32Async of the seed words");
-        }
-        return;
-    }
-    requireHip(
-        hipMemsetD32Async(
-            static_cast<hipDeviceptr_t>(base), 0, SEED_REGION_BYTES / sizeof(uint32_t), stream),
-        "hipMemsetD32Async of the seed region");
-    requireHip(
-        hipMemcpyAsync(base, upload.seedSource, sizeof(uint32_t), hipMemcpyDeviceToDevice, stream),
-        "hipMemcpyAsync of the seed");
-    requireHip(hipMemcpyAsync(base + SEED_WORD_BYTES,
-                              upload.offsetSource,
-                              sizeof(uint32_t),
-                              hipMemcpyDeviceToDevice,
-                              stream),
-               "hipMemcpyAsync of the offset");
 }
 
 // ---------------------------------------------------------------------------
@@ -1412,7 +1017,7 @@ public:
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
     {
-        return workspaceLayout(problemOf(context)).totalBytes;
+        return native::workspaceLayout(problemOf(context)).totalBytes;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1435,11 +1040,15 @@ public:
         {
             KernelDefinition reduceKernel = kernel;
             reduceKernel.source.symbol = plan.reduceSymbol;
-            reduceKernel.source.signature = reduceSignature();
-            reduceCode.emplace(buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature()));
-            reduceCode->setBlockSize(REDUCE_THREADS, 1, 1);
-            reduceCode->setGridSize(plan.reduceGridX, plan.reduceGridY, 1);
+            reduceKernel.source.signature = native::reduceSignature();
+            reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
+                                                       _kpackLoader,
+                                                       context,
+                                                       reduceKernel,
+                                                       options,
+                                                       native::reduceSignature()));
+            reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
+            reduceCode->setGridSize(plan.reduceGrid.x, plan.reduceGrid.y, 1);
         }
         return std::make_unique<PreparedFlydslSdpaBwdMerged>(
             std::move(plan), std::move(mergedCode), std::move(reduceCode));
@@ -1458,7 +1067,7 @@ public:
 
         if(arguments.seedUpload.has_value())
         {
-            uploadSeed(*arguments.seedUpload, workspace, stream);
+            native::uploadSeed(*arguments.seedUpload, workspace, stream);
         }
         // Changing either argument list means changing its struct with it: the signature the
         // descriptor is checked against is read from the same tie().
@@ -1526,7 +1135,7 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
         = launchArguments(plan, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
 
     FlydslSdpaBwdMergedLaunchDump dump;
-    dump.kernarg = kernargImage(arguments.merged);
+    dump.kernarg = native::kernargImage(arguments.merged);
     dump.block = plan.blockThreads;
     dump.grid = {plan.gridBlocks, 1, 1};
     dump.workspaceBytes = plan.workspace.totalBytes;
@@ -1534,9 +1143,9 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
     {
         dump.reduces = true;
         dump.reduceSymbol = plan.reduceSymbol;
-        dump.reduceKernarg = kernargImage(*arguments.reduce);
-        dump.reduceBlock = REDUCE_THREADS;
-        dump.reduceGrid = {plan.reduceGridX, plan.reduceGridY, 1};
+        dump.reduceKernarg = native::kernargImage(*arguments.reduce);
+        dump.reduceBlock = native::REDUCE_THREADS;
+        dump.reduceGrid = {plan.reduceGrid.x, plan.reduceGrid.y, 1};
     }
     if(arguments.seedUpload.has_value())
     {
