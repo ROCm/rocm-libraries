@@ -27,6 +27,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
+#include "rocke/helper_rocke.instances.common._attention_bwd_sched.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_valu.h"
 #include "rocke/ir.h"
 
@@ -38,8 +39,8 @@ static const int NONE = ROCKE_ATTN_BWD_NONE;
 /* ====================================================================== *
  * value sets (Python constants; the ones other modules own are mirrored
  * here until their C twins exist: _attention_bwd_body STAGE_ORDERS /
- * G4_SLICINGS / COPY_ORDERS, _attention_bwd_sched SCHEDS; the counted and valu
- * constants come from those helpers' exports)
+ * G4_SLICINGS / COPY_ORDERS; the sched, counted and valu constants come from
+ * those helpers' exports)
  * ====================================================================== */
 
 typedef std::vector<std::string> Strs;
@@ -91,21 +92,7 @@ static const Strs G4_SLICINGS = {"step", "slice", "slice_db", "slice_db_g3"};
 static const char* const DEFAULT_G4_SLICING = "step";
 static const Strs G4_AFTER_G3_ORDERS = {"g1g3g4", "g3g4g1"};
 static const Strs COPY_ORDERS = {"split", "loads_first", "joint"};
-/* _attention_bwd_sched */
-static const Strs SCHEDS
-    = {"none", "iglp0", "iglp1", "fences_only", "stage_table", "stage_table_atomics"};
-static const Strs STAGE_TABLE_SCHEDS = {"stage_table", "stage_table_atomics"};
-static const Strs FENCED_SCHEDS = {"fences_only", "stage_table", "stage_table_atomics"};
-static const char* const COUNTED_LATE_DEFERRED
-    = "sched='stage_table_atomics' with loop_sync='counted' needs "
-      "counted_issue='early': the late issue would load the next step after the "
-      "deferred dQ atomics of stage A (the counted waits keep every load of the "
-      "step ahead of its atomics)";
-static const char* const SPLIT_DEFERRED
-    = "sched='stage_table_atomics' needs dq_mode='atomic': the split-dQ main "
-      "kernel issues no dQ atomics to defer (its stage table is "
-      "sched='stage_table')";
-/* _attention_bwd_counted / _attention_bwd_valu: views of the owners' exports */
+/* _attention_bwd_sched / _counted / _valu: views of the owners' exports */
 template <typename T, size_t N>
 static std::vector<T> as_vec(const T (&a)[N])
 {
@@ -115,6 +102,13 @@ static Strs as_strs(const char* const* a, int n)
 {
     return Strs(a, a + n);
 }
+static const Strs SCHEDS = as_strs(ROCKE_ATTN_BWD_SCHEDS, ROCKE_ATTN_BWD_N_SCHEDS);
+static const Strs STAGE_TABLE_SCHEDS
+    = as_strs(ROCKE_ATTN_BWD_STAGE_TABLE_SCHEDS, ROCKE_ATTN_BWD_N_STAGE_TABLE_SCHEDS);
+static const Strs FENCED_SCHEDS
+    = as_strs(ROCKE_ATTN_BWD_FENCED_SCHEDS, ROCKE_ATTN_BWD_N_FENCED_SCHEDS);
+static const char* const COUNTED_LATE_DEFERRED = ROCKE_ATTN_BWD_COUNTED_LATE_DEFERRED;
+static const char* const SPLIT_DEFERRED = ROCKE_ATTN_BWD_SPLIT_DEFERRED;
 static const Strs COUNTED_ISSUES
     = as_strs(ROCKE_ATTN_BWD_COUNTED_ISSUES, ROCKE_ATTN_BWD_COUNTED_N_ISSUES);
 static const int COUNTED_VMCNT_MAX = ROCKE_ATTN_BWD_COUNTED_VMCNT_MAX;
