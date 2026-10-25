@@ -1161,6 +1161,13 @@ rocke_status_t boundary(rocke_attn_bwd_err_t* err, Fn&& fn)
 }
 
 } // namespace
+
+/* For the dense dQ kernel (rocke/instance_attention_bwd_dq.h, C++ section). */
+std::vector<std::pair<std::string, std::string>>
+    dq_non_default_fields(const rocke_attn_bwd_dq_spec_t& spec)
+{
+    return non_default_fields(spec);
+}
 } // namespace rocke_attn_bwd
 
 using namespace rocke_attn_bwd;

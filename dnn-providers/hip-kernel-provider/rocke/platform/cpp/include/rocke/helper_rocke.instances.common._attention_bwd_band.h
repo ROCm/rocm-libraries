@@ -12,10 +12,17 @@
  *     other subclass in the C port yet)
  *   * TILE_INTERIOR / TILE_EDGE             -> ROCKE_ATTN_BWD_TILE_*
  *
- * NOT ported (host-only, they evaluate the same formulas on Python ints through
- * the duck-typed HostInt builder): HostInt, StaticKvTilePlan and
- * static_kv_tile_plan. MaskPolicy.q_tile_range's optional k_n0 / k_m0 mismatch
- * check is not ported either (no caller passes them).
+ * HostInt (the duck-typed integer builder that evaluates these formulas on
+ * the host) has no C object: q_tile_range / is_edge_tile evaluated on HostInt
+ * over a BandEmitter of int bounds are rocke_attn_bwd_host_band_* below (plain
+ * int64 arithmetic, sdiv truncating toward zero as HostInt.div), and
+ * StaticKvTilePlan / static_kv_tile_plan are rocke_attn_bwd_static_kv_tile_plan_t
+ * / rocke_attn_bwd_static_kv_tile_plan. The plan's edge_tiles tuple is kept
+ * as its count (n_edge; interior_tiles is n_qt - n_edge): the dense shell
+ * only tests whether either is empty.
+ *
+ * Not ported: MaskPolicy.q_tile_range's optional k_n0 / k_m0 mismatch check
+ * (no caller passes them).
  *
  * Errors: a Python ValueError / NotImplementedError records the status and the
  * Python message on the builder; Value-returning entries return NULL and
@@ -191,6 +198,83 @@ rocke_value_t* rocke_attn_bwd_mask_keep_in(rocke_ir_builder_t* b,
                                            rocke_value_t* lo,
                                            rocke_value_t* hi,
                                            rocke_value_t* k);
+
+/* ------------------------------------------------- host-side evaluation */
+
+/* BandEmitter(HostInt(), AttnRuntimeBounds(s_q, s_kv, off, left, right)) on
+ * build-time ints: has_off false is a zero offset (None), has_left /
+ * has_right false a static unbounded side (None). */
+typedef struct rocke_attn_bwd_host_band
+{
+    int64_t sq;
+    int64_t sk;
+    int64_t sk_minus1;
+    bool has_off;
+    int64_t off;
+    bool has_left;
+    int64_t left;
+    bool has_right;
+    int64_t right;
+} rocke_attn_bwd_host_band_t;
+
+/* AttnRuntimeBounds(...).__post_init__ then BandEmitter(HostInt(), bounds):
+ * ROCKE_ERR_VALUE (and err filled when not NULL) for a bound below -1. */
+rocke_status_t rocke_attn_bwd_host_band_init(rocke_attn_bwd_host_band_t* out,
+                                             int64_t s_q,
+                                             int64_t s_kv,
+                                             int64_t off,
+                                             int64_t left,
+                                             int64_t right,
+                                             char* err,
+                                             size_t err_cap);
+
+/* q_tile_range(HostInt(), band, k0, k_n0=, k_m0=, uniform=False):
+ * ROCKE_ERR_VALUE for a tile size below 1. */
+rocke_status_t rocke_attn_bwd_host_band_q_tile_range(const rocke_attn_bwd_host_band_t* band,
+                                                     int64_t k0,
+                                                     int k_n0,
+                                                     int k_m0,
+                                                     int64_t* out_qt_start,
+                                                     int64_t* out_n_qt);
+
+/* is_edge_tile(HostInt(), band, qt, k0, k_m0=, k_n0=, masked=). */
+bool rocke_attn_bwd_host_band_is_edge_tile(const rocke_attn_bwd_host_band_t* band,
+                                           int64_t qt,
+                                           int64_t k0,
+                                           int k_m0,
+                                           int k_n0,
+                                           bool masked);
+
+/* StaticKvTilePlan: the q tiles [qt_start, qt_start + n_qt) key tile k0
+ * visits; n_edge of them are edge tiles (edge_tiles, counted), the other
+ * n_qt - n_edge interior (interior_tiles). */
+typedef struct rocke_attn_bwd_static_kv_tile_plan
+{
+    int64_t k0;
+    int64_t qt_start;
+    int64_t n_qt;
+    int64_t n_edge;
+} rocke_attn_bwd_static_kv_tile_plan_t;
+
+/* len(StaticKvTilePlan.interior_tiles). */
+int64_t
+    rocke_attn_bwd_static_kv_tile_plan_n_interior(const rocke_attn_bwd_static_kv_tile_plan_t* p);
+
+/* static_kv_tile_plan(s_q=, s_kv=, k0=, k_m0=, k_n0=, left=, right=,
+ * bottom_right=, masked=): ROCKE_ERR_VALUE (err filled when not NULL) for
+ * a bound below -1 or a tile size below 1. */
+rocke_status_t rocke_attn_bwd_static_kv_tile_plan(int64_t s_q,
+                                                  int64_t s_kv,
+                                                  int64_t k0,
+                                                  int k_m0,
+                                                  int k_n0,
+                                                  int64_t left,
+                                                  int64_t right,
+                                                  bool bottom_right,
+                                                  bool masked,
+                                                  rocke_attn_bwd_static_kv_tile_plan_t* out,
+                                                  char* err,
+                                                  size_t err_cap);
 
 #ifdef __cplusplus
 }

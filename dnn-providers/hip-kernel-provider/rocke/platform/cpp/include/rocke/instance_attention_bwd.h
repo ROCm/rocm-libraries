@@ -76,7 +76,8 @@
  * specs that Python's public build_attn_bwd_main (main_kernel_refusals=True)
  * refuses; a caller that launches the kernel must consult Python's
  * resource_refusal first. _kv_tile's dense-shell hooks (mask.static_runs and
- * the epilogue= callback) are not ported. Also, _not_built's one refusal
+ * the epilogue= callback) are in instance_attention_bwd_main_internal.h.
+ * Also, _not_built's one refusal
  * (dkv_sink="last_cta" in atomic mode) is the same NotImplementedError
  * (ROCKE_ERR_NOTIMPL). The builder runs the body unit's full
  * BwdTileGeometry.from_spec check (lane-map proofs included).
@@ -363,6 +364,7 @@ rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
 
 #ifdef __cplusplus
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocke_attn_bwd
@@ -391,6 +393,10 @@ void spec_init(rocke_attn_bwd_spec_t& spec);
 rocke_attn_bwd_spec_t resolved(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
 rocke_attn_bwd_spec_t validate_spec(const rocke_attn_bwd_spec_t& spec, const std::string& arch);
 std::string kernel_name(const rocke_attn_bwd_spec_t& spec, const std::string& stage);
+/* non_default_fields(spec, skip=("head_size", "name")): (name, repr(value))
+ * of every field that differs from its declared default, in field order. */
+std::vector<std::pair<std::string, std::string>>
+    non_default_fields(const rocke_attn_bwd_spec_t& spec);
 rocke_attn_bwd_lds_request_t lds_request(const rocke_attn_bwd_spec_t& spec,
                                          const std::string& arch);
 rocke_attn_bwd_lds_plan_t lds_plan(const rocke_attn_bwd_spec_t& spec, const std::string& arch);

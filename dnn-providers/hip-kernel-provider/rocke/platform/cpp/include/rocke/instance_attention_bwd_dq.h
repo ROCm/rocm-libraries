@@ -191,4 +191,19 @@ rocke_kernel_def_t* rocke_build_attn_bwd_dq_new(rocke_ir_builder_t* b,
 }
 #endif
 
+#ifdef __cplusplus
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace rocke_attn_bwd
+{
+/* AttnBwdDqSpec.non_default_fields(): (name, repr(value)) of every field
+ * (head_size and name skipped) that differs from its default, in field
+ * order. */
+std::vector<std::pair<std::string, std::string>>
+    dq_non_default_fields(const rocke_attn_bwd_dq_spec_t& spec);
+} // namespace rocke_attn_bwd
+#endif
+
 #endif /* ROCKE_INSTANCE_ATTENTION_BWD_DQ_H */

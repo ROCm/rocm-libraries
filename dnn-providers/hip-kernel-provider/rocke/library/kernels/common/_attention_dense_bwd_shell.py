@@ -1,7 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Shell of the dense SDPA backward main kernel (family glue, Python-only).
+"""Shell of the dense SDPA backward main kernel (family glue).
+
+C++ twin: ``helper_rocke.instances.common._attention_dense_bwd_shell.h``,
+byte-identical by ``tests/parity/attention_dense_bwd_main_emit`` and
+``tests/parity/attention_dense_bwd_dq_emit``.
 
 The dense backward runs the shared backward body of the layout-general family
 (:class:`~kernels.common._attention_bwd_body.BwdTileStep`, the dQ sink, the
