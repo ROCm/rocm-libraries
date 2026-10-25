@@ -914,6 +914,21 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         break;
 
+    /* Longest-first query blocks (D256/b16/GQA-8, two sequences): the reversed
+     * grid-y decode reads total_q from cu_q[num_seqs]. */
+    case 56:
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->use_qblock_reverse = true;
+        break;
+
     default:
         return -1;
     }

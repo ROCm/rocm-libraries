@@ -813,6 +813,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
+    s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
