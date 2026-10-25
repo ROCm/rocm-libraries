@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <roc/hostnumerics/detail/prime.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -19,49 +20,18 @@ enum class OutputSelectionKind {
     All,
     Strided,
     Explicit,
-    Count,
 };
 
 class OutputSelection;
 
 namespace detail {
-enum class OutputSelectionError { InvalidKind, IndexOutOfRange };
-inline constexpr std::string_view message(OutputSelectionError error) noexcept {
-    return error == OutputSelectionError::InvalidKind
-               ? "Invalid output selection kind."
-               : "Explicit output selection index exceeds output shape.";
+enum class OutputSelectionError { IndexOutOfRange };
+inline constexpr std::string_view message(OutputSelectionError) noexcept {
+    return "Explicit output selection index exceeds output shape.";
 }
 inline std::optional<OutputSelectionError> outputSelectionError(const OutputSelection& selection,
                                                                 size_t logicalElements) noexcept;
 
-// Tests divisors only through floor(sqrt(value)). The quotient comparison is
-// equivalent to divisor * divisor <= value and cannot overflow size_t.
-inline bool isPrime(size_t value) {
-    if (value < 2) return false;
-    if (value % 2 == 0) return value == 2;
-    if (value % 3 == 0) return value == 3;
-
-    for (size_t divisor = 5; divisor <= value / divisor; divisor += 6) {
-        if (value % divisor == 0 || value % (divisor + 2) == 0) return false;
-    }
-    return true;
-}
-
-inline std::optional<size_t> getNextPrimeStride(size_t value) {
-    if (value <= 2) return 2;
-    size_t candidate = value % 2 == 0 ? value + 1 : value;
-    while (!isPrime(candidate)) {
-        if (candidate > std::numeric_limits<size_t>::max() - 2) return std::nullopt;
-        candidate += 2;
-    }
-    return candidate;
-}
-
-inline size_t nextPrimeStride(size_t value) {
-    const auto stride = getNextPrimeStride(value);
-    if (!stride) throw std::runtime_error("Prime-stride output selection overflow.");
-    return *stride;
-}
 }  // namespace detail
 
 // Describes which logical tensor elements an operation or comparison should
@@ -110,8 +80,9 @@ class OutputSelection {
                                        std::span<const size_t> indexOrder) {
         if (requestedElements == 0 || requestedElements >= logicalElements) return all(indexOrder);
         const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
-        return strided(0, detail::nextPrimeStride(candidate), std::numeric_limits<size_t>::max(),
-                       indexOrder);
+        const auto stride = detail::getNextPrime(candidate);
+        if (!stride) throw std::runtime_error("Prime-stride output selection overflow.");
+        return strided(0, *stride, std::numeric_limits<size_t>::max(), indexOrder);
     }
 
     OutputSelectionKind kind() const {
@@ -140,48 +111,36 @@ class OutputSelection {
     }
 
     std::vector<size_t> indices(size_t logicalElements) const {
-        switch (m_kind) {
-            case OutputSelectionKind::All: {
-                std::vector<size_t> result(logicalElements);
-                for (size_t index = 0; index < logicalElements; ++index) result[index] = index;
-                return result;
-            }
-            case OutputSelectionKind::Strided: {
-                std::vector<size_t> result;
-                if (m_first >= logicalElements || m_maxElements == 0) return result;
-                const size_t available = 1 + (logicalElements - 1 - m_first) / m_stride;
-                const size_t count = std::min(available, m_maxElements);
-                result.reserve(count);
-                for (size_t index = m_first; index < logicalElements && result.size() < count;) {
-                    result.push_back(index);
-                    if (index > std::numeric_limits<size_t>::max() - m_stride) break;
-                    index += m_stride;
-                }
-                return result;
-            }
-            case OutputSelectionKind::Explicit:
-                validateExplicitIndices(logicalElements);
-                return m_indices;
-            case OutputSelectionKind::Count:
-                break;
+        if (m_kind == OutputSelectionKind::All) {
+            std::vector<size_t> result(logicalElements);
+            for (size_t index = 0; index < logicalElements; ++index) result[index] = index;
+            return result;
         }
-        throw std::runtime_error("Invalid output selection kind.");
+        if (m_kind == OutputSelectionKind::Strided) {
+            std::vector<size_t> result;
+            if (m_first >= logicalElements || m_maxElements == 0) return result;
+            const size_t available = 1 + (logicalElements - 1 - m_first) / m_stride;
+            const size_t count = std::min(available, m_maxElements);
+            result.reserve(count);
+            for (size_t index = m_first; index < logicalElements && result.size() < count;) {
+                result.push_back(index);
+                if (index > std::numeric_limits<size_t>::max() - m_stride) break;
+                index += m_stride;
+            }
+            return result;
+        }
+        validateExplicitIndices(logicalElements);
+        return m_indices;
     }
 
     size_t selectedCount(size_t logicalElements) const {
-        switch (m_kind) {
-            case OutputSelectionKind::All:
-                return logicalElements;
-            case OutputSelectionKind::Strided:
-                if (m_first >= logicalElements) return 0;
-                return std::min(1 + (logicalElements - 1 - m_first) / m_stride, m_maxElements);
-            case OutputSelectionKind::Explicit:
-                validateExplicitIndices(logicalElements);
-                return m_indices.size();
-            case OutputSelectionKind::Count:
-                break;
+        if (m_kind == OutputSelectionKind::All) return logicalElements;
+        if (m_kind == OutputSelectionKind::Strided) {
+            if (m_first >= logicalElements) return 0;
+            return std::min(1 + (logicalElements - 1 - m_first) / m_stride, m_maxElements);
         }
-        throw std::runtime_error("Invalid output selection kind.");
+        validateExplicitIndices(logicalElements);
+        return m_indices.size();
     }
 
    private:
@@ -204,11 +163,8 @@ namespace detail {
 // Checks normalized explicit indices without allocating or throwing.
 inline std::optional<OutputSelectionError> outputSelectionError(const OutputSelection& selection,
                                                                 size_t logicalElements) noexcept {
-    if (selection.m_kind == OutputSelectionKind::All ||
-        selection.m_kind == OutputSelectionKind::Strided)
-        return std::nullopt;
-    if (selection.m_kind != OutputSelectionKind::Explicit) return OutputSelectionError::InvalidKind;
-    if (!selection.m_indices.empty() && selection.m_indices.back() >= logicalElements)
+    if (selection.m_kind == OutputSelectionKind::Explicit && !selection.m_indices.empty() &&
+        selection.m_indices.back() >= logicalElements)
         return OutputSelectionError::IndexOutOfRange;
     return std::nullopt;
 }

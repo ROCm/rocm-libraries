@@ -37,6 +37,7 @@ target_sources(hostnumerics-core
             include/roc/hostnumerics/scalar_type.hpp
             include/roc/hostnumerics/shape.hpp
             include/roc/hostnumerics/output_selection.hpp
+            include/roc/hostnumerics/detail/prime.hpp
             include/roc/hostnumerics/expected.hpp
 )
 

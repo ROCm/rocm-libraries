@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -10,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/detail/prime.hpp>
 #include <roc/hostnumerics/output_selection.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
@@ -427,6 +429,19 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
+}
+
+TEST(PrimeCpp, InclusiveSearchAndPrimality) {
+    const std::array<size_t, 25> primes{2,  3,  5,  7,  11, 13, 17, 19, 23, 29, 31, 37, 41,
+                                        43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97};
+    for (size_t value = 0; value <= primes.back(); ++value) {
+        SCOPED_TRACE(value);
+        EXPECT_EQ(detail::isPrime(value), std::binary_search(primes.begin(), primes.end(), value));
+        EXPECT_EQ(detail::getNextPrime(value),
+                  *std::lower_bound(primes.begin(), primes.end(), value));
+    }
+    EXPECT_EQ(detail::getNextPrime(121), 127);
+    EXPECT_FALSE(detail::getNextPrime(std::numeric_limits<size_t>::max()));
 }
 
 TEST(OutputSelectionCpp, DefaultConstruction) {
