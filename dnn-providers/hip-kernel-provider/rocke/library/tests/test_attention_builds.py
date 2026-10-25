@@ -4582,12 +4582,14 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     # The runtime K stride feeds three K/V load paths; each (head_size, dtype)
     # pins one, keyed to the (rows per async-load instruction, cfvst) it must take:
     # D128 bf16 the one-row _async_load, D64 the two-row _async_load, D128 fp16
-    # the cfvst V loads.
+    # the cfvst V loads. D128 bf16 defaults to cfvst too, so it forces cfvst off
+    # to keep the one-row path covered.
     _LOAD_PATHS = {
         (128, "bf16"): (1, False),
         (128, "fp16"): (1, True),
         (64, "bf16"): (2, False),
     }
+    _LOAD_PATH_KWARGS = {(128, "bf16"): {"use_cfvst": False}}
 
     @staticmethod
     def _spec(**kw):
@@ -4602,7 +4604,13 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
         for (d, dtype), path in self._LOAD_PATHS.items():
             base = self._spec(
-                **{**self._BASE_KWARGS, "head_size": d, "dtype": dtype}, **kw
+                **{
+                    **self._BASE_KWARGS,
+                    "head_size": d,
+                    "dtype": dtype,
+                    **self._LOAD_PATH_KWARGS.get((d, dtype), {}),
+                },
+                **kw,
             )
             self.assertEqual(
                 (_rows_per_instr(d), base.resolved_use_cfvst()),
