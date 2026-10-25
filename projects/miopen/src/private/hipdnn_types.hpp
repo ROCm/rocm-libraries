@@ -29,9 +29,9 @@ struct PointwiseActivation
     hipdnn_frontend::PointwiseMode backward;
 };
 
-// The only place that knows which activations forward. Every path that builds
-// an activation node asks here, so a mode is either wired up in both
-// directions or declined everywhere.
+// The activations with no coefficients that forward, wired up in both
+// directions. Batchnorm also forwards CLIPPEDRELU and CLAMP, which it maps to
+// ReLU with clips itself.
 bool ToPointwiseActivation(miopenActivationMode_t mode, PointwiseActivation& out);
 
 // The enumerator's name without its prefix, for decline messages.

@@ -46,9 +46,9 @@ bool ComputeTypeFor(miopenDataType_t type, fe::DataType& out)
 
 bool ToPointwiseActivation(miopenActivationMode_t mode, PointwiseActivation& out)
 {
-    // Deliberately narrow. The remaining MIOpen activation modes carry alpha,
-    // beta or gamma coefficients that the plain pointwise node has nowhere to
-    // put, so they are declined rather than silently approximated.
+    // Deliberately narrow: only the modes with no coefficients. Batchnorm maps
+    // CLIPPEDRELU and CLAMP to ReLU with clips itself. The rest are declined
+    // rather than silently approximated.
     if(mode == miopenActivationRELU)
     {
         out = {fe::PointwiseMode::RELU_FWD, fe::PointwiseMode::RELU_BWD};

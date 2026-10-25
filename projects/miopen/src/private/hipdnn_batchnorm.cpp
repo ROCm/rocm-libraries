@@ -73,6 +73,8 @@ struct BnProblem
     GraphKind kind = GraphKind::BnFwdTraining;
     std::vector<TensorInfo> tensors;
     miopenActivationMode_t act   = miopenActivationPASTHRU;
+    double actAlpha              = 0.0; // CLIPPEDRELU's ceiling, or CLAMP's floor
+    double actBeta               = 0.0; // CLAMP's ceiling
     miopenBatchNormMode_t bnMode = miopenBNSpatial;
     double epsilon               = 0.0; // 0 for the kinds whose graph takes none
     double momentum              = 0.0;
@@ -123,13 +125,23 @@ bool SameRank(const std::vector<TensorInfo>& tensors)
 }
 
 // A null descriptor is how the entry points without an activation reach the
-// shared paths, and it means no activation.
-miopenStatus_t ReadActivation(miopenActivationDescriptor_t desc, miopenActivationMode_t& mode)
+// shared paths, and it means no activation. The coefficients are kept only for
+// the modes that use them, so that a stale value never splits the cache.
+miopenStatus_t ReadActivation(miopenActivationDescriptor_t desc, BnProblem& problem)
 {
-    mode = miopenActivationPASTHRU;
+    problem.act = miopenActivationPASTHRU;
     if(desc == nullptr)
         return miopenStatusSuccess;
-    return ReadActivationMode(desc, mode);
+    double alpha = 0.0;
+    double beta  = 0.0;
+    double gamma = 0.0;
+    const miopenStatus_t status =
+        miopenGetActivationDescriptor_impl(desc, &problem.act, &alpha, &beta, &gamma);
+    if(problem.act == miopenActivationCLIPPEDRELU || problem.act == miopenActivationCLAMP)
+        problem.actAlpha = alpha;
+    if(problem.act == miopenActivationCLAMP)
+        problem.actBeta = beta;
+    return status;
 }
 
 // Reads the descriptors into problem.tensors, in the kIdx order, and then the
@@ -145,7 +157,7 @@ const char* ReadProblem(BnProblem& problem,
         if(ReadTensor(desc, *tensor++) != miopenStatusSuccess)
             return "could not read the MIOpen descriptors";
     }
-    if(ReadActivation(activDesc, problem.act) != miopenStatusSuccess)
+    if(ReadActivation(activDesc, problem) != miopenStatusSuccess)
         return "could not read the activation descriptor";
     return nullptr;
 }
@@ -317,17 +329,57 @@ miopenStatus_t CheckProblem(const BnProblem& problem)
     return CheckSolverExists(problem);
 }
 
+// The pointwise node for the activation, or nothing for one hipDNN cannot
+// express. hipDNN's relu takes clip values, and the MIOpen provider turns an
+// upper clip alone back into CLIPPEDRELU and both clips into CLAMP. MIOpen's
+// kernels take the coefficients as float, so narrowing them here loses nothing.
+std::optional<fe::graph::PointwiseAttributes> ActivationAttributes(const BnProblem& problem,
+                                                                   bool backward)
+{
+    fe::graph::PointwiseAttributes attributes;
+    attributes.set_mode(backward ? fe::PointwiseMode::RELU_BWD : fe::PointwiseMode::RELU_FWD)
+        .set_compute_data_type(fe::DataType::FLOAT);
+    if(problem.act == miopenActivationRELU)
+        return attributes;
+    if(problem.act == miopenActivationCLIPPEDRELU)
+    {
+        attributes.set_relu_upper_clip(static_cast<float>(problem.actAlpha));
+        return attributes;
+    }
+    if(problem.act == miopenActivationCLAMP)
+    {
+        attributes.set_relu_lower_clip(static_cast<float>(problem.actAlpha))
+            .set_relu_upper_clip(static_cast<float>(problem.actBeta));
+        return attributes;
+    }
+    return std::nullopt;
+}
+
+// Whether the elements lie in row-major order. A dim of extent 1 is never
+// stepped over, so its stride does not matter.
+bool IsRowMajor(const TensorInfo& info)
+{
+    int64_t expected = 1;
+    for(size_t i = info.dims.size(); i-- > 0;)
+    {
+        if(info.dims[i] != 1 && info.strides[i] != expected)
+            return false;
+        expected *= info.dims[i];
+    }
+    return true;
+}
+
 // What the MIOpen provider can run, whatever the kind. Empty when it can.
 // CheckProblem has already limited the rank to 4 or 5.
 std::string CheckSupported(const BnProblem& problem)
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
     const TensorInfo& x                    = tensors[kIdxX];
+    const bool perActivation               = problem.bnMode == miopenBNPerActivation;
 
-    if(problem.bnMode != miopenBNSpatial)
-        return "hipDNN batchnorm supports only spatial mode";
-    PointwiseActivation activation{};
-    if(problem.act != miopenActivationPASTHRU && !ToPointwiseActivation(problem.act, activation))
+    if(problem.bnMode != miopenBNSpatial && !perActivation)
+        return "hipDNN batchnorm supports only spatial and per-activation modes";
+    if(problem.act != miopenActivationPASTHRU && !ActivationAttributes(problem, false))
         return std::string("hipDNN batchnorm does not support the ") +
                ActivationModeName(problem.act) + " activation";
     // Before the packed test, so a truncated tensor is declined for the reason
@@ -347,14 +399,46 @@ std::string CheckSupported(const BnProblem& problem)
             return "hipDNN batchnorm needs every data tensor in the same shape and layout";
     }
     // Spatial mode keeps one value per channel: {1, C, 1, ...} at the rank of x.
-    std::vector<int64_t> channelDims(x.dims.size(), 1);
-    channelDims[1] = x.dims[1];
+    // Per-activation mode keeps one per element of a sample: {1, C, H, W, ...}.
+    std::vector<int64_t> paramDims(x.dims.size(), 1);
+    paramDims[1] = x.dims[1];
+    if(perActivation)
+        std::copy(x.dims.begin() + 1, x.dims.end(), paramDims.begin() + 1);
     for(size_t index = kIdxScale; index <= kIdxVar; ++index)
     {
-        if(tensors[index].dims != channelDims)
-            return "hipDNN batchnorm needs scale, bias and statistics shaped {1, C, 1, ...}";
+        if(tensors[index].dims != paramDims)
+            return perActivation ? "hipDNN per-activation batchnorm needs scale, bias and "
+                                   "statistics shaped {1, C, H, W, ...}"
+                                 : "hipDNN batchnorm needs scale, bias and statistics shaped "
+                                   "{1, C, 1, ...}";
     }
+    // FoldPerActivation reads every tensor as a flat run of elements per sample.
+    if(perActivation && !std::all_of(tensors.begin(), tensors.end(), IsRowMajor))
+        return "hipDNN per-activation batchnorm supports only row-major (NCHW, NCDHW) tensors";
     return {};
+}
+
+// Per-activation batchnorm is spatial batchnorm with every element of a sample
+// as its own channel, so it runs as spatial on {N, K, 1, 1}, K being the
+// elements per sample. Even the running variance agrees: both modes scale it
+// by N / (N - 1). CheckSupported has made every tensor row-major, so only the
+// descriptions change. The plan key keeps the mode, so the two never share a
+// plan by accident of shape.
+void FoldPerActivation(BnProblem& problem)
+{
+    if(problem.bnMode != miopenBNPerActivation)
+        return;
+    const std::vector<int64_t> dims = problem.tensors[kIdxX].dims;
+    int64_t elements                = 1;
+    for(size_t i = 1; i < dims.size(); ++i)
+        elements *= dims[i];
+    for(size_t index = 0; index < problem.tensors.size(); ++index)
+    {
+        TensorInfo& tensor = problem.tensors[index];
+        const bool isParam = index >= kIdxScale && index <= kIdxVar;
+        tensor.dims        = {isParam ? 1 : dims[0], elements, 1, 1};
+        tensor.strides     = {elements, 1, 1, 1};
+    }
 }
 
 int64_t DoubleBits(double value)
@@ -371,6 +455,10 @@ PlanKey MakePlanKey(miopenHandle_t handle, const BnProblem& problem)
     std::vector<int64_t>& out = key.problem;
     out.push_back(static_cast<int64_t>(problem.kind));
     out.push_back(static_cast<int64_t>(problem.act));
+    // The clip values are constants in the plan, and zero for the modes
+    // without them.
+    out.push_back(DoubleBits(problem.actAlpha));
+    out.push_back(DoubleBits(problem.actBeta));
     out.push_back(static_cast<int64_t>(problem.tensors.size()));
     for(const TensorInfo& tensor : problem.tensors)
         AppendTensor(out, tensor);
@@ -419,15 +507,12 @@ bool MarkResult(const BnProblem& problem,
         return false;
     if(problem.act != miopenActivationPASTHRU)
     {
-        PointwiseActivation activation{};
-        if(!ToPointwiseActivation(problem.act, activation))
+        const std::optional<fe::graph::PointwiseAttributes> activation =
+            ActivationAttributes(problem, false);
+        if(!activation)
             return false;
         out->set_dim(yInfo.dims).set_stride(yInfo.strides);
-
-        fe::graph::PointwiseAttributes activationAttributes;
-        activationAttributes.set_mode(activation.forward)
-            .set_compute_data_type(fe::DataType::FLOAT);
-        out = graph.pointwise(out, activationAttributes);
+        out = graph.pointwise(out, *activation);
     }
     return MarkOutput(out, yInfo, ioType, kUidY);
 }
@@ -487,11 +572,13 @@ bool PopulateBackward(const BnProblem& problem, fe::DataType ioType, fe::graph::
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
     const bool fusedActivation             = problem.kind == GraphKind::BnBackwardActivation;
-    // The fused graph recomputes y from the saved statistics.
+    // The fused graph recomputes y from the saved statistics, so without them
+    // it would drop the activation. Backward computes them first instead.
     if(fusedActivation && !problem.hasSavedStats)
         return false;
-    PointwiseActivation activation{};
-    if(fusedActivation && !ToPointwiseActivation(problem.act, activation))
+    const std::optional<fe::graph::PointwiseAttributes> activation =
+        ActivationAttributes(problem, true);
+    if(fusedActivation && !activation)
         return false;
 
     auto x     = MakeTensor(tensors[kIdxX], ioType, kUidX);
@@ -519,10 +606,7 @@ bool PopulateBackward(const BnProblem& problem, fe::DataType ioType, fe::graph::
                 return false;
             y->set_dim(tensors[kIdxX].dims).set_stride(tensors[kIdxX].strides);
 
-            fe::graph::PointwiseAttributes activationAttributes;
-            activationAttributes.set_mode(activation.backward)
-                .set_compute_data_type(fe::DataType::FLOAT);
-            dy = graph.pointwise(dy, y, activationAttributes);
+            dy = graph.pointwise(dy, y, *activation);
             if(dy == nullptr)
                 return false;
             dy->set_dim(tensors[kIdxY].dims).set_stride(tensors[kIdxY].strides);
@@ -576,20 +660,34 @@ miopenStatus_t RunProblem(miopenHandle_t handle,
         scratch);
 }
 
-size_t FloatBytes(const TensorInfo& info)
+size_t ElementCount(const TensorInfo& info)
 {
     size_t count = 1;
     for(int64_t dim : info.dims)
         count *= static_cast<size_t>(dim);
-    return count * sizeof(float);
+    return count;
 }
+
+// The graphs keep every statistic in FLOAT.
+size_t FloatBytes(const TensorInfo& info) { return ElementCount(info) * sizeof(float); }
+
+// The bytes of a packed data tensor. CheckProblem has limited its type to
+// FLOAT, HALF or BFLOAT16.
+size_t DataBytes(const TensorInfo& info)
+{
+    const bool twoBytes = info.dataType == miopenHalf || info.dataType == miopenBFloat16;
+    return ElementCount(info) * (twoBytes ? 2 : 4);
+}
+
+// Where the next scratch buffer starts after `bytes`, keeping each one aligned
+// as the handle's buffer is.
+size_t AlignScratch(size_t bytes) { return (bytes + 255) / 256 * 256; }
 
 // The training graph always produces the saved statistics. When the caller
 // wants none, they go to scratch instead and are dropped.
 GraphScratch SavedStatsScratch(const BnProblem& problem)
 {
-    const size_t meanBytes = FloatBytes(problem.tensors[kIdxMean]);
-    const size_t varOffset = (meanBytes + 255) / 256 * 256;
+    const size_t varOffset = AlignScratch(FloatBytes(problem.tensors[kIdxMean]));
     return {varOffset + FloatBytes(problem.tensors[kIdxVar]),
             [varOffset](VariantPack& variantPack, void* scratch) {
                 variantPack[kUidSavedMean]   = scratch;
@@ -649,6 +747,7 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
         return RecordFailure(miopenStatusUnsupportedOp, reason);
     if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
         return status;
+    FoldPerActivation(problem);
     // Like MIOpen, write the saved statistics only when both are given, and
     // update the running statistics only when all four are.
     const bool saveStats    = saveMean != nullptr && saveInvVariance != nullptr;
@@ -750,6 +849,7 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
+    FoldPerActivation(problem);
 
     VariantPack variantPack{
         {kUidX, const_cast<void*>(x)},
@@ -760,6 +860,64 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
         {kUidEstVar, variance},
     };
     return RunProblem(handle, problem, variantPack);
+}
+
+// Backward without saved statistics, when hipDNN cannot recompute them itself:
+// at an epsilon other than 1e-5, or with an activation, whose graph needs them
+// to recompute y. A training graph first computes them into scratch, at the
+// caller's epsilon, and backward then reads them from there. Its y goes to
+// scratch too and is dropped.
+miopenStatus_t BackwardFromComputedStats(miopenHandle_t handle,
+                                         const BnProblem& backward,
+                                         double epsilon,
+                                         const void* x,
+                                         const void* scale,
+                                         const void* bias,
+                                         const VariantPack& backwardPack)
+{
+    const std::vector<TensorInfo>& tensors = backward.tensors;
+
+    BnProblem training;
+    training.kind    = GraphKind::BnFwdTraining;
+    training.bnMode  = backward.bnMode;
+    training.epsilon = epsilon;
+    training.tensors = {tensors[kIdxX],
+                        tensors[kIdxX],
+                        tensors[kIdxScale],
+                        tensors[kIdxBias],
+                        tensors[kIdxMean],
+                        tensors[kIdxVar]};
+
+    BnProblem withStats     = backward;
+    withStats.hasSavedStats = true;
+
+    const size_t meanOffset   = AlignScratch(DataBytes(tensors[kIdxX]));
+    const size_t varOffset    = meanOffset + AlignScratch(FloatBytes(tensors[kIdxMean]));
+    const size_t scratchBytes = varOffset + FloatBytes(tensors[kIdxVar]);
+    auto bindStats            = [meanOffset, varOffset](VariantPack& variantPack, void* scratch) {
+        variantPack[kUidSavedMean]   = static_cast<char*>(scratch) + meanOffset;
+        variantPack[kUidSavedInvVar] = static_cast<char*>(scratch) + varOffset;
+    };
+
+    std::vector<GraphStep> steps;
+    // Plain backward has no bias, and its value cannot change the statistics.
+    steps.push_back({MakePlanKey(handle, training),
+                     [training](fe::graph::Graph& graph) { return PopulateGraph(training, graph); },
+                     VariantPack{
+                         {kUidX, const_cast<void*>(x)},
+                         {kUidScale, const_cast<void*>(scale)},
+                         {kUidBias, const_cast<void*>(bias != nullptr ? bias : scale)},
+                     },
+                     [bindStats](VariantPack& variantPack, void* scratch) {
+                         variantPack[kUidY] = scratch;
+                         bindStats(variantPack, scratch);
+                     }});
+    steps.push_back(
+        {MakePlanKey(handle, withStats),
+         [withStats](fe::graph::Graph& graph) { return PopulateGraph(withStats, graph); },
+         backwardPack,
+         bindStats});
+    return RunCachedGraphs(handle, steps, scratchBytes);
 }
 
 // Shared by the three backward entry points. Only the fused one has a bias
@@ -829,14 +987,7 @@ miopenStatus_t Backward(miopenHandle_t handle,
         return RecordFailure(miopenStatusUnsupportedOp, reason);
     if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
         return status;
-    if(!problem.hasSavedStats && epsilon != kDefaultEpsilon)
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "hipDNN batchnorm backward without saved statistics always uses "
-                             "epsilon 1e-5");
-    if(problem.kind == GraphKind::BnBackwardActivation && !problem.hasSavedStats)
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "hipDNN batchnorm backward with an activation needs the saved "
-                             "mean and inverse variance");
+    FoldPerActivation(problem);
 
     VariantPack variantPack{
         {kUidX, const_cast<void*>(x)},
@@ -846,14 +997,19 @@ miopenStatus_t Backward(miopenHandle_t handle,
         {kUidDscale, dscale},
         {kUidDbias, dbias},
     };
+    if(problem.kind == GraphKind::BnBackwardActivation)
+        variantPack[kUidBias] = const_cast<void*>(bias);
     if(problem.hasSavedStats)
     {
         variantPack[kUidSavedMean]   = const_cast<void*>(savedMean);
         variantPack[kUidSavedInvVar] = const_cast<void*>(savedInvVariance);
+        return RunProblem(handle, problem, variantPack);
     }
-    if(problem.kind == GraphKind::BnBackwardActivation)
-        variantPack[kUidBias] = const_cast<void*>(bias);
-    return RunProblem(handle, problem, variantPack);
+    // hipDNN's backward recomputes the statistics with epsilon 1e-5, which is
+    // all plain backward needs at that epsilon.
+    if(problem.kind == GraphKind::BnBackward && epsilon == kDefaultEpsilon)
+        return RunProblem(handle, problem, variantPack);
+    return BackwardFromComputedStats(handle, problem, epsilon, x, scale, bias, variantPack);
 }
 
 } // namespace

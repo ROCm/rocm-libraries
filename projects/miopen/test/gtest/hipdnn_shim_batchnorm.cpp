@@ -6,11 +6,12 @@
 // miopenBatchNorm* API and check against the fusionHost.hpp CPU reference. The
 // plain tests cover what those fixtures cannot reach: epsilon and momentum in
 // the plan key, running stats updated in place, null save and running pointers,
-// inference without estimated stats, and the cases the hipDNN path declines
-// while MIOpen serves them. Each of those records whether the call was served so
-// the parity harness can pin the expected divergences. The rest record the
-// status, for problems both modes must fail the same way: alpha/beta other than
-// 1/0, and problems no MIOpen solver takes.
+// inference without estimated stats, per-activation mode, clipped activations,
+// backward without saved stats, and the calls the hipDNN path declines while
+// MIOpen serves them. Each of those records whether the call was served so the
+// parity harness can pin the expected divergences. The rest record the status,
+// for problems both modes must fail the same way: alpha/beta other than 1/0, and
+// problems no MIOpen solver takes.
 //
 // Not covered, because MIOpen itself has no defined behavior to compare with:
 // null alpha/beta pointers (MIOpen dereferences them), null dscale/dbias on
@@ -383,6 +384,14 @@ bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, c
     if(!served)
         hs::ExpectForwardedDecline(result, reason);
     hs::RecordServed(case_name, served);
+    return served;
+}
+
+// A call both paths must serve.
+bool ExpectServed(const std::string& case_name, const hs::CallResult& result)
+{
+    const bool served = RecordOutcome(case_name, result, nullptr);
+    EXPECT_TRUE(served) << case_name << ": " << result.message;
     return served;
 }
 
@@ -884,19 +893,22 @@ TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
 }
 
 // ---------------------------------------------------------------------------
-// Gaps: MIOpen serves these, the hipDNN path declines them
+// Problems the shim reshapes or maps before forwarding. They are checked against
+// the CPU reference and not hashed: where the graph differs from MIOpen's kernel,
+// the results match MIOpen's only to rounding.
 
-TEST(GPU_HipdnnShimBNGaps_FP32, PerActivationMode)
+// Per-activation mode is folded into spatial mode over C*H*W channels of one
+// element each, which gives every element its own stats over the batch.
+TEST(GPU_HipdnnShimBNPerActivation_FP32, MatchesCpuReference)
 {
-    auto&& handle      = get_handle();
-    const char* reason = "supports only spatial mode";
+    auto&& handle = get_handle();
 
     {
         SCOPED_TRACE("train");
         TrainData d;
         SetUpTrain(d, miopenBNPerActivation);
         const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
-        if(RecordOutcome("per_activation_train", result, reason))
+        if(ExpectServed("per_activation_train", result))
             CheckTrain(handle, d, true, true);
     }
     {
@@ -904,7 +916,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, PerActivationMode)
         InferData d;
         SetUpInfer(d, miopenBNPerActivation);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
-        if(RecordOutcome("per_activation_infer", result, reason))
+        if(ExpectServed("per_activation_infer", result))
             CheckInfer(handle, d);
     }
     {
@@ -912,51 +924,73 @@ TEST(GPU_HipdnnShimBNGaps_FP32, PerActivationMode)
         BwdData d;
         SetUpBwd(d, miopenBNPerActivation);
         const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
-        if(RecordOutcome("per_activation_bwd", result, reason))
+        if(ExpectServed("per_activation_bwd", result))
             CheckBwd(handle, d);
     }
 }
 
-// Backward is covered as well as forward, because it is the direction that
-// takes the activation's gradient and so has the most to get wrong.
-TEST(GPU_HipdnnShimBNGaps_FP32, ClampActivation)
+// CLIPPEDRELU and CLAMP forward as ReLU with an upper clip, and with both clips.
+// The clips are set wide enough that every branch of the activation and of its
+// gradient is taken. Backward is covered as well as forward, because it is the
+// direction that takes the activation's gradient and so has the most to get wrong.
+TEST(GPU_HipdnnShimBNClippedActivation_FP32, MatchesCpuReference)
 {
-    auto&& handle      = get_handle();
-    const char* reason = "does not support the CLAMP activation";
-
+    struct ClipCase
     {
-        SCOPED_TRACE("train");
-        TrainData d;
-        SetUpTrain(d);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationCLAMP);
+        const char* name;
+        miopenActivationMode_t mode;
+        double alpha;
+        double beta;
+    };
 
-        hs::OwnedActivationDescriptor activ;
-        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
-        ASSERT_EQ(miopenSetActivationDescriptor(
-                      activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
-                  miopenStatusSuccess);
+    const std::vector<ClipCase> cases = {
+        {"clipped_relu", miopenActivationCLIPPEDRELU, 1.0, 0.0},
+        {"clamp", miopenActivationCLAMP, -0.5, 1.0},
+    };
 
-        const auto result =
-            hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
-        if(RecordOutcome("clamp_train", result, reason))
-            CheckTrain(handle, d, true, true);
-    }
+    auto&& handle = get_handle();
+    for(const auto& c : cases)
     {
-        SCOPED_TRACE("bwd");
-        BwdData d;
-        SetUpBwd(d);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationCLAMP);
+        SCOPED_TRACE(c.name);
+        const std::string name = c.name;
+        {
+            SCOPED_TRACE("train");
+            TrainData d;
+            SetUpTrain(d);
+            d.activ_mode  = c.mode;
+            d.activ_alpha = c.alpha;
+            d.activ_beta  = c.beta;
 
-        hs::OwnedActivationDescriptor activ;
-        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
-        ASSERT_EQ(miopenSetActivationDescriptor(
-                      activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
-                  miopenStatusSuccess);
+            hs::OwnedActivationDescriptor activ;
+            ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+            ASSERT_EQ(miopenSetActivationDescriptor(
+                          activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+                      miopenStatusSuccess);
 
-        const auto result =
-            hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
-        if(RecordOutcome("clamp_bwd", result, reason))
-            CheckBwd(handle, d);
+            const auto result =
+                hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
+            if(ExpectServed(name + "_train", result))
+                CheckTrain(handle, d, true, true);
+        }
+        {
+            SCOPED_TRACE("bwd");
+            BwdData d;
+            SetUpBwd(d);
+            d.activ_mode  = c.mode;
+            d.activ_alpha = c.alpha;
+            d.activ_beta  = c.beta;
+
+            hs::OwnedActivationDescriptor activ;
+            ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+            ASSERT_EQ(miopenSetActivationDescriptor(
+                          activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+                      miopenStatusSuccess);
+
+            const auto result =
+                hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
+            if(ExpectServed(name + "_bwd", result))
+                CheckBwd(handle, d);
+        }
     }
 }
 
@@ -983,63 +1017,62 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
     CheckInfer(handle, d);
 }
 
-// Epsilon is 1e-5 so the shim gets past its epsilon check and declines for the
-// missing saved stats, which its inference node needs.
-TEST(GPU_HipdnnShimBNGaps_FP32, BackwardActivationWithoutSavedStats)
+// The provider recomputes the stats itself only for plain backward at an epsilon
+// of 1e-5. For any other epsilon, and for backward with an activation, whose
+// graph needs the saved stats, the shim runs training first to compute them into
+// scratch. Every combination is served; the CPU reference is given the true stats
+// of the input at the call's epsilon.
+TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
 {
-    auto&& handle = get_handle();
-
-    BwdData d;
-    SetUpBwd(d);
-    d.epsilon = kProviderEpsilon;
-    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationRELU);
-
-    hs::OwnedActivationDescriptor activ;
-    ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
-    ASSERT_EQ(
-        miopenSetActivationDescriptor(activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
-        miopenStatusSuccess);
-
-    const auto result =
-        hs::CaptureCall([&] { return BwdActivation(handle, d, false, activ.handle); });
-    if(RecordOutcome("bwd_act_no_saved_stats", result, "needs the saved"))
+    struct NoStatsCase
     {
-        FillTrueStats(d, d.epsilon);
-        CheckBwd(handle, d);
-    }
-}
+        const char* name;
+        bool provider_epsilon;
+        miopenActivationMode_t mode;
+    };
 
-// The provider recomputes the stats with a fixed epsilon of 1e-5, so any other
-// epsilon is declined and 1e-5 is served.
-TEST(GPU_HipdnnShimBNGaps_FP32, BackwardWithoutSavedStats)
-{
+    // BwdData's own epsilon is FLT_EPSILON.
+    const std::vector<NoStatsCase> cases = {
+        {"bwd_no_saved_stats_provider_epsilon", true, miopenActivationPASTHRU},
+        {"bwd_no_saved_stats_flt_epsilon", false, miopenActivationPASTHRU},
+        {"bwd_act_no_saved_stats", true, miopenActivationRELU},
+        {"bwd_act_no_saved_stats_flt_epsilon", false, miopenActivationRELU},
+    };
+
     auto&& handle = get_handle();
-
+    for(const auto& c : cases)
     {
-        SCOPED_TRACE("flt_epsilon");
+        SCOPED_TRACE(c.name);
         BwdData d;
         SetUpBwd(d);
-        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, false); });
-        if(RecordOutcome("bwd_no_saved_stats_flt_epsilon", result, "always uses"))
+        if(c.provider_epsilon)
+            d.epsilon = kProviderEpsilon;
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, c.mode);
+
+        hs::OwnedActivationDescriptor activ;
+        if(c.mode != miopenActivationPASTHRU)
         {
-            FillTrueStats(d, d.epsilon);
-            CheckBwd(handle, d);
+            ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+            ASSERT_EQ(miopenSetActivationDescriptor(
+                          activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+                      miopenStatusSuccess);
         }
-    }
-    {
-        SCOPED_TRACE("provider_epsilon");
-        BwdData d;
-        SetUpBwd(d);
-        d.epsilon         = kProviderEpsilon;
-        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, false); });
-        EXPECT_TRUE(RecordOutcome("bwd_no_saved_stats_provider_epsilon", result, nullptr));
-        if(result.status == miopenStatusSuccess)
+
+        const auto result = hs::CaptureCall([&] {
+            return c.mode == miopenActivationPASTHRU
+                       ? BwdV1(handle, d, false)
+                       : BwdActivation(handle, d, false, activ.handle);
+        });
+        if(ExpectServed(c.name, result))
         {
             FillTrueStats(d, d.epsilon);
             CheckBwd(handle, d);
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Gaps: MIOpen serves these, the hipDNN path declines them
 
 // Restores the shared handle's tuning policy even when an ASSERT returns early, so
 // the tests after this one keep running under None.

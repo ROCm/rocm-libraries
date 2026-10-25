@@ -43,24 +43,32 @@ namespace hipdnn {
 // four are. Inference without an estimated mean or variance runs training, as
 // MIOpen does.
 //
+// Some problems take a different route through hipDNN than through MIOpen:
+// - Per-activation mode runs as spatial batchnorm on x viewed as {N, C*H*W, 1,
+//   1}, which normalizes each element over the batch exactly as MIOpen does.
+// - CLIPPEDRELU and CLAMP run as ReLU with an upper clip, and with a lower and
+//   an upper clip.
+// - Backward without the saved statistics, at an epsilon other than 1e-5 or
+//   with an activation, first runs training into scratch to compute them, at
+//   the caller's epsilon. The provider's backward recomputes them only at 1e-5,
+//   and the fused graph needs them to recompute y.
+// The results match MIOpen's to rounding, not bit for bit.
+//
 // Where hipDNN cannot express a problem that MIOpen accepts, the call fails with
 // miopenStatusUnsupportedOp. MIOpen does not run the call instead. The caller can
 // thus tell that forwarding did not happen. miopenGetErrorString adds a
 // "[hipDNN-forwarded]" prefix. The reason goes to stderr unless MIOPEN_LOG_LEVEL
 // hides errors. The wrapper declines these problems:
-// - Any mode other than miopenBNSpatial.
-// - Any activation other than ReLU or PASTHRU. A null activation descriptor
-//   means no activation, as it does in MIOpen.
+// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP. A null
+//   activation descriptor means no activation, as it does in MIOpen.
 // - Tensors that are not packed, data tensors of different types or shapes, or
-//   scale, bias or statistics not shaped {1, C, 1, ...}. MIOpen reshapes a 5-D x
-//   to 4-D, so a non-packed 5-D x is declined here, not rejected with
-//   miopenStatusBadParm.
+//   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
+//   per-activation mode). MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x
+//   is declined here, not rejected with miopenStatusBadParm.
+// - Per-activation mode on tensors that are not row-major (NCHW or NCDHW).
 // - Training or backward when the handle has a tuning policy other than
 //   miopenTuningPolicyNone. The provider runs on its own handle and cannot apply
 //   the policy. Inference has no tunable solver, so the policy does not matter.
-// - Backward without the saved statistics and an epsilon other than 1e-5. The
-//   provider recomputes the statistics with epsilon 1e-5 only.
-// - Backward with an activation and without the saved statistics.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
 //
 // The wrapper also returns miopenStatusBadParm for a null alpha or beta, a null

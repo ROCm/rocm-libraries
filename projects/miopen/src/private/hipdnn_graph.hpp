@@ -131,6 +131,22 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               size_t workspaceSize,
                               const GraphScratch& scratch = {});
 
+// One graph of a sequence for RunCachedGraphs. `bindScratch` may be empty.
+struct GraphStep
+{
+    PlanKey key;
+    PopulateGraphFn populate;
+    VariantPack variantPack;
+    BindScratchFn bindScratch;
+};
+
+// Runs `steps` in order on `handle`'s stream, as RunCachedGraph runs one graph,
+// in the handle's buffer. Every step sees the same `scratchBytes` of scratch at
+// the same address, so a step can read what an earlier one wrote there. No
+// step runs unless every graph can be built.
+miopenStatus_t
+RunCachedGraphs(miopenHandle_t handle, std::vector<GraphStep>& steps, size_t scratchBytes);
+
 } // namespace hipdnn
 } // namespace wrapper
 } // namespace miopen

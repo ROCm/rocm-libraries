@@ -12,6 +12,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -22,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -250,49 +252,119 @@ AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t
     return {graph, miopenStatusSuccess};
 }
 
-miopenStatus_t RunGraph(HandleState& state,
-                        const GraphPtr& graph,
-                        VariantPack& variantPack,
-                        void* callerWorkspace,
-                        size_t callerWorkspaceSize,
-                        const GraphScratch& scratch)
+// One graph of a sequence, with the variant pack it runs on and the function
+// that adds the scratch pointers to that pack.
+struct GraphRun
+{
+    GraphPtr graph;
+    VariantPack* variantPack;
+    const BindScratchFn* bindScratch;
+};
+
+// Runs `runs` in order. They share one workspace, big enough for any of them,
+// and one scratch after it, so each run sees the scratch at the same address.
+miopenStatus_t RunGraphs(HandleState& state,
+                         const std::vector<GraphRun>& runs,
+                         void* callerWorkspace,
+                         size_t callerWorkspaceSize,
+                         size_t scratchBytes)
 {
     const std::lock_guard<std::mutex> lock(state.mutex);
 
-    int64_t needed = 0;
-    if(const fe::Error error = graph->get_workspace_size(needed); !error.is_good())
-        return RecordHipdnnFailure(error);
+    size_t needed = 0;
+    for(const GraphRun& run : runs)
+    {
+        int64_t runNeeded = 0;
+        if(const fe::Error error = run.graph->get_workspace_size(runNeeded); !error.is_good())
+            return RecordHipdnnFailure(error);
+        needed = std::max(needed, static_cast<size_t>(runNeeded));
+    }
 
     void* workspace = callerWorkspace;
-    if(scratch.bytes > 0)
+    void* scratch   = nullptr;
+    if(scratchBytes > 0)
     {
         // The scratch follows the graph's workspace in the handle's buffer.
         constexpr size_t alignment = 256;
-        const size_t offset = (static_cast<size_t>(needed) + alignment - 1) / alignment * alignment;
-        if(!state.EnsureWorkspace(offset + scratch.bytes))
+        const size_t offset        = (needed + alignment - 1) / alignment * alignment;
+        if(!state.EnsureWorkspace(offset + scratchBytes))
             return RecordFailure(miopenStatusAllocFailed, "hipDNN scratch allocation failed");
         workspace = state.workspace;
-        scratch.bind(variantPack, static_cast<char*>(state.workspace) + offset);
+        scratch   = static_cast<char*>(state.workspace) + offset;
     }
-    else if(needed > 0 &&
-            (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
+    else if(needed > 0 && (callerWorkspace == nullptr || callerWorkspaceSize < needed))
     {
-        if(!state.EnsureWorkspace(static_cast<size_t>(needed)))
+        if(!state.EnsureWorkspace(needed))
             return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
         workspace = state.workspace;
     }
 
-    const fe::Error error = graph->execute(*state.hipdnnHandle, variantPack, workspace);
-    // Recorded even when execute failed, because it may have queued work first.
-    const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
-    if(!error.is_good())
-        return RecordHipdnnFailure(error);
-    if(!recorded)
-        return RecordFailure(miopenStatusInternalError,
-                             "could not record the end of the hipDNN work on the MIOpen "
-                             "handle's stream");
+    for(const GraphRun& run : runs)
+    {
+        if(scratch != nullptr && run.bindScratch != nullptr && *run.bindScratch)
+            (*run.bindScratch)(*run.variantPack, scratch);
+        const fe::Error error =
+            run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
+        // Recorded even when execute failed, because it may have queued work first.
+        const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
+        if(!error.is_good())
+            return RecordHipdnnFailure(error);
+        if(!recorded)
+            return RecordFailure(miopenStatusInternalError,
+                                 "could not record the end of the hipDNN work on the MIOpen "
+                                 "handle's stream");
+    }
 
     return RecordSuccess();
+}
+
+// One graph to look up or build, then run.
+struct GraphRequest
+{
+    const PlanKey* key;
+    const PopulateGraphFn* populate;
+    VariantPack* variantPack;
+    const BindScratchFn* bindScratch;
+};
+
+miopenStatus_t RunCachedRequests(miopenHandle_t handle,
+                                 const std::vector<GraphRequest>& requests,
+                                 void* workspace,
+                                 size_t workspaceSize,
+                                 size_t scratchBytes)
+{
+    hipStream_t stream = nullptr;
+    if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
+        return RecordFailure(miopenStatusInternalError,
+                             "could not read the MIOpen handle's stream");
+
+    // MIOpen makes the handle's device current before each launch. Doing the same
+    // here puts the workspace, event and hipDNN handle on that device. A null
+    // stream reports the current device, so a handle on the null stream runs on
+    // whichever device the caller has current.
+    hipDevice_t device = 0;
+    ScopedDevice scopedDevice;
+    if(hipStreamGetDevice(stream, &device) != hipSuccess || !scopedDevice.Set(device))
+        return RecordFailure(miopenStatusInternalError,
+                             "could not make the MIOpen handle's device current");
+
+    auto [state, acquired] = AcquireHandleState(handle, stream);
+    if(state == nullptr)
+        return acquired;
+
+    // Every graph is built before any runs, so a sequence that cannot be built
+    // does no work.
+    std::vector<GraphRun> runs;
+    runs.reserve(requests.size());
+    for(const GraphRequest& request : requests)
+    {
+        auto [graph, status] = AcquireGraph(*request.key, *request.populate, *state->hipdnnHandle);
+        if(graph == nullptr)
+            return status;
+        runs.push_back({graph, request.variantPack, request.bindScratch});
+    }
+
+    return RunGraphs(*state, runs, workspace, workspaceSize, scratchBytes);
 }
 
 } // namespace
@@ -357,30 +429,21 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               size_t workspaceSize,
                               const GraphScratch& scratch)
 {
-    hipStream_t stream = nullptr;
-    if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
-        return RecordFailure(miopenStatusInternalError,
-                             "could not read the MIOpen handle's stream");
+    return RunCachedRequests(handle,
+                             {{&key, &populate, &variantPack, &scratch.bind}},
+                             workspace,
+                             workspaceSize,
+                             scratch.bytes);
+}
 
-    // MIOpen makes the handle's device current before each launch. Doing the same
-    // here puts the workspace, event and hipDNN handle on that device. A null
-    // stream reports the current device, so a handle on the null stream runs on
-    // whichever device the caller has current.
-    hipDevice_t device = 0;
-    ScopedDevice scopedDevice;
-    if(hipStreamGetDevice(stream, &device) != hipSuccess || !scopedDevice.Set(device))
-        return RecordFailure(miopenStatusInternalError,
-                             "could not make the MIOpen handle's device current");
-
-    auto [state, acquired] = AcquireHandleState(handle, stream);
-    if(state == nullptr)
-        return acquired;
-
-    auto [graph, status] = AcquireGraph(key, populate, *state->hipdnnHandle);
-    if(graph == nullptr)
-        return status;
-
-    return RunGraph(*state, graph, variantPack, workspace, workspaceSize, scratch);
+miopenStatus_t
+RunCachedGraphs(miopenHandle_t handle, std::vector<GraphStep>& steps, size_t scratchBytes)
+{
+    std::vector<GraphRequest> requests;
+    requests.reserve(steps.size());
+    for(GraphStep& step : steps)
+        requests.push_back({&step.key, &step.populate, &step.variantPack, &step.bindScratch});
+    return RunCachedRequests(handle, requests, nullptr, 0, scratchBytes);
 }
 
 bool IsAvailable()
