@@ -219,7 +219,8 @@ def _dump_corpus(
         cid = case["case_id"]
         try:
             _rec, llvm = lower_case(case, flavor)
-        except NotImplementedError as exc:
+        except (NotImplementedError, ValueError) as exc:
+            # The llvm23-gated target ops refuse with a ValueError.
             if not _requires_newer_flavor(exc):
                 raise
             skipped[cid] = ("UNVALIDATED", f"{type(exc).__name__}: {exc}")
