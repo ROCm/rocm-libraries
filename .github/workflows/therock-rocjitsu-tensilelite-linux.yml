@@ -21,6 +21,9 @@ on:
       artifact_run_id:
         type: string
         required: true
+      strategy:
+        type: string
+        default: "shape"
       workers:
         type: string
         default: "96"
@@ -69,6 +72,7 @@ jobs:
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
       SUITE_TIMEOUT_SECONDS: ${{ inputs.suite_seconds }}
+      STRATEGY: ${{ inputs.strategy }}
       REQUESTED_WORKERS: ${{ inputs.workers }}
       REQUESTED_DISPATCH_THREADS: ${{ inputs.dispatch_threads }}
       CASE_FILTER: ${{ inputs.case_filter }}
@@ -88,6 +92,10 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          trials=1
+          [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
+          (( trials * SUITE_TIMEOUT_SECONDS <= 1500 )) || { echo "::error::trial execution limits must total at most 1500 seconds"; exit 1; }
           [[ "${REQUESTED_DISPATCH_THREADS}" == 1 ]] || { echo "::error::shape queue experiments require serial dispatch"; exit 1; }
 
       - name: Checkout TheRock repository
@@ -212,6 +220,7 @@ jobs:
           (( workers <= cores )) || { echo "::error::workers exceeds host CPU count"; exit 1; }
           budget=1
           mkdir -p "${REPORT_DIR}/junit"
+          cp "${config}" "${REPORT_DIR}/artifact-config.json"
           python - "${config}" \
               "${REPORT_DIR}/rocjitsu-config.json" "${budget}" "${REQUESTED_DISPATCH_THREADS}" <<'PY'
           import json, sys
@@ -246,6 +255,7 @@ jobs:
             echo "MKL_NUM_THREADS=1"
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
+            echo "ROCJITSU_EFFECTIVE_LIB=${rocjitsu_lib}"
             echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
             echo "PYTHONPATH=${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
           } >> "${GITHUB_ENV}"
@@ -272,6 +282,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gdb
 
+      - name: Resolve frozen calibration cohort
+        if: ${{ inputs.case_filter == 'calibration16' }}
+        run: |
+          python - "${SCRIPTS_DIR}/rocjitsu_calibration_cohort.json" >> "${GITHUB_ENV}" <<'PYTHON'
+          import json, sys
+          manifest = sys.argv[1]
+          cohort = json.load(open(manifest))
+          print("CASE_FILTER=" + " or ".join(s["path"] for s in cohort["sources"]))
+          print("COHORT_MANIFEST=" + manifest)
+          PYTHON
+
       - name: Prepare gated shape queue
         timeout-minutes: 5
         run: |
@@ -280,84 +301,45 @@ jobs:
           mirage run --profile "${MIRAGE_PROFILE}" --in-process \
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
             python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
-              -p rocjitsu_shape_plan --collect-only -q -p no:cacheprovider \
+              -p rocjitsu_shape_plan -p rocjitsu_evidence --capture=fd --collect-only -q -p no:cacheprovider \
+              --rocjitsu-evidence-dir="${REPORT_DIR}/collection" \
               --rocjitsu-shape-plan="${REPORT_DIR}/shape-plan.json" \
               --rocjitsu-max-work="${MAX_WORK}" \
               -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
               -k "${CASE_FILTER}" \
             2>&1 | tee "${REPORT_DIR}/shape-plan.log"
 
-      - name: Run rocjitsu shape queue
+      - name: Run audited scheduling experiment
         id: tests
-        # The supervisor owns all descendant processes and preserves partial
-        # reports if the suite limit is reached.
-        timeout-minutes: 345
-        run: |
-          set -o pipefail
-          cd "${REPORT_DIR}"
-          TIMEFORMAT='wall_seconds=%R user_seconds=%U system_seconds=%S'
-          { time python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
-            --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
-            python "${SCRIPTS_DIR}/rocjitsu_shape_queue.py" \
-              --plan "${REPORT_DIR}/shape-plan.json" --report-dir "${REPORT_DIR}" \
-              --workers "${PYTEST_WORKERS}" --per-job-seconds "${PER_JOB_SECONDS}" -- \
-            mirage run --profile "${MIRAGE_PROFILE}" --in-process \
-              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
-            python -m pytest "${SCRIPTS_DIR}/rocjitsu_shape_test.py" \
-              -c "${TENSILELITE_ROOT}/pytest.ini" \
-              -p rocjitsu_shape_case -p rocjitsu_pytest -p no:cacheprovider \
-              --gpu-targets="${ROCJITSU_TARGET}" \
-              -v -s -n 0 --client-lock-scope=worker \
-              --timeout="${PER_JOB_SECONDS}" \
-              --prebuilt-client="${TENSILELITE_CLIENT}" \
-              --global-parameters="LibraryFormat='msgpack'" \
-              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET},--global-parameters,CpuThreads=1" \
-            2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"; } \
-            2> "${REPORT_DIR}/suite-resource-time.txt"
-
-      - name: Summarize test timings
-        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
-        run: python "${SCRIPTS_DIR}/rocjitsu_junit_summary.py" --report-dir "${REPORT_DIR}"
-
-      - name: Summarize test results
-        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
-        run: |
-          python "${SCRIPTS_DIR}/rocjitsu_test_summary.py" --report-dir "${REPORT_DIR}" \
-            --title "rocjitsu TensileLite (${AMDGPU_FAMILIES})"
-
-      # A killed test step can still be reported as successful; verify the
-      # supervisor's records instead and keep the container's memory counters.
-      - name: Check suite completeness
-        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
-        run: python "${SCRIPTS_DIR}/rocjitsu_check_suite.py" --report-dir "${REPORT_DIR}"
-
-      # TEMPORARY diagnostic: the ductile tests fail here but pass locally, and
-      # Tensile prints its fatal message to stdout, which xdist workers drop.
-      # Rerun the failed ones without xdist so the message reaches the log.
-      - name: Rerun failed ductile tests without xdist
-        if: ${{ !cancelled() && steps.tests.conclusion == 'failure' && inputs.artifact_run_id == '' }}
-        continue-on-error: true
         timeout-minutes: 30
         run: |
           set -o pipefail
-          mapfile -t failed < <(python - "${REPORT_DIR}/progress.json" <<'PY'
+          python "${SCRIPTS_DIR}/rocjitsu_experiment.py" \
+            --report-dir "${REPORT_DIR}" --strategy "${STRATEGY}" \
+            --workers "${PYTEST_WORKERS}" --per-job-seconds "${PER_JOB_SECONDS}" \
+            --suite-seconds "${SUITE_TIMEOUT_SECONDS}" \
+            2>&1 | tee "${REPORT_DIR}/experiment.log"
+
+      - name: Check experiment completeness and record memory
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: |
+          python - "${REPORT_DIR}" <<'PYTHON'
           import json, sys
-          tests = json.load(open(sys.argv[1])).get("tests", {})
-          print("\n".join(n for n, t in tests.items()
-                          if "/ductile/" in n and t.get("outcome") == "failed"))
-          PY
-          )
-          if (( ${#failed[@]} == 0 )); then echo "No failed ductile tests"; exit 0; fi
-          cd "${TENSILELITE_ROOT}"
-          mirage run --profile "${MIRAGE_PROFILE}" --in-process \
-              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
-            python -m pytest "${failed[@]}" \
-              --gpu-targets="${ROCJITSU_TARGET}" -v -s --timeout=600 \
-              -p no:cacheprovider --basetemp="${RUNNER_TEMP}/ductile-rerun" \
-              --prebuilt-client="${TENSILELITE_CLIENT}" \
-              --global-parameters="LibraryFormat='msgpack'" \
-              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
-            2>&1 | tee "${REPORT_DIR}/ductile-rerun.log"
+          from pathlib import Path
+          from rocjitsu_check_suite import memory_lines
+          root = Path(sys.argv[1])
+          (root / "container-memory.txt").write_text("\n".join(memory_lines(Path("/sys/fs/cgroup"))) + "\n")
+          final = root / "experiment.json"
+          if not final.is_file():
+              sys.exit("experiment.json missing: the experiment did not finish")
+          report = json.loads(final.read_text())
+          if not report["complete"] or report["exit_code"]:
+              sys.exit("experiment failed its completion or coverage checks")
+          for strategy in report["strategies"]:
+              execution = json.loads((root / strategy / "execution.json").read_text())
+              if not execution["complete"] or execution["exit_code"]:
+                  sys.exit(f"incomplete or failed strategy: {strategy}")
+          PYTHON
 
       - name: Upload test reports
         if: ${{ always() }}

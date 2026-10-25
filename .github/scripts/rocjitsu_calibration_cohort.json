@@ -1,0 +1,120 @@
+{
+  "artifact_run_id": "39722400519",
+  "admitted_jobs": 259,
+  "ceiling": 68719476736,
+  "sources": [
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/bf16_activation.yaml",
+      "sha256": "928a7468713db56e8cf42d3a48551244185e51425cdfbf7f5ca5f1e6d8f46c59",
+      "shape_jobs": 3,
+      "historical_seconds": 107,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8b8.yaml",
+      "sha256": "92aca6f4bd83a67a90d268d7eba56a0e78ab0849e15ff2242fd37ba9adec40c1",
+      "shape_jobs": 8,
+      "historical_seconds": 102,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/workspace_hints.yaml",
+      "sha256": "3484db4e259b9664ac69005e1e346113cc69c590eb16071013577350389c143e",
+      "shape_jobs": 65,
+      "historical_seconds": 101,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_gate.yaml",
+      "sha256": "d5c440bb6f67ae0abd7dff8e3028b36d6e7866c066c5cc0d52f979d2022c429d",
+      "shape_jobs": 6,
+      "historical_seconds": 99,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8.yaml",
+      "sha256": "f91040bcfa476d1b27f75bba8bff21b7262cdb4343176a537132ed7fa37a8da4",
+      "shape_jobs": 16,
+      "historical_seconds": 98,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8_sb.yaml",
+      "sha256": "56ba36632f12c05fc298de90d9a10629197ef36d76ab8d9f2fdea449b28cc8c6",
+      "shape_jobs": 16,
+      "historical_seconds": 98,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8is.yaml",
+      "sha256": "2f25b6e2d9e896b30efcefbaa534324e44a09beb19c0740590c105e06b5c1330",
+      "shape_jobs": 16,
+      "historical_seconds": 96,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf8f4ss_gfx1250.yaml",
+      "sha256": "389d8254a80f3de1801aa3d1a316cc8d3abbdf1ceab15e8a29c6d979830878bb",
+      "shape_jobs": 3,
+      "historical_seconds": 94,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8hs.yaml",
+      "sha256": "310319a8e01dec8d92125e8c1b96bd739677586d94736d5a6be17c6e681fd9ff",
+      "shape_jobs": 16,
+      "historical_seconds": 92,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_hybrid_quick.yaml",
+      "sha256": "6bf95a74d0fd5be66baf5eb256395357b0b6dc7ad55ddc1cb989898c67d094d2",
+      "shape_jobs": 14,
+      "historical_seconds": 92,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8hs.yaml",
+      "sha256": "ca6d32ecfdc2b177f3655b6682f80f62e1aec50796682ec9d854ef0118e16186",
+      "shape_jobs": 16,
+      "historical_seconds": 91,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_xcc.yaml",
+      "sha256": "85523bbc5bacafede7a7dc3f16b47e74392ef4950ae498d21d7a10229041ea19",
+      "shape_jobs": 49,
+      "historical_seconds": 83,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf4.yaml",
+      "sha256": "353f2003b96c1da299dfdf672a388b2797419e2eb21cfdba329e21e0de717144",
+      "shape_jobs": 8,
+      "historical_seconds": 79,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_hgemm_quick.yaml",
+      "sha256": "3a764cc1f729f74f8d78401ce0be9fee28d57a4107fbcad4de35e1393bb9d042",
+      "shape_jobs": 9,
+      "historical_seconds": 79,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf4_pap.yaml",
+      "sha256": "4302c83bb1ab45444c9ec91bed62678431b0e8222a145e93c660beeec2fdc725",
+      "shape_jobs": 8,
+      "historical_seconds": 78,
+      "validation_elements": -1
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/zgemm_gfx1250.yaml",
+      "sha256": "576002ae0c30e52c93c214066baf03053cc82f2c72334ef57016173c19d15c6e",
+      "shape_jobs": 6,
+      "historical_seconds": 76,
+      "validation_elements": -1
+    }
+  ],
+  "excluded_jobs": 0
+}

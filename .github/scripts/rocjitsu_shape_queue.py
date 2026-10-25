@@ -114,6 +114,8 @@ class Queue:
             "--junit-xml",
             str(directory / "junit.xml"),
         ]
+        if "rocjitsu_evidence" in self.command:
+            test_command += ["--rocjitsu-evidence-dir", str(directory / "evidence")]
         # A per-job subreaper also owns helpers that start separate sessions.
         command = [
             sys.executable,

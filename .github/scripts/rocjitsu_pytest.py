@@ -77,7 +77,7 @@ class Progress:
             outcome=report.outcome,
             seconds=report.duration,
             wasxfail=getattr(report, "wasxfail", None),
-            detail=str(report.longrepr) if report.failed else None,
+            detail=str(report.longrepr) if report.failed or report.skipped else None,
         )
         self.save()
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # This experimental branch reuses the registered workflow path so it can be
 # dispatched by ref without adding a workflow to the default branch.
-name: RocJITsu shape queue experiment
+name: RocJITsu scheduling experiment
 
 on:
   workflow_dispatch:
@@ -15,6 +15,11 @@ on:
         type: string
         description: "Independent serial shape workers (at most the runner CPU count)"
         default: "96"
+      strategy:
+        type: choice
+        description: "Shape queue, whole-YAML comparison, or serial/concurrent safety check"
+        options: [shape, reference, paired, safety]
+        default: shape
       dispatch_threads:
         type: string
         description: "Inclusive dispatch width; 0 uses the artifact config, 1 is serial"
@@ -29,11 +34,11 @@ on:
         default: "600"
       case_filter:
         type: string
-        description: "Required pytest -k expression defining the calibration workload"
+        description: "Use calibration16 for the frozen 16-YAML workload, or an explicit pytest -k expression"
         required: true
       suite_seconds:
         type: string
-        description: "Suite execution limit, excluding setup and reporting"
+        description: "Per-strategy limit; combined trial execution limits must total at most 1500 seconds"
         default: "1200"
 
 permissions:
@@ -48,6 +53,7 @@ jobs:
       build_runs_on: aws-linux-scale-rocm-prod
       amdgpu_families: gfx125X-dcgpu
       artifact_run_id: ${{ inputs.artifact_run_id }}
+      strategy: ${{ inputs.strategy }}
       workers: ${{ inputs.workers }}
       dispatch_threads: ${{ inputs.dispatch_threads }}
       max_work: ${{ inputs.max_work }}

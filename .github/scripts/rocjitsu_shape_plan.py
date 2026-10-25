@@ -102,6 +102,8 @@ def split_yaml(source, nodeid, directory, ceiling):
                     source_sha256=digest(source),
                     work=work,
                     grouped=grouped,
+                    problem_type_index=pi,
+                    group_index=gi - 1,
                     problems=signatures,
                 )
                 # Ductile's search and weights span its shape list. Splitting it
@@ -195,9 +197,6 @@ def pytest_collection_modifyitems(config, items):
     sources = []
     for item in items:
         source = Path(item.callspec.params["config"])
-        sources.append(
-            dict(nodeid=item.nodeid, path=str(source), sha256=digest(source))
-        )
         try:
             admitted, rejected = split_yaml(source, item.nodeid, directory, ceiling)
         except (ValueError, KeyError, TypeError) as error:
@@ -217,6 +216,14 @@ def pytest_collection_modifyitems(config, items):
             markers.append(dict(name=mark.name, args=mark.args, kwargs=mark.kwargs))
         for job in admitted + rejected:
             job["markers"] = markers
+        sources.append(
+            dict(
+                nodeid=item.nodeid,
+                path=str(source),
+                sha256=digest(source),
+                markers=markers,
+            )
+        )
         jobs.extend(admitted)
         excluded.extend(rejected)
     jobs.sort(key=lambda job: (-job["work"], job["nodeid"]))

@@ -90,6 +90,12 @@ def test_teardown(cleanup): pass
         self.assertEqual(progress["passed"], 1)
         self.assertEqual(progress["failed"], 2)
         self.assertEqual(progress["skipped"], 2)
+        skipped = next(
+            value
+            for name, value in progress["tests"].items()
+            if name.endswith("::test_skip")
+        )
+        self.assertIn("unsupported", skipped["phases"]["call"]["detail"])
 
     def test_reaps_detached_client_after_success(self):
         result, execution, progress = self.run_pytest(
