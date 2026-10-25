@@ -34,12 +34,17 @@
  * raises ckc::Error, so call these helpers under ckc::guard_builder (the
  * kernel builders do). The bool returns never answer false to a caller.
  *
- * Not ported yet (later units): deal_chunks, chunk_coords, sgpr_ptr,
+ * Not ported yet (later units): sgpr_ptr,
  * RowSlab.sgpr_ptr, StridedTensorAddr.offset_bytes / stride_bytes / slab_at,
  * StridedBatchedAddr, ThdOffsetAddr, WsSlab.sgpr_ptr / load / load_raw /
- * neutral / atomic_add / atomic_add_row / atomic_add_row_select / store_row /
- * store_vec_in_row, and PackedRows. The slab structs already carry the
+ * neutral / atomic_add_row / atomic_add_row_select / store_row /
+ * store_vec_in_row. The slab structs already carry the
  * (base, offset) parts sgpr_ptr needs.
+ *
+ * Ported by unit P5 (small emitters), in the block at the end of this file:
+ * deal_chunks / chunk_coords, PackedRows (+ locate), WsSlab.atomic_add, and
+ * exported twins of the private helpers _min64 / _max64 / _clamp64_to_i32 /
+ * _scaled32 / _scaled64 / _elem_bytes.
  */
 #ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_ADDR_H
 #define ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_ADDR_H
@@ -311,6 +316,72 @@ rocke_attn_bwd_row_slab_t
                                          rocke_value_t* page_id,
                                          rocke_attn_bwd_iv_t h,
                                          rocke_attn_bwd_iv_t tok0);
+
+/* ===================================================================== *
+ * Unit P5 (small emitters: counted, valu, sinks, paged) additions.
+ * ===================================================================== */
+
+/* Exported twins of the private Python helpers _min64, _max64,
+ * _clamp64_to_i32 (hi is an i32 value), _scaled32, _scaled64 and _elem_bytes
+ * (-1 and a recorded ValueError for an unsupported element type). */
+rocke_value_t* rocke_attn_bwd_min64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+rocke_value_t* rocke_attn_bwd_max64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+rocke_value_t*
+    rocke_attn_bwd_clamp64_to_i32(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* hi);
+rocke_value_t*
+    rocke_attn_bwd_scaled32(rocke_ir_builder_t* b, rocke_value_t* idx, rocke_attn_bwd_iv_t stride);
+rocke_value_t* rocke_attn_bwd_scaled64(rocke_ir_builder_t* b,
+                                       rocke_value_t* idx64,
+                                       rocke_attn_bwd_iv_t stride);
+int rocke_attn_bwd_elem_bytes(rocke_ir_builder_t* b, const rocke_type_t* dtype);
+
+/* deal_chunks(b, tid, total, threads): the generator becomes a round count
+ * plus one call per round. _count is ceil_div(total, threads) (exact for any
+ * sign; -1 and a recorded ValueError when threads == 0, where Python raises
+ * ZeroDivisionError). _round emits round `it` (0-based) when the caller asks
+ * for it: tid for round 0, else tid + const(it * threads); *partial is
+ * (it + 1) * threads > total. */
+int rocke_attn_bwd_deal_chunks_count(rocke_ir_builder_t* b, int64_t total, int64_t threads);
+rocke_value_t* rocke_attn_bwd_deal_chunks_round(rocke_ir_builder_t* b,
+                                                rocke_value_t* tid,
+                                                int64_t total,
+                                                int64_t threads,
+                                                int it,
+                                                bool* partial);
+
+/* chunk_coords: (chunk / per_row, (chunk % per_row) * vec); (chunk, 0) with
+ * no division for per_row == 1. */
+void rocke_attn_bwd_chunk_coords(rocke_ir_builder_t* b,
+                                 rocke_value_t* chunk,
+                                 int per_row,
+                                 int vec,
+                                 rocke_value_t** out_row,
+                                 rocke_value_t** out_col);
+
+/* WsSlab.atomic_add: branch-free fp32 atomic add; rows outside the workspace
+ * add 0. */
+void rocke_attn_bwd_ws_slab_atomic_add(const rocke_attn_bwd_ws_slab_t* s,
+                                       rocke_value_t* r,
+                                       rocke_attn_bwd_iv_t x,
+                                       rocke_value_t* v);
+
+/* PackedRows: (head, row, ok) of each M row of a q step that packs query
+ * heads. Every value is i32. */
+typedef struct rocke_attn_bwd_packed_rows
+{
+    rocke_value_t* head0;
+    rocke_value_t* n_heads;
+    rocke_value_t* rows_per_head;
+    rocke_value_t* row0;
+} rocke_attn_bwd_packed_rows_t;
+
+/* PackedRows.locate(b, r): the head, the row and the ok flag of M row r. */
+void rocke_attn_bwd_packed_rows_locate(const rocke_attn_bwd_packed_rows_t* p,
+                                       rocke_ir_builder_t* b,
+                                       rocke_attn_bwd_iv_t r,
+                                       rocke_value_t** out_head,
+                                       rocke_value_t** out_row,
+                                       rocke_value_t** out_ok);
 
 #ifdef __cplusplus
 }

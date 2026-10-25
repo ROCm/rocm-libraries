@@ -851,3 +851,140 @@ rocke_attn_bwd_row_slab_t
     s.has_parts = false;
     return s;
 }
+
+/* ====================================================================== *
+ * Unit P5 (small emitters: counted, valu, sinks, paged) additions.
+ * ====================================================================== */
+
+rocke_value_t* rocke_attn_bwd_min64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    return min64(b, x, y);
+}
+
+rocke_value_t* rocke_attn_bwd_max64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    return max64(b, x, y);
+}
+
+rocke_value_t*
+    rocke_attn_bwd_clamp64_to_i32(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* hi)
+{
+    return clamp64_to_i32(b, x, hi);
+}
+
+rocke_value_t*
+    rocke_attn_bwd_scaled32(rocke_ir_builder_t* b, rocke_value_t* idx, rocke_attn_bwd_iv_t stride)
+{
+    return scaled32(b, idx, stride);
+}
+
+rocke_value_t*
+    rocke_attn_bwd_scaled64(rocke_ir_builder_t* b, rocke_value_t* idx64, rocke_attn_bwd_iv_t stride)
+{
+    return scaled64(b, idx64, stride);
+}
+
+int rocke_attn_bwd_elem_bytes(rocke_ir_builder_t* b, const rocke_type_t* dtype)
+{
+    return elem_bytes(b, dtype);
+}
+
+/* py: spec.ceil_div(total, threads), exact for any sign. */
+int rocke_attn_bwd_deal_chunks_count(rocke_ir_builder_t* b, int64_t total, int64_t threads)
+{
+    if(threads == 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "deal_chunks: threads must not be 0");
+        return -1;
+    }
+    /* floor(-total / threads) negated, with floor division */
+    int64_t num = -total;
+    int64_t q = num / threads;
+    if((num % threads != 0) && ((num < 0) != (threads < 0)))
+        q -= 1;
+    int64_t n = -q;
+    if(n < 0)
+        n = 0; /* range(negative) is empty */
+    if(n > 0x7fffffff)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "deal_chunks: round count %lld too large", (long long)n);
+        return -1;
+    }
+    return (int)n;
+}
+
+/* py: chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads)) */
+rocke_value_t* rocke_attn_bwd_deal_chunks_round(rocke_ir_builder_t* b,
+                                                rocke_value_t* tid,
+                                                int64_t total,
+                                                int64_t threads,
+                                                int it,
+                                                bool* partial)
+{
+    rocke_value_t* chunk = tid;
+    if(it != 0)
+    {
+        rocke_value_t* c = rocke_b_const_i32(b, (int64_t)it * threads);
+        chunk = rocke_b_add(b, tid, c);
+    }
+    *partial = ((int64_t)it + 1) * threads > total;
+    return chunk;
+}
+
+void rocke_attn_bwd_chunk_coords(rocke_ir_builder_t* b,
+                                 rocke_value_t* chunk,
+                                 int per_row,
+                                 int vec,
+                                 rocke_value_t** out_row,
+                                 rocke_value_t** out_col)
+{
+    if(per_row == 1)
+    {
+        *out_row = chunk;
+        *out_col = rocke_b_const_i32(b, 0);
+        return;
+    }
+    rocke_value_t* cp = rocke_b_const_i32(b, per_row);
+    rocke_value_t* r = rocke_b_div(b, chunk, cp);
+    rocke_value_t* cp2 = rocke_b_const_i32(b, per_row);
+    rocke_value_t* m = rocke_b_mod(b, chunk, cp2);
+    rocke_value_t* cv = rocke_b_const_i32(b, vec);
+    rocke_value_t* c = rocke_b_mul(b, m, cv);
+    *out_row = r;
+    *out_col = c;
+}
+
+void rocke_attn_bwd_ws_slab_atomic_add(const rocke_attn_bwd_ws_slab_t* s,
+                                       rocke_value_t* r,
+                                       rocke_attn_bwd_iv_t x,
+                                       rocke_value_t* v)
+{
+    rocke_ir_builder_t* b = s->b;
+    rocke_value_t* ok = rocke_attn_bwd_ws_slab_row_ok(s, r);
+    rocke_value_t* z = rocke_b_const_f32(b, 0.0);
+    rocke_value_t* val = rocke_b_select(b, ok, v, z);
+    rocke_value_t* idx = rocke_attn_bwd_ws_slab_index(s, r, x);
+    rocke_b_global_atomic_add_f32(b, s->ptr, idx, val);
+}
+
+void rocke_attn_bwd_packed_rows_locate(const rocke_attn_bwd_packed_rows_t* p,
+                                       rocke_ir_builder_t* b,
+                                       rocke_attn_bwd_iv_t r,
+                                       rocke_value_t** out_head,
+                                       rocke_value_t** out_row,
+                                       rocke_value_t** out_ok)
+{
+    rocke_value_t* rr = rocke_attn_bwd_as_i32(b, r);
+    rocke_value_t* hh = rocke_b_div(b, rr, p->rows_per_head);
+    rocke_value_t* hp = rocke_b_mul(b, hh, p->rows_per_head);
+    rocke_value_t* rem = rocke_b_sub(b, rr, hp);
+    rocke_value_t* row = rocke_b_add(b, p->row0, rem);
+    rocke_value_t* ok = rocke_b_cmp_lt(b, hh, p->n_heads);
+    rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* last = rocke_b_sub(b, p->n_heads, c1);
+    rocke_value_t* m = rocke_b_smin(b, hh, last);
+    *out_head = rocke_b_add(b, p->head0, m);
+    *out_row = row;
+    *out_ok = ok;
+}
