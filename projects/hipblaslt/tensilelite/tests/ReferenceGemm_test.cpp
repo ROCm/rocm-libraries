@@ -220,18 +220,34 @@ TEST(ReferenceInvocationAdapter, NonfiniteIntegerScalarReturnsDescriptorFailure)
 {
     auto problem = makePackedProblem(
         rocisa::DataType::Int8, rocisa::DataType::Int8, rocisa::DataType::Int32, 1, 1, 1);
-    int8_t  a = 2, b = 3;
-    int32_t c = 0, d = -99;
-    for(float alpha :
-        {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
-    {
-        const ContractionInputs inputs(&a, &b, &c, &d, alpha, int32_t{0});
-        const auto              translated = hostnumerics::translateGemmInvocation(
-            problem, inputs, roc::hostnumerics::OutputSelection::all({}));
-        ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translated));
-        EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translated).code,
+    int8_t     a = 2, b = 3;
+    int32_t    c = 0, d = -99;
+    const auto expectFailure = [&](const auto& result) {
+        ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(result));
+        EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(result).code,
                   hostnumerics::TranslationFailureCode::InvalidDescriptor);
         EXPECT_EQ(d, -99);
+    };
+    for(auto alphaType : {rocisa::DataType::Int32, rocisa::DataType::Float})
+    {
+        problem.setAlphaType(alphaType);
+        for(float alpha : {std::numeric_limits<float>::quiet_NaN(),
+                           std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity()})
+        {
+            const ContractionInputs inputs(&a, &b, &c, &d, alpha, int32_t{0});
+            const auto              translated = hostnumerics::translateGemmInvocation(
+                problem, inputs, roc::hostnumerics::OutputSelection::all({}));
+            if(alphaType == rocisa::DataType::Float)
+            {
+                ASSERT_TRUE(
+                    std::holds_alternative<hostnumerics::GemmInvocationAdapter>(translated));
+                expectFailure(
+                    std::get<hostnumerics::GemmInvocationAdapter>(translated).translateBatch(0));
+            }
+            else
+                expectFailure(translated);
+        }
     }
 }
 
