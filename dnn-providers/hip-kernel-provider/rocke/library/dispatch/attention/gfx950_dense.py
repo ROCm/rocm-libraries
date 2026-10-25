@@ -159,6 +159,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     ragged it starts at the first registered tile that is not (its ``block_m``
     is then resolved per problem and recorded).
     """
+    from kernels.common.attention_dense_kv_split import max_kv_segments_for_extent
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx950.attention_dense import (
         GFX950_DENSE_LAYOUTS,
@@ -189,16 +190,24 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         # device (see dense_kv_segments).
         cus = int(req.num_cus) if int(req.num_cus) > 0 else _DEFAULT_NUM_PERSISTENT
         batch_heads = int(req.batch) * int(req.nhead_q)
+        # Fewer segments where more would push the FP32 workspace index past i32.
+        max_seg = max_kv_segments_for_extent(
+            req.batch, sq, req.nhead_q, req.hdim_q, max_segments=8
+        )
         if -(-sq // bm) * batch_heads < cus:
             small = DENSE_TILE_GEOMETRIES["bm128"]
             sbm, sbn = int(small["block_m"]), int(small["block_n"])
             if not _is_ragged(sq, sk, sbm, sbn):
                 bm, bn, ragged = sbm, sbn, False
-                kv_segments = dense_kv_segments(-(-sq // bm) * batch_heads, cus)
+                kv_segments = dense_kv_segments(
+                    -(-sq // bm) * batch_heads, cus, max_segments=max_seg
+                )
         elif not ragged:
             # A grid that covers the device can still leave its last wave mostly
             # empty (a head count just past the CU count): split to fill it.
-            kv_segments = dense_wave_segments(-(-sq // bm) * batch_heads, cus)
+            kv_segments = dense_wave_segments(
+                -(-sq // bm) * batch_heads, cus, max_segments=max_seg
+            )
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
             if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
