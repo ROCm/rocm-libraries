@@ -158,6 +158,21 @@ memory-address pairs under 8 cycles.
    61); whole kernels 26693 -> 26630, strict 16937 -> 16914. On b8-3 (interleaved reps) the PR
    alone was +0.49% slower on mxf4 medium; with this step +0.18%, mxf8 maf -0.13%, f8 maf
    finetune +0.14% (15 reps, within noise).
+3c. Prefetch placement (PR #14366, below this stack). The cycle hazard model was also what placed
+   each prefetch: develop fired it at its hazard deadline, about 5 windows after its planned slot.
+   With the model gone the prefetch issues at the slot (`window - lead`), where it ran 1% behind
+   develop on f8 k128k and 1.3% on mxfp8 medium. The pin (`promoteDuePrefetch`, after the
+   window's fills) keeps prefetches where develop put them without the model.
+3d. A negative need-by does not promote. A producer whose window is below 0 can no longer meet it;
+   promoting it only took the slot of a ds the pacer had released. MAB kernels plan the whole
+   prefetch group in window 3, so every address VALU hit this: f8 mab +1.18% -> +0.49%, nvf4 mab
+   -1.11%, mxf8 mab -0.10%.
+3e. Prefetch lead 40 -> 30 (`KernelWriter.py`). 40 was measured while the model added the delay.
+   gfx1250 MAF sweep (5 reps, % vs develop, leads 25/30/35/40/45): the average is -0.10/-0.30/-0.16/
+   +0.27/+0.86; 40 and above lose on every kernel but one, 30 is never worse than +0.02. A 64-window
+   stage (4x8 tile) shows the same band: good 15-30, bad at 10 and from 35. The cliff moved by about
+   5 windows when the stage halved, so the lead is a time (about 130-290 cycles before the next
+   tensor_load), not a fraction of the stage.
 4. Next: filler pacer (catch-up instead of the per-window quota), replacing the critical fillers
    and the strict-count hold; cross-queue order in its init plan.
 5. Rule 2 as a hold, once the pacer gives held VALUs a later slot. Tried alone it made things
@@ -170,6 +185,13 @@ memory-address pairs under 8 cycles.
   pass's BB entry state.
 - When a candidate needs both `va_vdst` and `vm_vsrc`, how their two counts combine in the rank.
 - Loop strict waits rose by 5 in step 3: traced and fixed in step 3b (medium mxf8 stays at 5).
+- `f8_tn_mab` stays +0.49% behind develop. Its loop is 8 WMMAs; develop issues the 3 prefetches at
+  the end (window 8), the stack at 6, 7, 8, taking the `va_vdst` wait develop avoided by waiting out
+  the gap. Holding a pinned prefetch while `untilFree > 0` should restore 8, bounded by the barrier
+  that precedes its load (the planned window is 3 and the barrier issues at 8).
+- The prefetch lead is an empirical time, not derived. The MI400 shader guide gives the semantics
+  (a SCOPE_SE prefetch fills GL2 only, returns nothing, and only VM_VSRC waits on it) but no
+  latencies. A formula would need the TDM completion time and GL2 residency.
 - The 5 left in medium mxf8 are the LDS read-address swap `v_xor` after the last ds that reads the
   old address (`vm_vsrc(0)`). Its need-by window (4-8) is far behind the region (WMMA 12-20), so
   holding it only delays the ds that need the new address. The cause is ds issuing late
