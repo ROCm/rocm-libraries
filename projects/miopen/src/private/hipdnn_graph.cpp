@@ -254,7 +254,8 @@ miopenStatus_t RunGraph(HandleState& state,
                         const GraphPtr& graph,
                         VariantPack& variantPack,
                         void* callerWorkspace,
-                        size_t callerWorkspaceSize)
+                        size_t callerWorkspaceSize,
+                        const GraphScratch& scratch)
 {
     const std::lock_guard<std::mutex> lock(state.mutex);
 
@@ -263,8 +264,18 @@ miopenStatus_t RunGraph(HandleState& state,
         return RecordHipdnnFailure(error);
 
     void* workspace = callerWorkspace;
-    if(needed > 0 &&
-       (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
+    if(scratch.bytes > 0)
+    {
+        // The scratch follows the graph's workspace in the handle's buffer.
+        constexpr size_t alignment = 256;
+        const size_t offset = (static_cast<size_t>(needed) + alignment - 1) / alignment * alignment;
+        if(!state.EnsureWorkspace(offset + scratch.bytes))
+            return RecordFailure(miopenStatusAllocFailed, "hipDNN scratch allocation failed");
+        workspace = state.workspace;
+        scratch.bind(variantPack, static_cast<char*>(state.workspace) + offset);
+    }
+    else if(needed > 0 &&
+            (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
     {
         if(!state.EnsureWorkspace(static_cast<size_t>(needed)))
             return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
@@ -343,7 +354,8 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PopulateGraphFn& populate,
                               VariantPack& variantPack,
                               void* workspace,
-                              size_t workspaceSize)
+                              size_t workspaceSize,
+                              const GraphScratch& scratch)
 {
     hipStream_t stream = nullptr;
     if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
@@ -368,7 +380,7 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
     if(graph == nullptr)
         return status;
 
-    return RunGraph(*state, graph, variantPack, workspace, workspaceSize);
+    return RunGraph(*state, graph, variantPack, workspace, workspaceSize, scratch);
 }
 
 bool IsAvailable()

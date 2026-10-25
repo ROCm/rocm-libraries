@@ -233,7 +233,92 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle)
     return miopenStatusSuccess;
 }
 
+// MIOpen's problem description knows only 2-D (rank 4) and 3-D (rank 5)
+// batchnorm and throws for any other rank, which reaches the caller as
+// UnknownError. MIOpen builds it right after the scale-factor checks, before
+// it looks for a solver, so this check runs at the same point.
+miopenStatus_t CheckSpatialRank(const BnProblem& problem)
+{
+    const size_t rank = problem.tensors[kIdxX].dims.size();
+    if(rank == 4 || rank == 5)
+        return miopenStatusSuccess;
+    return RecordFailure(miopenStatusUnknownError,
+                         "batchnorm supports only 4-D and 5-D tensors (Unknown spatial dim!)");
+}
+
+bool IsSolverIoType(miopenDataType_t type)
+{
+    return type == miopenFloat || type == miopenHalf || type == miopenBFloat16;
+}
+
+// The data types every MIOpen batchnorm solver needs: x, y (or dy) and dx all
+// FLOAT, all HALF or all BFLOAT16, and FLOAT scale, bias and statistics. The
+// BadParm checks have already matched y to x on forward and dx to dy on
+// backward, but not x to dy.
+bool HasSolverDataTypes(const std::vector<TensorInfo>& tensors)
+{
+    const miopenDataType_t type = tensors[kIdxX].dataType;
+    if(!IsSolverIoType(type))
+        return false;
+    for(size_t index : {kIdxY, kIdxDx})
+    {
+        if(index < tensors.size() && tensors[index].dataType != type)
+            return false;
+    }
+    return std::all_of(tensors.begin() + kIdxScale,
+                       tensors.begin() + kIdxVar + 1,
+                       [](const TensorInfo& tensor) { return tensor.dataType == miopenFloat; });
+}
+
+// The activations MIOpen's spatial training and inference solvers accept.
+bool IsSolverActivation(miopenActivationMode_t act)
+{
+    return act == miopenActivationPASTHRU || act == miopenActivationRELU ||
+           act == miopenActivationCLIPPEDRELU || act == miopenActivationCLAMP;
+}
+
+// When no MIOpen solver applies, MIOpen fails with NotImplemented ("No solver
+// found"), so the forwarded call does too. Training has a spatial and a
+// per-activation solver, and only the spatial one limits the activation.
+// Inference has one solver for both modes, which limits it. Backward has a
+// spatial and a per-activation solver, and the per-activation one accepts
+// spatial problems with any activation, so backward never fails on one.
+miopenStatus_t CheckSolverExists(const BnProblem& problem)
+{
+    if(!HasSolverDataTypes(problem.tensors))
+        return RecordFailure(miopenStatusNotImplemented,
+                             "MIOpen has no batchnorm solver for these data types");
+    bool limitsActivation = false;
+    switch(problem.kind)
+    {
+    case GraphKind::BnFwdTraining: limitsActivation = problem.bnMode == miopenBNSpatial; break;
+    case GraphKind::BnFwdInference:
+    case GraphKind::BnFwdInferenceInvVar: limitsActivation = true; break;
+    case GraphKind::BnBackward:
+    case GraphKind::BnBackwardActivation:
+    case GraphKind::ConvFprop:
+    case GraphKind::ConvDgrad:
+    case GraphKind::ConvWgrad:
+    case GraphKind::ConvBiasActivation: break;
+    }
+    if(limitsActivation && !IsSolverActivation(problem.act))
+        return RecordFailure(miopenStatusNotImplemented,
+                             std::string("MIOpen has no batchnorm solver for the ") +
+                                 ActivationModeName(problem.act) + " activation");
+    return miopenStatusSuccess;
+}
+
+// The checks between MIOpen's scale-factor checks and its solver: the rank,
+// then whether any solver applies.
+miopenStatus_t CheckProblem(const BnProblem& problem)
+{
+    if(const miopenStatus_t status = CheckSpatialRank(problem); status != miopenStatusSuccess)
+        return status;
+    return CheckSolverExists(problem);
+}
+
 // What the MIOpen provider can run, whatever the kind. Empty when it can.
+// CheckProblem has already limited the rank to 4 or 5.
 std::string CheckSupported(const BnProblem& problem)
 {
     const std::vector<TensorInfo>& tensors = problem.tensors;
@@ -245,16 +330,13 @@ std::string CheckSupported(const BnProblem& problem)
     if(problem.act != miopenActivationPASTHRU && !ToPointwiseActivation(problem.act, activation))
         return std::string("hipDNN batchnorm does not support the ") +
                ActivationModeName(problem.act) + " activation";
-    if(x.dims.size() < 3 || x.dims.size() > 5)
-        return "hipDNN batchnorm supports only 3 to 5 dimensions";
     // Before the packed test, so a truncated tensor is declined for the reason
     // that applies to it.
     if(const char* reason = CheckTensorLayouts(tensors))
         return reason;
     if(!std::all_of(tensors.begin(), tensors.end(), IsPacked))
         return "hipDNN batchnorm supports only packed tensors";
-    if(x.dataType != miopenFloat && x.dataType != miopenHalf && x.dataType != miopenBFloat16)
-        return "hipDNN batchnorm supports only FLOAT, HALF and BFLOAT16 data";
+    // CheckProblem has limited every type to one a MIOpen solver accepts.
     for(size_t index : {kIdxY, kIdxDx})
     {
         if(index >= tensors.size())
@@ -269,8 +351,6 @@ std::string CheckSupported(const BnProblem& problem)
     channelDims[1] = x.dims[1];
     for(size_t index = kIdxScale; index <= kIdxVar; ++index)
     {
-        if(tensors[index].dataType != miopenFloat)
-            return "hipDNN batchnorm supports only FLOAT scale, bias and statistics";
         if(tensors[index].dims != channelDims)
             return "hipDNN batchnorm needs scale, bias and statistics shaped {1, C, 1, ...}";
     }
@@ -481,7 +561,10 @@ bool PopulateGraph(const BnProblem& problem, fe::graph::Graph& graph)
     return false;
 }
 
-miopenStatus_t RunProblem(miopenHandle_t handle, const BnProblem& problem, VariantPack& variantPack)
+miopenStatus_t RunProblem(miopenHandle_t handle,
+                          const BnProblem& problem,
+                          VariantPack& variantPack,
+                          const GraphScratch& scratch = {})
 {
     return RunCachedGraph(
         handle,
@@ -489,7 +572,29 @@ miopenStatus_t RunProblem(miopenHandle_t handle, const BnProblem& problem, Varia
         [&problem](fe::graph::Graph& graph) { return PopulateGraph(problem, graph); },
         variantPack,
         nullptr,
-        0);
+        0,
+        scratch);
+}
+
+size_t FloatBytes(const TensorInfo& info)
+{
+    size_t count = 1;
+    for(int64_t dim : info.dims)
+        count *= static_cast<size_t>(dim);
+    return count * sizeof(float);
+}
+
+// The training graph always produces the saved statistics. When the caller
+// wants none, they go to scratch instead and are dropped.
+GraphScratch SavedStatsScratch(const BnProblem& problem)
+{
+    const size_t meanBytes = FloatBytes(problem.tensors[kIdxMean]);
+    const size_t varOffset = (meanBytes + 255) / 256 * 256;
+    return {varOffset + FloatBytes(problem.tensors[kIdxVar]),
+            [varOffset](VariantPack& variantPack, void* scratch) {
+                variantPack[kUidSavedMean]   = scratch;
+                variantPack[kUidSavedInvVar] = static_cast<char*>(scratch) + varOffset;
+            }};
 }
 
 // Shared by the five training entry points. The ones that update the running
@@ -537,31 +642,30 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
     if(const miopenStatus_t status = CheckScaleFactors(alpha, beta, miopenStatusUnknownError);
        status != miopenStatusSuccess)
         return status;
+    if(const miopenStatus_t status = CheckProblem(problem); status != miopenStatusSuccess)
+        return status;
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
     if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
         return status;
-    if(saveMean == nullptr || saveInvVariance == nullptr)
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "hipDNN batchnorm training always produces the saved mean and "
-                             "inverse variance, so both must be given");
-    const bool anyRunning = prevRunningMean != nullptr || prevRunningVariance != nullptr ||
-                            nextRunningMean != nullptr || nextRunningVariance != nullptr;
+    // Like MIOpen, write the saved statistics only when both are given, and
+    // update the running statistics only when all four are.
+    const bool saveStats    = saveMean != nullptr && saveInvVariance != nullptr;
     problem.hasRunningStats = prevRunningMean != nullptr && prevRunningVariance != nullptr &&
                               nextRunningMean != nullptr && nextRunningVariance != nullptr;
-    if(anyRunning && !problem.hasRunningStats)
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "running mean and variance must all be given or all be null");
 
     VariantPack variantPack{
         {kUidX, const_cast<void*>(x)},
         {kUidY, y},
         {kUidScale, scale},
         {kUidBias, bias},
-        {kUidSavedMean, saveMean},
-        {kUidSavedInvVar, saveInvVariance},
     };
+    if(saveStats)
+    {
+        variantPack[kUidSavedMean]   = saveMean;
+        variantPack[kUidSavedInvVar] = saveInvVariance;
+    }
     // An in-place update binds one buffer as both input and output. That holds
     // because the graph runs exactly once; it must never be re-run to tune.
     if(problem.hasRunningStats)
@@ -571,7 +675,8 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
         variantPack[kUidNextRunMean] = nextRunningMean;
         variantPack[kUidNextRunVar]  = nextRunningVariance;
     }
-    return RunProblem(handle, problem, variantPack);
+    return RunProblem(
+        handle, problem, variantPack, saveStats ? GraphScratch{} : SavedStatsScratch(problem));
 }
 
 // Shared by the five inference entry points. With an epsilon the statistics
@@ -596,6 +701,34 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
                                 std::optional<double> epsilon,
                                 miopenActivationDescriptor_t activDesc)
 {
+    // Without the statistics MIOpen runs training instead, with no running
+    // update and no saved statistics, and with the statistics' descriptors as
+    // the saved ones. It makes this choice before any inference check.
+    if(mean == nullptr || variance == nullptr)
+        return ForwardTraining(handle,
+                               bnMode,
+                               alpha,
+                               beta,
+                               xDesc,
+                               x,
+                               yDesc,
+                               y,
+                               scaleDesc,
+                               biasDesc,
+                               meanDesc,
+                               varianceDesc,
+                               scale,
+                               bias,
+                               0.0,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               nullptr,
+                               epsilon.value_or(kDefaultEpsilon),
+                               nullptr,
+                               nullptr,
+                               activDesc);
+
     if(!IsAvailable())
         return RecordFailure(miopenStatusInternalError, "hipDNN forwarding is unavailable");
 
@@ -607,17 +740,12 @@ miopenStatus_t ForwardInference(miopenHandle_t handle,
            problem, {xDesc, yDesc, scaleDesc, biasDesc, meanDesc, varianceDesc}, activDesc))
         return RecordFailure(miopenStatusBadParm, reason);
 
-    // Without the statistics MIOpen silently runs training instead, which an
-    // inference graph cannot reproduce. MIOpen makes this choice before any
-    // inference check, so the decline comes first too.
-    if(mean == nullptr || variance == nullptr)
-        return RecordFailure(miopenStatusUnsupportedOp,
-                             "hipDNN batchnorm inference needs the estimated mean and variance");
-
     if(const char* reason = CheckForwardParams(problem, false, x, y, scale, bias))
         return RecordFailure(miopenStatusBadParm, reason);
     if(const miopenStatus_t status = CheckScaleFactors(alpha, beta, miopenStatusBadParm);
        status != miopenStatusSuccess)
+        return status;
+    if(const miopenStatus_t status = CheckProblem(problem); status != miopenStatusSuccess)
         return status;
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
@@ -687,6 +815,8 @@ miopenStatus_t Backward(miopenHandle_t handle,
     if(const miopenStatus_t status =
            CheckScaleFactors(alphaParamDiff, betaParamDiff, miopenStatusBadParm);
        status != miopenStatusSuccess)
+        return status;
+    if(const miopenStatus_t status = CheckProblem(problem); status != miopenStatusSuccess)
         return status;
     // MIOpen would write through these, so a null one has no behavior to match.
     if(dscale == nullptr || dbias == nullptr)

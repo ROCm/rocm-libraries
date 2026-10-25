@@ -550,6 +550,41 @@ inline void ExpectForwardedDecline(const CallResult& result, const char* reason 
         EXPECT_NE(result.logged.find(reason), std::string::npos) << result.logged;
 }
 
+// For a case MIOpen serves and the forwarded path may decline. Natively, some conv problems fail
+// with UnknownError, so unknown_error_declines counts that as a decline in that mode only.
+// Returns whether the case was served.
+inline bool RecordGapOutcome(const std::string& case_name,
+                             const CallResult& result,
+                             const char* reason          = nullptr,
+                             bool unknown_error_declines = false)
+{
+    const bool served   = result.status == miopenStatusSuccess;
+    const bool declined = result.status == miopenStatusUnsupportedOp ||
+                          result.status == miopenStatusNotImplemented ||
+                          (unknown_error_declines && !ForwardingEnabled() &&
+                           result.status == miopenStatusUnknownError);
+    EXPECT_TRUE(served || declined)
+        << case_name << ": unexpected status " << result.status << ": " << result.message << '\n'
+        << result.logged;
+    if(declined)
+        ExpectForwardedDecline(result, reason);
+    RecordServed(case_name, served);
+    return served;
+}
+
+// For a case where both modes must return the same status.
+inline void ExpectStatusParity(const std::string& case_name,
+                               const CallResult& result,
+                               miopenStatus_t expected,
+                               const char* reason = nullptr)
+{
+    EXPECT_EQ(result.status, expected) << case_name << ": " << result.message << '\n'
+                                       << result.logged;
+    RecordStatus(case_name, result.status);
+    if(result.status != miopenStatusSuccess)
+        ExpectForwardedDecline(result, reason);
+}
+
 // The parity comparison matches known divergences against this device. Recorded only when a
 // shim test is selected, because in a single-binary build this runs for every test selection,
 // and most of those must not touch the GPU.

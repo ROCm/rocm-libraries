@@ -107,6 +107,17 @@ miopenStatus_t RecordCurrentException() noexcept;
 
 using PopulateGraphFn = std::function<bool(hipdnn_frontend::graph::Graph&)>;
 using VariantPack     = std::unordered_map<int64_t, void*>;
+using BindScratchFn   = std::function<void(VariantPack&, void*)>;
+
+// Device scratch for graph outputs the caller has no buffer for. RunCachedGraph
+// carves `bytes` from the handle's buffer and passes their start to `bind`,
+// which adds the scratch pointers to the variant pack. The scratch is reused by
+// the next call on the handle, so its contents are lost.
+struct GraphScratch
+{
+    size_t bytes = 0;
+    BindScratchFn bind;
+};
 
 // Runs the graph for `key` on `handle`'s stream. On a cache miss, `populate`
 // fills in a new graph, which is then built and cached. The caller's workspace
@@ -117,7 +128,8 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PopulateGraphFn& populate,
                               VariantPack& variantPack,
                               void* workspace,
-                              size_t workspaceSize);
+                              size_t workspaceSize,
+                              const GraphScratch& scratch = {});
 
 } // namespace hipdnn
 } // namespace wrapper

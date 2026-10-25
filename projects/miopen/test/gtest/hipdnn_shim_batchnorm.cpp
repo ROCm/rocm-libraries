@@ -6,9 +6,11 @@
 // miopenBatchNorm* API and check against the fusionHost.hpp CPU reference. The
 // plain tests cover what those fixtures cannot reach: epsilon and momentum in
 // the plan key, running stats updated in place, null save and running pointers,
-// and the cases the hipDNN path declines while MIOpen serves them. Each of those
-// records whether the call was served so the parity harness can pin the
-// expected divergences.
+// inference without estimated stats, and the cases the hipDNN path declines
+// while MIOpen serves them. Each of those records whether the call was served so
+// the parity harness can pin the expected divergences. The rest record the
+// status, for problems both modes must fail the same way: alpha/beta other than
+// 1/0, and problems no MIOpen solver takes.
 //
 // Not covered, because MIOpen itself has no defined behavior to compare with:
 // null alpha/beta pointers (MIOpen dereferences them), null dscale/dbias on
@@ -18,6 +20,7 @@
 #include "bn.hpp"
 #include "hipdnn_shim_helpers.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -309,12 +312,16 @@ void CheckBwd(miopen::Handle& handle, BwdData& d)
     test::CompareTensor<float>(d.dBias, d.dBias_ref, kTol);
 }
 
-// Backward without saved stats recomputes them from x. The CPU reference reads
-// only savedMean and savedInvVar, so give it the true per-channel stats of the
-// NCHW input (biased variance, as the kernels use).
-void FillTrueStats(BwdData& d, double eps)
+struct BatchStats
 {
-    const auto& lens    = d.input.desc.GetLengths();
+    std::vector<double> mean;
+    std::vector<double> variance; // biased, as the kernels use
+};
+
+// The true per-channel stats of an NCHW input.
+BatchStats ComputeBatchStats(const tensor<float>& input)
+{
+    const auto& lens    = input.desc.GetLengths();
     const std::size_t n = lens[0];
     const std::size_t c = lens[1];
     std::size_t spatial = 1;
@@ -322,12 +329,13 @@ void FillTrueStats(BwdData& d, double eps)
         spatial *= lens[i];
     const double count = static_cast<double>(n * spatial);
 
+    BatchStats stats{std::vector<double>(c), std::vector<double>(c)};
     for(std::size_t ci = 0; ci < c; ++ci)
     {
         double sum = 0.0;
         for(std::size_t ni = 0; ni < n; ++ni)
             for(std::size_t i = 0; i < spatial; ++i)
-                sum += d.input.data[(ni * c + ci) * spatial + i];
+                sum += input.data[(ni * c + ci) * spatial + i];
         const double mean = sum / count;
 
         double sq = 0.0;
@@ -335,14 +343,34 @@ void FillTrueStats(BwdData& d, double eps)
         {
             for(std::size_t i = 0; i < spatial; ++i)
             {
-                const double diff = d.input.data[(ni * c + ci) * spatial + i] - mean;
+                const double diff = input.data[(ni * c + ci) * spatial + i] - mean;
                 sq += diff * diff;
             }
         }
 
-        d.savedMean.data[ci]   = static_cast<float>(mean);
-        d.savedInvVar.data[ci] = static_cast<float>(1.0 / std::sqrt(sq / count + eps));
+        stats.mean[ci]     = mean;
+        stats.variance[ci] = sq / count;
     }
+    return stats;
+}
+
+// Backward without saved stats recomputes them from x. The CPU reference reads
+// only savedMean and savedInvVar, so give it the true stats of the input.
+void FillTrueStats(BwdData& d, double eps)
+{
+    const BatchStats stats = ComputeBatchStats(d.input);
+    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
+    {
+        d.savedMean.data[ci]   = static_cast<float>(stats.mean[ci]);
+        d.savedInvVar.data[ci] = static_cast<float>(1.0 / std::sqrt(stats.variance[ci] + eps));
+    }
+}
+
+// True when every element still holds the NaN the test data poisoned it with.
+bool Untouched(miopen::Handle& handle, const miopen::Allocator::ManageDataPtr& dev, std::size_t n)
+{
+    const auto values = handle.Read<float>(dev, n);
+    return std::all_of(values.begin(), values.end(), [](float v) { return std::isnan(v); });
 }
 
 // A served call or an expected decline. A decline must come from the hipDNN path
@@ -812,23 +840,24 @@ TEST(GPU_HipdnnShimBNFwdTrainActivationV2_FP32, SeparateRunningStatsMatchCpuRefe
 }
 
 // MIOpen serves every combination and skips the save or running update whose
-// pointers are not all given. The hipDNN graph always produces the saved stats
-// and needs the running stats all or none.
+// pointers are not all given. The hipDNN graph always produces the saved stats,
+// so the shim writes them to scratch when the caller does not take them. A buffer
+// of a skipped group must be left as it was: the saved mean keeps its poison and
+// the running mean its initial value.
 TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
 {
     struct NullCase
     {
         const char* name;
         TrainPointers pointers;
-        const char* decline_reason;
     };
 
     const std::vector<NullCase> cases = {
-        {"save_only", {true, true, false, false}, nullptr},
-        {"running_only", {false, false, true, true}, "always produces the saved mean"},
-        {"neither", {false, false, false, false}, "always produces the saved mean"},
-        {"save_var_missing", {true, false, true, true}, "always produces the saved mean"},
-        {"run_var_missing", {true, true, true, false}, "all be given or all be null"},
+        {"save_only", {true, true, false, false}},
+        {"running_only", {false, false, true, true}},
+        {"neither", {false, false, false, false}},
+        {"save_var_missing", {true, false, true, true}},
+        {"run_var_missing", {true, true, true, false}},
     };
 
     auto&& handle = get_handle();
@@ -837,17 +866,20 @@ TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
         SCOPED_TRACE(c.name);
         TrainData d;
         SetUpTrain(d);
+        const auto initial_run_mean = d.runMean.data;
 
         const auto result = hs::CaptureCall([&] { return TrainV2(handle, d, c.pointers); });
-        const bool served = RecordOutcome(c.name, result, c.decline_reason);
-        if(c.decline_reason == nullptr)
-            EXPECT_TRUE(served);
-        if(served)
-        {
-            const bool save    = c.pointers.save_mean && c.pointers.save_var;
-            const bool running = c.pointers.run_mean && c.pointers.run_var;
-            CheckTrain(handle, d, save, running);
-        }
+        EXPECT_TRUE(RecordOutcome(c.name, result, nullptr));
+        if(result.status != miopenStatusSuccess)
+            continue;
+
+        const bool save    = c.pointers.save_mean && c.pointers.save_var;
+        const bool running = c.pointers.run_mean && c.pointers.run_var;
+        if(c.pointers.save_mean && !save)
+            EXPECT_TRUE(Untouched(handle, d.saveMean_dev, d.saveMean.data.size()));
+        if(c.pointers.run_mean && !running)
+            EXPECT_EQ(handle.Read<float>(d.runMean_dev, initial_run_mean.size()), initial_run_mean);
+        CheckTrain(handle, d, save, running);
     }
 }
 
@@ -928,16 +960,27 @@ TEST(GPU_HipdnnShimBNGaps_FP32, ClampActivation)
     }
 }
 
-// MIOpen silently runs training when the estimated stats are null; there is no
-// inference result to compare, so only the outcome is recorded.
-TEST(GPU_HipdnnShimBNGaps_FP32, InferenceWithoutEstimatedStats)
+// MIOpen silently runs training when the estimated stats are null, so the output
+// is x normalized with its own batch stats: the inference reference given those
+// stats as its estimates.
+TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 {
     auto&& handle = get_handle();
 
     InferData d;
     SetUpInfer(d);
     const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-    RecordOutcome("infer_no_estimates", result, "needs the estimated mean and variance");
+    EXPECT_TRUE(RecordOutcome("infer_no_estimates", result, nullptr));
+    if(result.status != miopenStatusSuccess)
+        return;
+
+    const BatchStats stats = ComputeBatchStats(d.input);
+    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
+    {
+        d.estMean.data[ci]     = static_cast<float>(stats.mean[ci]);
+        d.estVariance.data[ci] = static_cast<float>(stats.variance[ci]);
+    }
+    CheckInfer(handle, d);
 }
 
 // Epsilon is 1e-5 so the shim gets past its epsilon check and declines for the
@@ -1116,5 +1159,195 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         hs::RecordStatus("alpha_beta_bwd", result.status);
         if(result.status != miopenStatusSuccess)
             hs::ExpectForwardedDecline(result, reason);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Problems no MIOpen solver takes
+
+namespace {
+
+// A tensor with an uninitialized device buffer, for calls both modes reject
+// before any kernel runs.
+struct RawTensor
+{
+    RawTensor(miopen::Handle& handle, miopenDataType_t type, std::vector<std::size_t> lens)
+        : desc(type, std::move(lens)), dev(handle.Create(desc.GetNumBytes()))
+    {
+    }
+
+    miopen::TensorDescriptor desc;
+    miopen::Allocator::ManageDataPtr dev;
+};
+
+std::vector<std::size_t> StatLens(const std::vector<std::size_t>& x_lens)
+{
+    std::vector<std::size_t> lens(x_lens.size(), 1);
+    lens[1] = x_lens[1];
+    return lens;
+}
+
+// y takes x's type, dx takes dy's, and scale, bias and the statistics take
+// stat_type.
+struct RawProblem
+{
+    RawProblem(miopen::Handle& handle,
+               const std::vector<std::size_t>& x_lens,
+               miopenDataType_t x_type,
+               miopenDataType_t dy_type,
+               miopenDataType_t stat_type)
+        : x(handle, x_type, x_lens),
+          y(handle, x_type, x_lens),
+          dy(handle, dy_type, x_lens),
+          dx(handle, dy_type, x_lens),
+          scale(handle, stat_type, StatLens(x_lens)),
+          bias(handle, stat_type, StatLens(x_lens)),
+          mean(handle, stat_type, StatLens(x_lens)),
+          variance(handle, stat_type, StatLens(x_lens)),
+          dscale(handle, stat_type, StatLens(x_lens)),
+          dbias(handle, stat_type, StatLens(x_lens))
+    {
+        EXPECT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+        SetActivation(miopenActivationPASTHRU);
+    }
+
+    void SetActivation(miopenActivationMode_t mode)
+    {
+        EXPECT_EQ(miopenSetActivationDescriptor(activ.handle, mode, 0.1, 0.3, 0.0),
+                  miopenStatusSuccess);
+    }
+
+    miopenStatus_t Train(miopen::Handle& handle)
+    {
+        return miopenBatchNormForwardTrainingActivation(&handle,
+                                                        miopenBNSpatial,
+                                                        &one,
+                                                        &zero,
+                                                        &x.desc,
+                                                        x.dev.get(),
+                                                        &y.desc,
+                                                        y.dev.get(),
+                                                        &scale.desc,
+                                                        &bias.desc,
+                                                        &mean.desc,
+                                                        &variance.desc,
+                                                        scale.dev.get(),
+                                                        bias.dev.get(),
+                                                        0.1,
+                                                        mean.dev.get(),
+                                                        variance.dev.get(),
+                                                        1e-5,
+                                                        nullptr,
+                                                        nullptr,
+                                                        activ.handle);
+    }
+
+    miopenStatus_t Infer(miopen::Handle& handle)
+    {
+        return miopenBatchNormForwardInferenceActivation(&handle,
+                                                         miopenBNSpatial,
+                                                         &one,
+                                                         &zero,
+                                                         &x.desc,
+                                                         x.dev.get(),
+                                                         &y.desc,
+                                                         y.dev.get(),
+                                                         &scale.desc,
+                                                         &bias.desc,
+                                                         &mean.desc,
+                                                         &variance.desc,
+                                                         scale.dev.get(),
+                                                         bias.dev.get(),
+                                                         mean.dev.get(),
+                                                         variance.dev.get(),
+                                                         1e-5,
+                                                         activ.handle);
+    }
+
+    miopenStatus_t Bwd(miopen::Handle& handle)
+    {
+        return miopenBatchNormalizationBackward(&handle,
+                                                miopenBNSpatial,
+                                                &one,
+                                                &zero,
+                                                &one,
+                                                &zero,
+                                                &x.desc,
+                                                x.dev.get(),
+                                                &dy.desc,
+                                                dy.dev.get(),
+                                                &dx.desc,
+                                                dx.dev.get(),
+                                                &scale.desc,
+                                                scale.dev.get(),
+                                                dscale.dev.get(),
+                                                dbias.dev.get(),
+                                                1e-5,
+                                                mean.dev.get(),
+                                                variance.dev.get());
+    }
+
+    RawTensor x, y, dy, dx, scale, bias, mean, variance, dscale, dbias;
+    hs::OwnedActivationDescriptor activ;
+    float one  = 1.0f;
+    float zero = 0.0f;
+};
+
+} // namespace
+
+// MIOpen fails these after its parameter checks, with UnknownError for a rank
+// its problem description does not know and NotImplemented when no solver
+// applies. The hipDNN path must return the same status rather than decline them
+// as unsupported. Each problem passes the parameter checks, so y matches x on
+// forward and dx matches dy on backward.
+TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
+{
+    auto&& handle = get_handle();
+    const std::vector<std::size_t> nchw{2, 4, 8, 8};
+    const char* no_solver = "no batchnorm solver";
+
+    {
+        SCOPED_TRACE("rank 3 train");
+        RawProblem p(handle, {2, 4, 64}, miopenFloat, miopenFloat, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_rank3_train", result, miopenStatusUnknownError, "Unknown spatial dim");
+    }
+    {
+        SCOPED_TRACE("tanh train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.SetActivation(miopenActivationTANH);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_tanh_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    {
+        SCOPED_TRACE("tanh infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.SetActivation(miopenActivationTANH);
+        const auto result = hs::CaptureCall([&] { return p.Infer(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_tanh_infer", result, miopenStatusNotImplemented, no_solver);
+    }
+    {
+        SCOPED_TRACE("double train");
+        RawProblem p(handle, nchw, miopenDouble, miopenDouble, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_double_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    {
+        SCOPED_TRACE("half scale train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenHalf);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_half_scale_train", result, miopenStatusNotImplemented, no_solver);
+    }
+    {
+        SCOPED_TRACE("mixed bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenHalf, miopenFloat);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "no_solver_mixed_bwd", result, miopenStatusNotImplemented, no_solver);
     }
 }

@@ -31,8 +31,17 @@ namespace hipdnn {
 //   x, but not the rank of dx.
 // - miopenStatusBadParm for non-default alpha or beta on inference and backward.
 // - miopenStatusUnknownError for non-default alpha or beta on training.
-// MIOpen never returns miopenStatusNotImplemented for batch normalization, so
-// nothing here returns it either. Convolution is different.
+// - miopenStatusUnknownError when x does not have 4 or 5 dimensions. MIOpen's
+//   problem description supports only those ranks.
+// - miopenStatusNotImplemented when no MIOpen solver applies: x, y, dy or dx
+//   not FLOAT, HALF or BFLOAT16, or scale, bias or statistics not FLOAT. Also
+//   an activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP on spatial
+//   training and on inference. Backward has a solver for every activation.
+//
+// Like MIOpen, the wrapper writes the saved statistics on training only when
+// both pointers are given, and updates the running statistics only when all
+// four are. Inference without an estimated mean or variance runs training, as
+// MIOpen does.
 //
 // Where hipDNN cannot express a problem that MIOpen accepts, the call fails with
 // miopenStatusUnsupportedOp. MIOpen does not run the call instead. The caller can
@@ -42,17 +51,13 @@ namespace hipdnn {
 // - Any mode other than miopenBNSpatial.
 // - Any activation other than ReLU or PASTHRU. A null activation descriptor
 //   means no activation, as it does in MIOpen.
-// - Tensors that are not packed, that have fewer than 3 or more than 5
-//   dimensions, or whose scale, bias or statistics are not {1, C, 1, ...}.
-//   MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x is declined here, not
-//   rejected with miopenStatusBadParm.
+// - Tensors that are not packed, data tensors of different types or shapes, or
+//   scale, bias or statistics not shaped {1, C, 1, ...}. MIOpen reshapes a 5-D x
+//   to 4-D, so a non-packed 5-D x is declined here, not rejected with
+//   miopenStatusBadParm.
 // - Training or backward when the handle has a tuning policy other than
 //   miopenTuningPolicyNone. The provider runs on its own handle and cannot apply
 //   the policy. Inference has no tunable solver, so the policy does not matter.
-// - Inference with a null estimated mean or variance. MIOpen runs training in
-//   that case.
-// - Training with a null saved mean or inverse variance.
-// - Training with some, but not all, running statistics.
 // - Backward without the saved statistics and an epsilon other than 1e-5. The
 //   provider recomputes the statistics with epsilon 1e-5 only.
 // - Backward with an activation and without the saved statistics.
