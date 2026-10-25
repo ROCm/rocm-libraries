@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <miopen/bfloat16.hpp>
+#include <half/half.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/env.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/solver/ck_impl_error.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_solution.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
@@ -16,6 +21,9 @@
 #include <array>
 #include <cstdint>
 #include <utility>
+#include <cmath>
+#include <type_traits>
+#include <iterator>
 
 #include <vector>
 #include <thread>
@@ -27,6 +35,7 @@
 #include "get_handle.hpp"
 #include <algorithm>
 #include <cmath>
+#include "../workspace.hpp"
 #endif
 
 using miopen::solver::CKSolverType;
@@ -1025,6 +1034,374 @@ void CheckNcdhwForwardOverwriteAndAliasFallback(miopenDataType_t dtype)
     }
 }
 
+static bool IsNativeOutputKernel(const std::string& id) { return id.find("NativeOutput:") == 0; }
+
+static miopen::conv::ProblemDescription
+MakeNativeOutputForwardProblem(miopenDataType_t dtype,
+                               unsigned spatial_dims,
+                               int stride,
+                               std::size_t outputs_per_group,
+                               bool channels_last   = false,
+                               miopen::Scalar alpha = miopen::Scalar(1.0),
+                               miopen::Scalar beta  = miopen::Scalar(0.0))
+{
+    const auto layout = spatial_dims == 2 ? (channels_last ? miopenTensorNHWC : miopenTensorNCHW)
+                                          : (channels_last ? miopenTensorNDHWC : miopenTensorNCDHW);
+    // C/G=8, two groups/batches; K/G=20 exercises the output tile tail.
+    std::vector<std::size_t> xl{2, 16};
+    if(spatial_dims == 3)
+        xl.push_back(stride == 1 ? 5 : 9);
+    xl.push_back(stride == 1 ? 7 : 9);
+    xl.push_back(stride == 1 ? 9 : 15);
+    std::vector<std::size_t> wl{2 * outputs_per_group, 8};
+    wl.resize(spatial_dims + 2, 3);
+    const miopen::TensorDescriptor x(dtype, layout, xl);
+    const miopen::TensorDescriptor w(dtype, layout, wl);
+    const miopen::ConvolutionDescriptor conv(std::vector<int>(spatial_dims, stride),
+                                             std::vector<int>(spatial_dims, stride),
+                                             std::vector<int>(spatial_dims, stride),
+                                             std::vector<int>(spatial_dims, 0),
+                                             2);
+    const auto y = conv.GetForwardOutputTensor(x, w, dtype);
+    return {x, w, y, conv, miopen::conv::Direction::Forward, 0, alpha, beta};
+}
+
+template <typename DataType>
+static std::vector<DataType>
+NativeOutputForwardReference(const miopen::conv::ProblemDescription& problem,
+                             const std::vector<DataType>& input,
+                             const std::vector<DataType>& weights)
+{
+    const auto& xl   = problem.GetIn().GetLengths();
+    const auto& xs   = problem.GetIn().GetStrides();
+    const auto& wl   = problem.GetWeights().GetLengths();
+    const auto& ws   = problem.GetWeights().GetStrides();
+    const auto& yl   = problem.GetOut().GetLengths();
+    const auto dims  = problem.GetSpatialDims();
+    const auto& conv = problem.GetConv();
+    std::size_t taps = 1;
+    for(unsigned d = 0; d < dims; ++d)
+        taps *= wl[d + 2];
+    std::vector<DataType> expected(problem.GetOut().GetElementSize());
+    for(std::size_t i = 0; i < expected.size(); ++i)
+    {
+        std::array<std::size_t, 5> output_coordinate{};
+        auto remainder = i;
+        for(std::size_t d = yl.size(); d-- > 0;)
+        {
+            output_coordinate[d] = remainder % yl[d];
+            remainder /= yl[d];
+        }
+        const auto n     = output_coordinate[0];
+        const auto k     = output_coordinate[1];
+        const auto group = k / (wl[0] / problem.GetGroupCount());
+        double sum       = 0;
+        for(std::size_t c = 0; c < wl[1]; ++c)
+            for(std::size_t tap = 0; tap < taps; ++tap)
+            {
+                auto xi               = n * xs[0] + (group * wl[1] + c) * xs[1];
+                auto wi               = k * ws[0] + c * ws[1];
+                auto filter_remainder = tap;
+                bool inside           = true;
+                for(unsigned d = dims; d-- > 0;)
+                {
+                    const auto filter_coordinate = filter_remainder % wl[d + 2];
+                    filter_remainder /= wl[d + 2];
+                    const auto position =
+                        static_cast<int>(output_coordinate[d + 2]) * conv.GetConvStrides()[d] +
+                        static_cast<int>(filter_coordinate) * conv.GetConvDilations()[d] -
+                        conv.GetConvPads()[d];
+                    if(position < 0 || static_cast<std::size_t>(position) >= xl[d + 2])
+                    {
+                        inside = false;
+                        break;
+                    }
+                    xi += static_cast<std::size_t>(position) * xs[d + 2];
+                    wi += filter_coordinate * ws[d + 2];
+                }
+                if(inside)
+                    sum += static_cast<double>(static_cast<float>(input[xi])) *
+                           static_cast<float>(weights[wi]);
+            }
+        expected[i] = DataType{static_cast<float>(sum)};
+    }
+    return expected;
+}
+
+template <typename DataType>
+static void CheckNativeOutputForward(miopenDataType_t dtype, unsigned spatial_dims)
+{
+    const auto device_name = GetCurrentDeviceName();
+    const bool gfx1250     = device_name.substr(0, device_name.find(':')) == "gfx1250";
+    const auto& loader     = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!gfx1250 && !loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
+    ASSERT_TRUE(loader.IsLoaded()) << "Required CK library not installed for " << device_name;
+    const auto solver = spatial_dims == 2 ? CKSolverType::GrpConvFwd : CKSolverType::GrpConv3dFwd;
+    const auto expect_no_native = [&](const auto& problem, bool tf32 = false) {
+        const auto ids = loader.FillValidKernels(solver, problem, dtype, tf32);
+        EXPECT_TRUE(std::none_of(ids.begin(), ids.end(), IsNativeOutputKernel));
+    };
+    const auto base = MakeNativeOutputForwardProblem(dtype, spatial_dims, 1, 20);
+    expect_no_native(MakeNativeOutputForwardProblem(dtype, spatial_dims, 1, 20, true));
+    expect_no_native(MakeNativeOutputForwardProblem(dtype, spatial_dims, 1, 19));
+    {
+        auto pointwise_lengths = base.GetWeights().GetLengths();
+        std::fill(pointwise_lengths.begin() + 2, pointwise_lengths.end(), 1);
+        const auto layout = spatial_dims == 2 ? miopenTensorNCHW : miopenTensorNCDHW;
+        const miopen::TensorDescriptor weights(dtype, layout, pointwise_lengths);
+        const miopen::ConvolutionDescriptor conv(std::vector<int>(spatial_dims, 0),
+                                                 std::vector<int>(spatial_dims, 1),
+                                                 std::vector<int>(spatial_dims, 1),
+                                                 std::vector<int>(spatial_dims, 0),
+                                                 2);
+        expect_no_native(miopen::conv::ProblemDescription{
+            base.GetIn(),
+            weights,
+            conv.GetForwardOutputTensor(base.GetIn(), weights, dtype),
+            conv,
+            miopen::conv::Direction::Forward});
+    }
+    for(const auto scalars : {std::pair<double, double>{2.0, 0.0},
+                              {1.0, 1.0},
+                              {1.0 + std::ldexp(1.0, -30), 0.0},
+                              {1.0, std::ldexp(1.0, -150)}})
+        expect_no_native(MakeNativeOutputForwardProblem(dtype,
+                                                        spatial_dims,
+                                                        1,
+                                                        20,
+                                                        false,
+                                                        miopen::Scalar(scalars.first),
+                                                        miopen::Scalar(scalars.second)));
+    if(dtype == miopenFloat)
+        expect_no_native(base, true);
+    if(!gfx1250)
+    {
+        expect_no_native(base);
+        return;
+    }
+
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    constexpr std::size_t outputs_per_group = 20;
+    for(const int stride : {1, 2})
+    {
+        auto problem =
+            MakeNativeOutputForwardProblem(dtype, spatial_dims, stride, outputs_per_group);
+        problem.SetupFloats(ctx);
+        problem.SetupComputeType(ctx);
+        const auto kernels = loader.FillValidKernels(solver, problem, dtype, false);
+        std::vector<std::string> native;
+        std::copy_if(
+            kernels.begin(), kernels.end(), std::back_inserter(native), IsNativeOutputKernel);
+        ASSERT_FALSE(native.empty()) << "dims=" << spatial_dims << " stride=" << stride;
+        const auto& x_desc = problem.GetIn();
+        const auto& w_desc = problem.GetWeights();
+        const auto& y_desc = problem.GetOut();
+        const miopen::MultiBufferWorkspaceTraits regions(
+            {miopen::solver::GetPackedSize(x_desc), miopen::solver::GetPackedSize(w_desc)});
+        // A 16-byte-aligned, non-256-byte-aligned base is supported; region offsets still
+        // follow MultiBufferWorkspaceTraits' 256-byte padding.
+        constexpr std::size_t guard = 16;
+        // Oversize each operand allocation so an erroneously accepted alias stays in-bounds.
+        const auto operand_bytes = std::max(
+            {x_desc.GetNumBytes(), w_desc.GetNumBytes(), y_desc.GetNumBytes(), regions.GetSize()});
+        Workspace x_buffer(operand_bytes + 2 * guard);
+        Workspace w_buffer(operand_bytes + 2 * guard);
+        Workspace y_buffer(operand_bytes + 2 * guard);
+        auto* x_ptr = static_cast<unsigned char*>(x_buffer.ptr()) + guard;
+        auto* w_ptr = static_cast<unsigned char*>(w_buffer.ptr()) + guard;
+        auto* y_ptr = static_cast<unsigned char*>(y_buffer.ptr()) + guard;
+        std::vector<DataType> input(x_desc.GetElementSize());
+        std::vector<DataType> weights(w_desc.GetElementSize());
+        for(const auto& selected : native)
+        {
+            SCOPED_TRACE(selected);
+            const auto solution = loader.GetSolution(solver, ctx, problem, selected, false);
+            ASSERT_EQ(solution.status, miopenStatusSuccess);
+            ASSERT_TRUE(solution.invoker_factory);
+            ASSERT_EQ(solution.workspace_sz, regions.GetSize());
+            Workspace scratch(solution.workspace_sz + y_desc.GetNumBytes() + 2 * guard);
+            auto* scratch_ptr = static_cast<unsigned char*>(scratch.ptr()) + guard;
+            const auto invoker =
+                handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+            for(const int pass : {0, 1})
+            {
+                SCOPED_TRACE(pass);
+                // Change BOTH operands without changing their device pointers.
+                // FP32 fractions distinguish exact input products from TF32 truncation.
+                for(std::size_t i = 0; i < input.size(); ++i)
+                {
+                    float value =
+                        static_cast<float>(static_cast<int>((i * 13 + i / 7 + pass) % 5) - 2);
+                    if constexpr(std::is_same_v<DataType, float>)
+                        value = value / 16 + (pass == 0 ? 1.0f : -1.0f) / 8192;
+                    input[i] = DataType{value};
+                }
+                for(std::size_t i = 0; i < weights.size(); ++i)
+                {
+                    float value =
+                        static_cast<float>(static_cast<int>((i * 17 + i / 11 + pass) % 3) - 1);
+                    if constexpr(std::is_same_v<DataType, float>)
+                        value = value / 16 + (pass == 0 ? 1.0f : -1.0f) / 4096;
+                    weights[i] = DataType{value};
+                }
+                ASSERT_EQ(hipMemset(x_buffer.ptr(), 0xa5, x_buffer.size()), hipSuccess);
+                ASSERT_EQ(hipMemset(w_buffer.ptr(), 0xa5, w_buffer.size()), hipSuccess);
+                if(pass == 0)
+                    ASSERT_EQ(hipMemset(y_buffer.ptr(), 0xa5, y_buffer.size()), hipSuccess);
+                ASSERT_EQ(hipMemset(scratch.ptr(), 0xa5, scratch.size()), hipSuccess);
+                ASSERT_EQ(
+                    hipMemcpy(x_ptr, input.data(), x_desc.GetNumBytes(), hipMemcpyHostToDevice),
+                    hipSuccess);
+                ASSERT_EQ(
+                    hipMemcpy(w_ptr, weights.data(), w_desc.GetNumBytes(), hipMemcpyHostToDevice),
+                    hipSuccess);
+                // First launch sees poison; second launch sees the previous result.
+                if(pass == 0)
+                    ASSERT_EQ(hipMemset(y_ptr, 0x7f, y_desc.GetNumBytes()), hipSuccess);
+                const auto x_before = x_buffer.Read<std::vector<unsigned char>>();
+                const auto w_before = w_buffer.Read<std::vector<unsigned char>>();
+                const miopen::ConvFwdTensors tensors{x_desc, x_ptr, w_desc, w_ptr, y_desc, y_ptr};
+                miopen::conv::DataInvokeParams params{
+                    tensors, scratch_ptr, solution.workspace_sz, false};
+                if(pass == 0 && stride == 1 && selected == native.front())
+                {
+                    const auto y_before       = y_buffer.Read<std::vector<unsigned char>>();
+                    const auto scratch_before = scratch.Read<std::vector<unsigned char>>();
+                    const auto reject         = [&](const auto& invalid) {
+                        EXPECT_THROW(invoker(handle, invalid), miopen::Exception);
+                        handle.Finish();
+                        EXPECT_EQ(y_buffer.Read<std::vector<unsigned char>>(), y_before);
+                        EXPECT_EQ(x_buffer.Read<std::vector<unsigned char>>(), x_before);
+                        EXPECT_EQ(w_buffer.Read<std::vector<unsigned char>>(), w_before);
+                        EXPECT_EQ(scratch.Read<std::vector<unsigned char>>(), scratch_before);
+                    };
+                    auto invalid      = params;
+                    invalid.workSpace = nullptr;
+                    reject(invalid);
+                    invalid = params;
+                    invalid.workSpaceSize--;
+                    reject(invalid);
+                    invalid           = params;
+                    invalid.workSpace = scratch_ptr + 1;
+                    reject(invalid);
+                    for(auto* operand : {x_ptr, w_ptr, y_ptr})
+                    {
+                        invalid           = params;
+                        invalid.workSpace = operand;
+                        reject(invalid);
+                    }
+                    for(auto* alias : {x_ptr, x_ptr + 16, w_ptr, w_ptr + 16, scratch_ptr})
+                    {
+                        invalid             = params;
+                        invalid.tensors.out = alias;
+                        reject(invalid);
+                    }
+                    invalid           = params;
+                    invalid.tensors.w = x_ptr;
+                    reject(invalid);
+                    for(unsigned slot = 0; slot < 3; ++slot)
+                    {
+                        invalid = params;
+                        if(slot == 0)
+                            invalid.tensors.in = nullptr;
+                        else if(slot == 1)
+                            invalid.tensors.w = nullptr;
+                        else
+                            invalid.tensors.out = nullptr;
+                        reject(invalid);
+                        invalid = params;
+                        if(slot == 0)
+                            invalid.tensors.in = x_ptr + 1;
+                        else if(slot == 1)
+                            invalid.tensors.w = w_ptr + 1;
+                        else
+                            invalid.tensors.out = y_ptr + 1;
+                        reject(invalid);
+                        for(unsigned mismatch = 0; mismatch < 4; ++mismatch)
+                        {
+                            invalid      = params;
+                            auto& desc   = slot == 0   ? invalid.tensors.inDesc
+                                           : slot == 1 ? invalid.tensors.wDesc
+                                                       : invalid.tensors.outDesc;
+                            auto lengths = desc.GetLengths();
+                            auto strides = desc.GetStrides();
+                            const auto layout =
+                                spatial_dims == 2 ? miopenTensorNCHW : miopenTensorNCDHW;
+                            if(mismatch == 0)
+                            {
+                                strides[1]++;
+                                desc = miopen::TensorDescriptor(dtype, layout, lengths, strides);
+                            }
+                            else if(mismatch == 1)
+                            {
+                                lengths.back()--;
+                                desc = miopen::TensorDescriptor(dtype, layout, lengths);
+                            }
+                            else if(mismatch == 2)
+                                desc = miopen::TensorDescriptor(
+                                    dtype,
+                                    spatial_dims == 2 ? miopenTensorNHWC : miopenTensorNDHWC,
+                                    lengths);
+                            else
+                                desc = miopen::TensorDescriptor(dtype == miopenFloat ? miopenHalf
+                                                                                     : miopenFloat,
+                                                                layout,
+                                                                lengths);
+                            reject(invalid);
+                        }
+                    }
+                    for(const auto scalars : {std::pair<double, double>{2.0, 0.0},
+                                              {1.0, 1.0},
+                                              {1.0 + std::ldexp(1.0, -30), 0.0},
+                                              {1.0, std::ldexp(1.0, -150)}})
+                    {
+                        invalid       = params;
+                        invalid.alpha = miopen::Scalar(scalars.first);
+                        invalid.beta  = miopen::Scalar(scalars.second);
+                        reject(invalid);
+                    }
+                }
+                if(pass == 1)
+                {
+                    const float alpha = 1, beta = 0;
+                    params.alpha = miopen::Scalar(&alpha, miopenFloat);
+                    params.beta  = miopen::Scalar(&beta, miopenFloat);
+                }
+                invoker(handle, params);
+                handle.Finish();
+                const auto expected = NativeOutputForwardReference(problem, input, weights);
+                std::vector<DataType> actual(expected.size());
+                ASSERT_EQ(
+                    hipMemcpy(actual.data(), y_ptr, y_desc.GetNumBytes(), hipMemcpyDeviceToHost),
+                    hipSuccess);
+                for(std::size_t i = 0; i < actual.size(); ++i)
+                {
+                    if constexpr(std::is_same_v<DataType, float>)
+                        EXPECT_NEAR(actual[i], expected[i], 1e-6f) << "index=" << i;
+                    else
+                        EXPECT_EQ(static_cast<float>(actual[i]), static_cast<float>(expected[i]))
+                            << "index=" << i;
+                }
+                EXPECT_EQ(x_buffer.Read<std::vector<unsigned char>>(), x_before);
+                EXPECT_EQ(w_buffer.Read<std::vector<unsigned char>>(), w_before);
+                const auto check_guards = [&](const Workspace& buffer, std::size_t used) {
+                    const auto bytes = buffer.Read<std::vector<unsigned char>>();
+                    EXPECT_TRUE(std::all_of(bytes.begin(),
+                                            bytes.begin() + guard,
+                                            [](unsigned char b) { return b == 0xa5; }));
+                    EXPECT_TRUE(std::all_of(bytes.begin() + guard + used,
+                                            bytes.end(),
+                                            [](unsigned char b) { return b == 0xa5; }));
+                };
+                check_guards(y_buffer, y_desc.GetNumBytes());
+                check_guards(scratch, solution.workspace_sz);
+            }
+        }
+    }
+}
+
 TEST(GPU_CkImplLoader_FP32, NcdhwForwardOverwriteAndAliasFallback)
 {
     CheckNcdhwForwardOverwriteAndAliasFallback<float>(miopenFloat);
@@ -1149,6 +1526,36 @@ TEST(GPU_CkImplLoader_FP16, NchwWrwOverwriteAndAliasFallback)
 TEST(GPU_CkImplLoader_BFP16, NchwWrwOverwriteAndAliasFallback)
 {
     CheckNchwWrwOverwriteAndAliasFallback<bfloat16>(miopenBFloat16);
+}
+
+TEST(GPU_CkImplLoader_FP16, NchwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<half_float::half>(miopenHalf, 2);
+}
+
+TEST(GPU_CkImplLoader_BF16, NchwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<bfloat16>(miopenBFloat16, 2);
+}
+
+TEST(GPU_CkImplLoader_FP32, NchwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<float>(miopenFloat, 2);
+}
+
+TEST(GPU_CkImplLoader_FP16, NcdhwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<half_float::half>(miopenHalf, 3);
+}
+
+TEST(GPU_CkImplLoader_BF16, NcdhwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<bfloat16>(miopenBFloat16, 3);
+}
+
+TEST(GPU_CkImplLoader_FP32, NcdhwNativeOutputOverwriteAndValidation)
+{
+    CheckNativeOutputForward<float>(miopenFloat, 3);
 }
 
 TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)

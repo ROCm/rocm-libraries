@@ -14,6 +14,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added gfx1250 FP16/BF16/exact-FP32 grouped forward candidates with channels-last operands and native NCHW/NCDHW output stores, avoiding an output-layout conversion when selected.
 * Added a gfx1250 BF16 unmerged two-stage backward-weight candidate with scalar output-gradient loads and vectorized input-channel loads for skinny-channel long reductions.
 * Added gfx1250 BF16 RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
 

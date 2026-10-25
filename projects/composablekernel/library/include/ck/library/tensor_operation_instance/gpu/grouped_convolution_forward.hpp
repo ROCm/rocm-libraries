@@ -14,6 +14,7 @@
 #if defined(CK_USE_GFX1250) && defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
 #include "grouped_conv_fwd/device_grouped_conv_fwd_nchw_pointwise_instance.hpp"
 #endif
+#include "grouped_convolution_forward_native_output.inc"
 
 #ifdef DL_KERNELS
 #include "grouped_convolution_forward_dl.inc"
@@ -95,6 +96,55 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
         {
             add_device_grouped_conv2d_fwd_nchw_pointwise_f16_instances(op_ptrs);
         }
+#endif
+
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+        if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NHWGC> &&
+                     is_same_v<WeiLayout, GKYXC> && is_same_v<OutLayout, NGKHW> &&
+                     is_same_v<InDataType, half_t> && is_same_v<WeiDataType, half_t> &&
+                     is_same_v<OutDataType, half_t> && is_same_v<AComputeType, half_t> &&
+                     is_same_v<BComputeType, half_t>)
+            add_device_grouped_conv2d_fwd_native_output_nhwgc_gkyxc_ngkhw_f16_instances(op_ptrs);
+#endif
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_BF16)
+        if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NHWGC> &&
+                     is_same_v<WeiLayout, GKYXC> && is_same_v<OutLayout, NGKHW> &&
+                     is_same_v<InDataType, bhalf_t> && is_same_v<WeiDataType, bhalf_t> &&
+                     is_same_v<OutDataType, bhalf_t> && is_same_v<AComputeType, bhalf_t> &&
+                     is_same_v<BComputeType, bhalf_t>)
+            add_device_grouped_conv2d_fwd_native_output_nhwgc_gkyxc_ngkhw_bf16_instances(op_ptrs);
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
+        if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NHWGC> &&
+                     is_same_v<WeiLayout, GKYXC> && is_same_v<OutLayout, NGKHW> &&
+                     is_same_v<InDataType, float> && is_same_v<WeiDataType, float> &&
+                     is_same_v<OutDataType, float> && is_same_v<AComputeType, float> &&
+                     is_same_v<BComputeType, float>)
+            add_device_grouped_conv2d_fwd_native_output_nhwgc_gkyxc_ngkhw_f32_instances(op_ptrs);
+#endif
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+        if constexpr(NumDimSpatial == 3 && is_same_v<InLayout, NDHWGC> &&
+                     is_same_v<WeiLayout, GKZYXC> && is_same_v<OutLayout, NGKDHW> &&
+                     is_same_v<InDataType, half_t> && is_same_v<WeiDataType, half_t> &&
+                     is_same_v<OutDataType, half_t> && is_same_v<AComputeType, half_t> &&
+                     is_same_v<BComputeType, half_t>)
+            add_device_grouped_conv3d_fwd_native_output_ndhwgc_gkzyxc_ngkdhw_f16_instances(op_ptrs);
+#endif
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_BF16)
+        if constexpr(NumDimSpatial == 3 && is_same_v<InLayout, NDHWGC> &&
+                     is_same_v<WeiLayout, GKZYXC> && is_same_v<OutLayout, NGKDHW> &&
+                     is_same_v<InDataType, bhalf_t> && is_same_v<WeiDataType, bhalf_t> &&
+                     is_same_v<OutDataType, bhalf_t> && is_same_v<AComputeType, bhalf_t> &&
+                     is_same_v<BComputeType, bhalf_t>)
+            add_device_grouped_conv3d_fwd_native_output_ndhwgc_gkzyxc_ngkdhw_bf16_instances(op_ptrs);
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
+        if constexpr(NumDimSpatial == 3 && is_same_v<InLayout, NDHWGC> &&
+                     is_same_v<WeiLayout, GKZYXC> && is_same_v<OutLayout, NGKDHW> &&
+                     is_same_v<InDataType, float> && is_same_v<WeiDataType, float> &&
+                     is_same_v<OutDataType, float> && is_same_v<AComputeType, float> &&
+                     is_same_v<BComputeType, float>)
+            add_device_grouped_conv3d_fwd_native_output_ndhwgc_gkzyxc_ngkdhw_f32_instances(op_ptrs);
 #endif
 
 #ifdef DL_KERNELS
