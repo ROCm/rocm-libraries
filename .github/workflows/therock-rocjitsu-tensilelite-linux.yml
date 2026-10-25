@@ -33,6 +33,9 @@ on:
       case_filter:
         type: string
         default: ""
+      job_minutes:
+        type: number
+        default: 400
       suite_seconds:
         type: number
         default: 19800
@@ -45,7 +48,7 @@ jobs:
     name: rocjitsu tensilelite (${{ inputs.amdgpu_families }})
     continue-on-error: true
     runs-on: ${{ inputs.build_runs_on }}
-    timeout-minutes: 400
+    timeout-minutes: ${{ inputs.job_minutes }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host

@@ -44,3 +44,4 @@ jobs:
       dispatch_threads: ${{ inputs.dispatch_threads }}
       case_filter: ${{ inputs.case_filter }}
       suite_seconds: ${{ inputs.suite_seconds }}
+      job_minutes: 35
