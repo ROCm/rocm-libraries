@@ -153,19 +153,21 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
 def test_a_slots_knobs_are_its_own_tuning_fields() -> None:
     folders = _split()
     by_slot = {slot["name"]: slot["knobs"] for slot in _ued(folders)["slots"]}
-    # head_dim is graph-determined, so only the schedule fields are knobs.
+    # head_dim is a graph fact but also an alternative of dkdv and dq, whose tiles overlap;
+    # prep has no tile knob, and every slot's schedule fields are knobs.
     assert by_slot == {
         "prep": ["block_m", "waves_per_eu"],
-        "dkdv": ["block_m", "waves_per_eu"],
-        "dq": ["block_m", "waves_per_eu"],
+        "dkdv": ["head_dim", "block_m", "waves_per_eu"],
+        "dq": ["head_dim", "block_m", "waves_per_eu"],
     }
     for op, slot in zip(SLOT_OPS, SLOTS):
         fields = [
             f["name"] for f in folders[Path(op)][f"flydsl_{op}.kmd.json"]["fields"]
         ]
         assert set(by_slot[slot]) <= set(fields)
-        assert not set(by_slot[slot]) & gd.GRAPH_DETERMINED_FIELDS
-        assert set(by_slot[slot]) == set(fields) & gd.TUNING_FIELDS
+        alternatives = gd.ALTERNATIVE_KNOBS[op]
+        assert not set(by_slot[slot]) & gd.GRAPH_DETERMINED_FIELDS - alternatives
+        assert set(by_slot[slot]) == set(fields) & (gd.TUNING_FIELDS | alternatives)
     # reduce_symbol is graph-determined: a dq KMD field, never a knob.
     assert "reduce_symbol" in {
         f["name"]

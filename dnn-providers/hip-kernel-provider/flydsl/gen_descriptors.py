@@ -138,6 +138,14 @@ GENERIC_N = 0
 # `GENERIC_N` sentinel; a null anywhere else is a generator bug, not a tier.
 SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 
+# **What a knob is.** A knob is a performance alternative with overlapping coverage: two
+# kernels that serve the same graph and differ in it are interchangeable, and autotune
+# chooses between them. A knob is never a feature field, one that decides whether a kernel
+# serves a graph at all (dtype, causal or window, dropout, has_bias, the reduce kernel).
+# The runtime also requires the kernels that serve one graph to have distinct knob tuples
+# (GenericPlanBuilder's enumeration), so a field that tells apart kernels serving the same
+# graph must be a knob, whatever else it is; ALTERNATIVE_KNOBS below lists those per op.
+#
 # Fields the graph fixes rather than the tuner choosing. They belong in the
 # metadata schema -- the matcher needs every one of them to pick a variant --
 # but not in the engine's `knobs` list, which names what autotune may vary.
@@ -155,7 +163,9 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
 # dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
 # `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
-# the bias layout (an LDS-staged bias needs the 16-byte row contract).
+# the bias layout (an LDS-staged bias needs the 16-byte row contract). The matchers keep
+# reading all of them; the ones several kernels of an SDPA backward op share a graph on
+# are also knobs of that op (ALTERNATIVE_KNOBS).
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -219,6 +229,40 @@ TUNING_FIELDS = {
     "tight_registers",
     "num_stream_buffers",
 }
+
+# Graph-determined fields that are also knobs of one op, because kernels of that op with
+# overlapping coverage differ in them. The matcher still reads each as a graph fact, so a
+# dBias graph matches only dB-storing rows; the knob only addresses the alternatives among
+# the rows that match. Per op and graph, the distinct values are:
+#   padded      an exact tile and the padded tile of the same size serve a graph of that size
+#               (merged: the tile-32 pair)
+#   head_dim    the tile: a graph is served by its own tile and, for padded and `g1` rows, by
+#               larger ones. It is the build tile (head_dim_v is not a function of it: a dQ
+#               row carries the rung below its tile there)
+#   floor       tail and `g1` rows of one tile
+#   dform       a baked-dropout and a runtime-dropout row
+#   gqa_pack    a packed and an unpacked dK/dV (and merged) row serve a grouped graph
+#   store_db    a dB-storing and a dB-less dQ (and merged) row serve a bias graph without dBias
+#   bias_stage  a staged and a direct bias row
+# `tests/test_sdpa_bwd_enumeration.py` checks both directions over the shipped catalogue.
+ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
+    "sdpa_bwd_prep": frozenset({"padded"}),
+    "sdpa_bwd_dkdv": frozenset({"head_dim", "padded", "floor", "dform", "gqa_pack"}),
+    "sdpa_bwd_dq": frozenset(
+        {"head_dim", "padded", "floor", "dform", "bias_stage", "store_db"}
+    ),
+    "sdpa_bwd_merged": frozenset({"padded", "gqa_pack", "store_db"}),
+}
+
+
+def knob_fields(op: str, fields: Any) -> list[str]:
+    """The fields of @p fields that @p op's engine exposes as knobs, in schema order."""
+    return [
+        f
+        for f in fields
+        if f in TUNING_FIELDS or f in ALTERNATIVE_KNOBS.get(op, frozenset())
+    ]
+
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
@@ -444,7 +488,7 @@ class OpDescriptors:
                 # The UHD that orders the engine's kernel catalog, on every arch.
                 "sort_kernel_catalog": {"default": self.uhd_id},
                 "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
+                "knobs": knob_fields(self.op, self.fields),
             },
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -517,7 +561,8 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
             raise HkpPackError(
                 f"{entries[0].op}: metadata field '{name}' must be in exactly one of "
                 f"GRAPH_DETERMINED_FIELDS, SELECTION_FIELDS and TUNING_FIELDS "
-                f"(found in {homes or 'none'}); only TUNING_FIELDS become knobs"
+                f"(found in {homes or 'none'}); only TUNING_FIELDS and the op's "
+                f"ALTERNATIVE_KNOBS become knobs"
             )
     return fields
 
@@ -641,7 +686,7 @@ class SplitEngine:
                     {
                         "name": slot.slot,
                         "metadata": slot.kmd_id,
-                        "knobs": [f for f in slot.fields if f in TUNING_FIELDS],
+                        "knobs": knob_fields(slot.op, slot.fields),
                     }
                     for slot in self.slot_ops.values()
                 ],

@@ -1,15 +1,16 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""An engine exposes as knobs only the schedule its objects were built with.
+"""An engine exposes as knobs only performance alternatives, never feature fields.
 
 A UED's ``knobs`` are what a caller may pin and what autotune and the UHD tooling treat
-as the variant space. A field the graph fixes (``has_bias``, ``head_dim``) or a tier
+as the variant space. A field the graph fixes (``has_bias``, ``dtype``) or a tier
 bound the matcher gates on (``head_dim_max``) is no choice: offering it would have a
 caller pin, and a model rank on, a value the graph already decided.
 ``gen_descriptors.py`` classifies every metadata field into one of three sets and
-exposes only ``TUNING_FIELDS``; these tests hold the shipped UEDs to that and require
-the generator to refuse a field it cannot classify. A slotted engine (the SDPA backward
+exposes ``TUNING_FIELDS`` plus, for an SDPA backward op, the graph-determined fields its
+kernels differ in while serving the same graph (``ALTERNATIVE_KNOBS``); these tests hold
+the shipped UEDs to that and require the generator to refuse a field it cannot classify. A slotted engine (the SDPA backward
 split) is descriptor-only and keeps its knobs per slot, against each slot's own KMD. They
 read only the op-level descriptors in git, so they need no ``dvc pull``.
 """
@@ -58,8 +59,10 @@ def _kmd_fields(root: Path, kmd_id: str) -> list[str]:
     raise AssertionError(f"no KMD {kmd_id} under {root}")
 
 
-def _knob_owners(ued: dict, ued_dir: Path, root: Path) -> list[tuple[str, list, list]]:
-    """(label, declared knobs, the KMD's fields) for each owner of knobs in a UED.
+def _knob_owners(
+    ued: dict, ued_dir: Path, root: Path
+) -> list[tuple[str, str, list, list]]:
+    """(label, op, declared knobs, the KMD's fields) for each owner of knobs in a UED.
 
     An unslotted engine owns its knobs and sits beside its KMD. A slotted engine is
     descriptor-only: each slot owns its knobs and names its own KMD, which sits in the
@@ -67,10 +70,13 @@ def _knob_owners(ued: dict, ued_dir: Path, root: Path) -> list[tuple[str, list, 
     """
     if "slots" not in ued:
         kmd = json.loads(next(ued_dir.glob("*.kmd.json")).read_text(encoding="utf-8"))
-        return [("engine", ued["knobs"], [f["name"] for f in kmd["fields"]])]
+        return [
+            ("engine", ued_dir.name, ued["knobs"], [f["name"] for f in kmd["fields"]])
+        ]
     return [
         (
             f"slot {slot['name']}",
+            f"sdpa_bwd_{slot['name']}",
             slot.get("knobs", []),
             _kmd_fields(root, slot["metadata"]),
         )
@@ -80,10 +86,12 @@ def _knob_owners(ued: dict, ued_dir: Path, root: Path) -> list[tuple[str, list, 
 
 def _assert_exposes_exactly_tuning_fields(ued_path: Path, root: Path) -> None:
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
-    for label, knobs, fields in _knob_owners(ued, ued_path.parent, root):
-        expected = [f for f in fields if f in gen_descriptors.TUNING_FIELDS]
-        assert knobs == expected, label
-        assert not set(knobs) & gen_descriptors.GRAPH_DETERMINED_FIELDS, label
+    for label, op, knobs, fields in _knob_owners(ued, ued_path.parent, root):
+        assert knobs == gen_descriptors.knob_fields(op, fields), label
+        alternatives = gen_descriptors.ALTERNATIVE_KNOBS.get(op, frozenset())
+        assert (
+            not set(knobs) & gen_descriptors.GRAPH_DETERMINED_FIELDS - alternatives
+        ), label
 
 
 @pytest.mark.parametrize("ued_path", UEDS, ids=lambda p: p.parent.name)
@@ -118,10 +126,11 @@ def test_a_slotted_engine_exposes_exactly_each_slots_tuning_fields(
         slot["name"]: slot["knobs"]
         for slot in json.loads(ued_path.read_text(encoding="utf-8"))["slots"]
     }
+    # head_dim is an alternative of dkdv and dq (their tiles overlap); prep has no tile knob.
     assert knobs == {
         "prep": ["block_m"],
-        "dkdv": ["block_m", "waves_per_eu"],
-        "dq": ["block_m", "role_order"],
+        "dkdv": ["head_dim", "block_m", "waves_per_eu"],
+        "dq": ["head_dim", "block_m", "role_order"],
     }
 
 
@@ -133,6 +142,16 @@ def test_a_slot_that_exposes_a_graph_determined_field_is_caught(tmp_path: Path) 
     ued_path.write_text(json.dumps(ued), encoding="utf-8")
     with pytest.raises(AssertionError, match="slot dq"):
         _assert_exposes_exactly_tuning_fields(ued_path, root)
+
+
+def test_the_alternative_knobs_are_graph_determined_alternatives_never_feature_fields() -> (
+    None
+):
+    features = {"dtype", "causal", "dropout", "has_bias", "reduce_symbol", "sink"}
+    for op, fields in gen_descriptors.ALTERNATIVE_KNOBS.items():
+        assert op.startswith("sdpa_bwd_"), op
+        assert fields <= gen_descriptors.GRAPH_DETERMINED_FIELDS, op
+        assert not fields & features, op
 
 
 def test_the_three_field_sets_are_disjoint() -> None:

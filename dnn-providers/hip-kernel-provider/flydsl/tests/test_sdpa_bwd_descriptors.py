@@ -111,9 +111,14 @@ def test_kmd_fields_are_the_contract(documents):
     assert {f["name"]: f["type"] for f in kmd["fields"]} == CONTRACT_FIELDS
 
 
-def test_ued_knobs_are_the_tuning_fields_only(documents):
+def test_ued_knobs_are_the_tuning_fields_and_the_alternatives(documents):
     ued = _doc(documents, "sdpa_bwd_merged", "ued")
+    # The alternatives are the graph-determined fields merged's kernels differ in while
+    # serving one graph: the tile-32 exact and padded rows, packed and unpacked GQA, dB store.
     assert set(ued["knobs"]) == {
+        "padded",
+        "store_db",
+        "gqa_pack",
         "role_order",
         "hints",
         "block_threads",
