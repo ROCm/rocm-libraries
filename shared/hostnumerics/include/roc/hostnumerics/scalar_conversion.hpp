@@ -7,12 +7,6 @@
 #include <utility>
 
 namespace roc::hostnumerics::detail {
-// No-options conversion to a native C++ integer truncates fractional values
-// and defines out-of-range conversion by reducing modulo the destination width.
-inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {
-    return {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
-}
-
 // Value-returning native conversion. Callers must satisfy the integer conversion
 // preconditions and supply real inputs for complex-to-real conversion.
 template <typename Target, typename Source>
@@ -56,21 +50,15 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
 }  // namespace roc::hostnumerics::detail
 
 namespace roc::hostnumerics {
-// Convert a native numeric value without encoding it. Integer conversion
-// truncates toward zero and wraps modulo the destination width when options
-// are omitted. With explicit Reject options, the rounded value must fit.
+// Convert a native numeric value without encoding it. Callers must specify
+// integer rounding and overflow policies. With Reject, the rounded value must fit.
 // Complex-to-real input must have a zero imaginary component. For non-Boolean
 // integer destinations, input must not be NaN, and infinity requires Saturate.
 // Policies must be valid when used. This function does not validate inputs or
 // report conversion failures.
-// For example, convertScalar<int8_t>(128.75) returns -128. NearestEven with
-// Reject maps 2.5 to 2 and 3.5 to 4. Boolean conversion tests for a nonzero value.
-template <typename Target, typename Source>
-Target convertScalar(Source source) noexcept {
-    return detail::convertScalarValue<Target>(std::move(source),
-                                              detail::implicitNativeConversionOptions());
-}
-
+// For example, convertScalar<int8_t>(128.75, {IntegerRounding::TowardZero,
+// IntegerOverflow::ModuloWrap}) returns -128. NearestEven with Reject maps 2.5
+// to 2 and 3.5 to 4. Boolean conversion tests for a nonzero value.
 template <typename Target, typename Source>
 Target convertScalar(Source source, const ScalarConversionOptions& options) noexcept {
     return detail::convertScalarValue<Target>(std::move(source), options);

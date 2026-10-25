@@ -13,16 +13,19 @@
 namespace {
 using namespace roc::hostnumerics;
 
-constexpr ScalarConversionOptions reject;
+constexpr ScalarConversionOptions reject{IntegerRounding::TowardZero, IntegerOverflow::Reject};
 constexpr ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
 constexpr ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
 
-TEST(ScalarConversion, OmittedOptionsTruncateAndWrap) {
-    EXPECT_EQ(convertScalar<int32_t>(3.75), 3);
-    EXPECT_EQ(convertScalar<int32_t>(-3.75), -3);
-    EXPECT_EQ(convertScalar<int8_t>(128.75), -128);
-    EXPECT_EQ(convertScalar<uint8_t>(-1.75), 255);
-    EXPECT_EQ(convertScalar<uint8_t>(uint16_t{256}), 0);
+template <typename Source>
+concept ConvertsWithoutPolicies = requires(Source source) { convertScalar<int32_t>(source); };
+
+TEST(ScalarConversion, ExplicitOptionsTruncateAndWrap) {
+    EXPECT_EQ(convertScalar<int32_t>(3.75, wrap), 3);
+    EXPECT_EQ(convertScalar<int32_t>(-3.75, wrap), -3);
+    EXPECT_EQ(convertScalar<int8_t>(128.75, wrap), -128);
+    EXPECT_EQ(convertScalar<uint8_t>(-1.75, wrap), 255);
+    EXPECT_EQ(convertScalar<uint8_t>(uint16_t{256}, wrap), 0);
 }
 
 template <typename T>
@@ -113,35 +116,38 @@ TEST(ScalarConversion, SaturatesInfinity) {
 TEST(ScalarConversion, ConvertsComplexComponents) {
     const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Reject};
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, nearest), 4);
-    EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0}), -2.25);
-    EXPECT_EQ(convertScalar<std::complex<double>>(1.25f), std::complex<double>(1.25, 0.0));
-    EXPECT_EQ(convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5}),
+    EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0}, wrap), -2.25);
+    EXPECT_EQ(convertScalar<std::complex<double>>(1.25f, wrap), std::complex<double>(1.25, 0.0));
+    EXPECT_EQ(convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5}, wrap),
               std::complex<float>(1.25f, -2.5f));
 }
 
 TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
     enum class SignedValue : int16_t { Negative = -129, Positive = 128 };
     EXPECT_EQ(convertScalar<int32_t>(true, reject), 1);
-    EXPECT_EQ(convertScalar<uint8_t>(false), 0);
-    EXPECT_EQ(convertScalar<int8_t>(SignedValue::Positive), -128);
+    EXPECT_EQ(convertScalar<uint8_t>(false, wrap), 0);
+    EXPECT_EQ(convertScalar<int8_t>(SignedValue::Positive, wrap), -128);
     EXPECT_EQ(convertScalar<int8_t>(SignedValue::Negative, saturate), -128);
-    EXPECT_FALSE(convertScalar<bool>(-0.0));
-    EXPECT_TRUE(convertScalar<bool>(-0.25));
-    EXPECT_EQ(convertScalar<double>(int64_t{-123}), -123.0);
-    EXPECT_EQ(convertScalar<float>(2.25), 2.25f);
-    EXPECT_TRUE(std::isnan(convertScalar<double>(std::numeric_limits<float>::quiet_NaN())));
-    EXPECT_TRUE(std::isinf(convertScalar<float>(std::numeric_limits<double>::infinity())));
+    EXPECT_FALSE(convertScalar<bool>(-0.0, wrap));
+    EXPECT_TRUE(convertScalar<bool>(-0.25, wrap));
+    EXPECT_EQ(convertScalar<double>(int64_t{-123}, wrap), -123.0);
+    EXPECT_EQ(convertScalar<float>(2.25, wrap), 2.25f);
+    EXPECT_TRUE(std::isnan(convertScalar<double>(std::numeric_limits<float>::quiet_NaN(), wrap)));
+    EXPECT_TRUE(std::isinf(convertScalar<float>(std::numeric_limits<double>::infinity(), wrap)));
 }
 
 TEST(ScalarConversion, ReturnsANoexceptValue) {
-    static_assert(std::is_same_v<decltype(convertScalar<int8_t>(128)), int8_t>);
-    static_assert(noexcept(convertScalar<int8_t>(128)));
+    static_assert(!std::is_default_constructible_v<ScalarConversionOptions>);
+    static_assert(!std::is_constructible_v<ScalarConversionOptions, IntegerRounding>);
+    static_assert(!ConvertsWithoutPolicies<double>);
+    static_assert(std::is_same_v<decltype(convertScalar<int8_t>(128, wrap)), int8_t>);
+    static_assert(noexcept(convertScalar<int8_t>(128, wrap)));
     static_assert(noexcept(convertScalar<int8_t>(2.5, reject)));
-    static_assert(noexcept(convertScalar<double>(std::declval<std::complex<double>>())));
-    static_assert(noexcept(convertScalar<std::complex<float>>(1.0)));
-    EXPECT_EQ(convertScalar<int8_t>(128), -128);
+    static_assert(noexcept(convertScalar<double>(std::declval<std::complex<double>>(), wrap)));
+    static_assert(noexcept(convertScalar<std::complex<float>>(1.0, wrap)));
+    EXPECT_EQ(convertScalar<int8_t>(128, wrap), -128);
     EXPECT_EQ(convertScalar<int8_t>(2.5, reject), 2);
-    EXPECT_EQ(convertScalar<std::complex<double>>(1.5), std::complex<double>(1.5, 0.0));
+    EXPECT_EQ(convertScalar<std::complex<double>>(1.5, wrap), std::complex<double>(1.5, 0.0));
 }
 
 TYPED_TEST(IntegerConversion, PoliciesMatchIndependentIntegerExpectations) {

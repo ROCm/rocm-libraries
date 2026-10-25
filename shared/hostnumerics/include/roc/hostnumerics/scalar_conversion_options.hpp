@@ -20,9 +20,11 @@ enum class IntegerOverflow : uint8_t {
 };
 
 struct ScalarConversionOptions {
-    // Explicit options require representability unless another policy is selected.
-    IntegerRounding integerRounding = IntegerRounding::TowardZero;
-    IntegerOverflow integerOverflow = IntegerOverflow::Reject;
+    constexpr ScalarConversionOptions(IntegerRounding rounding, IntegerOverflow overflow) noexcept
+        : integerRounding(rounding), integerOverflow(overflow) {}
+
+    IntegerRounding integerRounding;
+    IntegerOverflow integerOverflow;
 };
 
 }  // namespace roc::hostnumerics

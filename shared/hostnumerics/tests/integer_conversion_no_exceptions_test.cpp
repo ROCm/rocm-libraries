@@ -29,15 +29,15 @@ void operator delete[](void* pointer, std::size_t) noexcept {
 
 int main() {
     using namespace roc::hostnumerics;
-    const ScalarConversionOptions reject;
+    const ScalarConversionOptions reject{IntegerRounding::TowardZero, IntegerOverflow::Reject};
     const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
     const ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
     const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Reject};
-    static_assert(noexcept(convertScalar<int8_t>(128)));
+    static_assert(noexcept(convertScalar<int8_t>(128, wrap)));
     static_assert(noexcept(convertScalar<int8_t>(2.5, reject)));
     for (int input = -128; input <= 127; ++input)
         if (convertScalar<int8_t>(static_cast<double>(input), reject) != input) return 1;
-    if (convertScalar<int8_t>(128) != -128 || convertScalar<int8_t>(300.0, saturate) != 127 ||
+    if (convertScalar<int8_t>(128, wrap) != -128 || convertScalar<int8_t>(300.0, saturate) != 127 ||
         convertScalar<int8_t>(300.0, wrap) != 44 || convertScalar<int8_t>(2.5, nearest) != 2 ||
         convertScalar<int8_t>(3.5, nearest) != 4)
         return 2;
@@ -49,15 +49,16 @@ int main() {
         return 3;
     if (convertScalar<int8_t>(std::numeric_limits<double>::infinity(), saturate) != 127 ||
         convertScalar<uint8_t>(-std::numeric_limits<double>::infinity(), saturate) != 0 ||
-        convertScalar<uint8_t>(-1.75) != 255 || convertScalar<int8_t>(-128.75, reject) != -128 ||
+        convertScalar<uint8_t>(-1.75, wrap) != 255 ||
+        convertScalar<int8_t>(-128.75, reject) != -128 ||
         convertScalar<uint8_t>(-0.75, reject) != 0)
         return 4;
-    if (convertScalar<std::complex<double>>(1.5) != std::complex<double>(1.5, 0.0) ||
+    if (convertScalar<std::complex<double>>(1.5, wrap) != std::complex<double>(1.5, 0.0) ||
         convertScalar<int32_t>(std::complex<double>(3.5, 0.0), nearest) != 4 ||
-        convertScalar<double>(std::complex<double>(2.25, 0.0)) != 2.25)
+        convertScalar<double>(std::complex<double>(2.25, 0.0), wrap) != 2.25)
         return 5;
-    if (!convertScalar<bool>(std::numeric_limits<double>::quiet_NaN()) ||
-        convertScalar<bool>(-0.0) || !convertScalar<bool>(-0.25))
+    if (!convertScalar<bool>(std::numeric_limits<double>::quiet_NaN(), wrap) ||
+        convertScalar<bool>(-0.0, wrap) || !convertScalar<bool>(-0.25, wrap))
         return 6;
     return 0;
 }
