@@ -19,8 +19,8 @@
 #include "hipdnn_shim_helpers.hpp"
 
 #include <cmath>
-#include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hs = hipdnn_shim_test;
@@ -150,6 +150,36 @@ TrainActivation(miopen::Handle& handle, TrainData& d, miopenActivationDescriptor
                                                     activ);
 }
 
+// Reads the previous running stats from runMean/runVariance and writes the updated
+// ones to nextRunMean/nextRunVariance.
+miopenStatus_t
+TrainActivationV2(miopen::Handle& handle, TrainData& d, miopenActivationDescriptor_t activ)
+{
+    return miopenBatchNormForwardTrainingActivation_V2(&handle,
+                                                       d.bn_mode,
+                                                       &d.alpha,
+                                                       &d.beta,
+                                                       &d.input.desc,
+                                                       d.in_dev.get(),
+                                                       &d.output.desc,
+                                                       d.out_dev.get(),
+                                                       &d.scale.desc,
+                                                       &d.shift.desc,
+                                                       &d.saveMean.desc,
+                                                       &d.saveVariance.desc,
+                                                       d.scale_dev.get(),
+                                                       d.shift_dev.get(),
+                                                       d.averageFactor,
+                                                       d.runMean_dev.get(),
+                                                       d.runVariance_dev.get(),
+                                                       d.nextRunMean_dev.get(),
+                                                       d.nextRunVariance_dev.get(),
+                                                       d.epsilon,
+                                                       d.saveMean_dev.get(),
+                                                       d.saveVariance_dev.get(),
+                                                       activ);
+}
+
 miopenStatus_t InferV1(miopen::Handle& handle, InferData& d, bool with_estimates)
 {
     return miopenBatchNormalizationForwardInference(&handle,
@@ -261,6 +291,8 @@ void CheckInfer(miopen::Handle& handle, InferData& d)
 {
     d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
     test::ComputeCPUBNInference(d);
+    activationHostInfer(
+        d.activ_mode, 0.0, d.activ_beta, d.activ_alpha, d.out_ref.data, d.out_ref.data);
     test::CompareTensor<float>(d.output, d.out_ref, kTol);
 }
 
@@ -318,8 +350,7 @@ void FillTrueStats(BwdData& d, double eps)
 bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, const char* reason)
 {
     const bool served = result.status == miopenStatusSuccess;
-    EXPECT_TRUE(served || result.status == miopenStatusUnsupportedOp ||
-                result.status == miopenStatusNotImplemented)
+    EXPECT_TRUE(served || result.status == miopenStatusUnsupportedOp)
         << case_name << ": " << result.message;
     if(!served)
         hs::ExpectForwardedDecline(result, reason);
@@ -333,9 +364,17 @@ bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, c
 // holds if the forwarded call ran the same kernel with the same configuration that
 // MIOpen picks. Whether to hash is decided before the base TearDown runs, because
 // that is where a skipped or failed test returns before reading anything back.
+// SetUp resets the process-wide PRNG first, so a test's data, and its hash, do not
+// depend on which tests ran before it (a shuffle or a narrower filter).
 template <typename Base>
 struct HashTrainOutputs : Base
 {
+    void SetUp() override
+    {
+        prng::reset_seed();
+        Base::SetUp();
+    }
+
     void TearDown() override
     {
         const bool read = !this->test_skipped && !this->HasFailure();
@@ -361,6 +400,12 @@ struct HashTrainOutputs : Base
 template <typename Base>
 struct HashInferOutputs : Base
 {
+    void SetUp() override
+    {
+        prng::reset_seed();
+        Base::SetUp();
+    }
+
     void TearDown() override
     {
         const bool read = !this->test_skipped && !this->HasFailure();
@@ -376,6 +421,12 @@ struct HashInferOutputs : Base
 template <typename Base>
 struct HashBwdOutputs : Base
 {
+    void SetUp() override
+    {
+        prng::reset_seed();
+        Base::SetUp();
+    }
+
     void TearDown() override
     {
         const bool read = !this->test_skipped && !this->HasFailure();
@@ -523,6 +574,11 @@ struct GPU_HipdnnShimBNInfer_BFP16
 {
 };
 
+struct GPU_HipdnnShimBNInfer3D_FP32
+    : HashInferOutputs<BNInferTest<float, float, float, float, float, double, BN3DTestCase>>
+{
+};
+
 struct GPU_HipdnnShimBNInferRelu_FP32
     : HashInferOutputs<BNInferTest<float, float, float, float, float, double, BN2DTestCase>>
 {
@@ -531,6 +587,7 @@ struct GPU_HipdnnShimBNInferRelu_FP32
 TEST_P(GPU_HipdnnShimBNInfer_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNInfer_FP16, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNInfer_BFP16, MatchesCpuReference) {}
+TEST_P(GPU_HipdnnShimBNInfer3D_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNInferRelu_FP32, MatchesCpuReference) {}
 
 INSTANTIATE_TEST_SUITE_P(
@@ -562,6 +619,16 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({testBNAPIV1, testBNAPIV2, testBNAPIInvVar}),
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN2DTestCase>());
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_HipdnnShimBNInfer3D_FP32,
+    testing::Combine(testing::ValuesIn(ShimNetwork3D()),
+                     testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
+                     testing::ValuesIn({miopenBNSpatial}),
+                     testing::ValuesIn({testBNAPIV1, testBNAPIV2, testBNAPIInvVar}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN3DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_HipdnnShimBNInferRelu_FP32,
@@ -597,6 +664,11 @@ struct GPU_HipdnnShimBNBwd_BFP16
 {
 };
 
+struct GPU_HipdnnShimBNBwd3D_FP32
+    : HashBwdOutputs<BNBwdTest<float, float, float, float, float, float, double, BN3DTestCase>>
+{
+};
+
 struct GPU_HipdnnShimBNBwdRelu_FP32
     : HashBwdOutputs<BNBwdTest<float, float, float, float, float, float, double, BN2DTestCase>>
 {
@@ -605,6 +677,7 @@ struct GPU_HipdnnShimBNBwdRelu_FP32
 TEST_P(GPU_HipdnnShimBNBwd_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNBwd_FP16, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNBwd_BFP16, MatchesCpuReference) {}
+TEST_P(GPU_HipdnnShimBNBwd3D_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNBwdRelu_FP32, MatchesCpuReference) {}
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -635,6 +708,15 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_HipdnnShimBNBwd3D_FP32,
+                         testing::Combine(testing::ValuesIn(ShimNetwork3D()),
+                                          testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
+                                          testing::ValuesIn({miopenBNSpatial}),
+                                          testing::ValuesIn({testBNAPIV1, testBNAPIV2}),
+                                          testing::ValuesIn({miopenActivationPASTHRU})),
+                         TestNameGenerator<BN3DTestCase>());
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_HipdnnShimBNBwdRelu_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -644,32 +726,16 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestNameGenerator<BN2DTestCase>());
 
 // ---------------------------------------------------------------------------
-// Output hash
-
-// The published FNV-1a 64 test vectors. They pin the constants and the byte order of
-// OutputHash, and the split case shows that hashing in several Add calls is the same as
-// hashing the joined bytes, which the multi-output parity hashes rely on.
-TEST(CPU_HipdnnShimOutputHash_NONE, MatchesPublishedFnv1aVectors)
-{
-    const auto hash_of = [](std::initializer_list<std::string> parts) {
-        hs::OutputHash hash;
-        for(const auto& part : parts)
-            hash.Add(std::vector<char>(part.begin(), part.end()));
-        return hash.Hex();
-    };
-    EXPECT_EQ(hash_of({}), "cbf29ce484222325");
-    EXPECT_EQ(hash_of({"a"}), "af63dc4c8601ec8c");
-    EXPECT_EQ(hash_of({"foobar"}), "85944171f73967e8");
-    EXPECT_EQ(hash_of({"foo", "bar"}), "85944171f73967e8");
-}
-
-// ---------------------------------------------------------------------------
 // Plan key, in-place running stats and null outputs
 
-// Epsilon and momentum are compile-time scalars in the hipDNN plan, so they must
-// be part of the plan key. The second call has the same shape as the first and
-// must not reuse its plan.
-TEST(GPU_HipdnnShimBNPlanKey_FP32, EpsilonAndMomentumSelectTheirOwnPlan)
+namespace {
+
+// Epsilon and momentum are compile-time scalars in the hipDNN plan, so each must
+// be part of the plan key on its own. The second call has the same shape as the
+// first and differs only in what `change` sets; a key that missed it would reuse
+// the first plan and give wrong numbers without failing the call.
+template <typename Change>
+void ExpectOwnPlan(Change change)
 {
     auto&& handle = get_handle();
 
@@ -680,10 +746,21 @@ TEST(GPU_HipdnnShimBNPlanKey_FP32, EpsilonAndMomentumSelectTheirOwnPlan)
 
     TrainData changed;
     SetUpTrain(changed);
-    changed.epsilon       = 0.5;
-    changed.averageFactor = 0.9;
+    change(changed);
     ASSERT_EQ(TrainV1(handle, changed), miopenStatusSuccess);
     CheckTrain(handle, changed, true, true);
+}
+
+} // namespace
+
+TEST(GPU_HipdnnShimBNPlanKey_FP32, EpsilonSelectsItsOwnPlan)
+{
+    ExpectOwnPlan([](TrainData& d) { d.epsilon = 0.5; });
+}
+
+TEST(GPU_HipdnnShimBNPlanKey_FP32, MomentumSelectsItsOwnPlan)
+{
+    ExpectOwnPlan([](TrainData& d) { d.averageFactor = 0.9; });
 }
 
 // V1 binds the same running-stat buffers as input and output. Each call must
@@ -700,6 +777,37 @@ TEST(GPU_HipdnnShimBNInPlace_FP32, RunningStatsUpdateOncePerCall)
     // The CPU reference updates runMean_ref and runVariance_ref in place, so
     // running it twice gives the expected stats after two calls.
     test::ComputeCPUBNFwdTrain(d);
+    CheckTrain(handle, d, true, true);
+}
+
+// The bn.hpp fixtures call the V1 activation entry point whenever an activation is
+// set, whatever the API version, so this is the only test that reaches the V2 one.
+// Its previous and next running stats are separate buffers: the previous ones must
+// stay untouched and the next ones must hold the update.
+TEST(GPU_HipdnnShimBNFwdTrainActivationV2_FP32, SeparateRunningStatsMatchCpuReference)
+{
+    auto&& handle = get_handle();
+
+    TrainData d;
+    SetUpTrain(d);
+    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationRELU);
+
+    hs::OwnedActivationDescriptor activ;
+    ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+    ASSERT_EQ(
+        miopenSetActivationDescriptor(activ.handle, d.activ_mode, d.activ_alpha, d.activ_beta, 0.0),
+        miopenStatusSuccess);
+
+    const auto prev_mean     = d.runMean.data;
+    const auto prev_variance = d.runVariance.data;
+    ASSERT_EQ(TrainActivationV2(handle, d, activ.handle), miopenStatusSuccess);
+
+    EXPECT_EQ(handle.Read<float>(d.runMean_dev, prev_mean.size()), prev_mean);
+    EXPECT_EQ(handle.Read<float>(d.runVariance_dev, prev_variance.size()), prev_variance);
+
+    // CheckTrain reads the running stats from runMean_dev and runVariance_dev.
+    std::swap(d.runMean_dev, d.nextRunMean_dev);
+    std::swap(d.runVariance_dev, d.nextRunVariance_dev);
     CheckTrain(handle, d, true, true);
 }
 
@@ -908,7 +1016,8 @@ struct ScopedHandleTuningPolicy
 // MIOpen tunes the spatial training and backward solvers when the handle asks for
 // Search; the provider runs on a handle of its own and never sees that policy, so
 // the shim declines rather than run a perf config MIOpen would not have picked.
-// Inference is not tunable and stays served. The shape is used by no other test,
+// Inference is not tunable and stays served under the same policy, and DbUpdate is
+// declined like Search. The shape is used by no other test,
 // because a Search caches its tuned invoker on the handle under the shape's network
 // config, and in the disabled run alone that would change what later tests run.
 // Training passes no running stats, since a Search re-runs the kernel and would
@@ -939,6 +1048,29 @@ TEST(GPU_HipdnnShimBNGaps_FP32, HandleTuningPolicy)
         const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
         if(RecordOutcome("tuning_policy_bwd", result, reason))
             CheckBwd(handle, d);
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW, false);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
+        if(RecordOutcome("tuning_policy_infer", result, nullptr))
+            CheckInfer(handle, d);
+        else
+            ADD_FAILURE() << "inference must stay served under a tuning policy";
+    }
+    {
+        // Any policy other than None is declined, not only Search.
+        SCOPED_TRACE("dbupdate train");
+        const ScopedHandleTuningPolicy db_update(handle, miopenTuningPolicyDbUpdate);
+        TrainData d;
+        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+        const auto result =
+            hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
+        if(RecordOutcome("tuning_policy_dbupdate_train", result, reason))
+            CheckTrain(handle, d, true, false);
     }
 }
 

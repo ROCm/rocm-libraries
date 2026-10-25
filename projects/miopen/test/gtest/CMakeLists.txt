@@ -79,6 +79,7 @@ endif()
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
         hipdnn_lru_cache.cpp
+        hipdnn_output_hash.cpp
         hipdnn_shim_batchnorm.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp

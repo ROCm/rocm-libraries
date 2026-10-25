@@ -20,27 +20,52 @@ namespace miopen {
 namespace wrapper {
 namespace hipdnn {
 
-// The forwarded batch normalization entry points. Where MIOpen's own path
-// rejects a call, the forwarded call returns the same status: miopenStatusBadParm
-// for missing tensors, mismatched descriptors and non-default alpha or beta on
-// inference and backward, and miopenStatusUnknownError for non-default alpha or
-// beta on training. MIOpen never returns miopenStatusNotImplemented for batch
-// normalization, so unlike convolution nothing here does either. If hipDNN
-// cannot express a problem MIOpen accepts, the call fails with
-// miopenStatusUnsupportedOp instead of running through MIOpen, so a caller can
-// tell that forwarding did not happen. miopenGetErrorString then adds a
-// "[hipDNN-forwarded]" prefix, and the reason goes to stderr unless
-// MIOPEN_LOG_LEVEL hides errors.
+// The forwarded batch normalization entry points.
+//
+// Where MIOpen rejects a call, the forwarded call returns the same status in the
+// same order:
+// - miopenStatusBadParm when x, y, scale or bias is null on forward, or when x,
+//   dy, scale or dx is null on backward.
+// - miopenStatusBadParm when a descriptor does not match x. Like MIOpen, the
+//   wrapper compares the rank of y (or dy), scale, bias and the statistics with
+//   x, but not the rank of dx.
+// - miopenStatusBadParm for non-default alpha or beta on inference and backward.
+// - miopenStatusUnknownError for non-default alpha or beta on training.
+// MIOpen never returns miopenStatusNotImplemented for batch normalization, so
+// nothing here returns it either. Convolution is different.
+//
+// Where hipDNN cannot express a problem that MIOpen accepts, the call fails with
+// miopenStatusUnsupportedOp. MIOpen does not run the call instead. The caller can
+// thus tell that forwarding did not happen. miopenGetErrorString adds a
+// "[hipDNN-forwarded]" prefix. The reason goes to stderr unless MIOPEN_LOG_LEVEL
+// hides errors. The wrapper declines these problems:
+// - Any mode other than miopenBNSpatial.
+// - Any activation other than ReLU or PASTHRU. A null activation descriptor
+//   means no activation, as it does in MIOpen.
+// - Tensors that are not packed, that have fewer than 3 or more than 5
+//   dimensions, or whose scale, bias or statistics are not {1, C, 1, ...}.
+//   MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x is declined here, not
+//   rejected with miopenStatusBadParm.
+// - Training or backward when the handle has a tuning policy other than
+//   miopenTuningPolicyNone. The provider runs on its own handle and cannot apply
+//   the policy. Inference has no tunable solver, so the policy does not matter.
+// - Inference with a null estimated mean or variance. MIOpen runs training in
+//   that case.
+// - Training with a null saved mean or inverse variance.
+// - Training with some, but not all, running statistics.
+// - Backward without the saved statistics and an epsilon other than 1e-5. The
+//   provider recomputes the statistics with epsilon 1e-5 only.
+// - Backward with an activation and without the saved statistics.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
 //
-// Only miopenBNSpatial is forwarded, and of the activations only ReLU; a null
-// activation descriptor means no activation, as it does in MIOpen. A null alpha
-// or beta is declined with miopenStatusBadParm. MIOpen would dereference it and
-// crash, so there is no MIOpen behaviour to match.
+// The wrapper also returns miopenStatusBadParm for a null alpha or beta, a null
+// dscale or dbias, and a null bias on backward with an activation. MIOpen would
+// dereference these and crash, so there is no MIOpen behavior to match.
 //
-// The entry points without separate previous and next running statistics update
-// them in place, so the same buffer is bound to both. That is safe for one
-// execution, and nothing on this path ever executes a graph twice.
+// Some entry points have no separate previous and next running statistics.
+// They update the statistics in place, so the wrapper binds the same buffer to
+// both. That is safe for one execution. Nothing on this path executes a graph
+// twice.
 miopenStatus_t
 BatchNormalizationForwardTraining(miopenHandle_t handle,
                                   miopenBatchNormMode_t bn_mode,

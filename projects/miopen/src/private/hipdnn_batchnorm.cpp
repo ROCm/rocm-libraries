@@ -112,11 +112,14 @@ bool ValidateShape(const TensorInfo& x, miopenBatchNormMode_t mode)
     return std::any_of(x.dims.begin() + 2, x.dims.end(), [](int64_t dim) { return dim > 1; });
 }
 
+// MIOpen rank-checks y (or dy), scale, bias and the two statistics against x.
+// It does not rank-check dx, so neither does this.
 bool SameRank(const std::vector<TensorInfo>& tensors)
 {
-    return std::all_of(tensors.begin(), tensors.end(), [&tensors](const TensorInfo& tensor) {
-        return tensor.dims.size() == tensors[kIdxX].dims.size();
-    });
+    const size_t rank = tensors[kIdxX].dims.size();
+    return std::all_of(tensors.begin(),
+                       tensors.begin() + kIdxVar + 1,
+                       [rank](const TensorInfo& tensor) { return tensor.dims.size() == rank; });
 }
 
 // A null descriptor is how the entry points without an activation reach the
@@ -164,10 +167,12 @@ const char* CheckForwardParams(const BnProblem& problem,
     if(x == nullptr || y == nullptr || scale == nullptr || bias == nullptr)
         return "x, y, scale and bias must not be null";
     if(!SameRank(tensors))
-        return "every batchnorm tensor must have the same number of dimensions";
+        return "y, scale, bias and the statistics must have as many dimensions as x";
     if(xInfo.dataType != tensors[kIdxY].dataType)
         return "x and y must have the same data type";
-    if(training && checkShape && !IsPacked(xInfo))
+    // MIOpen reshapes a 5-D x to a packed 4-D descriptor before it tests, so it
+    // never rejects a 5-D x here. CheckSupported declines a non-packed one.
+    if(training && checkShape && xInfo.dims.size() < 5 && !IsPacked(xInfo))
         return "x must be packed";
     if(xInfo.dims.size() < 3)
         return "batchnorm needs at least 3 dimensions";
@@ -186,7 +191,7 @@ const char* CheckBackwardParams(
     if(x == nullptr || dy == nullptr || scale == nullptr || dx == nullptr)
         return "x, dy, scale and dx must not be null";
     if(!SameRank(tensors))
-        return "every batchnorm tensor must have the same number of dimensions";
+        return "dy, scale, bias and the statistics must have as many dimensions as x";
     if(tensors[kIdxDx].dataType != tensors[kIdxY].dataType)
         return "dx and dy must have the same data type";
     if(xInfo.dims.size() < 3)
@@ -259,10 +264,15 @@ std::string CheckSupported(const BnProblem& problem)
         if(tensors[index].dims != x.dims || tensors[index].strides != x.strides)
             return "hipDNN batchnorm needs every data tensor in the same shape and layout";
     }
+    // Spatial mode keeps one value per channel: {1, C, 1, ...} at the rank of x.
+    std::vector<int64_t> channelDims(x.dims.size(), 1);
+    channelDims[1] = x.dims[1];
     for(size_t index = kIdxScale; index <= kIdxVar; ++index)
     {
         if(tensors[index].dataType != miopenFloat)
             return "hipDNN batchnorm supports only FLOAT scale, bias and statistics";
+        if(tensors[index].dims != channelDims)
+            return "hipDNN batchnorm needs scale, bias and statistics shaped {1, C, 1, ...}";
     }
     return {};
 }
