@@ -10,6 +10,7 @@
 #include <roc/hostnumerics/tensor_operations.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -161,13 +162,11 @@ namespace TensileLite::Client::hostnumerics
             case rocisa::DataType::Int32:
             {
                 const double real = constVariantCast<double>(value);
-                const auto   bits = roc::hostnumerics::detail::getConvertFloatingToIntegerBits(
-                    real, 32, true, roc::hostnumerics::detail::implicitNativeConversionOptions());
-                if(!bits)
+                if(!std::isfinite(real))
                     return std::nullopt;
-                return std::complex<double>{
-                    static_cast<double>(roc::hostnumerics::detail::integerFromBits<int32_t>(*bits)),
-                    0.0};
+                const auto converted = roc::hostnumerics::convertScalar<int32_t>(
+                    real, roc::hostnumerics::detail::implicitNativeConversionOptions());
+                return std::complex<double>{static_cast<double>(converted), 0.0};
             }
             case rocisa::DataType::ComplexFloat:
             {
@@ -1348,16 +1347,12 @@ namespace TensileLite::Client::hostnumerics
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "A complex value with a nonzero imaginary component cannot be "
                                "converted to real.");
-            if(accumulatorType == ScalarType::Int32)
+            if(accumulatorType == ScalarType::Int32 && !std::isfinite(value.real()))
             {
-                const auto converted = roc::hostnumerics::detail::getConvertFloatingToIntegerBits(
-                    value.real(),
-                    32,
-                    true,
-                    roc::hostnumerics::detail::implicitStorageConversionOptions(accumulatorType));
-                if(!converted)
-                    return failure(TranslationFailureCode::InvalidDescriptor,
-                                   std::string(message(converted.error())));
+                return failure(TranslationFailureCode::InvalidDescriptor,
+                               std::isnan(value.real())
+                                   ? "NaN cannot be converted to an integer destination."
+                                   : "Infinity cannot be converted to an integer destination.");
             }
         }
 
