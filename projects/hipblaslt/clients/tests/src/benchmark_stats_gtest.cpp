@@ -21,9 +21,8 @@ using hipblaslt_bench::validate_adaptive_config;
 
 TEST(HostUnitBenchmarkTiming, smoke_ZeroTimedIterationsDoesNotLaunch)
 {
-    // Generated race-detection inputs request one numerical-validation launch
-    // and zero timed launches. Previously zero was coerced to one, running the
-    // GEMM twice. This regression covers the timing helper used by that bench path.
+    // Race-detection inputs request a numerical-validation launch and zero timed
+    // launches. The empty timing result must still reach the benchmark's validation callback.
     TimingConfig cfg;
     cfg.iters = 0;
     // The early return must work without a GPU or valid HIP events/stream.
@@ -32,8 +31,8 @@ TEST(HostUnitBenchmarkTiming, smoke_ZeroTimedIterationsDoesNotLaunch)
     result.mean_us   = 17.0;
     result.hot_iters = 3;
     int launches     = 0;
-    hipblaslt_bench::run_measurement(
-        [&](int64_t) { ++launches; }, cfg, nullptr, nullptr, nullptr, result);
+    EXPECT_TRUE(hipblaslt_bench::run_measurement(
+        [&](int64_t) { ++launches; }, cfg, nullptr, nullptr, nullptr, result));
     EXPECT_EQ(launches, 0);
     EXPECT_EQ(result.hot_iters, 0);
     EXPECT_EQ(result.samples, 0);
