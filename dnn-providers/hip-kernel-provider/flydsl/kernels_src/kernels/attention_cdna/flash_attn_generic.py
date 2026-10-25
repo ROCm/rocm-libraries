@@ -41,12 +41,15 @@ from kernels.attention_cdna.flash_attn_utils import (
     GenericQLoader,
     GenericSoftmaxHelper,
     GenericStoreHelper,
+    SINK_F32,
+    SINK_QUERY_DTYPE,
     _is_gfx942_class,
     _load_seq_lens,
     _make_flash_attn_generic_traits,
     _no_keys,
     _waitcnt_vm_n,
     daz_denormal_attr,
+    load_sink_logit,
 )
 from kernels.common.kernels_common import dtype_to_elem_type
 from kernels.common import buffer_ops
@@ -972,15 +975,9 @@ def build_flash_attn_func_module_primary(
         # +inf once the sink leads by more than ~88.7 (modification 29).
         sink_val = c_ninf
         if const_expr(has_sink):
-            sink_rsrc = buffer_ops.create_buffer_resource(Sink, max_size=True)
-            sink_raw = buffer_ops.buffer_load(
-                sink_rsrc,
-                as_mlir_value(fx.Int32(h_idx * fx.Index(sink_stride))),
-                vec_width=1,
-                dtype=elem_dtype,
-            )
-            sink_val = (fx.Int32(sink_on) != fx.Int32(0)).select(
-                fx.Float32(fx.Float32(sink_raw)), c_ninf
+            # In f32 or the query's dtype (modification 36).
+            sink_val = load_sink_logit(
+                Sink, sink_stride, sink_on, h_idx, elem_dtype, c_ninf
             )
             m_top = fx.Float32(m_all.maximumf(sink_val))
             keep = fx.Float32(fx.math.exp(m_all - m_top))
@@ -1317,7 +1314,11 @@ def build_flash_attn_func_module_primary(
                 num_splits,
                 sink if sink is not None else Out,
                 1,
-                1 if sink is not None else 0,
+                (
+                    (SINK_F32 if sink.element_size() == 4 else SINK_QUERY_DTYPE)
+                    if sink is not None
+                    else 0
+                ),
                 # Packed [B, H, Sq] LSE (modification 20).
                 traits.NUM_HEADS_Q * seq_len,
                 seq_len,
@@ -1411,7 +1412,11 @@ def build_flash_attn_func_module_primary(
                 num_splits,
                 sink if sink is not None else Out,
                 1,
-                1 if sink is not None else 0,
+                (
+                    (SINK_F32 if sink.element_size() == 4 else SINK_QUERY_DTYPE)
+                    if sink is not None
+                    else 0
+                ),
                 # Packed [B, H, Sq] LSE (modification 20).
                 traits.NUM_HEADS_Q * seq_len,
                 seq_len,

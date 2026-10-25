@@ -563,6 +563,22 @@ diff against upstream plus the modifications below.
       K only with Q re-read, so no existing object takes this path.
     - **Objects:** every bf16/f16 object is byte-identical to modification 34's.
     - Not yet upstream.
+36. **An f32 sink** (`flash_attn_utils.py`, `flash_attn_generic.py`; sink builds).
+    - **Why:** cuDNN and hipDNN's reference take the attention sink as FLOAT
+      `[1, Hq, 1, 1]`; modification 19 read it in the query's dtype only.
+    - **Argument:** `sink_on`, already a runtime argument of every generic object, now
+      names the sink's dtype too: `SINK_OFF` (0, no sink: the logit is -inf, as before),
+      `SINK_QUERY_DTYPE` (1, as before) or `SINK_F32` (2). `sink_stride` stays the head
+      stride in elements of the sink's dtype. The argument list is unchanged.
+    - **Read:** `load_sink_logit`, in the main kernel's `with_sink` and the decode merge,
+      reads the logit without a branch as two 16-bit buffer loads at the element (an f32
+      sink's two halves, a 16-bit sink's one element twice, so no load reaches past a
+      16-bit sink) and widens it exactly: a query-dtype sink gives the same logit as
+      before, an f32 one its full value. The launch wrappers pass `SINK_F32` for a 4-byte
+      `sink`.
+    - **Objects:** the 24 prefill and 8 decode sink objects per arch change; every other
+      object (the dual-wave ones included) is byte-identical to modification 35's.
+    - Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

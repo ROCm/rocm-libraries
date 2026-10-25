@@ -68,6 +68,39 @@ def _no_keys(l_sum):
     return fx.Float32(l_sum).bitcast(fx.Int32) == fx.Int32(0)
 
 
+# The `sink_on` argument of a sink object (modification 36): no sink (the logit is -inf), a
+# sink in the query's dtype, or an f32 one (cuDNN's and hipDNN's reference's dtype).
+SINK_OFF = 0
+SINK_QUERY_DTYPE = 1
+SINK_F32 = 2
+
+
+def load_sink_logit(sink, sink_stride, sink_on, head, elem_dtype, neg_inf):
+    """Query head ``head``'s attention-sink logit as f32, or ``neg_inf`` when ``sink_on`` is
+    SINK_OFF (modification 36). ``sink_stride`` is the head stride in elements of the sink's
+    dtype, ``sink_on`` SINK_QUERY_DTYPE or SINK_F32. Read as two 16-bit loads at the element
+    -- an f32 sink's low and high halves, a 16-bit sink's one element twice -- so neither
+    dtype's load reaches past it, without a branch; both widen exactly."""
+    rsrc = buffer_ops.create_buffer_resource(sink, max_size=True)
+    on = fx.Int32(sink_on)
+    wide = (on == fx.Int32(SINK_F32)).select(fx.Int32(1), fx.Int32(0))
+    first = fx.Int32(head * fx.Index(sink_stride)) << wide
+    low = fx.Int16(
+        buffer_ops.buffer_load(rsrc, as_mlir_value(first), vec_width=1, dtype=fx.Int16)
+    )
+    high = fx.Int16(
+        buffer_ops.buffer_load(
+            rsrc, as_mlir_value(first + wide), vec_width=1, dtype=fx.Int16
+        )
+    )
+    low_bits = fx.Int32(low) & fx.Int32(0xFFFF)
+    high_bits = fx.Int32(high) & fx.Int32(0xFFFF)
+    as_f32 = ((high_bits << fx.Int32(16)) | low_bits).bitcast(fx.Float32)
+    as_query = fx.Float32(low.bitcast(elem_dtype).to(fx.Float32))
+    logit = (wide != fx.Int32(0)).select(as_f32, as_query)
+    return (on != fx.Int32(SINK_OFF)).select(logit, neg_inf)
+
+
 # The generic kernel's `varlen_flags` bits (modification 32).
 # Bit 0: per-batch lengths are passed (padding); a padded query row gets O = 0, LSE = -inf.
 VARLEN_PADDED = 1
@@ -2947,7 +2980,8 @@ class GenericFlashAttnContext:
         # keeps the packed [B, H, Sq] layout.
         self.lse_strides = lse_strides
         # Attention sinks (modification 19): a per-query-head logit in the softmax's
-        # denominator, read when sink_on.
+        # denominator, read unless sink_on is SINK_OFF, in the dtype it names
+        # (modification 36).
         self.sink = sink
         self.sink_stride = sink_stride
         self.sink_on = sink_on
@@ -5241,15 +5275,14 @@ class GenericStoreHelper:
             head = head + (q_row < ctx.rows_b).select(
                 q_row // ctx.seq_len_v, fx.Index(0)
             )
-        sink_rsrc = buffer_ops.create_buffer_resource(ctx.sink, max_size=True)
-        raw = buffer_ops.buffer_load(
-            sink_rsrc,
-            as_mlir_value(fx.Int32(head * fx.Index(ctx.sink_stride))),
-            vec_width=1,
-            dtype=ctx.elem_dtype,
-        )
-        sink_val = (fx.Int32(ctx.sink_on) != fx.Int32(0)).select(
-            fx.Float32(fx.Float32(raw)), ctx.c_neg_inf
+        # In f32 or the query's dtype (modification 36).
+        sink_val = load_sink_logit(
+            ctx.sink,
+            ctx.sink_stride,
+            ctx.sink_on,
+            head,
+            ctx.elem_dtype,
+            ctx.c_neg_inf,
         )
         no_keys = _no_keys(l_final)
         m_scaled = fx.Float32(m_final * ctx.c_sm_scale)
