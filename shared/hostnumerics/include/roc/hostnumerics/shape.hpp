@@ -110,8 +110,10 @@ class Shape {
         return computeLinearIndex(indices, order);
     }
 
-    size_t linearIndex(std::span<const size_t> indices) const {
-        return linearIndex(indices, Permutation::identity(rank()));
+    size_t linearIndexLastDimensionFastest(std::span<const size_t> indices) const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), 0);
+        return linearIndex(indices, order);
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
@@ -124,8 +126,10 @@ class Shape {
         return result;
     }
 
-    std::vector<size_t> coordinates(size_t index) const {
-        return coordinates(index, Permutation::identity(rank()));
+    std::vector<size_t> coordinatesLastDimensionFastest(size_t index) const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), 0);
+        return coordinates(index, order);
     }
 
     bool operator==(const Shape& other) const noexcept {

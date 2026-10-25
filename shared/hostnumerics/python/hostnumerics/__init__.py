@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 from ._hostnumerics import (
-    OutputSelection,
-    OutputSelectionKind,
+    IndexSelection,
+    IndexSelectionKind,
     ScalarCategory,
     ScalarType,
     ScalarTypeInfo,
@@ -20,6 +20,6 @@ __all__ = [
     "scalar_type_info",
     "Permutation",
     "Shape",
-    "OutputSelection",
-    "OutputSelectionKind",
+    "IndexSelection",
+    "IndexSelectionKind",
 ]
