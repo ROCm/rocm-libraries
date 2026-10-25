@@ -167,6 +167,22 @@ class TestTuningSpace(unittest.TestCase):
         # use_kv_lds_swizzle x use_wave_page_id_load.
         self.assertEqual(len(specs), 40)
 
+    def test_3d_space_drops_kv_lds_swizzle_at_head_size_192(self):
+        """24 chunks per K/V row: the XOR swizzle would leave the row."""
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch):
+                specs = _sampled(
+                    f"attention_{arch}_u3d_splitkv_seg64_t1xb",
+                    256,
+                    arch=arch,
+                    seqlen_q=1,
+                    seqlen_k=4096,
+                    hdim_q=192,
+                    hdim_v=192,
+                )
+                self.assertTrue(specs)
+                self.assertFalse(any(s.kernel_spec.use_kv_lds_swizzle for s in specs))
+
     def test_3d_cache_policy_base_follows_the_problem(self):
         """The 3D builder resolves the K/V cache policy per problem
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
