@@ -514,7 +514,8 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         const int k_shape[3] = {2, T, HD};
         /* One V slot: V(i) is issued and consumed within iteration i. */
         const int v_shape[3] = {1, T, HD};
-        ctx->Q_lds = rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
+        /* D192 stages Q through the V slot (Python: Q_IN_V_SLOT). */
+        ctx->Q_lds = CFG.Q_IN_V_SLOT ? NULL : rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
         ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
@@ -712,8 +713,16 @@ void rocke_gfx942_attention_tiled_3d_emit_q_to_lds(rocke_gfx942_attention_tiled_
         rocke_value_t* v8 = rocke_b_global_load_vN(B, ctx->query, v8_idx, dtype, 8, 16);
         rocke_value_t* splat = rocke_b_vector_splat(B, qmask_t, 8);
         rocke_value_t* sel = rocke_b_vector_select(B, splat, v8, ctx->z8);
-        rocke_value_t* idxs[2] = {Q_row, Q_col};
-        rocke_b_smem_store_vN(B, ctx->Q_lds, idxs, 2, sel, 8);
+        if(CFG.Q_IN_V_SLOT)
+        {
+            rocke_value_t* idxs3[3] = {rocke_b_const_i32(B, 0), Q_row, Q_col};
+            rocke_b_smem_store_vN(B, ctx->V_lds, idxs3, 3, sel, 8);
+        }
+        else
+        {
+            rocke_value_t* idxs[2] = {Q_row, Q_col};
+            rocke_b_smem_store_vN(B, ctx->Q_lds, idxs, 2, sel, 8);
+        }
     }
     rocke_b_sync(B);
 }

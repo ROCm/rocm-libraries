@@ -681,6 +681,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->QK_N_TILES = out->T / ROCKE_ATTN3D_MFMA_N;
     out->PV_K_ITERS = out->T / out->PV_K_STEP;
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D_MFMA_N;
+    /* D192 stages Q through the V slot (Python: Q_IN_V_SLOT). */
+    out->Q_IN_V_SLOT = out->HD == 192 && out->T >= out->BLOCK_M;
 
     out->THREADS = 64;
     out->binary_search_iters = rocke_unified_attention_3d_tiled_spec_binary_search_iters(spec);
