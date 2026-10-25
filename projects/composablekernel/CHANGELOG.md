@@ -9,12 +9,9 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added a gfx1250 BF16 unmerged two-stage backward-weight candidate with scalar output-gradient loads and vectorized input-channel loads for skinny-channel long reductions.
 * Added gfx1250 BF16 RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
 
-### Optimized
-
-* Capped automatic split-K of gfx1250 two-stage WMMA grouped backward-weight at the squared per-CU occupancy.
-
 ### Fixed
 
+* Restored device-wide occupancy planning for automatic split-K in gfx1250 two-stage WMMA grouped backward-weight, removing the squared per-CU cap that underfilled small output grids with long reductions.
 * Corrected BF16/FP32 large backward-weight factory declarations to respect their own datatype build guards.
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
