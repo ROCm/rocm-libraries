@@ -34,8 +34,10 @@
  * raises ckc::Error, so call these helpers under ckc::guard_builder (the
  * kernel builders do). The bool returns never answer false to a caller.
  *
- * Not ported yet (later units): StridedTensorAddr.offset_bytes /
- * stride_bytes / slab_at, StridedBatchedAddr, ThdOffsetAddr,
+ * Not ported yet (later units): StridedBatchedAddr, ThdOffsetAddr.
+ *
+ * Ported by the main-kernel unit, in the last block of this file:
+ * StridedTensorAddr.offset_bytes / stride_bytes / slab_at and
  * WsSlab.atomic_add_row / atomic_add_row_select / store_row /
  * store_vec_in_row.
  *
@@ -406,6 +408,55 @@ void rocke_attn_bwd_packed_rows_locate(const rocke_attn_bwd_packed_rows_t* p,
                                        rocke_value_t** out_head,
                                        rocke_value_t** out_row,
                                        rocke_value_t** out_ok);
+
+/* ===================================================================== *
+ * Main-kernel unit additions.
+ * ===================================================================== */
+
+/* StridedTensorAddr.offset_bytes(h, row0): the i64 byte offset slab() adds to
+ * the base pointer for head h and the unclamped row row0 (const_i64(0) when
+ * neither term is present). */
+rocke_value_t* rocke_attn_bwd_strided_tensor_addr_offset_bytes(
+    const rocke_attn_bwd_strided_tensor_addr_t* t, rocke_attn_bwd_iv_t h, rocke_attn_bwd_iv_t row0);
+/* StridedTensorAddr.stride_bytes(which): the i64 byte stride of one head
+ * (which 'h') or one row ('t'); another letter is a ValueError (NULL). */
+rocke_value_t*
+    rocke_attn_bwd_strided_tensor_addr_stride_bytes(const rocke_attn_bwd_strided_tensor_addr_t* t,
+                                                    char which);
+/* StridedTensorAddr.slab_at(off, row0, clamp=): the slab at base + off (an i64
+ * byte offset) with base row row0. */
+rocke_attn_bwd_row_slab_t
+    rocke_attn_bwd_strided_tensor_addr_slab_at(const rocke_attn_bwd_strided_tensor_addr_t* t,
+                                               rocke_value_t* off,
+                                               rocke_value_t* row0,
+                                               bool clamp);
+
+/* WsSlab.atomic_add_row / atomic_add_row_select / store_row(r, items, ok):
+ * items are the n (xs[i], vs[i]) pairs; ok NULL is None. */
+void rocke_attn_bwd_ws_slab_atomic_add_row(const rocke_attn_bwd_ws_slab_t* s,
+                                           rocke_value_t* r,
+                                           const rocke_attn_bwd_iv_t* xs,
+                                           rocke_value_t* const* vs,
+                                           int n,
+                                           rocke_value_t* ok);
+void rocke_attn_bwd_ws_slab_atomic_add_row_select(const rocke_attn_bwd_ws_slab_t* s,
+                                                  rocke_value_t* r,
+                                                  const rocke_attn_bwd_iv_t* xs,
+                                                  rocke_value_t* const* vs,
+                                                  int n,
+                                                  rocke_value_t* ok);
+void rocke_attn_bwd_ws_slab_store_row(const rocke_attn_bwd_ws_slab_t* s,
+                                      rocke_value_t* r,
+                                      const rocke_attn_bwd_iv_t* xs,
+                                      rocke_value_t* const* vs,
+                                      int n,
+                                      rocke_value_t* ok);
+/* WsSlab.store_vec_in_row(r, x, v): <n x f32> (n in 1, 2, 4, 8) at an
+ * unclamped index; another n is a ValueError. */
+void rocke_attn_bwd_ws_slab_store_vec_in_row(const rocke_attn_bwd_ws_slab_t* s,
+                                             rocke_value_t* r,
+                                             rocke_attn_bwd_iv_t x,
+                                             rocke_value_t* v);
 
 #ifdef __cplusplus
 }
