@@ -110,9 +110,11 @@ inline constexpr std::string_view ALIGN_BOTTOM_RIGHT_TOKEN = "flydsl_sdpa_rdna.a
 inline constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_rdna.stats.uid";
 /// The uid of the additive bias (`attn_mask`), or NO_BIAS when the graph has none.
 inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_rdna.bias.uid";
-/// The uid of the attention sink, or NO_SINK, and its element stride across query heads.
+/// The uid of the attention sink, or NO_SINK, its element stride across query heads, and 1
+/// when it is FLOAT rather than in the query's dtype.
 inline constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_rdna.sink.uid";
 inline constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_rdna.sink.stride";
+inline constexpr std::string_view SINK_FLOAT_TOKEN = "flydsl_sdpa_rdna.sink.float";
 /// Where the softmax scale comes from; see ScaleSource.
 inline constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_rdna.scale_source";
 /// The scale's f32 bit pattern when baked (BoundTokens carry int64_t), else the uid of
@@ -601,20 +603,22 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // An attention sink: one logit per query head, in the query's dtype, served by the
-    // has_sink objects.
+    // An attention sink: one logit per query head, FLOAT or in the query's dtype, served by
+    // the has_sink objects.
     int64_t sinkUid = NO_SINK;
     int64_t sinkStride = 0;
+    int64_t sinkFloat = 0;
     if(attributes.sink_token_tensor_uid().has_value())
     {
-        const auto stride = servableSinkStride(
+        const auto sink = servableSink(
             context, *attributes.sink_token_tensor_uid(), problem.numHeads, problem.dataType);
-        if(!stride.has_value())
+        if(!sink.has_value())
         {
             return std::nullopt;
         }
         sinkUid = *attributes.sink_token_tensor_uid();
-        sinkStride = *stride;
+        sinkStride = sink->stride;
+        sinkFloat = sink->isFloat ? 1 : 0;
     }
     // Block-sparse masks.
     if(attributes.block_mask_tensor_uid().has_value())
@@ -723,6 +727,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     bound[std::string(BIAS_TOKEN)] = biasUid;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
+    bound[std::string(SINK_FLOAT_TOKEN)] = sinkFloat;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     bound[std::string(SEQ_LEN_Q_TOKEN)] = varlen->seqLenQ;
@@ -750,6 +755,8 @@ struct FlydslSdpaRdnaBinding
     int64_t bias = NO_BIAS;
     int64_t sink = NO_SINK;
     int64_t sinkStride = 0;
+    /// Whether the sink is FLOAT rather than in the query's dtype.
+    bool sinkFloat = false;
     ScaleSource scaleSource = ScaleSource::BAKED;
     int64_t scale = 0;
     int64_t seqLenQ = NO_SEQ_LEN;
@@ -806,6 +813,7 @@ inline FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
     binding.bias = read(BIAS_TOKEN);
     binding.sink = read(SINK_TOKEN);
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
+    binding.sinkFloat = read(SINK_FLOAT_TOKEN) != 0;
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     binding.seqLenQ = read(SEQ_LEN_Q_TOKEN);

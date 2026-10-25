@@ -648,7 +648,8 @@ public:
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        const int64_t sinkStride = binding.sinkStride;
+        // The head stride, with the sink's dtype in its bit 32 (kernel modification 31).
+        const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
 
         const auto& s = preparedSdpa.strides();
         const auto& b = preparedSdpa.biasStrides();

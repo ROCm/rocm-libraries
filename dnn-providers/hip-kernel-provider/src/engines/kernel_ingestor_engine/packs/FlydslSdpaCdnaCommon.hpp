@@ -143,10 +143,17 @@ inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 /// 1 when the vectorized bias objects read the graph's bias, 0 when only the strided ones
 /// do (`bias_kstrided`, vendored-kernel modification 31) or there is none.
 inline constexpr std::string_view BIAS_VECTORIZED_TOKEN = "flydsl_sdpa_cdna.bias.vectorized";
-/// The attention sink's uid, or NO_SINK, and its element stride across query heads
-/// (vendored-kernel modification 19).
+/// The attention sink's uid, or NO_SINK, its element stride across query heads
+/// (vendored-kernel modification 19), and 1 when it is FLOAT rather than in the query's dtype
+/// (modification 36).
 inline constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_cdna.sink.uid";
 inline constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+inline constexpr std::string_view SINK_FLOAT_TOKEN = "flydsl_sdpa_cdna.sink.float";
+/// The generic kernel's sink_on argument (vendored-kernel modification 36): no sink, a sink in
+/// the query's dtype, or a FLOAT one.
+inline constexpr int32_t SINK_OFF = 0;
+inline constexpr int32_t SINK_QUERY_DTYPE = 1;
+inline constexpr int32_t SINK_FLOAT = 2;
 /// 1 for an object built to add an attention sink's logit to its softmax (modification 19).
 inline constexpr std::string_view HAS_SINK_FIELD = "has_sink";
 /// The uids of the per-batch query and key lengths under padding, or NO_SEQ_LEN for a dense
@@ -1064,20 +1071,23 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         scaleToken = static_cast<int64_t>(scaleBits);
     }
 
-    // An attention sink: one logit per query head, in the query's dtype, as a rank-1
-    // [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modification 19).
+    // An attention sink: one logit per query head, FLOAT or in the query's dtype, as a
+    // rank-1 [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modifications 19
+    // and 36).
     int64_t sinkUid = NO_SINK;
     int64_t sinkStride = 0;
+    int64_t sinkFloat = 0;
     if(attributes.sink_token_tensor_uid().has_value())
     {
-        const auto stride = servableSinkStride(
+        const auto sink = servableSink(
             context, *attributes.sink_token_tensor_uid(), problem.numHeads, problem.dataType);
-        if(!stride.has_value())
+        if(!sink.has_value())
         {
             return std::nullopt;
         }
         sinkUid = *attributes.sink_token_tensor_uid();
-        sinkStride = *stride;
+        sinkStride = sink->stride;
+        sinkFloat = sink->isFloat ? 1 : 0;
     }
 
     BoundTokens bound;
@@ -1095,6 +1105,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     bound[std::string(BIAS_VECTORIZED_TOKEN)] = biasVectorized ? 1 : 0;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
+    bound[std::string(SINK_FLOAT_TOKEN)] = sinkFloat;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     bound[std::string(SEQ_LEN_Q_TOKEN)] = varlen->seqLenQ;
@@ -1127,6 +1138,8 @@ struct FlydslSdpaCdnaBinding
     int64_t bias = NO_BIAS;
     int64_t sink = NO_SINK;
     int64_t sinkStride = 0;
+    /// Whether the sink is FLOAT rather than in the query's dtype.
+    bool sinkFloat = false;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
     int64_t seqLenQ = NO_SEQ_LEN;
@@ -1183,6 +1196,7 @@ inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.bias = read(BIAS_TOKEN);
     binding.sink = read(SINK_TOKEN);
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
+    binding.sinkFloat = read(SINK_FLOAT_TOKEN) != 0;
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     binding.seqLenQ = read(SEQ_LEN_Q_TOKEN);
@@ -2293,14 +2307,19 @@ public:
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
-        // The attention sink, when one is bound; otherwise O stands in and sink_on is 0.
+        // The attention sink, when one is bound; otherwise O stands in and sink_on is
+        // SINK_OFF. sink_on names the sink's dtype (vendored-kernel modification 36).
         const bool hasSink = binding.sink != NO_SINK;
         void* sink = hasSink ? hipdnn_plugin_sdk::findDeviceBuffer(
                                    binding.sink, deviceBuffers, numDeviceBuffers)
                                    .ptr
                              : o;
         const auto sinkStride = static_cast<int32_t>(binding.sinkStride);
-        const int32_t sinkOn = hasSink ? 1 : 0;
+        int32_t sinkOn = SINK_OFF;
+        if(hasSink)
+        {
+            sinkOn = binding.sinkFloat ? SINK_FLOAT : SINK_QUERY_DTYPE;
+        }
         // The split workspace: the partial O, then the partial LSEs. Unread with one split,
         // when O stands in.
         const auto splits = static_cast<int32_t>(preparedSdpa.splits());

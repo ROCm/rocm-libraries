@@ -290,25 +290,40 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
     return text == nullptr ? std::nullopt : std::optional<std::string>(*text);
 }
 
+/// A servable attention sink: its head stride in elements of its own dtype, and whether that
+/// dtype is FLOAT (cuDNN's and hipDNN's reference's) rather than the query's.
+struct ServableSink
+{
+    int64_t stride = 0;
+    bool isFloat = false;
+};
+
 /**
- * @brief The attention sink's element stride across query heads, or nullopt for a sink the
- *        kernels cannot read.
+ * @brief The attention sink as the kernels read it, or nullopt for a sink they cannot read.
  *
- * One logit per query head in the query's dtype, as a rank-1 [Hq] tensor or a rank-4
- * [1, Hq, 1, 1] one; a device operand, its head stride positive unless there is one head,
- * and every head's element offset inside int32: the kernels compute h * stride in 32 bits.
+ * One logit per query head, FLOAT or in the query's dtype, as a rank-1 [Hq] tensor or a
+ * rank-4 [1, Hq, 1, 1] one; a device operand aligned to its element, its head stride
+ * positive unless there is one head, and every head's offset in 16-bit units inside int32:
+ * the kernels read the logit as 16-bit halves at h * stride, scaled to the dtype's width, in
+ * 32 bits (kernel modifications 31, 11 and 36).
  */
-inline std::optional<int64_t> servableSinkStride(const MatchContext& context,
-                                                 int64_t uid,
-                                                 int64_t numHeads,
-                                                 data_objects::DataType dataType)
+inline std::optional<ServableSink> servableSink(const MatchContext& context,
+                                                int64_t uid,
+                                                int64_t numHeads,
+                                                data_objects::DataType dataType)
 {
     const auto* sink = findTensor(context, uid);
     if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
-       || sink->data_type() != dataType || sink->virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
-       || sink->ragged_offset_tensor_uid().has_value()
-       || !declaresAlignment(*sink, BYTES_PER_ELEMENT))
+       || (sink->data_type() != dataType && sink->data_type() != data_objects::DataType::FLOAT)
+       || sink->virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
+       || sink->ragged_offset_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    const bool isFloat = sink->data_type() == data_objects::DataType::FLOAT;
+    // Each element is one 16-bit half, or two for FLOAT.
+    const int64_t halves = isFloat ? 2 : 1;
+    if(!declaresAlignment(*sink, BYTES_PER_ELEMENT * halves))
     {
         return std::nullopt;
     }
@@ -331,11 +346,21 @@ inline std::optional<int64_t> servableSinkStride(const MatchContext& context,
         return std::nullopt;
     }
     const int64_t stride = numHeads == 1 ? 0 : sink->strides()->Get(headAxis);
-    if(stride < 0 || (numHeads > 1 && (stride == 0 || stride > INT32_LIMIT / (numHeads - 1))))
+    if(stride < 0
+       || (numHeads > 1 && (stride == 0 || stride > INT32_LIMIT / ((numHeads - 1) * halves))))
     {
         return std::nullopt;
     }
-    return stride;
+    return ServableSink{stride, isFloat};
+}
+
+/// The RDNA and aiw kernels' sink_stride argument: the head stride in elements, with bit
+/// SINK_FLOAT_STRIDE_BIT set for a FLOAT sink (kernel modifications 31 and 11).
+inline constexpr int64_t SINK_FLOAT_STRIDE_BIT = 32;
+
+inline int64_t rdnaSinkStrideArgument(int64_t stride, bool isFloat)
+{
+    return stride | (isFloat ? int64_t{1} << SINK_FLOAT_STRIDE_BIT : int64_t{0});
 }
 
 /// A graph's mask bounds in the kernels' terms: key j is hidden from query row i when

@@ -459,7 +459,8 @@ public:
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        const int64_t sinkStride = binding.sinkStride;
+        // The head stride, with the sink's dtype in its bit 32 (kernel modification 31).
+        const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
         // Each batch's lengths under padding; null (the launch's lengths) for a dense graph.
         void* seqLenQ = optionalBuffer(binding.seqLenQ, deviceBuffers, numDeviceBuffers);
         void* seqLenKv = optionalBuffer(binding.seqLenKv, deviceBuffers, numDeviceBuffers);

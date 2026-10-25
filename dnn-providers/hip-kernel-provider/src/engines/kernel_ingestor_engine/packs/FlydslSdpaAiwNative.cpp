@@ -790,7 +790,9 @@ public:
                     b[1],
                     b[2],
                     sink,
-                    binding.sinkStride,
+                    // The head stride, with the sink's dtype in its bit 32 (kernel
+                    // modification 11).
+                    rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat),
                     b[3],
                     i32(problem.numVHeads),
                     s[4][0],
