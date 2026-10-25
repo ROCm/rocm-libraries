@@ -4,9 +4,9 @@
 """Address generators for the attention backward kernels.
 
 Family glue for the backward kernels (prep, main, convert and the paged
-roles). The parts the aux kernels use have a C++ twin
-(``platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h``,
-which lists what is not ported yet); the rest is Python-only.  Everything here emits integer IR through
+roles). C++ twin:
+``platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h``,
+which lists what is not ported yet.  Everything here emits integer IR through
 the builder it is handed and only calls integer / pointer / load / store
 methods of ``IRBuilder``, so the same code can be evaluated with a
 duck-typed integer builder on the host (that is how the unit tests check the
