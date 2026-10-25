@@ -15,21 +15,25 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
             ``dbias_reduce,<dtype>,32,plain,bk,0,0,tail,0,1``: the tile is the ladder's first rung as a placeholder,
             every other field its default. merged: dK/dV + dQ + dB in one launch, no prep; both roles take their
             policy-default schedules, and the dQ role is built at the dK/dV role's wave count)
-  dtype   : f16 | bf16
-  tile    : head-dim tile, one of LADDER
+  dtype   : f16 | bf16 | fp32   (fp32: the native f32 MFMA family; tiles 32..256 and 512 (no 384); kernels prep,
+            dkdv, dq and dbias_reduce only, no ``sink``, ``merged`` or ``dsink_reduce``; its perf knobs are
+            listed in ``FP32_KNOBS``)
+  tile    : head-dim tile, one of LADDERS[dtype]
   cls     : plain | causal | bias
   dform   : rt (dropout is a runtime branch on ``rt_flags`` bit 1; the compiled dropout flag is 1)
             bk (dropout baked into the object; ``dropout`` = 0 or 1)
   dropout : compiled dropout flag (rt => 1)
   padded  : 0 exact tile | 1 padded head compiled (the head dim itself is a launch value)
   floor   : g1 (pinned tile, floor 0) | tail (rung below the tile) | <int>
-  hdv     : V head dim carried in meta (0 = tile)
+  hdv     : V head dim carried in meta (0 = tile; the dQ convention is ``hdv_of`` of the builder)
   hints   : 0|1  apply the kernel module's _COMPILE_HINTS
   knobs   : perf knobs, listed only when set, in KNOBS order. Unset = the FlyDSL policy value.
             dkdv: num_waves mfma_rows dkv_shards block_q waves_per_eu tight_registers num_stream_buffers gqa_pack
             dq  : num_waves block_m block_n mfma_rows waves_per_eu store_db bias_stage
             prep: sink (``sink=1``: the sink twin, a different object with a different ABI)
-            merged: role_order (concat | lpt), store_db, gqa_pack
+            merged: num_waves mfma_rows dkv_shards role_order store_db gqa_pack (num_waves, mfma_rows and
+            dkv_shards are the dK/dV role's grid-fill knobs, with the split dK/dV meaning; the dQ role follows the
+            wave count; role_order is concat | lpt)
             ``gqa_pack=1`` packs the GQA group into the q-tile row axis of the dK/dV role; ``store_db=0`` builds a bias
             dQ object without the dB store; ``bias_stage=direct`` loads the bias directly instead of staging it in LDS.
 
@@ -41,10 +45,15 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)
+LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)  # the 16-bit ladder
+# fp32 rides tile 512 for head dims 257..512: no 384 rung, so ``rung_below(512, "fp32")`` is 256.
+FP32_LADDER = tuple(t for t in LADDER if t != 384)
 KERNELS = ("prep", "dkdv", "dq", "dbias_reduce", "dsink_reduce", "merged")
 ROLE_ORDERS = ("concat", "lpt")
-DTYPES = ("f16", "bf16")
+DTYPES = ("f16", "bf16")  # the 16-bit dtypes
+FP32 = "fp32"
+ALL_DTYPES = DTYPES + (FP32,)
+LADDERS = {"f16": LADDER, "bf16": LADDER, FP32: FP32_LADDER}
 CLASSES = ("plain", "causal", "bias")
 DFORMS = ("rt", "bk")
 # Perf knobs per kernel, in canonical order. Values are ints; tight_registers is 0/1.
@@ -71,7 +80,28 @@ KNOBS = {
         "store_db",
         "bias_stage",
     ),
-    "merged": ("role_order", "store_db", "gqa_pack"),
+    "merged": (
+        "num_waves",
+        "mfma_rows",
+        "dkv_shards",
+        "role_order",
+        "store_db",
+        "gqa_pack",
+    ),
+}
+
+# The fp32-legal perf knobs and values per kernel; anything else is rejected on fp32. The dK/dV schedule (per-wave or
+# D-split) and the wave count are per-tile entries of the fp32 tuning table, not Spec keys.
+FP32_KNOBS = {
+    "prep": {},
+    "dbias_reduce": {},
+    "dkdv": {"mfma_rows": (16,), "block_q": (16, 32), "num_stream_buffers": (1,)},
+    "dq": {"block_m": (16, 32), "block_n": (16,)},
+}
+# Knob values only the fp32 family has (the 16-bit policies never take them): rejected on a 16-bit Spec.
+FP32_ONLY_VALUES = {
+    "dkdv": {"block_q": (16,)},
+    "dq": {"block_m": (16,), "block_n": (16,)},
 }
 
 ALL_KNOBS = tuple(dict.fromkeys(k for ks in KNOBS.values() for k in ks))
@@ -81,8 +111,9 @@ STR_KNOBS = {
 }  # knobs whose value is one of these words rather than an int
 
 
-def rung_below(t):
-    return max([r for r in LADDER if r < t], default=0)
+def rung_below(t, dtype=None):
+    """The rung below tile ``t`` on the dtype's ladder (None: the 16-bit ladder); fp32 tile 512 gives 256."""
+    return max([r for r in LADDERS.get(dtype, LADDER) if r < t], default=0)
 
 
 @dataclass(frozen=True)
@@ -118,10 +149,12 @@ class Spec:
 
         if self.kernel not in KERNELS:
             bad("kernel")
-        if self.dtype not in DTYPES:
+        if self.dtype not in ALL_DTYPES:
             bad("dtype")
-        if self.tile not in LADDER:
-            bad("tile")
+        if self.tile not in LADDERS[self.dtype]:
+            bad(f"tile (the {self.dtype} ladder is {LADDERS[self.dtype]})")
+        if self.dtype == FP32 and self.kernel not in FP32_KNOBS:
+            bad(f"kernel {self.kernel} has no fp32 family")
         if self.cls not in CLASSES:
             bad("cls")
         if self.dform not in DFORMS:
@@ -174,6 +207,13 @@ class Spec:
                 continue
             if k not in KNOBS[self.kernel]:
                 bad(f"knob {k} does not apply to {self.kernel}")
+            if self.dtype == FP32:
+                if v not in FP32_KNOBS[self.kernel].get(k, ()):
+                    bad(
+                        f"knob {k}={v} is not fp32-legal for {self.kernel} (fp32: {FP32_KNOBS[self.kernel]})"
+                    )
+            elif v in FP32_ONLY_VALUES.get(self.kernel, {}).get(k, ()):
+                bad(f"knob {k}={v} is an fp32 knob value, not legal on {self.dtype}")
             if k in STR_KNOBS:
                 if v not in STR_KNOBS[k]:
                     bad(f"knob {k} must be one of {STR_KNOBS[k]}")
@@ -256,8 +296,8 @@ class Spec:
 
 
 def dbias_reduce_spec(dtype: str) -> Spec:
-    """The standalone dBias reduce object of @p dtype: the pin a merged bias object's reduce kernel is gated against."""
-    return Spec("dbias_reduce", dtype, LADDER[0])
+    """The standalone dBias reduce object of @p dtype: the pin a combined bias object's reduce kernel is gated against."""
+    return Spec("dbias_reduce", dtype, LADDERS[dtype][0])
 
 
 # The instance-row spelling of an unset knob: -1 for the int knobs (0 is legal for
@@ -279,9 +319,9 @@ ROW_FIELDS = (
 )
 
 # Row fields a kernel's rows carry that are no part of its Spec: the object's content is
-# named by the key, these only describe how it is shipped. The merged rows carry the
-# symbol of the dBias reduce kernel their bias objects hold (`""` on the others).
-NON_KEY_FIELDS = {"merged": ("reduce_symbol",)}
+# named by the key, these only describe how it is shipped. The merged and dq rows carry
+# the symbol of the dBias reduce kernel their bias objects hold (`""` on the others).
+NON_KEY_FIELDS = {"merged": ("reduce_symbol",), "dq": ("reduce_symbol",)}
 
 
 def to_spec(instance) -> Spec:

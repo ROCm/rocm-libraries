@@ -15,6 +15,13 @@ there is deliberately no fused kernel (plan section 4).
     dQ = sum_j dS . K * sm_scale
     dB = dS                               (bias-gradient builds only)
 
+**dBias reduction.** `dbias_reduce=True` (bias builds that store dB) adds a second launch of `fmha_bwd_dbias_reduce_gfx950`'s kernel after the
+dQ one, so the object carries two kernel symbols: the dQ kernel and the reduce (`fmha_bwd_dbias_reduce_gfx950_kernel_1`). The launcher's arguments
+gain the reduce launch's (`DBias`, `reduce_batch`, `reduce_head`, `stride_ws_*`, `stride_out_*`; its `DB` is the dQ kernel's `DB`); they serve
+compilation only, since each kernel's kernarg is packed from its own declaration, and a build without the reduce ignores them (`_launch` and
+`_compile` pass placeholders). The reduce launch resets the module's fast-math compile hints, as the merged launcher's does. The gpu module is
+compiled under one set of LLVM options, the dQ module's, so the reduce kernel's bytes differ from its standalone build's.
+
 --- The whole design, in one observation --------------------------------------
 
 **Every one of the three GEMMs is a GEMM the forward already emits**, once the
@@ -230,6 +237,9 @@ from dataclasses import replace
 from types import SimpleNamespace as _WireArgs
 
 from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi
+from kernels.attention_bwd_cdna import (
+    fmha_bwd_dbias_reduce_gfx950 as dbias_reduce_module,
+)
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_bwd_cdna.fmha_bwd_dq_m16_gfx950 import make_m16_dq_body
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import _fmax, _fmul, _fsub
@@ -1413,7 +1423,9 @@ class BwdDbStoreHelper(ParityStoreHelper):
                 )
 
 
-def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
+def build_fmha_bwd_dq_gfx950_module_primary(
+    meta, knobs, runtime_axes=(), dbias_reduce=False
+):
     """Build the backward dQ kernel for a resolved (meta, knobs) pair.
 
     Same shape as the forward's builder and for the same reason: `meta` is what
@@ -1438,6 +1450,17 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
     # different quarter of the kernel. See `BwdDqTraits.ACC_ELEMS`.
     ACC_ELEMS = traits.ACC_ELEMS
     STORE_DB = traits.STORE_DB
+    if dbias_reduce and not (traits.BIAS_TYPE and STORE_DB):
+        raise ValueError("dbias_reduce: a bias build that stores dB only")
+    REDUCE_VEC = dbias_reduce_module.VEC
+    REDUCE_BLOCK = dbias_reduce_module.BLOCK_THREADS
+    reduce_kernel = (
+        dbias_reduce_module.build_fmha_bwd_dbias_reduce_gfx950_module_primary(
+            traits.DTYPE_STR
+        ).kernel
+        if dbias_reduce
+        else None
+    )
     LDS_BIAS = traits.BIAS_STAGE == "lds"
     # Which MFMA family this build is. `MFMA_N` is the query rows a wave owns,
     # so it is the discriminator rather than a width threshold -- the same
@@ -1464,6 +1487,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
         knobs.strides_constexpr,
         BUILD_SM_SCALE,
         tuple(sorted(runtime_axes)),
+        bool(dbias_reduce),
     )
 
     _lds_elem_dtype = dualwave.dtype_to_elem_type(traits.DTYPE_STR)
@@ -2076,6 +2100,15 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
         stride_db_head: fx.Int64,
         stride_db_seq_q: fx.Int64,
         rt_flags: fx.Int32,
+        DBias: fx.Pointer,
+        reduce_batch: fx.Int32,
+        reduce_head: fx.Int32,
+        stride_ws_batch: fx.Int64,
+        stride_ws_head: fx.Int64,
+        stride_ws_seq: fx.Int64,
+        stride_out_batch: fx.Int64,
+        stride_out_head: fx.Int64,
+        stride_out_seq: fx.Int64,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make the build configuration visible to the JIT cache key.
@@ -2160,6 +2193,38 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
             block=(traits.BLOCK_SIZE, 1, 1),
             stream=stream,
         )
+        if const_expr(dbias_reduce):
+            nvec = (fx.Index(max_seqlen_k) + fx.Index(REDUCE_VEC - 1)) // fx.Index(
+                REDUCE_VEC
+            )
+            nblk = (
+                fx.Index(max_seqlen_q) * nvec + fx.Index(REDUCE_BLOCK - 1)
+            ) // fx.Index(REDUCE_BLOCK)
+            out_b = (reduce_batch != fx.Int32(0)).select(fx.Int32(1), batch_size)
+            out_h = (reduce_head != fx.Int32(0)).select(fx.Int32(1), num_head_q)
+            with CompilationContext.compile_hints(
+                {"fastmath": None, "fast_fp_math": False, "unsafe_fp_math": False}
+            ):
+                reduce_kernel(
+                    DB,
+                    DBias,
+                    batch_size,
+                    num_head_q,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    reduce_batch,
+                    reduce_head,
+                    stride_ws_batch,
+                    stride_ws_head,
+                    stride_ws_seq,
+                    stride_out_batch,
+                    stride_out_head,
+                    stride_out_seq,
+                ).launch(
+                    grid=(nblk, fx.Index(out_b) * fx.Index(out_h), 1),
+                    block=(REDUCE_BLOCK, 1, 1),
+                    stream=stream,
+                )
 
     def _resolve_window_args(window):
         """`(window_left, window_right)` for the wire, as signed i32.
@@ -2441,9 +2506,23 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
             *db_st,
             int(not (hdim_qk == hdim_vo == BLOCK_DMODEL))
             | (2 if dropout_p is not None else 0),
+            # The reduce launch's arguments: placeholders, unused without `dbias_reduce`.
+            wire_ptr(db_t),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ), stream
 
     def _launch(*args, **kwargs):
+        if dbias_reduce:
+            raise NotImplementedError(
+                "a dbias_reduce build serves compilation: the reduce launch's arguments are the native dispatch's"
+            )
         packed, stream = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
             return abi.run_compiled(
@@ -2454,6 +2533,10 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
             )
 
     def _compile(*args, **kwargs):
+        if dbias_reduce:
+            raise NotImplementedError(
+                "a dbias_reduce build serves compilation: the reduce launch's arguments are the native dispatch's"
+            )
         packed, stream = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
             return flyc.compile(launch_fmha_bwd_dq_gfx950, *packed, fx.Stream(stream))
@@ -2464,6 +2547,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(meta, knobs, runtime_axes=()):
     _launch.emit = emit_dq_body
     _launch.SharedStorage = SharedStorage
     _launch.cache_tag = _cache_tag
+    _launch.jit = launch_fmha_bwd_dq_gfx950
     return _launch
 
 
