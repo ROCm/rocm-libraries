@@ -2083,10 +2083,15 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMoreQueriesThanKeysWithRowsNoKeyReache
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-// Suites named Full* are the full tier only (HIP_MLOPS_ENGINE_test_categories.yaml excludes
-// them from quick, standard and comprehensive): sweeps and large shapes whose reference costs
-// tens of seconds on a CDNA runner, beside the quick tier's 300 s budget for the whole binary.
-TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesTheCombinationsNoOtherCaseReaches)
+// The full tier only: sweeps and large shapes whose reference costs tens of seconds on a CDNA
+// runner, beside the quick tier's 300 s budget for the whole binary. Instantiated once under
+// the `Full` prefix (below), which HIP_MLOPS_ENGINE_test_categories.yaml excludes from the
+// quick, standard and comprehensive tiers; the parameter only carries that prefix.
+class TestGpuFlydslSdpaCdnaFullTier : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesTheCombinationsNoOtherCaseReaches)
 {
     // f16 objects built with kv_align (they run only at a key length that is a multiple of
     // 64): non-causal at each exact head dim.
@@ -2163,11 +2168,11 @@ void expectDeepSeekV4Prefill(int64_t seqLen, bool window)
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesDeepSeekV4PrefillAtHeadDim512)
 {
     // Long enough for the window to bind; the prefill-sized lengths are in
-    // FullTestGpuFlydslSdpaCdnaDispatch.
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
     expectDeepSeekV4Prefill(256, true);
 }
 
-TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesDeepSeekV4PrefillAtHeadDim512)
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesDeepSeekV4PrefillAtHeadDim512)
 {
     for(const int64_t seqLen : {int64_t{1024}, int64_t{2048}})
     {
@@ -2403,11 +2408,11 @@ void expectBucketWidth(int64_t headDim)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAWidthInsideABucketThatIsNotAPowerOfTwo)
 {
-    // Inside the 160 bucket; every width of every bucket is in FullTestGpuFlydslSdpaCdnaDispatch.
+    // Inside the 160 bucket; every width of every bucket is in Full/TestGpuFlydslSdpaCdnaFullTier.
     expectBucketWidth(152);
 }
 
-TEST(FullTestGpuFlydslSdpaCdnaDispatch, ServesEveryWidthInsideTheBucketsThatAreNotPowersOfTwo)
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesEveryWidthInsideTheBucketsThatAreNotPowersOfTwo)
 {
     for(const int64_t headDim : {int64_t{72},
                                  int64_t{88},
@@ -2895,11 +2900,11 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFinite
 {
     // The configuration that reaches every behavior at once: a part tile, the causal rows
     // that see no key, and the -inf keys beside the lowest rows. Every combination is in
-    // FullTestGpuFlydslSdpaCdnaDispatch.
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
     expectLowestFiniteBiasRows(128, 264, true, true);
 }
 
-TEST(FullTestGpuFlydslSdpaCdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFiniteValue)
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasThatMasksWholeRowsAtTheLowestFiniteValue)
 {
     for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
     {
@@ -2936,13 +2941,18 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAt
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(FullTestGpuFlydslSdpaCdnaDispatch, LongerSequenceMatchesTheReference)
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, LongerSequenceMatchesTheReference)
 {
     auto spec = cdnaSpec();
     spec.seqLenQ = 1024;
     spec.seqLenKv = 1024;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         TestGpuFlydslSdpaCdnaFullTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
 
 } // namespace
 
