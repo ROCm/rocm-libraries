@@ -1637,23 +1637,67 @@ TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetAsDeviceOrPassByValueScalarsAccep
              "seed (uid 15) is virtual");
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addDropout(g);
-        g.tensor("offset").dims = {1};
-        g.tensor("offset").strides = {1};
-    }),
-             "dropout",
-             "offset (uid 16) dims [1] != [1,1,1,1]");
-    declined(baseline().withEdit([](SdpaBwdGraph& g) {
-        addDropout(g);
         g.tensor("seed").dims = {1, 1, 1, 2};
     }),
              "dropout",
-             "seed (uid 15) dims [1,1,1,2] != [1,1,1,1]");
+             "seed (uid 15) dims [1,1,1,2] are not a scalar (every extent 1)");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g);
+        g.tensor("offset").dims = {2};
+        g.tensor("offset").strides = {1};
+    }),
+             "dropout",
+             "offset (uid 16) dims [2] are not a scalar (every extent 1)");
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         addDropout(g);
         g.tensor("seed").value = int64_t{7};
     }),
              "dropout",
              "differ");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetOfAnyRankWithEveryExtentOneAccept)
+{
+    // The frontend's constant form carries dims [1]; a device tensor may have any scalar rank.
+    for(const auto& dims : {std::vector<int64_t>{1}, {1, 1}, {1, 1, 1}, {1, 1, 1, 1}})
+    {
+        SCOPED_TRACE(dims.size());
+        const auto rank = [&dims](SdpaBwdGraph& g) {
+            for(const char* name : {"seed", "offset"})
+            {
+                g.tensor(name).dims = dims;
+                g.tensor(name).strides = std::vector<int64_t>(dims.size(), 1);
+            }
+        };
+        for(const auto type : {data_objects::DataType::INT32, data_objects::DataType::INT64})
+        {
+            const auto width
+                = type == data_objects::DataType::INT32 ? SeedWidth::INT32 : SeedWidth::INT64;
+            // Device, constant-valued and runtime pass-by-value.
+            auto problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
+                addDropout(g, 0.2F, type, false);
+                rank(g);
+            }));
+            ASSERT_TRUE(problem.has_value());
+            EXPECT_EQ(problem->seedForm, SeedForm::DEVICE);
+            EXPECT_EQ(problem->seedWidth, width);
+            problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
+                addDropout(g, 0.2F, type, true);
+                rank(g);
+            }));
+            ASSERT_TRUE(problem.has_value());
+            EXPECT_EQ(problem->seedForm, SeedForm::PASS_BY_VALUE);
+            EXPECT_EQ(problem->seedWidth, width);
+            problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
+                addDropout(g, 0.2F, type, false);
+                rank(g);
+                g.tensor("seed").runtimePassByValue = true;
+                g.tensor("offset").runtimePassByValue = true;
+            }));
+            ASSERT_TRUE(problem.has_value());
+            EXPECT_EQ(problem->seedForm, SeedForm::PASS_BY_VALUE);
+        }
+    }
 }
 
 TEST(TestFlydslSdpaBwdMatcher, DR8DeviceSeedAndOffsetMustBeDenseAndAlignedToTheirElementSize)
