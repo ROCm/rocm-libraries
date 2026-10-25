@@ -720,6 +720,10 @@ def _without(instance: Instance, op: str, dropped: tuple[str, ...]) -> Instance:
 # common classes: the specialized head dims, no bias, no sink. gfx11-generic only: on gfx12 the
 # aiw objects serve dropout (decision Q3). Every other class declines a dropping graph.
 SDPA_RDNA_DROPOUT_TARGETS = ("gfx11-generic",)
+# The 256 twins' (block_m, dv_split, hd_pair) per dtype: head-dim pairs without a column
+# split, so QK^T and the Philox draws run once per row rather than once per column half
+# (1.5-1.9x faster on gfx1101); f16 takes the 32-row tile, where 64 rows spill 3 VGPRs.
+SDPA_RDNA_DROPOUT_256 = {"bf16": (64, 1, 1), "f16": (32, 1, 1)}
 
 
 def sdpa_instances(arch: str) -> list[Instance]:
@@ -736,11 +740,10 @@ def sdpa_instances(arch: str) -> list[Instance]:
         for dtype in DTYPES:
             for head_dim in SDPA_HEAD_DIMS:
                 for causal in SDPA_CAUSAL:
-                    # The plain twin's schedule, but at 256 also a two-way column split,
-                    # as the generic 256 tier has: the keep masks on top of the head-dim
-                    # pairs' registers spill otherwise.
+                    # The plain twin's schedule; at 256 the head-dim pairs per dtype
+                    # (SDPA_RDNA_DROPOUT_256).
                     block_m, dv_split, hd_pair = (
-                        (64, 2, 1)
+                        SDPA_RDNA_DROPOUT_256[dtype]
                         if head_dim == 256
                         else sdpa_prefill_schedule(head_dim, causal, 0)
                     )
@@ -766,7 +769,8 @@ def sdpa_instances(arch: str) -> list[Instance]:
                         )
                     )
                     # Dropout with an additive bias (R2), f32 and in the query's dtype:
-                    # the bias schedule, but at 256 the dropout twins' column split.
+                    # the bias schedule, but at 256 a two-way column split (the bias and
+                    # the keep masks on top of the head-dim pairs' registers spill).
                     block_m, dv_split, hd_pair = (
                         (64, 2, 1)
                         if head_dim == 256
@@ -1434,6 +1438,39 @@ def _dropout_tier(arch: str, head_dim: int, causal: int) -> CdnaTier:
     )
 
 
+# The dropout objects without a bias, tuned against AOTriton's own dropout cost (COVERAGE.md
+# section 7.9, cost): on gfx942 and gfx950 each non-causal one also ships the key-aligned
+# build its plain class has, ranked above it (3-6% faster at key lengths a multiple of 64).
+SDPA_CDNA_DROPOUT_KV_ALIGNED_ARCHS = ("gfx942", "gfx950")
+# Where another tile holds the Philox draws faster than the class's: gfx950's 64-row tile at
+# 64 (its class's generic companion) is ~20% slower than the 128-row one at S1024-S4096.
+SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    ("gfx950", 64, 0): CdnaTier(_GEN, 128, kv_aligned=True),
+}
+# Companions with the plain class's preference rule: gfx942's 256-row tile at 128 (without
+# the KV global prefetch, which spills with the Philox draws) is ~20% faster from 49152 rows
+# on and much slower below.
+SDPA_CDNA_DROPOUT_COMPANIONS: dict[tuple[str, int, int], tuple[CdnaTier, ...]] = {
+    ("gfx942", 128, 0): (
+        CdnaTier(_GEN, 256, kv_gpfetch=0, kv_aligned=True, prefer=("rows", 49152, 0)),
+    ),
+}
+
+
+def _dropout_tiers(arch: str, head_dim: int, causal: int) -> tuple[CdnaTier, ...]:
+    """A dropout class's objects (no bias): its tier, then its companions."""
+    key = (arch, head_dim, causal)
+    tier = _dropout_tier(arch, head_dim, causal)
+    if key in SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES:
+        tier = replace(SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES[key], has_dropout=1)
+    elif arch in SDPA_CDNA_DROPOUT_KV_ALIGNED_ARCHS:
+        class_tier = next(t for t in SDPA_CDNA_TIERS[arch][key[1:]] if t.kernel == _GEN)
+        tier = replace(tier, kv_aligned=class_tier.kv_aligned)
+    return (tier,) + tuple(
+        replace(t, has_dropout=1) for t in SDPA_CDNA_DROPOUT_COMPANIONS.get(key, ())
+    )
+
+
 # Exact f32 operands (vendored-kernel modification 35), the first wave COVERAGE.md section
 # 7.11 states: no bias, sink or dropout. f32 runs the generic kernel's gfx942-class path on
 # every arch, at about a quarter of bf16's rate (f32 MFMA), so the tiles are chosen for
@@ -1542,9 +1579,9 @@ def _sdpa_cdna_rows(arch: str) -> list[Instance]:
     classes += [
         (key, 1, _sink_bias_tiers(arch, key)) for key in SDPA_CDNA_SINK_TIERS[arch]
     ]
-    # The dropout objects, each its class's only one, so its default.
+    # The dropout objects: each class's tier is its default; gfx942's 128 companion ranks below.
     classes += [
-        ((head_dim, causal), 0, (_dropout_tier(arch, head_dim, causal),))
+        ((head_dim, causal), 0, _dropout_tiers(arch, head_dim, causal))
         for head_dim in SDPA_CDNA_DROPOUT_HEAD_DIMS
         for causal in (0, 1)
     ]
