@@ -37,12 +37,15 @@
 namespace hiptensor
 {
     using CkScale             = ck::tensor_operation::element_wise::Scale;
+    using CkScaleF64          = ck::tensor_operation::element_wise::ScaleF64;
     using CkPassThrough       = ck::tensor_operation::element_wise::PassThrough;
     using CkHiptensorUnaryOp  = ck::tensor_operation::element_wise::HiptensorUnaryOp;
     using CkHiptensorBinaryOp = ck::tensor_operation::element_wise::HiptensorBinaryOp;
     using CkBilinearUnary     = ck::tensor_operation::element_wise::BilinearUnary;
     using CkUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
+    using CkPermutationUnaryCombinedOpF64
+        = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScaleF64>;
     using CkPermutationUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
     using CkPermutationPassThroughCombinedOp

@@ -404,7 +404,7 @@ an instructive way.
 integers that move with `C` are plainly affine, *including* the spatial products
 (`9 = Y*X`, `3136 = Hi*Wi`). The refusal comes from the two operands of a
 strength-reduced `n // C` — `(umul_hi(n, M) + n) >> s` from
-`helpers/transforms.py::do_magic_division` — where `s = ceil(log2 C)` and `M`
+`helpers/magic_division.py::do_magic_division` — where `s = ceil(log2 C)` and `M`
 depends on `C`'s odd part (`1` for powers of two, `0x55555556` for 3, `0x9999999A`
 for 5, `0x24924925` for 7). One constant is logarithmic, the other
 number-theoretic; no polynomial fits either. The tractable fix is not a richer

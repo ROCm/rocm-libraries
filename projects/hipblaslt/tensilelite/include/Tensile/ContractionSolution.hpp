@@ -165,7 +165,22 @@ namespace TensileLite
         X_MACRO(StrideE2) \
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2)
+        X_MACRO(StrideMetadata2) \
+        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps
+           them distinct from another generator's WorkgroupMapping. */ \
+        X_MACRO(RR_WorkgroupMapping) \
+        X_MACRO(RR_MagicMultipleWgm) \
+        X_MACRO(RR_MagicShiftAndSignWgm) \
+        X_MACRO(RR_MagicMultipleNumTilesN) \
+        X_MACRO(RR_MagicShiftAndSignNumTilesN) \
+        X_MACRO(RR_QuotientTilesMByWgm) \
+        X_MACRO(RR_MagicMultipleWgmTail) \
+        X_MACRO(RR_MagicShiftAndSignWgmTail) \
+        X_MACRO(RR_QuotientTilesByBlock) \
+        X_MACRO(RR_MagicMultipleWgmMainBlock) \
+        X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
+        X_MACRO(AddressScaleZeroA) \
+        X_MACRO(ScaleBlockSizeA)
 
     enum class CustomArgSemantic
     {
@@ -386,6 +401,7 @@ namespace TensileLite
     struct SizeMapping
     {
         size_t waveNum;
+        int    WavefrontSize = 0;
 
         dim3 clusterDim{1, 1, 1};
 
@@ -462,6 +478,8 @@ namespace TensileLite
         int temporalHintB = 0;
 
         bool hasTemporalHint = false;
+        bool BufferLoad = true;
+        bool BufferStore = true;
 
         int cacheHintA() const
         {
@@ -484,9 +502,8 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
-        // SourceSwap: MFMA output is mapped so that M is the fast (stride-1)
-        // store axis in D.  Enabled for all non-sparse kernels; plumbed into
-        // the Origami epilogue model to select the correct store-pattern cost.
+        // SourceSwap: MFMA operands are swapped so consecutive lanes run along M
+        // in D.  Either way each lane stores StoreVectorWidth contiguous M elements.
         bool SourceSwap = false;
 
         int NonTemporalD = 0;
@@ -502,6 +519,11 @@ namespace TensileLite
         int LocalSplitU = 1;
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
+        bool OneLDSBuffer = false;
+        int  UnrollMajorLDSA = -1;
+        int  UnrollMajorLDSB = -1;
+        bool enableLDSTrA    = false;
+        bool enableLDSTrB    = false;
 
         int expertSchedulingMode = 0;
 
@@ -1354,6 +1376,8 @@ namespace TensileLite
             bool swizzleTensorB             = false;
             bool fusedGemmA2A               = false;
             int  metadataLayout             = 0;
+            // w4a16 group size, zero-point and encoding come from predicates and the problem;
+            // a runtime-group kernel matches several group sizes.
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;

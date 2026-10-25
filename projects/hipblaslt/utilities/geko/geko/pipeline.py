@@ -257,6 +257,7 @@ def run_search(
         cache=True,
         bench_freq=bench_freq,
         custom_lib_dir=ref_custom_lib_dir,
+        force_benchmark=True,
     )
     if uniq_df.empty:
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
@@ -301,7 +302,12 @@ def run_search(
 
     winners.to_csv(winners_file, index=False)
 
-    libs = library.operations.extract_solutions(winners, match_table_path)
+    libs = library.operations.extract_solutions(
+        winners,
+        match_table_path,
+        hipblaslt_path=hipblaslt_path,
+        fill_perf=True, # Needed to set proper iterations during optim.analyze call
+    )
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")
 
