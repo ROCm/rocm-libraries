@@ -388,12 +388,12 @@ namespace detail
 
 inline flatbuffers::Optional<int64_t> toFlatOptional(const std::optional<int64_t>& value)
 {
-    return value.has_value() ? flatbuffers::Optional<int64_t>(*value) : flatbuffers::nullopt;
+    return value;
 }
 
 inline flatbuffers::Optional<float> toFlatOptional(const std::optional<float>& value)
 {
-    return value.has_value() ? flatbuffers::Optional<float>(*value) : flatbuffers::nullopt;
+    return value;
 }
 
 } // namespace detail
@@ -499,6 +499,7 @@ inline flatbuffers::FlatBufferBuilder buildSdpaBwdGraph(const SdpaBwdSpec& spec)
     }
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.reserve(graph.nodeCount);
     for(uint32_t index = 0; index < graph.nodeCount; ++index)
     {
         nodes.push_back(data_objects::CreateNodeDirect(

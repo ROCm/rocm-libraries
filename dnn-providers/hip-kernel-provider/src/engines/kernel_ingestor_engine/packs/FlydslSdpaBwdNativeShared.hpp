@@ -235,8 +235,8 @@ inline WorkspaceLayout workspaceLayout(const bwd::SdpaBwdProblem& problem,
     WorkspaceLayout layout;
     // A 64-bit device tensor is read in place; every other form is written here.
     layout.uploadsSeed = problem.seedForm != bwd::SeedForm::NONE
-                         && !(problem.seedForm == bwd::SeedForm::DEVICE
-                              && problem.seedWidth == bwd::SeedWidth::INT64);
+                         && (problem.seedForm != bwd::SeedForm::DEVICE
+                             || problem.seedWidth != bwd::SeedWidth::INT64);
     if(layout.uploadsSeed)
     {
         layout.seed = {0, SEED_REGION_BYTES};
@@ -699,7 +699,7 @@ hipdnn_plugin_sdk::ingestor::KernelArgument describeArgument(size_t& offset)
 
 template <typename Tuple, size_t... Index>
 std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>
-    signatureFromTuple(std::index_sequence<Index...>)
+    signatureFromTuple(std::index_sequence<Index...> /*indices*/)
 {
     size_t offset = 0;
     // A braced list is evaluated left to right, so each offset follows the one before.
@@ -732,7 +732,7 @@ std::vector<unsigned char> kernargImage(const Kernargs& kernargs)
                 using T = std::remove_cv_t<std::remove_reference_t<decltype(value)>>;
                 const size_t at = alignedOffset<T>(image.size());
                 image.resize(at + sizeof(T));
-                std::memcpy(image.data() + at, &value, sizeof(T));
+                std::memcpy(image.data() + at, static_cast<const void*>(&value), sizeof(T));
             };
             (append(argument), ...);
         },
