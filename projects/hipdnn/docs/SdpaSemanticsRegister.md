@@ -20,7 +20,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-001: Meaning of `left_bound`
 
-- **Status:** Matches cuDNN (fixed after a team decision; it used to keep one key too many).
+- **Status:** Matches cuDNN (it used to keep one key too many).
 - **cuDNN:** `left_bound = L` keeps `j > i + off - L`, so each row sees **L** keys including the diagonal.
   `set_sliding_window_length(L)` is the same field. `left_bound = 0` would keep no keys and is rejected.
   - Sources: cudnn-frontend `include/cudnn_frontend/utils/attn_score_modifiers.h:207-247` (retain
@@ -34,7 +34,7 @@ batch when `seq_len_q/kv` are set).
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
     `window_left`. The gfx950 dense pack declines windows.
   - Before the fix every hipDNN component used `j >= i + off - L` (L + 1 keys). It was internally consistent, so no
-    test caught it.
+    test caught it. `TestCpuFpReferenceSdpaFp64.LeftBoundCountsTheDiagonalKey` now pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.
@@ -77,8 +77,8 @@ batch when `seq_len_q/kv` are set).
 
 - **Status:** Diverges (hipDNN is more permissive).
 - **cuDNN:** rejects `left_bound <= 0` and `right_bound < 0`. A left bound with `s_q > s_kv` needs padding.
-  - Source: the external-references survey. Re-verify against cudnn-frontend
-    validation before the fix lands.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:229-232`. The forward
+    check applies only to backends before 9.10; the backward check always applies.
 - **hipDNN today:** accepts any bound `>= -1`, with `-1` meaning unbounded.
 - **Contract:** to be decided together with SEM-001. Under cuDNN's meaning `left_bound = 0` masks every key,
   so it must be rejected.
@@ -192,7 +192,7 @@ batch when `seq_len_q/kv` are set).
   `providerSdpaProbabilityMode`).
 - **Contract:** fp32 P in every reference by default.
 - **Watch:** provider engines checked against the GPU reference in bf16 lose the matching P rounding; the difference
-  is expected inside bf16 tolerances.
+  is expected to stay inside bf16 tolerances.
 
 ### SEM-013: Default scale
 
@@ -294,9 +294,9 @@ batch when `seq_len_q/kv` are set).
   post-softcap gradient, dQ and dK also take `1 - tanh^2(s / c)`. Pinned by
   `TestCpuFpReferenceSdpaGradCheck.Softcap`, `SoftcapClosedFormAndLargeCapLimit` and
   `TestGpuSdpaSoftcapFp32` (mutations: missing derivative, missing forward cap).
-- **Planned:** a first-class attribute will be added, but the schema / frontend / backend / engine
-  plumbing waits for a team discussion. Until then nothing in a graph reaches it. Plumbing checklist and the
-  engine-gating finding (hand-written decline lists ignore new attributes) are recorded separately.
+- **Plan:** a first-class attribute will be added; the schema, frontend, backend and engine plumbing is not yet
+  done, so nothing in a graph reaches it. Engines that decline from hand-written attribute lists must add it
+  to those lists when it lands.
 
 ### SEM-021: ALiBi
 

@@ -21,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaFwdTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "RaggedGraphTestUtils.hpp"
 #include "SdpaFwdGraphTestUtils.hpp"
@@ -974,4 +975,232 @@ TEST(TestGpuSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
         spec.blockMaskDims = dims;
         EXPECT_FALSE(applicable(spec)) << "dims must be [B, H_q, ceil(Sq/128), ceil(tiles/8)]";
     }
+}
+
+namespace
+{
+
+constexpr int64_t SEED_UID = 16;
+constexpr int64_t OFFSET_UID = 17;
+constexpr int64_t RNG_DUMP_UID = 18;
+constexpr int64_t SINK_UID = 19;
+
+// Philox keep mask / rng_dump [B, H, Sq, Skv] for the DIMS graph.
+const std::vector<int64_t> DROPOUT_DIMS = {1, 2, 8, 8};
+
+struct ExtraTensor
+{
+    int64_t uid;
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
+// The FLOAT DIMS graph with `attrs` plus `extras` (for operands createSdpaFwdGraph has no slot
+// for: Philox seed / offset / rng_dump, the attention sink).
+flatbuffers::FlatBufferBuilder makeGraphWithExtras(SdpaAttributesT attrs,
+                                                   const std::vector<ExtraTensor>& extras)
+{
+    attrs.q_tensor_uid = Q_UID;
+    attrs.k_tensor_uid = K_UID;
+    attrs.v_tensor_uid = V_UID;
+    attrs.o_tensor_uid = O_UID;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    const auto add = [&](int64_t uid, DataType type, const std::vector<int64_t>& dims) {
+        const auto strides = generateStrides(dims);
+        tensors.push_back(CreateTensorAttributesDirect(builder, uid, "T", type, &strides, &dims));
+    };
+    for(const auto uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        add(uid, DataType::FLOAT, DIMS);
+    }
+    for(const auto& extra : extras)
+    {
+        add(extra.uid, extra.dataType, extra.dims);
+    }
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+    builder.Finish(CreateGraphDirect(builder,
+                                     "SdpaFwdTestGraph",
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     &tensors,
+                                     &nodes));
+    return builder;
+}
+
+} // namespace
+
+// Philox dropout with an rng_dump output (SEM-015): the plan accepts it and applies the dumped
+// keep mask with scale 1 / (1 - p), so it matches the CPU executor run on the same graph and the
+// same dumped mask.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecutePhiloxDropoutMatchesCpuOnDumpedMask)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+
+    SdpaAttributesT attrs;
+    attrs.dropout_probability = 0.25F;
+    attrs.seed_tensor_uid = SEED_UID;
+    attrs.offset_tensor_uid = OFFSET_UID;
+    attrs.rng_dump_tensor_uid = RNG_DUMP_UID;
+    auto graph = makeGraphWithExtras(attrs,
+                                     {{SEED_UID, DataType::INT64, {1}},
+                                      {OFFSET_UID, DataType::INT64, {1}},
+                                      {RNG_DUMP_UID, DataType::FLOAT, DROPOUT_DIMS}});
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
+    Tensor<float> dumpedMask(DROPOUT_DIMS);
+    for(size_t i = 0; i < dumpedMask.elementCount(); ++i)
+    {
+        dumpedMask.memory().hostData()[i] = ((i * 5 + i / 8) % 4 == 1) ? 0.0f : 1.0f;
+    }
+    Tensor<int64_t> seed({1});
+    Tensor<int64_t> offset({1});
+    seed.fillWithValue(1234);
+    offset.fillWithValue(0);
+
+    // The CPU oracle reads host data, so it runs before any device upload.
+    Tensor<float> oCpu(DIMS);
+    const std::unordered_map<int64_t, void*> hostVariantPack{
+        {Q_UID, q.memory().hostData()},
+        {K_UID, k.memory().hostData()},
+        {V_UID, v.memory().hostData()},
+        {O_UID, oCpu.memory().hostData()},
+        {SEED_UID, seed.memory().hostData()},
+        {OFFSET_UID, offset.memory().hostData()},
+        {RNG_DUMP_UID, dumpedMask.memory().hostData()},
+    };
+    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        graph.GetBufferPointer(), graph.GetSize(), hostVariantPack);
+
+    Tensor<float> oPlan(DIMS);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {SEED_UID, seed.memory().deviceData()},
+        {OFFSET_UID, offset.memory().deviceData()},
+        {RNG_DUMP_UID, dumpedMask.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    const float tolerance = 2e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oCpu, oPlan))
+        << "Plan output differs from the CPU executor on the same dumped keep mask";
+}
+
+// Attention sink: FLOAT [1, H, 1, 1] (cuDNN), the same rule as the CPU plan. DIMS has H = 2.
+TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsCudnnShape)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    const auto applicable = [&floatPlanBuilder](DataType type, const std::vector<int64_t>& dims) {
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = SINK_UID;
+        auto graph = makeGraphWithExtras(attrs, {{SINK_UID, type, dims}});
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graph.GetBufferPointer(), graph.GetSize());
+        return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    EXPECT_TRUE(applicable(DataType::FLOAT, {1, 2, 1, 1}));
+    EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1})) << "FLOAT only";
+    EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1})) << "one value per head";
+    EXPECT_FALSE(applicable(DataType::FLOAT, {2})) << "rank 4";
+}
+
+// A pass-by-value descale's variant-pack slot holds a host pointer and a baked one has no slot,
+// so the plan stages both as one value instead of handing the slot to the kernel as device
+// memory. Each must give the output of the same descale held in a device tensor.
+TEST(TestGpuSdpaFwdPlanDescale, ScalarDescalesMatchDeviceDescales)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    using hipdnn_data_sdk::types::bfloat16;
+    using Fp8 = hipdnn_data_sdk::types::fp8_e4m3;
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<Fp8> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<Fp8> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<Fp8> v(dims);
+    q.fillWithRandomValues(Fp8(-1.0F), Fp8(1.0F), 121);
+    k.fillWithRandomValues(Fp8(-1.0F), Fp8(1.0F), 122);
+    v.fillWithRandomValues(Fp8(-1.0F), Fp8(1.0F), 123);
+    hipdnn_data_sdk::utilities::Tensor<float> descale({1});
+    descale.fillWithValue(0.5F);
+
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
+    const auto run = [&](OperandStorage storage, hipdnn_data_sdk::utilities::Tensor<bfloat16>& o) {
+        SdpaGraphSpec spec;
+        spec.descaleStorage = storage;
+        spec.bakedDescale = 0.5F;
+        auto graph = makeSdpaGraph(spec);
+        ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+        std::unordered_map<int64_t, void*> pack = {{Q, q.memory().deviceData()},
+                                                   {K, k.memory().deviceData()},
+                                                   {V, v.memory().deviceData()},
+                                                   {O, o.memory().deviceData()}};
+        for(const int64_t uid : {DESCALE_Q, DESCALE_K, DESCALE_V})
+        {
+            if(storage == OperandStorage::TENSOR)
+            {
+                pack[uid] = descale.memory().deviceData();
+            }
+            else if(storage == OperandStorage::RUNTIME_PASS_BY_VALUE)
+            {
+                pack[uid] = descale.memory().hostData();
+            }
+        }
+        ASSERT_NO_THROW(executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack));
+        o.markDeviceModified();
+    };
+    hipdnn_data_sdk::utilities::Tensor<bfloat16> oDevice(dims);
+    hipdnn_data_sdk::utilities::Tensor<bfloat16> oPassByValue(dims);
+    hipdnn_data_sdk::utilities::Tensor<bfloat16> oBaked(dims);
+    run(OperandStorage::TENSOR, oDevice);
+    run(OperandStorage::RUNTIME_PASS_BY_VALUE, oPassByValue);
+    run(OperandStorage::BAKED, oBaked);
+
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<bfloat16> validation(0.0F, 0.0F);
+    EXPECT_TRUE(validation.allClose(oDevice, oPassByValue));
+    EXPECT_TRUE(validation.allClose(oDevice, oBaked));
+}
+
+// A pass-by-value descale is staged as one value, so more than one element is declined; the same
+// shape held in a tensor (a per-KV-head descale) is accepted.
+TEST(TestGpuSdpaFwdPlanDescale, MultiElementPassByValueDescaleIsDeclined)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
+    SdpaGraphSpec spec;
+    spec.descaleKDims = {1, 2, 1, 1};
+    auto tensorGraph = makeSdpaGraph(spec);
+    EXPECT_TRUE(executor.isApplicable(tensorGraph.GetBufferPointer(), tensorGraph.GetSize()));
+    spec.descaleStorage = OperandStorage::RUNTIME_PASS_BY_VALUE;
+    auto passByValueGraph = makeSdpaGraph(spec);
+    EXPECT_FALSE(
+        executor.isApplicable(passByValueGraph.GetBufferPointer(), passByValueGraph.GetSize()));
 }

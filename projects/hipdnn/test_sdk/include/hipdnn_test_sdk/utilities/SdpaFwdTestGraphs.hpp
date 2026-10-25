@@ -12,6 +12,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 
 // One-node SDPA forward graphs for the applicability rules of the CPU and GPU plans (fp8 descales
 // and scaling, block mask): each field of SdpaGraphSpec changes one thing about an accepted graph.
@@ -43,7 +44,8 @@ enum Uid : int64_t
 };
 
 // Q [1, 2, 4, 8] in fp8Type with bf16 (or oType) O and `descales` scalar Q/K/V descales (K's dims
-// descaleKDims). The softmax / output scaling fields add one-element tensors of scalingType.
+// descaleKDims), stored as descaleStorage says (a baked descale holds bakedDescale). The softmax /
+// output scaling fields add one-element tensors of scalingType.
 // pagedK pages K through a [1, 1, 2, 1] table over [2, 2, 4, 8] blocks with seq_len tensors (V
 // dense at the 8-key extent). dropout adds an explicit dropout mask and scale. blockMaskType adds a
 // block mask of that dtype and blockMaskDims (cuDNN's shape for these graphs is [1, 2, 1, 1]).
@@ -53,6 +55,8 @@ struct SdpaGraphSpec
     DataType oType = DataType::BFLOAT16;
     int descales = 3;
     std::vector<int64_t> descaleKDims = {1};
+    OperandStorage descaleStorage = OperandStorage::TENSOR;
+    float bakedDescale = 0.5f;
     bool scaleS = false;
     bool descaleS = false;
     bool scaleO = false;
@@ -111,7 +115,12 @@ inline flatbuffers::FlatBufferBuilder makeSdpaGraph(const SdpaGraphSpec& spec)
     for(int i = 0; i < spec.descales && i < 3; ++i)
     {
         const auto [uid, slot] = descaleSlots[static_cast<size_t>(i)];
-        add(uid, "Descale", DataType::FLOAT, uid == DESCALE_K ? spec.descaleKDims : scalarDims);
+        FloatOperandSpec descale;
+        descale.uid = uid;
+        descale.storage = spec.descaleStorage;
+        descale.bakedValue = spec.bakedDescale;
+        descale.dims = uid == DESCALE_K ? spec.descaleKDims : scalarDims;
+        addFloatOperandTensor(builder, tensors, descale, "Descale");
         *slot = uid;
     }
 

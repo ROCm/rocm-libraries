@@ -183,25 +183,14 @@ public:
         auto shallowMaxTensor = bindStats(_params.maxTensor);
         auto shallowSumExpTensor = bindStats(_params.sumExpTensor);
 
-        // FP8 descale tensors (float32). Absent for non-fp8 graphs.
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleQ;
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleK;
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleV;
-        if(_params.descaleQTensor.has_value())
-        {
-            shallowDescaleQ = createShallowTensor<float>(
-                *_params.descaleQTensor, variantPack.at(_params.descaleQTensor->uid));
-        }
-        if(_params.descaleKTensor.has_value())
-        {
-            shallowDescaleK = createShallowTensor<float>(
-                *_params.descaleKTensor, variantPack.at(_params.descaleKTensor->uid));
-        }
-        if(_params.descaleVTensor.has_value())
-        {
-            shallowDescaleV = createShallowTensor<float>(
-                *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
-        }
+        // FP8 descale tensors (float32). Absent for non-fp8 graphs. A pass-by-value (baked or
+        // runtime) descale is staged in a one-element tensor.
+        auto shallowDescaleQ
+            = bindOptionalHostFloatOperand(_params.descaleQTensor, variantPack, "SDPA descale");
+        auto shallowDescaleK
+            = bindOptionalHostFloatOperand(_params.descaleKTensor, variantPack, "SDPA descale");
+        auto shallowDescaleV
+            = bindOptionalHostFloatOperand(_params.descaleVTensor, variantPack, "SDPA descale");
 
         // Padding lengths (INT32, one per batch). Applicability guarantees both or neither.
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<int32_t>> shallowSeqLenQ;
@@ -283,8 +272,8 @@ public:
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {
-            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
-                _params.scaleTensor.value(), variantPack, "SDPA scale");
+            effectiveScale
+                = readHostFloatOperand(_params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
         utilities::CpuFpReferenceSdpa::
@@ -412,6 +401,11 @@ public:
         {
             return false;
         }
+        // Runtime scale: one element, baked, pass-by-value or FLOAT.
+        if(!isSupportedSdpaScaleOperand(*nodeAttributes, tensorMap))
+        {
+            return false;
+        }
 
         // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
         // requirement that q/k/v descales are all provided for fp8) and rejected
@@ -439,6 +433,13 @@ public:
                 CHECK_TENSOR_EXISTS(tensorMap, uid.value());
                 CHECK_TENSOR_TYPE(
                     tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+                // A pass-by-value descale is staged as one value, so it must be one element.
+                const auto descale = unpackTensorAttributes(*tensorMap.at(uid.value()));
+                if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(descale)
+                   && elementCount(descale) != 1)
+                {
+                    return false;
+                }
             }
         }
 

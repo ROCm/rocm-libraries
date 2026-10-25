@@ -14,6 +14,7 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -284,18 +285,36 @@ public:
                 *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
         }
 
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleQ;
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleK;
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleV;
-        for(auto [attr, bound] : {std::pair{&_params.descaleQTensor, &descaleQ},
-                                  std::pair{&_params.descaleKTensor, &descaleK},
-                                  std::pair{&_params.descaleVTensor, &descaleV}})
-        {
-            if(attr->has_value())
+        // A pass-by-value descale (baked or runtime) is staged in a one-element tensor: its
+        // variant-pack slot, if any, holds a host pointer. A device descale is viewed in place.
+        const auto bindDescale
+            = [&variantPack](
+                  const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& d,
+                  std::optional<hipdnn_data_sdk::utilities::Tensor<float>>& staged,
+                  std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>>& view)
+            -> hipdnn_data_sdk::utilities::TensorBase<float>* {
+            if(!d.has_value())
             {
-                bound->emplace(variantPack.at((*attr)->uid), (*attr)->dims, (*attr)->strides);
+                return nullptr;
             }
-        }
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(*d))
+            {
+                staged.emplace(std::vector<int64_t>{1});
+                staged->fillWithValue(resolveScalarOperand(*d, variantPack, "SDPA descale"));
+                return &staged.value();
+            }
+            view.emplace(variantPack.at(d->uid), d->dims, d->strides);
+            return &view.value();
+        };
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleQ;
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleK;
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleV;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleQView;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleKView;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleVView;
+        auto* descaleQ = bindDescale(_params.descaleQTensor, stagedDescaleQ, descaleQView);
+        auto* descaleK = bindDescale(_params.descaleKTensor, stagedDescaleK, descaleKView);
+        auto* descaleV = bindDescale(_params.descaleVTensor, stagedDescaleV, descaleVView);
 
         const auto scalar = [&variantPack](const auto& attrs, const char* name) {
             return attrs.has_value()
@@ -351,9 +370,7 @@ public:
                     .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
                                  sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
                     .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
-                    .setDescales(descaleQ.has_value() ? &descaleQ.value() : nullptr,
-                                 descaleK.has_value() ? &descaleK.value() : nullptr,
-                                 descaleV.has_value() ? &descaleV.value() : nullptr)
+                    .setDescales(descaleQ, descaleK, descaleV)
                     .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
                                       scalar(_params.descaleSTensor, "SDPA descale_s"))
                     .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
@@ -449,17 +466,9 @@ public:
 
         // The scale may be baked, pass-by-value or device-resident. It must be one element, and a
         // device scale must be FLOAT since it is read back as one float.
-        if(nodeAttributes->scale_tensor_uid().has_value())
+        if(!isSupportedSdpaScaleOperand(*nodeAttributes, tensorMap))
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
-            const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
-            if(hipdnn_test_sdk::detail::elementCount(scale) != 1
-               || (!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scale)
-                   && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
-            {
-                return false;
-            }
+            return false;
         }
 
         // Paged KV cache: cuDNN layout, which needs padding; same rule as the CPU reference.
@@ -498,6 +507,14 @@ public:
                 CHECK_TENSOR_EXISTS(tensorMap, uid.value());
                 CHECK_TENSOR_TYPE(
                     tensorMap, uid.value(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+                // A pass-by-value descale is staged as one value, so it must be one element.
+                const auto descale
+                    = hipdnn_test_sdk::detail::unpackTensorAttributes(*tensorMap.at(uid.value()));
+                if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(descale)
+                   && hipdnn_test_sdk::detail::elementCount(descale) != 1)
+                {
+                    return false;
+                }
                 ++numQkvDescales;
             }
         }

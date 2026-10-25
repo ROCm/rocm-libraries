@@ -196,8 +196,8 @@ public:
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {
-            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
-                _params.scaleTensor.value(), variantPack, "SDPA scale");
+            effectiveScale
+                = readHostFloatOperand(_params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
         utilities::CpuFpReferenceSdpa::backward<QDataType,
@@ -264,6 +264,11 @@ public:
     {
         const auto* nodeAttributes = node.attributes_as_SdpaBackwardAttributes();
         if(nodeAttributes == nullptr)
+        {
+            return false;
+        }
+        // Runtime scale: one element, baked, pass-by-value or FLOAT.
+        if(!isSupportedSdpaScaleOperand(*nodeAttributes, tensorMap))
         {
             return false;
         }

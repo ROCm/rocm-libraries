@@ -654,8 +654,8 @@ TEST(TestSdpaFwdPlanPadding, ExecuteMatchesDirectReference)
 
 // Paged KV cache (cuDNN layout). The frontend cannot build these graphs (its node validation
 // requires K/V batch == Q batch, but a paged container's first dim is the block count), so they
-// are built raw. Q is FLOAT [2, 2, 3, 8]; paged K/V containers are [5, 2, 2, 8] (block size 2);
-// page tables are INT32 [2, 1, 3, 1] (capacity 6). UIDs: Q=1 K=2 V=3 O=4 SeqLenQ=6 SeqLenKv=7
+// are built raw. Q is FLOAT [2, 2, 3, 8]; paged K/V containers are by default [5, 2, 2, 8] (block
+// size 2); page tables are by default INT32 [2, 1, 3, 1] (capacity 6). UIDs: Q=1 K=2 V=3 O=4 SeqLenQ=6 SeqLenKv=7
 // PageTableK=8 PageTableV=9.
 namespace
 {
@@ -669,15 +669,18 @@ struct RawPagedGraphSpec
     std::optional<int32_t> maxSeqLenKv;
     // A FLOAT bias [1, 1, 3, biasSkv] (uid 10), from which cuDNN infers the extent.
     std::optional<int64_t> biasSkv;
+    // Both page tables' dims, and both paged containers' dims.
+    std::vector<int64_t> pageTableDims = {2, 1, 3, 1};
+    std::vector<int64_t> containerDims = {5, 2, 2, 8};
 };
 
 flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec& spec)
 {
     const std::vector<int64_t> qDims = {2, 2, 3, 8};
-    const std::vector<int64_t> cDims = {5, 2, 2, 8};
+    const auto& cDims = spec.containerDims;
     const std::vector<int64_t> denseKvDims = {2, 2, 6, 8};
     const std::vector<int64_t> lenDims = {2, 1, 1, 1};
-    const std::vector<int64_t> tableDims = {2, 1, 3, 1};
+    const auto& tableDims = spec.pageTableDims;
     const auto qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
     const auto cStrides = hipdnn_data_sdk::utilities::generateStrides(cDims);
     const auto denseKvStrides = hipdnn_data_sdk::utilities::generateStrides(denseKvDims);
@@ -811,7 +814,52 @@ INSTANTIATE_TEST_SUITE_P(
         // cuDNN: max_seq_len_kv without paging is rejected.
         PagedApplicabilityCase{"MaxSeqLenWithoutPaging",
                                {false, false, true, DataType::INT32, 6, std::nullopt},
-                               false}),
+                               false},
+        // An explicit max_seq_len_kv wins over the bias; the bias's last dim must then be
+        // max_seq_len_kv or 1.
+        PagedApplicabilityCase{
+            "BiasMatchingMaxSeqLen", {true, true, true, DataType::INT32, 6, 6}, true},
+        PagedApplicabilityCase{
+            "BroadcastBiasWithMaxSeqLen", {true, true, true, DataType::INT32, 6, 1}, true},
+        PagedApplicabilityCase{
+            "BiasNarrowerThanMaxSeqLen", {true, true, true, DataType::INT32, 6, 4}, false},
+        PagedApplicabilityCase{
+            "BiasWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 5, 6}, false},
+        // A dense V sets the extent (6) when only K is paged; the bias must still match it.
+        PagedApplicabilityCase{
+            "PagedKOnlyNarrowBias", {true, false, true, DataType::INT32, std::nullopt, 4}, false},
+        // Each page table is [B, 1, tableSize, 1] with B the query batch (2).
+        PagedApplicabilityCase{
+            "TableBatchDiffersFromQuery",
+            {true, true, true, DataType::INT32, std::nullopt, std::nullopt, {1, 1, 3, 1}},
+            false},
+        PagedApplicabilityCase{
+            "TableRank3",
+            {true, true, true, DataType::INT32, std::nullopt, std::nullopt, {2, 3, 1}},
+            false},
+        PagedApplicabilityCase{
+            "TableDim1NotOne",
+            {true, true, true, DataType::INT32, std::nullopt, std::nullopt, {2, 2, 3, 1}},
+            false},
+        PagedApplicabilityCase{
+            "TableDim3NotOne",
+            {true, true, true, DataType::INT32, std::nullopt, std::nullopt, {2, 1, 3, 2}},
+            false},
+        // Each paged container is rank 4 [blocks, H, blockSize, D] with a positive block size.
+        PagedApplicabilityCase{"ContainerRank3",
+                               {true,
+                                true,
+                                true,
+                                DataType::INT32,
+                                std::nullopt,
+                                std::nullopt,
+                                {2, 1, 3, 1},
+                                {5, 2, 16}},
+                               false},
+        PagedApplicabilityCase{
+            "ZeroBlockSize",
+            {true, true, true, DataType::INT32, 5, std::nullopt, {2, 1, 3, 1}, {5, 2, 0, 8}},
+            false}),
     [](const TestParamInfo<PagedApplicabilityCase>& info) { return std::string(info.param.name); });
 
 // A paged graph runs through the executor and equals gathering the cache and running the dense
@@ -1032,6 +1080,66 @@ TEST(TestSdpaFwdPlanDropout, Applicability)
     rngDump.rng_dump_tensor_uid = 22;
     EXPECT_FALSE(applicable(rngDump, {mask, scale}));
 }
+
+// Each case changes one field of an accepted explicit-mask dropout graph: FLOAT mask [1, 2, 4, 4]
+// (extras[0], uid 20) and one-element FLOAT dropout_scale (extras[1], uid 21). A Philox seed or
+// offset is declined even without dropout_probability, the mask's rows must be Sq, and the scale
+// must be FLOAT.
+struct FwdDropoutFieldCase
+{
+    const char* name;
+    void (*apply)(SdpaAttributesT&, std::vector<RawExtraTensor>&);
+    bool applicable;
+};
+
+class TestSdpaFwdPlanDropoutFields : public TestWithParam<FwdDropoutFieldCase>
+{
+};
+
+TEST_P(TestSdpaFwdPlanDropoutFields, MatchesContract)
+{
+    SdpaAttributesT attrs;
+    attrs.dropout_mask_tensor_uid = 20;
+    attrs.dropout_scale_tensor_uid = 21;
+    std::vector<RawExtraTensor> extras = {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}},
+                                          {21, "DropoutScale", DataType::FLOAT, {1}}};
+    GetParam().apply(attrs, extras);
+    auto graphBuilder
+        = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
+              GetParam().applicable);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaFwdPlanDropoutFields,
+    Values(FwdDropoutFieldCase{"ExplicitMask",
+                               [](SdpaAttributesT&, std::vector<RawExtraTensor>&) {},
+                               true},
+           FwdDropoutFieldCase{"SeedWithoutProbability",
+                               [](SdpaAttributesT& a, std::vector<RawExtraTensor>& e) {
+                                   a.seed_tensor_uid = 23;
+                                   e.push_back({23, "Seed", DataType::INT64, {1}});
+                               },
+                               false},
+           FwdDropoutFieldCase{"OffsetWithoutProbability",
+                               [](SdpaAttributesT& a, std::vector<RawExtraTensor>& e) {
+                                   a.offset_tensor_uid = 24;
+                                   e.push_back({24, "Offset", DataType::INT64, {1}});
+                               },
+                               false},
+           FwdDropoutFieldCase{"HalfScale",
+                               [](SdpaAttributesT&, std::vector<RawExtraTensor>& e) {
+                                   e[1].dataType = DataType::HALF;
+                               },
+                               false},
+           FwdDropoutFieldCase{
+               "MaskRowsDifferFromSq",
+               [](SdpaAttributesT&, std::vector<RawExtraTensor>& e) { e[0].dims = {1, 2, 3, 4}; },
+               false}),
+    [](const TestParamInfo<FwdDropoutFieldCase>& info) { return std::string(info.param.name); });
 
 // A dropout graph runs through the executor and equals the reference called directly.
 TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
@@ -2129,4 +2237,142 @@ TEST(TestSdpaDiagonalBandParams, RejectsZeroLeftBound)
     EXPECT_THROW(bandFor(0), std::invalid_argument);
     EXPECT_EQ(bandFor(1).leftBound, 1);
     EXPECT_EQ(bandFor(std::nullopt).leftBound, -1);
+}
+
+// The runtime scale may be an ordinary FLOAT tensor (its host buffer is in the variant pack), as
+// on the GPU. It must give the same output as the same scale baked as attn_scale_value.
+TEST(TestSdpaFwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
+{
+    SdpaAttributesT tensorScaleAttrs;
+    tensorScaleAttrs.scale_tensor_uid = 20;
+    auto tensorScaleGraph
+        = makeRawSdpaFwdGraph(tensorScaleAttrs,
+                              std::nullopt,
+                              std::nullopt,
+                              std::nullopt,
+                              {RawExtraTensor{20, "Scale", DataType::FLOAT, {1, 1, 1, 1}}});
+    SdpaAttributesT bakedScaleAttrs;
+    bakedScaleAttrs.attn_scale_value = 0.5F;
+    auto bakedScaleGraph = makeRawSdpaFwdGraph(bakedScaleAttrs);
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(
+        executor.isApplicable(tensorScaleGraph.GetBufferPointer(), tensorScaleGraph.GetSize()));
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    Tensor<float> q(dims);
+    Tensor<float> k(dims);
+    Tensor<float> v(dims);
+    Tensor<float> oTensorScale(dims);
+    Tensor<float> oBakedScale(dims);
+    q.fillWithRandomValues(-1.0F, 1.0F, 101);
+    k.fillWithRandomValues(-1.0F, 1.0F, 102);
+    v.fillWithRandomValues(-1.0F, 1.0F, 103);
+    Tensor<float> scale({1, 1, 1, 1});
+    scale.fillWithValue(0.5F);
+
+    ASSERT_NO_THROW(executor.execute(tensorScaleGraph.GetBufferPointer(),
+                                     tensorScaleGraph.GetSize(),
+                                     {{1, q.memory().hostData()},
+                                      {2, k.memory().hostData()},
+                                      {3, v.memory().hostData()},
+                                      {4, oTensorScale.memory().hostData()},
+                                      {20, scale.memory().hostData()}}));
+    ASSERT_NO_THROW(executor.execute(bakedScaleGraph.GetBufferPointer(),
+                                     bakedScaleGraph.GetSize(),
+                                     {{1, q.memory().hostData()},
+                                      {2, k.memory().hostData()},
+                                      {3, v.memory().hostData()},
+                                      {4, oBakedScale.memory().hostData()}}));
+
+    // Same arithmetic on the same inputs.
+    const CpuFpReferenceValidation<float> validation(0.0F, 0.0F);
+    EXPECT_TRUE(validation.allClose(oBakedScale, oTensorScale));
+}
+
+// A scale tensor is read as one float: more than one element, or a non-FLOAT tensor, is declined
+// rather than accepted and then thrown on at execute time.
+TEST(TestSdpaFwdPlanScale, ScaleTensorMustBeOneFloatElement)
+{
+    CpuReferenceGraphExecutor executor;
+    for(const auto& [dataType, dims] :
+        {std::pair{DataType::HALF, std::vector<int64_t>{1, 1, 1, 1}},
+         std::pair{DataType::FLOAT, std::vector<int64_t>{1, 1, 1, 2}}})
+    {
+        SdpaAttributesT attrs;
+        attrs.scale_tensor_uid = 20;
+        auto graph = makeRawSdpaFwdGraph(attrs,
+                                         std::nullopt,
+                                         std::nullopt,
+                                         std::nullopt,
+                                         {RawExtraTensor{20, "Scale", dataType, dims}});
+        EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()))
+            << "scale " << EnumNameDataType(dataType) << " with " << dims.back() << " elements";
+    }
+}
+
+// A pass-by-value or baked descale is a scalar, not a buffer: the plan stages it rather than
+// reading the variant-pack slot as tensor memory (a baked operand has no slot at all). Each must
+// give the output of the same descale held in a tensor.
+TEST(TestSdpaFwdPlanDescale, ScalarDescalesMatchTensorDescales)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::types::fp8_e4m3;
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    Tensor<fp8_e4m3> q(dims);
+    Tensor<fp8_e4m3> k(dims);
+    Tensor<fp8_e4m3> v(dims);
+    q.fillWithRandomValues(fp8_e4m3(-1.0F), fp8_e4m3(1.0F), 111);
+    k.fillWithRandomValues(fp8_e4m3(-1.0F), fp8_e4m3(1.0F), 112);
+    v.fillWithRandomValues(fp8_e4m3(-1.0F), fp8_e4m3(1.0F), 113);
+    Tensor<float> descale({1});
+    descale.fillWithValue(0.5F);
+
+    CpuReferenceGraphExecutor executor;
+    const auto run = [&](OperandStorage storage, Tensor<bfloat16>& o) {
+        SdpaGraphSpec spec;
+        spec.descaleStorage = storage;
+        spec.bakedDescale = 0.5F;
+        auto graph = makeSdpaGraph(spec);
+        ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+        std::unordered_map<int64_t, void*> pack = {{Q, q.memory().hostData()},
+                                                   {K, k.memory().hostData()},
+                                                   {V, v.memory().hostData()},
+                                                   {O, o.memory().hostData()}};
+        if(storage != OperandStorage::BAKED)
+        {
+            for(const int64_t uid : {DESCALE_Q, DESCALE_K, DESCALE_V})
+            {
+                pack[uid] = descale.memory().hostData();
+            }
+        }
+        ASSERT_NO_THROW(executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack));
+    };
+    Tensor<bfloat16> oTensor(dims);
+    Tensor<bfloat16> oPassByValue(dims);
+    Tensor<bfloat16> oBaked(dims);
+    run(OperandStorage::TENSOR, oTensor);
+    run(OperandStorage::RUNTIME_PASS_BY_VALUE, oPassByValue);
+    run(OperandStorage::BAKED, oBaked);
+
+    const CpuFpReferenceValidation<bfloat16> validation(0.0F, 0.0F);
+    EXPECT_TRUE(validation.allClose(oTensor, oPassByValue));
+    EXPECT_TRUE(validation.allClose(oTensor, oBaked));
+}
+
+// A pass-by-value descale is staged as one value, so more than one element is declined; the same
+// shape held in a tensor (a per-KV-head descale) is accepted.
+TEST(TestSdpaFwdPlanDescale, MultiElementPassByValueDescaleIsDeclined)
+{
+    using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
+    CpuReferenceGraphExecutor executor;
+    SdpaGraphSpec spec;
+    spec.descaleKDims = {1, 2, 1, 1};
+    auto tensorGraph = makeSdpaGraph(spec);
+    EXPECT_TRUE(executor.isApplicable(tensorGraph.GetBufferPointer(), tensorGraph.GetSize()));
+    spec.descaleStorage = OperandStorage::RUNTIME_PASS_BY_VALUE;
+    auto passByValueGraph = makeSdpaGraph(spec);
+    EXPECT_FALSE(
+        executor.isApplicable(passByValueGraph.GetBufferPointer(), passByValueGraph.GetSize()));
 }

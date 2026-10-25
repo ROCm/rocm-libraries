@@ -2567,70 +2567,6 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
 // types by comparing analytical gradients against finite-difference numerical
 // gradients computed from the forward pass.
 
-TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardCausalMaskExplicitBounds)
-{
-    // Verify that backward(..., leftBound=-1, rightBound=0, topLeftAlignment=true)
-    // produces identical results to backward(..., causalMask=true).
-    // [B=1, H=1, Sq=4, Skv=4, D=4, Dv=4]
-    Tensor<float> q({1, 1, 4, 4});
-    Tensor<float> k({1, 1, 4, 4});
-    Tensor<float> v({1, 1, 4, 4});
-    Tensor<float> o({1, 1, 4, 4});
-    Tensor<float> dO({1, 1, 4, 4});
-    Tensor<float> dQBool({1, 1, 4, 4});
-    Tensor<float> dKBool({1, 1, 4, 4});
-    Tensor<float> dVBool({1, 1, 4, 4});
-    Tensor<float> dQExplicit({1, 1, 4, 4});
-    Tensor<float> dKExplicit({1, 1, 4, 4});
-    Tensor<float> dVExplicit({1, 1, 4, 4});
-
-    q.fillWithRandomValues(-1.0f, 1.0f, 8000);
-    k.fillWithRandomValues(-1.0f, 1.0f, 8001);
-    v.fillWithRandomValues(-1.0f, 1.0f, 8002);
-    dO.fillWithRandomValues(-1.0f, 1.0f, 8003);
-
-    const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(
-        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
-
-    // Bool convenience overload
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQBool,
-                                 dKBool,
-                                 dVBool,
-                                 SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
-
-    // Explicit bounds overload (equivalent to TOP_LEFT_CAUSAL)
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQExplicit,
-                                 dKExplicit,
-                                 dVExplicit,
-                                 SdpaBwdOptions<float>{}.setMask(noMask).setBand(
-                                     static_cast<int64_t>(-1), static_cast<int64_t>(0), true));
-
-    const float tol = 1e-6f;
-    for(int sq = 0; sq < 4; ++sq)
-    {
-        for(int d = 0; d < 4; ++d)
-        {
-            EXPECT_NEAR(dQBool.getHostValue(0, 0, sq, d), dQExplicit.getHostValue(0, 0, sq, d), tol)
-                << "dQ mismatch at sq=" << sq << ", d=" << d;
-            EXPECT_NEAR(dKBool.getHostValue(0, 0, sq, d), dKExplicit.getHostValue(0, 0, sq, d), tol)
-                << "dK mismatch at sq=" << sq << ", d=" << d;
-            EXPECT_NEAR(dVBool.getHostValue(0, 0, sq, d), dVExplicit.getHostValue(0, 0, sq, d), tol)
-                << "dV mismatch at sq=" << sq << ", d=" << d;
-        }
-    }
-}
-
 TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
 {
     // BOTTOM_RIGHT_CAUSAL: leftBound=-1, rightBound=0, topLeftAlignment=false
@@ -3387,26 +3323,31 @@ TEST(TestCpuFpReferenceSdpaFp8, GqaPerKvHeadDescaleMatchesDequantizedInputs)
     }
 }
 
-TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
+TEST(TestCpuFpReferenceSdpaFp8, DescalesComposeWithCausalBand)
 {
-    // The causalMask-bool convenience overload must forward descale tensors to the
-    // primary (bounds) overload. causalMask=false maps to leftBound=-1/rightBound=-1/
-    // TOP_ANCHORED, so the two entry points must produce bit-identical output.
-    const int64_t batch = 1;
-    const int64_t numHeads = 1;
+    // fp8 Q/K/V descales under a top-left causal band, against a closed form. Every value is
+    // exact in fp8_e4m3. With descales (2, 3, 4), D = 2 and the default scale of 1, the score
+    // of key j is 2 * (0.5 * 2) * (k_j * 3) = 6 * k_j. Row 0 sees key 0 only, so
+    // O[0] = v_0 * 4; row 1 sees both keys. Dropping a descale or the band changes both rows.
     const int64_t seqQ = 2;
     const int64_t seqKv = 2;
     const int64_t headDim = 2;
-    const int64_t headDimV = 2;
 
-    Tensor<fp8_e4m3> q({batch, numHeads, seqQ, headDim});
-    Tensor<fp8_e4m3> k({batch, numHeads, seqKv, headDim});
-    Tensor<fp8_e4m3> v({batch, numHeads, seqKv, headDimV});
-    Tensor<bfloat16> oViaBool({batch, numHeads, seqQ, headDimV});
-    Tensor<bfloat16> oViaBounds({batch, numHeads, seqQ, headDimV});
+    Tensor<fp8_e4m3> q({1, 1, seqQ, headDim});
+    Tensor<fp8_e4m3> k({1, 1, seqKv, headDim});
+    Tensor<fp8_e4m3> v({1, 1, seqKv, headDim});
+    Tensor<bfloat16> o({1, 1, seqQ, headDim});
     q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
-    k.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.25f));
-    v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.75f));
+    const float kRow[2] = {0.25f, 0.5f};
+    const float vRow[2] = {0.75f, 0.25f};
+    for(int64_t j = 0; j < seqKv; ++j)
+    {
+        for(int64_t d = 0; d < headDim; ++d)
+        {
+            k.setHostValue(safeTestTypeCast<fp8_e4m3>(kRow[j]), 0, 0, j, d);
+            v.setHostValue(safeTestTypeCast<fp8_e4m3>(vRow[j]), 0, 0, j, d);
+        }
+    }
 
     Tensor<float> descaleQ({1});
     Tensor<float> descaleK({1});
@@ -3416,29 +3357,33 @@ TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
     descaleV.fillWithValue(4.0f);
 
     const TensorBase<float>* noMask = nullptr;
-    // Bool convenience overload (causalMask=false), with descale forwarded.
     CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
         q,
         k,
         v,
-        oViaBool,
-        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
-    // Equivalent primary (bounds) overload.
-    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
-        q,
-        k,
-        v,
-        oViaBounds,
-        SdpaFwdOptions<float>{}.setMask(noMask).setDescales(&descaleQ, &descaleK, &descaleV));
+        o,
+        SdpaFwdOptions<float>{}
+            .setMask(noMask)
+            .setBand(-1, 0, true)
+            .setDescales(&descaleQ, &descaleK, &descaleV));
 
+    const double slope = 6.0;
+    const auto k0 = static_cast<double>(kRow[0]);
+    const auto k1 = static_cast<double>(kRow[1]);
+    const auto v0 = static_cast<double>(vRow[0]);
+    const auto v1 = static_cast<double>(vRow[1]);
+    const double p1 = 1.0 / (1.0 + std::exp(slope * (k0 - k1)));
+    const double expected[2] = {4.0 * v0, 4.0 * ((1.0 - p1) * v0 + p1 * v1)};
+    // bf16 output: half an ulp at 3.0 is 2^-7.
+    const float tol = 1e-2f;
     for(int64_t s = 0; s < seqQ; ++s)
     {
-        for(int64_t d = 0; d < headDimV; ++d)
+        for(int64_t d = 0; d < headDim; ++d)
         {
-            EXPECT_EQ(static_cast<float>(oViaBool.getHostValue(0, 0, s, d)),
-                      static_cast<float>(oViaBounds.getHostValue(0, 0, s, d)))
-                << "bool overload did not forward descale identically at (sq=" << s << ", dv=" << d
-                << ")";
+            EXPECT_NEAR(static_cast<float>(o.getHostValue(0, 0, s, d)),
+                        static_cast<float>(expected[s]),
+                        tol)
+                << "mismatch at (sq=" << s << ", dv=" << d << ")";
         }
     }
 }
