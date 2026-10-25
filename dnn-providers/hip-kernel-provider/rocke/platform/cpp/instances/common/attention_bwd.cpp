@@ -26,6 +26,8 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
+#include "rocke/helper_rocke.instances.common._attention_bwd_valu.h"
 #include "rocke/ir.h"
 
 namespace rocke_attn_bwd
@@ -36,9 +38,8 @@ static const int NONE = ROCKE_ATTN_BWD_NONE;
 /* ====================================================================== *
  * value sets (Python constants; the ones other modules own are mirrored
  * here until their C twins exist: _attention_bwd_body STAGE_ORDERS /
- * G4_SLICINGS / COPY_ORDERS, _attention_bwd_sched SCHEDS, _attention_bwd_counted
- * COUNTED_ISSUES / COUNTED_VMCNT_MAX, _attention_bwd_valu BF16_CASTS /
- * BWD_EXP2S / STATS_VECS)
+ * G4_SLICINGS / COPY_ORDERS, _attention_bwd_sched SCHEDS; the counted and valu
+ * constants come from those helpers' exports)
  * ====================================================================== */
 
 typedef std::vector<std::string> Strs;
@@ -104,13 +105,22 @@ static const char* const SPLIT_DEFERRED
     = "sched='stage_table_atomics' needs dq_mode='atomic': the split-dQ main "
       "kernel issues no dQ atomics to defer (its stage table is "
       "sched='stage_table')";
-/* _attention_bwd_counted */
-static const Strs COUNTED_ISSUES = {"early", "late"};
-static const int COUNTED_VMCNT_MAX = 63;
-/* _attention_bwd_valu */
-static const Strs BF16_CASTS = {"generic", "rne_noguard"};
-static const Strs BWD_EXP2S = {"exact", "fast"};
-static const Ints STATS_VECS = {1, 2, 4};
+/* _attention_bwd_counted / _attention_bwd_valu: views of the owners' exports */
+template <typename T, size_t N>
+static std::vector<T> as_vec(const T (&a)[N])
+{
+    return std::vector<T>(a, a + N);
+}
+static Strs as_strs(const char* const* a, int n)
+{
+    return Strs(a, a + n);
+}
+static const Strs COUNTED_ISSUES
+    = as_strs(ROCKE_ATTN_BWD_COUNTED_ISSUES, ROCKE_ATTN_BWD_COUNTED_N_ISSUES);
+static const int COUNTED_VMCNT_MAX = ROCKE_ATTN_BWD_COUNTED_VMCNT_MAX;
+static const Strs BF16_CASTS = as_strs(ROCKE_ATTN_BWD_BF16_CASTS, ROCKE_ATTN_BWD_BF16_CASTS_N);
+static const Strs BWD_EXP2S = as_strs(ROCKE_ATTN_BWD_BWD_EXP2S, ROCKE_ATTN_BWD_BWD_EXP2S_N);
+static const Ints STATS_VECS = as_vec(ROCKE_ATTN_BWD_STATS_VECS);
 
 static const char* const AGPR_ALLOCS_REPR
     = "(None, 'backend', (0, 0), (128, 128), (192, 192), (256, 256))";
