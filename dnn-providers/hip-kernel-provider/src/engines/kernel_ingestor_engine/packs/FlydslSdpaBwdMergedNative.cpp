@@ -59,7 +59,7 @@
  * dBias is broadcast.
  *
  * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp). The merged
- * engine adds what only it knows: padded varlen is declined, a row serves the head sizes its
+ * engine adds what only it knows: a row serves the head sizes its
  * tile covers, every bias object stages the bias through LDS, and `gqa_pack` rows serve only
  * grouped-query graphs.
  *
@@ -137,6 +137,10 @@ constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 38
 
 /// `varlen_bits` names the layout of the LSE: bit 16 is the (B, Sq, H) packing.
 constexpr int32_t VARLEN_LSE_LAYOUT_TH = 1 << 16;
+/// Padded varlen: dense (B, H, S, D) tensors with a length per batch on each side, the
+/// layout's position implied by the batch index (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04, for the
+/// Q side in bits 0..7 and the K side in bits 8..15; the lengths go in `seqinfo_q0` / `seqinfo_k0`).
+constexpr int32_t VARLEN_LENGTHS_BOTH_SIDES = 0x0404;
 
 /// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
 constexpr int32_t RT_FLAG_PADDED = 1;
@@ -402,8 +406,8 @@ bool packedSpansFit(const bwd::SdpaBwdProblem& problem)
 }
 
 /**
- * @brief Graph-scoped applicability: the shared backward matcher's contract, less padded
- *        varlen, with what kernel_match needs bound.
+ * @brief Graph-scoped applicability: the shared backward matcher's contract, with what
+ *        kernel_match needs bound.
  *
  * Each decline of a graph with an SDPA-backward node logs its cause at INFO; any other
  * graph declines silently.
@@ -422,28 +426,20 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     }
     const auto& problem = std::get<bwd::SdpaBwdProblem>(matched);
 
-    // The matcher serves padded varlen; the merged kernel's varlen path is not offered.
-    if(problem.paddingMask || problem.seqLenQUid != bwd::NO_UID
-       || problem.seqLenKvUid != bwd::NO_UID)
-    {
-        logDecline("varlen", "padded varlen (padding_mask with seq_len tensors) is not served");
-        return std::nullopt;
-    }
-
     // The merged table (`_instances.py`, `sdpa_bwd_merged`) builds exact objects at tiles 32 to
-    // 192 and, at tile 32 only, padded objects: a head size is served when both dims are at
+    // 256 and, at tile 32 only, padded objects: a head size is served when both dims are at
     // most 32 (an exact or padded tile-32 object) or both equal one of the exact tiles 64 to
-    // 192. kernel_match keeps its per-row check.
+    // 256. kernel_match keeps its per-row check.
     const int64_t largest = std::max(problem.headDimQk, problem.headDimV);
-    const bool exactTile = problem.headDimQk == problem.headDimV && largest >= 64 && largest <= 192
+    const bool exactTile = problem.headDimQk == problem.headDimV && largest >= 64 && largest <= 256
                            && largest % 32 == 0;
     if(largest > 32 && !exactTile)
     {
-        logDecline(
-            "head_size",
-            "head dims Qk " + std::to_string(problem.headDimQk) + ", V "
-                + std::to_string(problem.headDimV)
-                + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160 or 192)");
+        logDecline("head_size",
+                   "head dims Qk " + std::to_string(problem.headDimQk) + ", V "
+                       + std::to_string(problem.headDimV)
+                       + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160, "
+                         "192, 224 or 256)");
         return std::nullopt;
     }
 
@@ -698,7 +694,8 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0;
+    plan.varlenBits = (problem.statsLayout == bwd::StatsLayout::TH ? VARLEN_LSE_LAYOUT_TH : 0)
+                      | (problem.paddingMask ? VARLEN_LENGTHS_BOTH_SIDES : 0);
 
     plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
 
@@ -891,9 +888,11 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     m.bias = problem.biasUid != bwd::NO_UID ? buffer(problem.biasUid) : m.o;
 
     m.batchSize = toInt32(problem.batch, "batch");
-    m.seqinfoQ0 = m.o;
+    // Unread slots stay O, as the harness passes them; a padded graph's lengths are its
+    // `seq_len_q` / `seq_len_kv` tensors, and nothing is packed (num_seqlens stays 0).
+    m.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : m.o;
     m.seqinfoQ1 = m.o;
-    m.seqinfoK0 = m.o;
+    m.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : m.o;
     m.seqinfoK1 = m.o;
     m.varlenBits = plan.varlenBits;
     m.numSeqlens = 0;

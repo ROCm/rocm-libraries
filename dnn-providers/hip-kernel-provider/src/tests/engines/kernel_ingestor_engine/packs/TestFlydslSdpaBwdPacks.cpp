@@ -26,7 +26,7 @@
  * @brief A census of what hipkernel:flydsl_sdpa_bwd_merged actually loads, read from the shard
  *        the census entry names rather than from anything built in-process.
  *
- * The merged table is 208 objects: 126 without a bias and 82 with one. The 28 bias objects
+ * The merged table is 309 objects: 189 without a bias and 120 with one. The 44 bias objects
  * that store dB carry the dBias reduce kernel as a second symbol of the same code object; a
  * store_db=0 object never writes dB and carries no reduce kernel. Every case
  * opens by reading loadedSet(), none skips and none touches a device, so an empty shard fails
@@ -52,9 +52,9 @@ constexpr const char* ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
 constexpr const char* GRAPH_MATCHER = "hipkernel.flydsl_sdpa_bwd_merged.graph_match";
 constexpr const char* REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 
-constexpr size_t MERGED_ROWS = 208;
-constexpr size_t BIAS_ROWS = 82;
-constexpr size_t REDUCE_ROWS = 28;
+constexpr size_t MERGED_ROWS = 309;
+constexpr size_t BIAS_ROWS = 120;
+constexpr size_t REDUCE_ROWS = 44;
 
 /// A metadata field of type @p T, or nullptr when absent or of another type.
 template <typename T>

@@ -209,11 +209,11 @@ RowSpec dropoutRow(int64_t tile = 64)
     return row;
 }
 
-/// The merged table's coverage: exact objects at tiles 32 to 192 and one padded object at 32.
+/// The merged table's coverage: exact objects at tiles 32 to 256 and one padded object at 32.
 std::vector<RowSpec> catalog()
 {
     std::vector<RowSpec> rows;
-    for(const int64_t tile : {32, 64, 96, 128, 160, 192})
+    for(const int64_t tile : {32, 64, 96, 128, 160, 192, 224, 256})
     {
         rows.push_back(plainRow(tile));
     }
@@ -607,7 +607,8 @@ TEST(TestFlydslSdpaBwdMergedGraph, ServesThePlainGraphTheSharedMatcherAccepts)
 
 TEST(TestFlydslSdpaBwdMergedGraph, DeclinesAGraphTheSharedMatcherDeclines)
 {
-    // Every tensor in fp32: DT-2, a [data_type] decline.
+    // Every tensor in fp32: DT-2, a [data_type] decline. The merged engine has no fp32 family and
+    // keeps the matcher's default options (no acceptFloat), so FLOAT stays declined.
     const auto spec = specOf({}, DataType::FLOAT);
     EXPECT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::Decline>(matchSdpaBwdSpec(spec)));
     EXPECT_FALSE(graphMatch(spec).has_value());
@@ -628,8 +629,8 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesAHeadSizeNoMergedObjectCovers)
         shape.headDimV = v;
         return specOf(shape);
     };
-    // The shared matcher serves both; the merged table (tiles 32 to 192) covers neither.
-    for(const int64_t headDim : {100, 224})
+    // The shared matcher serves both; the merged table (tiles 32 to 256) covers neither.
+    for(const int64_t headDim : {100, 288})
     {
         ASSERT_TRUE(
             std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(atDim(headDim, headDim))));
@@ -637,24 +638,23 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesAHeadSizeNoMergedObjectCovers)
     }
     EXPECT_FALSE(graphMatch(atDim(64, 40)).has_value());
     EXPECT_TRUE(graphMatch(atDim(96, 96)).has_value());
+    EXPECT_TRUE(graphMatch(atDim(224, 224)).has_value());
+    EXPECT_TRUE(graphMatch(atDim(256, 256)).has_value());
     EXPECT_TRUE(graphMatch(atDim(24, 24)).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, EN2DeclinesPaddedVarlenThatTheMatcherAccepts)
+TEST(TestFlydslSdpaBwdMergedGraph, EN2ServesPaddedVarlenTheMatcherAccepts)
 {
     const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
-    // PV-1: the shared matcher serves it; the merged engine does not.
     ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(padded)));
-    EXPECT_FALSE(graphMatch(padded).has_value());
-    EXPECT_TRUE(graphMatch(baseSpec()).has_value());
+    EXPECT_TRUE(graphMatch(padded).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedGraph, EN2DeclinesPaddedVarlenWithAMask)
+TEST(TestFlydslSdpaBwdMergedGraph, EN2ServesPaddedVarlenWithAMask)
 {
     const auto padded = withCausal(baseSpec()).withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
     ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(padded)));
-    EXPECT_FALSE(graphMatch(padded).has_value());
-    EXPECT_TRUE(graphMatch(withCausal(baseSpec())).has_value());
+    EXPECT_TRUE(graphMatch(padded).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -759,16 +759,16 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesTheSmallestTilePaddedBelowIt)
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesNoHeadDimTheCatalogDoesNotCover)
 {
     const auto rows = catalog();
-    for(const int64_t headDim : {24, 32, 64, 96, 128, 160, 192})
+    for(const int64_t headDim : {24, 32, 64, 96, 128, 160, 192, 224, 256})
     {
         Shape shape;
         shape.headDimQk = headDim;
         shape.headDimV = headDim;
         EXPECT_TRUE(anyServes(specOf(shape), rows)) << "D " << headDim;
     }
-    // D = 100 sits between tiles and D = 224 above the merged table: no row serves either,
+    // D = 100 sits between tiles and D = 288 above the merged table: no row serves either,
     // and the graph beside them (D = 96) is served.
-    for(const int64_t headDim : {100, 224, 256})
+    for(const int64_t headDim : {100, 288})
     {
         Shape shape;
         shape.headDimQk = headDim;
@@ -1228,6 +1228,19 @@ TEST(TestFlydslSdpaBwdMergedKernarg, StatsInTheTokenMajorLayoutSetTheLseLayoutBi
         [](SdpaBwdGraph& g) { g.tensor("stats").strides = {g.seqQ * g.heads, 1, g.heads, 1}; });
     const auto dump = dumpOf(spec, plainRow());
     expectKernarg(dump.kernarg, Golden().set("varlen_bits", int32_t{1} << 16));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, PaddedVarlenPassesTheLengthTensorsAsTheLengthArrays)
+{
+    const auto spec = baseSpec().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
+    const auto dump = dumpOf(spec, plainRow());
+    // INDIVIDUAL lengths with the position implied, on both sides: 0x04 in bytes 0 and 1.
+    // Nothing is packed: num_seqlens stays 0 and the batch size is the batch.
+    expectKernarg(dump.kernarg,
+                  Golden()
+                      .set("seqinfo_q0", ptrOf(sdpa_bwd_uid::SEQ_LEN_Q))
+                      .set("seqinfo_k0", ptrOf(sdpa_bwd_uid::SEQ_LEN_KV))
+                      .set("varlen_bits", int32_t{0x0404}));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernarg, Dropout)

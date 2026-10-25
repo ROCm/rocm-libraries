@@ -89,7 +89,7 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
     for instance in rows:
         stores_db = bool(instance.knobs["has_bias"]) and instance.knobs["store_db"] != 0
         assert instance.knobs["reduce_symbol"] == (
-            "fmha_bwd_dbias_reduce_gfx950_kernel_1" if stores_db else ""
+            _instances.SDPA_BWD_REDUCE_SYMBOL[instance.dtype] if stores_db else ""
         )
         assert "reduce" not in instance.name
         stripped = replace(
@@ -97,13 +97,30 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
             knobs={k: v for k, v in instance.knobs.items() if k != "reduce_symbol"},
         )
         assert to_spec(stripped) == to_spec(instance)
-    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 28
-    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 82
-    assert len(rows) == 208
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 44
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 120
+    assert len(rows) == 309
 
 
-def test_only_the_merged_rows_may_carry_a_reduce_symbol(tables) -> None:
-    row = tables["sdpa_bwd_dq"][0]
+def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
+    """A dB-storing bias dQ row holds its dtype's dBias reduce kernel; every fp32 bias dQ row stores dB."""
+    rows = tables["sdpa_bwd_dq"]
+    for instance in rows:
+        stores_db = bool(instance.knobs["has_bias"]) and instance.knobs["store_db"] != 0
+        assert instance.knobs["reduce_symbol"] == (
+            _instances.SDPA_BWD_REDUCE_SYMBOL[instance.dtype] if stores_db else ""
+        )
+    fp32_bias = [i for i in rows if i.dtype == "fp32" and i.knobs["has_bias"]]
+    assert fp32_bias
+    assert all(
+        i.knobs["reduce_symbol"].startswith("fmha_bwd_dbias_reduce_f32")
+        for i in fp32_bias
+    )
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 320
+
+
+def test_only_the_merged_and_dq_rows_may_carry_a_reduce_symbol(tables) -> None:
+    row = tables["sdpa_bwd_prep"][0]
     with pytest.raises(ValueError, match="reduce_symbol"):
         to_spec(replace(row, knobs={**row.knobs, "reduce_symbol": ""}))
 
@@ -138,9 +155,17 @@ def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
 ) -> None:
     """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
     in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
-    assert sum(len(rows) for rows in tables.values()) == 2011
+    assert sum(len(rows) for rows in tables.values()) == 2729
+    assert {op: len(rows) for op, rows in tables.items()} == {
+        "sdpa_bwd_prep": 86,
+        "sdpa_bwd_dkdv": 1319,
+        "sdpa_bwd_dq": 1010,
+        "sdpa_bwd_merged": 309,
+        "sdpa_bwd_dbias_reduce": 3,
+        "sdpa_bwd_dsink_reduce": 2,
+    }
     for held in (in_tables, _reference().keys()):
-        assert len(held) == 2011
+        assert len(held) == 2729
         assert not held & SUPERSEDED.keys()
         assert set(SUPERSEDED.values()) <= held
 
@@ -158,7 +183,7 @@ def test_the_engines_restated_constants_match_the_tables(tables, monkeypatch) ->
     """The merged engine restates three generator facts (`FlydslSdpaBwdMergedNative.cpp`).
 
     * `LADDER`: the head-dim tiles objects are built at.
-    * The exact-tile range of its graph check: equal head dims of 64, 96, 128, 160 or 192,
+    * The exact-tile range of its graph check: equal head dims of 64, 96, 128, 160, 192, 224 or 256,
       plus one padded tile (32) for smaller dims.
     * `PACK_MAX_BLOCK_Q`: the largest dK/dV block_q of a `gqa_pack == 1` row, which bounds the
       engine's pack_split exactness test.
@@ -169,7 +194,16 @@ def test_the_engines_restated_constants_match_the_tables(tables, monkeypatch) ->
 
     assert LADDER == (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)  # LADDER
     rows = tables["sdpa_bwd_merged"]
-    assert {to_spec(r).tile for r in rows} == {32, 64, 96, 128, 160, 192}  # exactTile
+    assert {to_spec(r).tile for r in rows} == {
+        32,
+        64,
+        96,
+        128,
+        160,
+        192,
+        224,
+        256,
+    }  # exactTile
     assert {to_spec(r).tile for r in rows if to_spec(r).padded} == {32}
 
     packed = [r for r in rows if r.knobs["gqa_pack"] == 1]
