@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -106,10 +105,11 @@ def test_a_kdp_without_kernel_descriptors_fails_instead_of_counting_zero(tmp_pat
 
 
 @pytest.mark.skipif(
-    os.name == "nt"
-    or shutil.which("bash") is None
-    or shutil.which("sha256sum") is None,
+    os.name == "nt",
     reason="the RUNBOOK recipe needs bash with GNU find/sort/sha256sum",
+)
+@pytest.mark.allow_skip(
+    reason="the RUNBOOK recipe needs bash with GNU find/sort/sha256sum, which Windows lacks"
 )
 def test_catalog_digest_matches_the_runbook_recipe(tmp_path):
     bundle = _tree(tmp_path)

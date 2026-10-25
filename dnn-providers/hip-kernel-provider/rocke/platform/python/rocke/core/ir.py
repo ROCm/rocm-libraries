@@ -482,6 +482,17 @@ def _refuse_unsigned_operands(op: "Op", instead: Optional[str] = None) -> None:
         _refuse_unsigned(op.name, operand.type, instead)
 
 
+def _refuse_non_u8_source(op: "Op") -> None:
+    """Refuse ``op``, a u8 -> float conversion, unless its source is a u8
+    scalar. IRBuilder.uitofp_f32 checks its input when the op is built; the
+    lowerings call this for IR that did not come through it (hand-assembled or
+    deserialized), because they would read any other source differently: LLVM's
+    uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0."""
+    (source,) = op.operands
+    if source.type.name != "u8":
+        raise TypeError(f"{op.name} expects a u8 source, got {source.type.name}")
+
+
 def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
     """Scope / ordering attr of a fence or flag op, checked for the lowerers.
 
@@ -1276,6 +1287,31 @@ class IRBuilder:
             )
         return self._op("arith.fma", [a, b, c], [a.type], result_name_hint="fma").result
 
+    def fdot2(self, a: Value, b: Value, c: Value) -> Value:
+        """Two-wide dot product with f32 accumulate: ``a.x*b.x + a.y*b.y + c``.
+
+        ``a`` and ``b`` are ``vec<f16x2>`` or ``vec<bf16x2>`` (same type),
+        ``c`` and the result are f32. Lowers to ``llvm.amdgcn.fdot2`` (f16)
+        or ``llvm.amdgcn.fdot2.f32.bf16`` (bf16) with clamp off, which the
+        gfx9 backend selects as ``v_dot2c_f32_f16`` / ``v_dot2c_f32_bf16``.
+        The bf16 form is not selectable on gfx90a / gfx942 (see the
+        intrinsic arch-domain artifact); among CDNA targets it needs gfx950.
+        """
+        ok_vec = (
+            isinstance(a.type, VectorType)
+            and a.type == b.type
+            and a.type.count == 2
+            and a.type.elem in (F16, BF16)
+        )
+        if not ok_vec or c.type != F32:
+            raise ValueError(
+                f"fdot2 expects (vec<f16|bf16 x2>, same, f32); got {a.type.name}, "
+                f"{b.type.name}, {c.type.name}"
+            )
+        return self._op(
+            "arith.fdot2", [a, b, c], [F32], result_name_hint="fdot2"
+        ).result
+
     def fmax3(self, a: Value, b: Value, c: Value) -> Value:
         """Three-way floating-point max — ``max(a, max(b, c))``.
 
@@ -1735,6 +1771,9 @@ class IRBuilder:
         """Convert ``<4 x fp8e4m3> -> <4 x f32>`` with **E8M0-scaled** fused
         cvt via AMDGPU's gfx950 ``v_cvt_scalef32_pk_f32_fp8``.
 
+        Only gfx950 has the instruction, so lowering for any other target
+        raises ``ValueError`` (the builder has no target to check against).
+
         IMPORTANT — E8M0 semantics, NOT plain f32 multiply:
 
             The hardware uses the f32 scale operand's *exponent bits
@@ -1807,12 +1846,18 @@ class IRBuilder:
         ).result
 
     def cvt_f32_to_fp8(self, v: Value) -> Value:
-        """Round + saturate one f32 element to fp8e4m3 (round-to-nearest-even).
+        """Convert one f32 element to fp8e4m3.
+
+        Rounds to nearest even and does NOT saturate: the hardware
+        conversion turns a value that rounds past the largest finite fp8
+        value, and +-inf and NaN, into NaN. The encoding is the target's:
+        FNUZ on gfx942 (largest value 240), OCP on gfx950 (largest 448).
+        Clamp first (``clamp_f32``) for a saturating conversion.
 
         Lowers to AMDGPU's ``llvm.amdgcn.cvt.pk.fp8.f32`` packing
         intrinsic (two f32 per call), with the second slot held at
         +0.0f and the low byte extracted as the single-element
-        result. Out-of-range inputs are clamped to the fp8e4m3 range.
+        result.
         """
         if v.type.name != "f32":
             raise ValueError(f"cvt_f32_to_fp8 expects f32 input, got {v.type.name}")
@@ -1821,8 +1866,9 @@ class IRBuilder:
         ).result
 
     def cvt_pk_fp8_f32x4(self, v: Value) -> Value:
-        """Round + saturate <4 x f32> to <4 x fp8e4m3> with AMDGPU's
-        packed ``v_cvt_pk_fp8_f32`` instruction.
+        """Convert <4 x f32> to <4 x fp8e4m3> with AMDGPU's packed
+        ``v_cvt_pk_fp8_f32`` instruction; out-of-range values as in
+        :meth:`cvt_f32_to_fp8` (no saturation).
 
         The scalar :meth:`cvt_f32_to_fp8` wrapper intentionally exposes a
         simple one-element API but wastes the second conversion lane of
@@ -1847,11 +1893,17 @@ class IRBuilder:
         ).result
 
     def cvt_f32_to_bf8(self, v: Value) -> Value:
-        """Round + saturate one f32 element to bf8e5m2 (round-to-nearest-even).
+        """Convert one f32 element to bf8e5m2.
+
+        Rounds to nearest even and does NOT saturate: a value that rounds
+        past the largest finite bf8 value (57344) becomes NaN on gfx942
+        (FNUZ) and +-inf on gfx950 (OCP); +-inf and NaN keep their class
+        (NaN on gfx942). Clamp first (``clamp_f32``) for a saturating
+        conversion.
 
         Lowers to ``llvm.amdgcn.cvt.pk.bf8.f32``; the e5m2 sibling of
         cvt_f32_to_fp8. ``bf8e5m2`` carries 5 exponent bits so its
-        representable range reaches ~57344 at the cost of 1 mantissa bit.
+        representable range reaches 57344 at the cost of 1 mantissa bit.
         """
         if v.type.name != "f32":
             raise ValueError(f"cvt_f32_to_bf8 expects f32 input, got {v.type.name}")
@@ -1860,7 +1912,8 @@ class IRBuilder:
         ).result
 
     def cvt_pk_bf8_f32x4(self, v: Value) -> Value:
-        """e5m2 sibling of :meth:`cvt_pk_fp8_f32x4`."""
+        """e5m2 sibling of :meth:`cvt_pk_fp8_f32x4`; out-of-range values as
+        in :meth:`cvt_f32_to_bf8` (no saturation)."""
         if (
             not isinstance(v.type, VectorType)
             or v.type.elem.name != "f32"
@@ -3302,6 +3355,18 @@ class IRBuilder:
         """
         return self.mma("mfma_f32_4x4x4_f16", a, b, c)
 
+    def mfma_f32_4x4x4_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """The 4x4x4 bf16 MFMA atom — 16 independent 4x4 matmuls per wave.
+
+        Same lane layout as :meth:`mfma_f32_4x4x4_f16` (per lane on wave64:
+        A `<4 x bfloat>`, B `<4 x bfloat>`, acc `<4 x float>`; `batch =
+        lane / 4`), with bf16 operands. Lowers through the CDNA2+ `_1k`
+        variant `@llvm.amdgcn.mfma.f32.4x4x4bf16.1k`: the operands are
+        bitcast `<4 x bfloat>` -> `<4 x i16>` first, exactly like
+        :meth:`mfma_f32_16x16x16_bf16`. Selectable on gfx942 and gfx950.
+        """
+        return self.mma("mfma_f32_4x4x4_bf16", a, b, c)
+
     # ----- vector type casts (for packed buffer-load + LDS reads) -----
 
     def vec_bitcast(self, v: Value, target: Type) -> Value:
@@ -4332,17 +4397,14 @@ class IRBuilder:
     def ds_read_tr16_b128(
         self, smem: Value, *indices: Value, dtype: Type = F16
     ) -> Value:
-        """``ds_read_b128_tr_b16`` — gfx950 wide transpose-read.
+        """``ds_load_tr16_b128`` — gfx1250 wide transpose-read.
 
         Same shape as :meth:`ds_read_tr16_b64` but reads 16 bytes per
-        lane instead of 8. Per-lane result is ``<8 x f16>`` (or bf16),
-        delivering the MFMA B-operand layout for the K-packed atoms
-        (``f16_16x16x32`` / ``bf16_16x16x32``) in a single LDS op
-        instead of two paired ``b64`` reads.
-
-        Used by transpose phase-2 and the PV-V LDS read in
-        ``attention_tiled_2d`` 32x32 path: 8 scalar ``ds_read_u16``
-        per lane → 1 transposed read.
+        lane instead of 8. Per-lane result is ``<8 x f16>`` (or bf16).
+        Only gfx1250 lowers this op. gfx950 has no such instruction and
+        LLVM has no ``ds.read.tr16.b128``, so lowering for any other
+        target raises ``NotImplementedError``. Use two
+        :meth:`ds_read_tr16_b64` reads there.
         """
         if not indices:
             raise ValueError("ds_read_tr16_b128 needs at least one index")
