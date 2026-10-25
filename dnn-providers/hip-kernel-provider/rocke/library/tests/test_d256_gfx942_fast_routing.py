@@ -87,6 +87,19 @@ class TestD256Gfx942FastGate(unittest.TestCase):
                 au._d256_gfx942_fast(_d256_problem(head_size=128), "gfx942")
             )
 
+    def test_gate_accepts_d192_bf16_prefill(self):
+        # D192 rides the lean 4-warp body (MHA and GQA alike).
+        with _PinArch("gfx942"):
+            for hq, hkv in ((96, 96), (16, 2)):
+                self.assertTrue(
+                    au._d256_gfx942_fast(
+                        _d256_problem(
+                            head_size=192, num_query_heads=hq, num_kv_heads=hkv
+                        ),
+                        "gfx942",
+                    )
+                )
+
     def test_gate_rejects_block_size_64(self):
         # block_size=64 cleanly falls back to the default builder (tile%block).
         with _PinArch("gfx942"):
@@ -175,6 +188,31 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
         self.assertEqual(
             via_entry, via_lean, "D256 entry must delegate to the lean natural-QK body"
         )
+
+    def test_d192_entry_delegates_to_lean_natural_qk_body(self):
+        """HD==192 builds via the lean body too; the general 4-warp body exceeds
+        the 256-VGPR budget at 192."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(head_size=192), "gfx942")
+            via_entry = _lower_kernel_to_llvm_python(
+                t2d.build_gfx942_4warp_gqa(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+            via_lean = _lower_kernel_to_llvm_python(
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+        self.assertEqual(via_entry, via_lean)
+
+    def test_lean_body_rejects_unserved_head_size(self):
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(head_size=128), "gfx942")
+            with self.assertRaises(NotImplementedError):
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
 
     def test_lean_body_rejects_sliding_window(self):
         """The lean D256 body is causal-only -- it has no sliding-window mask and

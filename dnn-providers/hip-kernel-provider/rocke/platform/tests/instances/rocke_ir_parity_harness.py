@@ -777,7 +777,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
 
     Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
     case above cannot stand in for this one: ``build_gfx942_4warp_gqa`` returns
-    ``_build_gfx942_4warp_gqa_lean`` at the ``HD == _4WGQA_LEAN_HEAD_SIZE`` (256)
+    ``_build_gfx942_4warp_gqa_lean`` at ``HD in _4WGQA_LEAN_HEAD_SIZES`` (192, 256)
     early-return, which is ~20 lines BEFORE the D128 fold body -- so the D256
     golden never lowers a single line of the folded kernel.
 

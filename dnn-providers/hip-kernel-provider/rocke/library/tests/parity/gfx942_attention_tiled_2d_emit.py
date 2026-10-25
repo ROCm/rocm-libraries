@@ -141,7 +141,8 @@ _CONFIGS = {
         use_register_pv=True,
         tile_size=32,
     ),
-    # --- idx9: head_size=192 MHA prefill selector spec (wide flash geometry)
+    # --- idx9: head_size=192 MHA prefill on the wide flash geometry (an explicit spec;
+    #     the bf16 causal selector now routes D192 to the lean 4-warp body)
     9: dict(
         head_size=192,
         block_size=16,

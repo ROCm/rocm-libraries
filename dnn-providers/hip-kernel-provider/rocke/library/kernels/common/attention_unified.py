@@ -1091,10 +1091,15 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
     prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
     Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
     run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
+
+    D192 bf16 causal prefill rides the same lean body: the 2-wave wide-flash
+    kernel it otherwise takes needs 48 KB LDS and over 256 registers per lane,
+    so one 2-wave CTA fits per CU and half the SIMDs idle. The lean body fits
+    D192 in 24 KB LDS and under 256 VGPRs with four waves per CTA.
     """
     return (
         _gfx942_4warp_eligible(problem, arch)
-        and problem.head_size == 256
+        and problem.head_size in (192, 256)
         and problem.dtype == "bf16"
         and problem.sliding_window == 0
         # tile_size==32 requires block_size in {16, 32} (tile % block == 0).
