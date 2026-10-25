@@ -23,7 +23,7 @@ Keep `library` and reuse it for subsequent indices. `library.indices` lists the
 loaded indices, including features not implemented yet, such as grouped GEMM
 and required gradient operations. Repeating a choice with the same
 arguments returns an equal problem description, without more file reads or GPU
-work. `reduction_blocks` controls the number of complete K blocks;
+work. `reduction_blocks` requests a number of complete K blocks;
 changing it changes the chosen K size as described below.
 
 If the indices are already known, load them together:
@@ -43,7 +43,7 @@ Indices belong to a particular build, so execution must use the same library.
 ## How the dimensions are chosen
 
 The helper first checks that it can handle the solution's scheduling and matrix
-options. It then chooses one full output tile, a rectangular chunk of the
+options. It starts with one full output tile, a rectangular chunk of the
 result matrix, with these dimensions:
 
 | Where the value comes from | Value | Use |
@@ -65,6 +65,21 @@ and can be zero. The native runtime determines the persistent grid and assigns
 the reduction work. For the same tile and `depthU=32`, the default is
 **M=128, N=96, K=256**. Canonical scheduling fields and their legacy StreamK
 equivalents are normalized and validated before construction.
+
+Serialized size predicates can require a different shape. The helper honors
+size bounds, equalities and divisibility constraints, including minimum K for
+fixed split-K. It keeps the requested dimensions when they fit, otherwise
+chooses dimensions within the bounds. K remains a multiple of the reduction
+block and fixed split; required MX block sizes also constrain K. For example,
+a 32-by-32 tile with `depthU=64` would normally give K=512. If its predicates
+require M/N from 64 through 128 and K=128, the default becomes **64-by-64-by-128**.
+Thus, `reduction_blocks` is a target that explicit size bounds can override.
+
+Contradictory or malformed size predicates raise `ValueError`. Consistent
+constraints that require several batches or exclude complete reduction blocks
+raise `UnsupportedSolution`. Dimension constraints under disjunction or negation
+are also unimplemented. Other native predicates, including hardware and
+buffer-offset checks, remain the runtime's responsibility.
 
 This small shape runs the original indexed kernel. It does not guarantee that
 every Stream-K work-distribution or cross-workgroup reduction path executes;

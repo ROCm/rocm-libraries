@@ -3,13 +3,15 @@
 """Construct a small GEMM workload for a chosen library solution.
 
 A solution describes a GPU kernel and the matrix layouts it expects. This module
-uses that description to choose one full output tile and a specified number of
-reduction blocks, without importing the kernel generator or using
+uses that description to choose a small problem within its size constraints,
+starting with one output tile and a specified number of reduction blocks, without
+importing the kernel generator or using
 an installed GPU. Execution and native solution support checks happen later.
 """
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from math import lcm
 from pathlib import Path
 from types import MappingProxyType
 
@@ -40,6 +42,107 @@ class UnsupportedSolution(Exception):
         super().__init__(
             f"Solution {solution_index}: unsupported features: {', '.join(self.reasons)}"
         )
+
+
+def _size_predicates(predicate):
+    """Retain dimension constraints without keeping unrelated native predicates."""
+    if not isinstance(predicate, dict) or not isinstance(predicate.get("type"), str):
+        raise ValueError("Invalid problem predicate")
+    kind = predicate["type"]
+    if kind in {"And", "Or", "Not"}:
+        children = predicate["value"]
+        if kind == "Not":
+            children = [children]
+        if not isinstance(children, list):
+            raise ValueError(f"Invalid {kind} problem predicate")
+        sizes = tuple(p for child in children for p in _size_predicates(child))
+        return sizes if kind == "And" or not sizes else (predicate,)
+    return (predicate,) if "Size" in kind or kind == "GlobalSplitUCheckMinK" else ()
+
+
+def _choose_sizes(index, preferred, reduction_multiple, predicates):
+    # Native GEMM problem sizes are ordered M, N, batch, K. Free and bound
+    # predicate indices address their own lists, each with one entry here.
+    lower, upper, multiples = [1] * 4, [None] * 4, [1] * 4
+    dimension_types = {
+        "Free0SizeMultiple": (0, {0}),
+        "Free1SizeMultiple": (1, {0}),
+        "BatchSizeMultiple": (2, {0}),
+        "BatchSizeEqual": (2, {0}),
+        "BoundSizeMultiple": (3, {0, -1}),
+        "LeadingFree0SizesGreaterOrEqual": (0, None),
+        "LeadingFree1SizesGreaterOrEqual": (1, None),
+    }
+    for predicate in predicates:
+        kind, value = predicate["type"], predicate["value"]
+        if kind == "GlobalSplitUCheckMinK":
+            if (
+                not isinstance(value, list)
+                or len(value) != 2
+                or any(type(v) is not int for v in value)
+                or value[0] < 0
+                or value[1] < -1
+            ):
+                raise ValueError(f"Solution {index}: invalid {kind}")
+            if value[1] > 1:
+                lower[3] = max(lower[3], value[0] * value[1])
+            continue
+        if kind in dimension_types:
+            dim, indices = dimension_types[kind]
+            if indices is not None and (
+                type(predicate.get("index")) is not int or predicate["index"] not in indices
+            ):
+                raise ValueError(f"Solution {index}: invalid {kind} index")
+        elif kind in {
+            "SizeEqual",
+            "ProblemSizeEqual",
+            "SizeGreaterThan",
+            "SizeLessThan",
+            "SizeMultiple",
+            "SizeInRange",
+        }:
+            dim = predicate.get("index")
+            if type(dim) is not int or not 0 <= dim < 4:
+                raise ValueError(f"Solution {index}: invalid {kind} index")
+        else:
+            raise UnsupportedSolution(index, [f"problem size predicate {kind}"])
+        if kind == "SizeInRange":
+            if not isinstance(value, dict):
+                raise ValueError(f"Solution {index}: invalid {kind}")
+            lo, hi = value.get("min", 0), value.get("max", (1 << 64) - 1)
+            if any(type(v) is not int or v < 0 for v in (lo, hi)):
+                raise ValueError(f"Solution {index}: invalid {kind}")
+            lower[dim] = max(lower[dim], lo)
+            upper[dim] = hi - 1 if upper[dim] is None else min(upper[dim], hi - 1)
+            continue
+        if type(value) is not int or value < 0 or (kind.endswith("Multiple") and value == 0):
+            raise ValueError(f"Solution {index}: invalid {kind} value")
+        if kind.endswith("Multiple"):
+            multiples[dim] = lcm(multiples[dim], value)
+        elif kind.endswith("Equal") and not kind.endswith("GreaterOrEqual"):
+            lower[dim] = max(lower[dim], value)
+            upper[dim] = value if upper[dim] is None else min(upper[dim], value)
+        elif kind == "SizeLessThan":
+            upper[dim] = value - 1 if upper[dim] is None else min(upper[dim], value - 1)
+        else:
+            lower[dim] = max(lower[dim], value + (kind == "SizeGreaterThan"))
+    result = []
+    for dim, target in enumerate(preferred):
+        lo, hi, multiple = lower[dim], upper[dim], multiples[dim]
+        first = ((lo + multiple - 1) // multiple) * multiple
+        if hi is not None and first > hi:
+            raise ValueError(f"Solution {index}: contradictory size predicates for dimension {dim}")
+        if dim == 2 and (lo > 1 or (hi is not None and hi < 1) or multiple != 1):
+            raise UnsupportedSolution(index, ["batch count other than one"])
+        if dim == 3:
+            multiple = lcm(multiple, reduction_multiple)
+        chosen = ((max(lo, target) + multiple - 1) // multiple) * multiple
+        if hi is not None and chosen > hi:
+            chosen = (hi // multiple) * multiple
+        if chosen < lo:
+            raise UnsupportedSolution(index, ["size bounds exclude complete reduction blocks"])
+        result.append(chosen)
+    return result[0], result[1], result[3]
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,13 +228,15 @@ class LibraryMetadata:
     ) -> GemmProblem:
         """Choose one of the matrix multiplications this solution may support.
 
-        This choice uses one full output tile; a solution can accept other sizes.
+        This choice starts with one full output tile and honors serialized size
+        bounds and divisibility constraints; a solution can accept other sizes.
         M and N are the dimensions of the output tile computed by one workgroup.
         K is ``reduction_blocks * DepthU * fixed_split``: each split workgroup
         processes ``reduction_blocks`` full blocks of DepthU reduction elements.
         Persistent scheduling (Stream-K or DataParallel) uses no fixed split
         multiplier; the runtime distributes those blocks among workgroups.
-        Blocks include prefetch and final stages; loop backedges can differ.
+        Bounds can change M/N or the number of complete reduction blocks. Blocks
+        include prefetch and final stages; loop backedges can differ.
 
         Raise UnsupportedSolution for explicitly unimplemented features. Invalid
         indices, missing fields and malformed metadata remain ordinary errors.
@@ -223,6 +328,15 @@ class LibraryMetadata:
         a_op, b_op = "C" if conjugate_a else "", "C" if conjugate_b else ""
         if operation != f"Contraction_l_A{a_indices}{a_op}_B{b_indices}{b_op}_Cijk_Dijk":
             raise UnsupportedSolution(solution_index, [f"contraction {operation}"])
+        reduction_multiple = lcm(
+            depth * (split if strategy == "None" else 1), *(b for b in mx_blocks if b)
+        )
+        m, n, k = _choose_sizes(
+            solution_index,
+            (m, n, 1, reduction_blocks * depth * (split if strategy == "None" else 1)),
+            reduction_multiple,
+            record.get("sizePredicates", ()),
+        )
         return GemmProblem(
             solution_index,
             record["name"],
@@ -231,7 +345,7 @@ class LibraryMetadata:
             self.target,
             m,
             n,
-            reduction_blocks * depth * (split if strategy == "None" else 1),
+            k,
             types["a"],
             types["b"],
             types["c"],
@@ -292,12 +406,15 @@ def load_library_metadata(
             seen.add(index)
             if record is not None:
                 # Native predicates and custom-kernel data can dominate catalog
-                # memory. Problem construction uses only these four fields.
+                # memory. Retain construction fields and dimension constraints.
                 records[index] = {
                     key: record[key]
                     for key in ("name", "kernelName", "problemType", "sizeMapping")
                     if key in record
                 }
+                records[index]["sizePredicates"] = _size_predicates(
+                    record.get("problemPredicate", {"type": "TruePred"})
+                )
     if wanted is not None and wanted - seen:
         raise KeyError(f"Solution indices not found: {sorted(wanted - seen)}")
     return LibraryMetadata(directory, target, tuple(sorted(records)), MappingProxyType(records))
