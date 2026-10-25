@@ -714,7 +714,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
         "tests/library/tests/test_sdpa_free_stride_layouts.py"
-        "tests/library/tests/test_bwd_memo_bound.py")
+        "tests/library/tests/test_bwd_memo_bound.py"
+        "tests/library/tests/test_attention_bwd_dq_refusal_rows.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

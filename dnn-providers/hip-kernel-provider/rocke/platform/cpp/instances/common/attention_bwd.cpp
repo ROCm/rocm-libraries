@@ -46,14 +46,14 @@ typedef std::vector<std::string> Strs;
 typedef std::vector<int> Ints;
 
 static const Strs BWD_ARCHS = {"gfx942", "gfx950", "gfx1151", "gfx1201"};
-static const Strs BWD_DTYPES = {"fp16", "bf16"};
-static const Ints BWD_HEAD_SIZES = {32, 64, 128};
-static const Strs SEQ_MODES = {"batched", "thd"};
+const Strs BWD_DTYPES = {"fp16", "bf16"};
+const Ints BWD_HEAD_SIZES = {32, 64, 128};
+const Strs SEQ_MODES = {"batched", "thd"};
 static const Strs DKV_MODES = {"direct", "atomic"};
-static const Ints STAGE_VECS = {8, 1};
-static const Strs MASK_CLASSES = {"band", "none"};
+const Ints STAGE_VECS = {8, 1};
+const Strs MASK_CLASSES = {"band", "none"};
 static const Strs DQ_MODES = {"atomic", "split"};
-static const Strs WS_LAYOUTS = {"head_major", "token_major"};
+const Strs WS_LAYOUTS = {"head_major", "token_major"};
 static const Strs STATIC_SCALES = {"fold_ds", "dq_before_atomic", "convert", "runtime"};
 static const Ints BLOCK_M_VALUES = {16, 32, 64};
 static const Ints BLOCK_N_VALUES = {16, 32, 64, 128, 192, 256};
@@ -80,7 +80,7 @@ static const Strs BARRIER_MERGES = {"off", "on"};
 static const Strs RING_ISSUES = {"early", "late"};
 static const Strs BARRIER_MERGE_ARCHS = {"gfx942", "gfx950"};
 static const Strs BARRIER_MERGE_STAGE_ORDERS = {"g1g3g4", "g3g1g4"};
-static const Strs SPLIT_DQ_ARCHS = {"gfx942", "gfx950"};
+const Strs SPLIT_DQ_ARCHS = {"gfx942", "gfx950"};
 static const Strs DQ_ISSUES = {"block", "fragment", "fragment_regs"};
 static const Strs DKV_EPILOGUES = {"lds_staged", "lds_staged_pair", "direct"};
 static const Strs LDS_ORDERS = {"resident_low", "phase_low"};
@@ -470,7 +470,7 @@ static bool latin1_isalnum(unsigned c)
 /* `name and name.replace("_", "").isalnum()`. A code point beyond U+00FF
  * needs the Unicode tables: refused (NotImplError) unless another character
  * already decides False. */
-static bool name_ok(const char* name)
+bool name_ok(const char* name)
 {
     if(name == NULL || !*name)
         return false;
@@ -1143,7 +1143,7 @@ rocke_attn_bwd_spec_t resolved(const rocke_attn_bwd_spec_t& self, const std::str
  * ====================================================================== */
 
 /* SHA-1 (FIPS 180-4) of a byte string, lower-case hex. */
-static std::string sha1_hex(const std::string& msg)
+std::string sha1_hex(const std::string& msg)
 {
     uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
     std::string m = msg;
