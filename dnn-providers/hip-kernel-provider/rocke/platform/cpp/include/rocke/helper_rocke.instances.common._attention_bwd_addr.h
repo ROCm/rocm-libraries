@@ -47,16 +47,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "rocke/helper_rocke.helpers.attention_band.h" /* ROCKE_ATTN_I32_FAR */
 #include "rocke/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-/* helpers/attention_band.py I32_FAR (1 << 30): the rows_left clamp. Defined
- * here until the band helper has its C twin. */
-#ifndef ROCKE_ATTN_BWD_I32_FAR
-#define ROCKE_ATTN_BWD_I32_FAR (1 << 30)
 #endif
 
 /* ------------------------------------------------------------ IntOrValue */
