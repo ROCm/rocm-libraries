@@ -256,10 +256,21 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* q_col_c = rocke_b_const_i32(b, k * 16);
         rocke_value_t* q_col_m = rocke_b_mul(b, ctx->lane_rg, rocke_b_const_i32(b, 4));
         rocke_value_t* q_col_off = rocke_b_add(b, q_col_c, q_col_m);
-        rocke_value_t* idx[2];
-        idx[0] = ctx->lane_col;
-        idx[1] = q_col_off;
-        Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        if(cfg->Q_IN_V_SLOT)
+        {
+            rocke_value_t* idx3[3];
+            idx3[0] = rocke_b_const_i32(b, 0);
+            idx3[1] = ctx->lane_col;
+            idx3[2] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->V_lds, idx3, 3, dtype, 4);
+        }
+        else
+        {
+            rocke_value_t* idx[2];
+            idx[0] = ctx->lane_col;
+            idx[1] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        }
     }
 
     rocke_for_t kvloop = rocke_b_scf_for_iter(b,

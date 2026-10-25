@@ -562,7 +562,16 @@ def build_unified_attention_3d_tiled(
         b.ret()
 
     # ---------------- LDS layout ----------------
-    Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
+    # D192: Q is staged through the V slot instead of its own buffer. Q is read
+    # into registers before the KV loop, and V(0) is issued only after the
+    # loop-top wait + barrier, so the slot is free again by then. Dropping the
+    # 6 KB Q buffer takes the CTA from 24 KB to 18 KB of LDS (2 -> 3 CTAs/CU).
+    Q_IN_V_SLOT = HD == 192 and T >= BLOCK_M
+    Q_lds = (
+        None
+        if Q_IN_V_SLOT
+        else b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
+    )
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
     # One V slot: V(i) is loaded after QK(i) and consumed by PV(i) in the same
     # iteration, and the next iteration's leading wait-all retires PV(i) before
@@ -610,12 +619,11 @@ def build_unified_attention_3d_tiled(
             dim=b.const_i32(0),
         )
         v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
-        b.smem_store_vN(
-            Q_lds,
-            [Q_row, Q_col],
-            b.vector_select(b.vector_splat(qmask_t, 8), v8, z8),
-            8,
-        )
+        q8 = b.vector_select(b.vector_splat(qmask_t, 8), v8, z8)
+        if Q_IN_V_SLOT:
+            b.smem_store_vN(V_lds, [b.const_i32(0), Q_row, Q_col], q8, 8)
+        else:
+            b.smem_store_vN(Q_lds, [Q_row, Q_col], q8, 8)
     b.sync()
 
     # ---------------- Per-segment tile range ----------------
@@ -1085,7 +1093,16 @@ def build_unified_attention_3d_tiled(
     Q_kits = []
     for k in range(QK_K_ITERS):
         q_col_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
-        Q_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=4))
+        if Q_IN_V_SLOT:
+            Q_kits.append(
+                b.smem_load_vN(
+                    V_lds, b.const_i32(0), lane_col, q_col_off, dtype=dtype, n=4
+                )
+            )
+        else:
+            Q_kits.append(
+                b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=4)
+            )
 
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
