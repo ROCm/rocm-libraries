@@ -45,13 +45,19 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-/// The arch the host half matches the gfx12-generic objects for: a member this build packed
-/// them for (a build packs only its GPU_TARGETS), or gfx1201 when it packed none, so the cases
-/// skip as before.
+/// The arch the host half matches the gfx12-generic objects for: a member whose shard this
+/// install staged (a build stages only its GPU_TARGETS' shards), or gfx1201 when it staged
+/// none, so the cases skip as before.
 std::string aiwArch()
 {
-    const auto arches = flydslShippedArches("sdpa_aiw");
-    return arches.empty() ? std::string("gfx1201") : arches.front();
+    for(const auto& arch : flydslShippedArches("sdpa_aiw"))
+    {
+        if(flydslShardStagedFor(arch))
+        {
+            return arch;
+        }
+    }
+    return "gfx1201";
 }
 
 int64_t intField(const KernelDefinition& kernel, const char* field)
@@ -158,7 +164,7 @@ void requireLoadedAiwObjects(std::vector<KernelDefinition>& kernels)
     {
         return;
     }
-    if(!flydslShippedArches("sdpa_aiw").empty())
+    if(flydslShipsAnywhere("sdpa_aiw"))
     {
         ADD_FAILURE() << "this build ships sdpa_aiw but loaded no " << aiwArch()
                       << " objects for it";

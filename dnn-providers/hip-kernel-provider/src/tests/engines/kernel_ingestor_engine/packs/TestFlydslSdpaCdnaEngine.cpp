@@ -2417,7 +2417,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsADumpOnlyBesideTheWriter)
             << kernel.name;
         ++matched;
     }
-    if(!flydslShippedArches("sdpa_cdna").empty())
+    if(flydslShipsAnywhere("sdpa_cdna"))
     {
         EXPECT_GT(writers, 0U);
         EXPECT_GT(matched, 0U) << "no staged dropout object serves the dropping graph";

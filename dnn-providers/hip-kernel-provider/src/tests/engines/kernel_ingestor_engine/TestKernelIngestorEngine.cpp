@@ -640,6 +640,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

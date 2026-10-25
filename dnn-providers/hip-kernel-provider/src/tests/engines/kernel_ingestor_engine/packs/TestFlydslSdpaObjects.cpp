@@ -579,7 +579,7 @@ TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
         const auto* staged = findLoadedSet(std::string("hipkernel:flydsl_") + op);
         if(staged == nullptr)
         {
-            EXPECT_TRUE(flydslShippedArches(op).empty())
+            EXPECT_FALSE(flydslShipsAnywhere(op))
                 << "this build ships " << op << " but loaded no objects for it";
             continue;
         }

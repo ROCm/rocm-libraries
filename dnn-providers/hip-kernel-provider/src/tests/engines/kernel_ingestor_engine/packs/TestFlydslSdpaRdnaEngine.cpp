@@ -5251,7 +5251,7 @@ TEST(TestFlydslSdpaRngDumpKernelMatch, NeedsTheWriterInTheObjectsShard)
             ++checked;
         }
     }
-    if(!flydslShippedArches("sdpa_rdna").empty() || !flydslShippedArches("sdpa_aiw").empty())
+    if(flydslShipsAnywhere("sdpa_rdna") || flydslShipsAnywhere("sdpa_aiw"))
     {
         EXPECT_GT(checked, 0U) << "no staged dropout object serves the bf16 d64 dropping graph";
     }
@@ -5286,7 +5286,7 @@ TEST(TestFlydslSdpaRngDumpKernel, EveryDroppingShardShipsTheWriter)
             }
         }
     }
-    if(!flydslShippedArches("sdpa_rdna").empty() || !flydslShippedArches("sdpa_aiw").empty())
+    if(flydslShipsAnywhere("sdpa_rdna") || flydslShipsAnywhere("sdpa_aiw"))
     {
         EXPECT_GT(checked, 0U);
     }
@@ -5302,7 +5302,7 @@ TEST(TestFlydslSdpaDropoutMaskEngine, ServesNoGraph)
     const auto* staged = findLoadedSet(FLYDSL_SDPA_DROPOUT_MASK.engineName);
     if(staged == nullptr)
     {
-        EXPECT_TRUE(flydslShippedArches("sdpa_dropout_mask").empty());
+        EXPECT_FALSE(flydslShipsAnywhere("sdpa_dropout_mask"));
         return;
     }
     for(const auto& pack : staged->packs)
