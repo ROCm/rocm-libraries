@@ -829,17 +829,17 @@ static Lines dump_dma(int rows, int cols, int eb)
         lines.push_back("dma: " + exc(e));
         return lines;
     }
-    int size = rocke_attn_bwd_dma_slab_layout_size(&l);
-    lines.push_back("dma: row_bytes=" + I(rocke_attn_bwd_dma_slab_layout_row_bytes(&l))
+    int size = (int)rocke_attn_bwd_dma_slab_layout_size(&l); /* tiles here are small */
+    lines.push_back("dma: row_bytes=" + I((int)rocke_attn_bwd_dma_slab_layout_row_bytes(&l))
                     + " fold=" + I(rocke_attn_bwd_dma_slab_layout_fold(&l))
                     + " slabs=" + I(rocke_attn_bwd_dma_slab_layout_slabs(&l)) + " size=" + I(size));
     std::vector<int> offs;
     for(int r = 0; r < rows; ++r)
         for(int c = 0; c < cols; c += 8)
-            offs.push_back(rocke_attn_bwd_dma_slab_layout_offset(&l, r, c, &e));
+            offs.push_back((int)rocke_attn_bwd_dma_slab_layout_offset(&l, r, c, &e));
     lines.push_back("dma offsets: " + join_ints(offs));
     attempt(lines, "dma offset out", [&](Err* er) {
-        return I(rocke_attn_bwd_dma_slab_layout_offset(&l, rows, 0, er));
+        return I((int)rocke_attn_bwd_dma_slab_layout_offset(&l, rows, 0, er));
     });
     std::string src = "dma sources:";
     for(int s = 0; s < size / 16; ++s)

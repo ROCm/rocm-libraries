@@ -38,12 +38,9 @@
  * explicit `has_tr_read_b64` argument (the caller asks the caps port) and
  * does not ask the caps port itself.
  *
- * emit_c_to_a rounds through _attention_bwd_valu.cast_c_frag. Until the valu
- * port lands, the .cpp carries a private twin of cast_c_frag and
- * rne_noguard_bf16; replace it with the valu helper when both are merged.
- *
- * slab_offset uses _attention_bwd_lds.DmaSlabLayout.offset; the .cpp carries a
- * private host-only twin of that offset until the lds layout port lands.
+ * emit_c_to_a rounds through _attention_bwd_valu.cast_c_frag
+ * (rocke_attn_bwd_cast_c_frag), and slab_offset uses
+ * _attention_bwd_lds.DmaSlabLayout.offset (rocke_attn_bwd_dma_slab_layout_*).
  *
  * Byte-identity rules: ops are created in the Python evaluation order (left
  * to right, inner call first), every intermediate bound to a local first. An
@@ -70,6 +67,8 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/helper_rocke.instances.common._attention_bwd_addr.h" /* rocke_attn_bwd_iv_t */
+#include "rocke/helper_rocke.instances.common._attention_bwd_lds.h" /* DmaSlabLayout */
+#include "rocke/helper_rocke.instances.common._attention_bwd_valu.h" /* cast_c_frag */
 #include "rocke/ir.h"
 
 #ifdef __cplusplus
