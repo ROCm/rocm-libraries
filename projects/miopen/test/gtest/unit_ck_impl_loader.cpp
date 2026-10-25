@@ -28,8 +28,6 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <miopen/conv/data_invoke_params.hpp>
-#include "get_handle.hpp"
-#include <algorithm>
 #include <cmath>
 #endif
 
