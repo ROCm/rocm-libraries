@@ -47,14 +47,6 @@ inline std::vector<std::string> buildSdpaDefines(SdpaSoftmaxProbabilityMode prob
     return defines;
 }
 
-// Puts a type in a non-deduced context so a template parameter is never deduced from
-// the argument (a literal nullptr mask still compiles, a wrong-dtype mask does not).
-template <typename T>
-struct NonDeduced
-{
-    using type = T;
-};
-
 } // namespace detail
 
 /// The fp8 format softmax probabilities are stored in before P @ V (cuDNN sdpa_fp8 quantizes P
@@ -330,7 +322,8 @@ public:
     // The mask dtype is MaskDataType, independent of ComputeDataType (float, half or
     // bfloat16; the kernel converts to float on read). It is passed to the kernel as
     // -DMASK_TYPE after the buildSdpaDefines set (Q/K/V/O/COMPUTE_TYPE/probability mode).
-    // The mask parameter is non-deduced: name MaskDataType when passing a non-float mask.
+    // MaskDataType comes from the options type: build GpuSdpaFwdOptions<MaskDataType> for a
+    // non-float mask.
     template <class QDataType,
               class KDataType = QDataType,
               class VDataType = QDataType,

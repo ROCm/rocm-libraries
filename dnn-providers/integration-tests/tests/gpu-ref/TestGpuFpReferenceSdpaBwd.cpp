@@ -749,30 +749,45 @@ INSTANTIATE_TEST_SUITE_P(
         return std::string(info.param.name);
     });
 
-// Logit softcap (reference-only extension, SEM-020): GPU forward and backward vs CPU, with GQA,
-// bias + dBias, bottom-right causal and padding.
-TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
+// Score modifiers: logit softcap (reference-only extension, SEM-020) and cuDNN ALiBi (SEM-021).
+// GPU forward and backward vs CPU over 2 K/V heads, with bias + dBias, a causal band and padding.
+// The ALiBi case uses 6 query heads, so its slopes are not all powers of two.
+struct ScoreModCase
+{
+    const char* name;
+    int64_t heads;
+    bool topLeft;
+    std::optional<float> softcap;
+    bool alibi;
+    unsigned seed;
+};
+
+class TestGpuSdpaScoreModFp32 : public ::testing::TestWithParam<ScoreModCase>
+{
+};
+
+TEST_P(TestGpuSdpaScoreModFp32, ForwardAndBackwardMatchCpuReference)
 {
     SKIP_IF_NO_DEVICES();
-    const std::vector<int64_t> qDims = {2, 4, 6, 8};
+    const auto& c = GetParam();
+    const std::vector<int64_t> qDims = {2, c.heads, 6, 8};
     const std::vector<int64_t> kDims = {2, 2, 9, 8};
     constexpr float SCALE = 1.2f;
-    constexpr float SOFTCAP = 1.5f;
     Tensor<float> q(qDims);
     Tensor<float> k(kDims);
     Tensor<float> v(kDims);
     Tensor<float> oCpu(qDims);
     Tensor<float> oGpu(qDims);
     Tensor<float> dO(qDims);
-    Tensor<float> lse({2, 4, 6, 1});
+    Tensor<float> lse({2, c.heads, 6, 1});
     Tensor<float> bias({6, 9});
     Tensor<int32_t> seqLenQ({2, 1, 1, 1});
     Tensor<int32_t> seqLenKv({2, 1, 1, 1});
-    q.fillWithRandomValues(-1.5f, 1.5f, 221);
-    k.fillWithRandomValues(-1.5f, 1.5f, 222);
-    v.fillWithRandomValues(-1.0f, 1.0f, 223);
-    dO.fillWithRandomValues(-1.0f, 1.0f, 224);
-    bias.fillWithRandomValues(-1.0f, 1.0f, 225);
+    q.fillWithRandomValues(-1.5f, 1.5f, c.seed);
+    k.fillWithRandomValues(-1.5f, 1.5f, c.seed + 1);
+    v.fillWithRandomValues(-1.0f, 1.0f, c.seed + 2);
+    dO.fillWithRandomValues(-1.0f, 1.0f, c.seed + 3);
+    bias.fillWithRandomValues(-1.0f, 1.0f, c.seed + 4);
     seqLenQ.setHostValue(6, 0, 0, 0, 0);
     seqLenQ.setHostValue(4, 1, 0, 0, 0);
     seqLenKv.setHostValue(9, 0, 0, 0, 0);
@@ -792,9 +807,10 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                                 SdpaFwdOptions<float>{}
                                     .setScale(SCALE)
                                     .setMask(static_cast<const TensorBase<float>*>(&bias))
-                                    .setBand(-1, 0, false)
+                                    .setBand(-1, 0, c.topLeft)
                                     .setSeqLens(&seqLenQ, &seqLenKv)
-                                    .setSoftcap(SOFTCAP)
+                                    .setSoftcap(c.softcap)
+                                    .setAlibi(c.alibi)
                                     .setLse(&lse));
     GpuFpReferenceSdpa::fprop(q,
                               k,
@@ -803,9 +819,10 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                               GpuSdpaFwdOptions<float>{}
                                   .setScale(SCALE)
                                   .setMask(static_cast<TensorBase<float>*>(&bias))
-                                  .setBand(-1, 0, false)
+                                  .setBand(-1, 0, c.topLeft)
                                   .setSeqLens(&seqLenQ, &seqLenKv)
-                                  .setSoftcap(SOFTCAP));
+                                  .setSoftcap(c.softcap)
+                                  .setAlibi(c.alibi));
     assertAllClose(oCpu, oGpu, TOL_FP32);
 
     Tensor<float> dQCpu(qDims);
@@ -835,9 +852,10 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                                      .setLse(&lse)
                                      .setMask(static_cast<const TensorBase<float>*>(&bias))
                                      .setDBias(&dBiasCpu)
-                                     .setBand(-1, 0, false)
+                                     .setBand(-1, 0, c.topLeft)
                                      .setSeqLens(&seqLenQ, &seqLenKv)
-                                     .setSoftcap(SOFTCAP));
+                                     .setSoftcap(c.softcap)
+                                     .setAlibi(c.alibi));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -851,121 +869,21 @@ TEST(TestGpuSdpaSoftcapFp32, ForwardAndBackwardMatchCpuReference)
                                   .setLse(&lse)
                                   .setMask(static_cast<TensorBase<float>*>(&bias))
                                   .setDBias(&dBiasGpu)
-                                  .setBand(-1, 0, false)
+                                  .setBand(-1, 0, c.topLeft)
                                   .setSeqLens(&seqLenQ, &seqLenKv)
-                                  .setSoftcap(SOFTCAP));
+                                  .setSoftcap(c.softcap)
+                                  .setAlibi(c.alibi));
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
     assertAllClose(dVCpu, dVGpu, TOL_FP32);
     assertAllClose(dBiasCpu, dBiasGpu, TOL_FP32);
 }
 
-// cuDNN ALiBi (SEM-021): GPU forward and backward vs CPU, with 6 query heads (non-power-of-two
-// slopes) over 2 K/V heads, bias + dBias, top-left causal and padding.
-TEST(TestGpuSdpaAlibiFp32, ForwardAndBackwardMatchCpuReference)
-{
-    SKIP_IF_NO_DEVICES();
-    const std::vector<int64_t> qDims = {2, 6, 6, 8};
-    const std::vector<int64_t> kDims = {2, 2, 9, 8};
-    constexpr float SCALE = 1.2f;
-    Tensor<float> q(qDims);
-    Tensor<float> k(kDims);
-    Tensor<float> v(kDims);
-    Tensor<float> oCpu(qDims);
-    Tensor<float> oGpu(qDims);
-    Tensor<float> dO(qDims);
-    Tensor<float> lse({2, 6, 6, 1});
-    Tensor<float> bias({6, 9});
-    Tensor<int32_t> seqLenQ({2, 1, 1, 1});
-    Tensor<int32_t> seqLenKv({2, 1, 1, 1});
-    q.fillWithRandomValues(-1.5f, 1.5f, 231);
-    k.fillWithRandomValues(-1.5f, 1.5f, 222);
-    v.fillWithRandomValues(-1.0f, 1.0f, 223);
-    dO.fillWithRandomValues(-1.0f, 1.0f, 224);
-    bias.fillWithRandomValues(-1.0f, 1.0f, 225);
-    seqLenQ.setHostValue(6, 0, 0, 0, 0);
-    seqLenQ.setHostValue(4, 1, 0, 0, 0);
-    seqLenKv.setHostValue(9, 0, 0, 0, 0);
-    seqLenKv.setHostValue(7, 1, 0, 0, 0);
-    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
-    for(auto* t : {&q, &k, &v, &dO, &bias})
-    {
-        t->memory().hostData();
-    }
-    seqLenQ.memory().hostData();
-    seqLenKv.memory().hostData();
-
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                oCpu,
-                                SdpaFwdOptions<float>{}
-                                    .setScale(SCALE)
-                                    .setMask(static_cast<const TensorBase<float>*>(&bias))
-                                    .setBand(-1, 0, true)
-                                    .setSeqLens(&seqLenQ, &seqLenKv)
-                                    .setAlibi(true)
-                                    .setLse(&lse));
-    GpuFpReferenceSdpa::fprop(q,
-                              k,
-                              v,
-                              oGpu,
-                              GpuSdpaFwdOptions<float>{}
-                                  .setScale(SCALE)
-                                  .setMask(static_cast<TensorBase<float>*>(&bias))
-                                  .setBand(-1, 0, true)
-                                  .setSeqLens(&seqLenQ, &seqLenKv)
-                                  .setAlibi(true));
-    assertAllClose(oCpu, oGpu, TOL_FP32);
-
-    Tensor<float> dQCpu(qDims);
-    Tensor<float> dKCpu(kDims);
-    Tensor<float> dVCpu(kDims);
-    Tensor<float> dBiasCpu({6, 9});
-    Tensor<float> dQGpu(qDims);
-    Tensor<float> dKGpu(kDims);
-    Tensor<float> dVGpu(kDims);
-    Tensor<float> dBiasGpu({6, 9});
-    for(auto* t : {&dQGpu, &dKGpu, &dVGpu, &dBiasGpu})
-    {
-        t->fillWithValue(std::numeric_limits<float>::quiet_NaN());
-    }
-    oCpu.memory().hostData();
-    lse.memory().hostData();
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 oCpu,
-                                 dO,
-                                 dQCpu,
-                                 dKCpu,
-                                 dVCpu,
-                                 SdpaBwdOptions<float>{}
-                                     .setScale(SCALE)
-                                     .setLse(&lse)
-                                     .setMask(static_cast<const TensorBase<float>*>(&bias))
-                                     .setDBias(&dBiasCpu)
-                                     .setBand(-1, 0, true)
-                                     .setSeqLens(&seqLenQ, &seqLenKv)
-                                     .setAlibi(true));
-    GpuFpReferenceSdpa::bprop(q,
-                              k,
-                              v,
-                              oCpu,
-                              dO,
-                              dQGpu,
-                              dKGpu,
-                              dVGpu,
-                              GpuSdpaBwdOptions<float>{}
-                                  .setScale(SCALE)
-                                  .setLse(&lse)
-                                  .setMask(static_cast<TensorBase<float>*>(&bias))
-                                  .setDBias(&dBiasGpu)
-                                  .setBand(-1, 0, true)
-                                  .setSeqLens(&seqLenQ, &seqLenKv)
-                                  .setAlibi(true));
-    assertAllClose(dQCpu, dQGpu, TOL_FP32);
-    assertAllClose(dKCpu, dKGpu, TOL_FP32);
-    assertAllClose(dVCpu, dVGpu, TOL_FP32);
-    assertAllClose(dBiasCpu, dBiasGpu, TOL_FP32);
-}
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestGpuSdpaScoreModFp32,
+    ::testing::Values(ScoreModCase{"SoftcapGqaBottomRight", 4, false, 1.5f, false, 221},
+                      ScoreModCase{"AlibiGqaTopLeft", 6, true, std::nullopt, true, 231}),
+    [](const ::testing::TestParamInfo<ScoreModCase>& info) {
+        return std::string(info.param.name);
+    });

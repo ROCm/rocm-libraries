@@ -292,8 +292,8 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:** the CPU forward/backward references and the GPU forward/backward references take an optional
   `softcap` argument (finite, > 0) with that order: scale, softcap, bias, masks. Backward: dBias takes the
   post-softcap gradient, dQ and dK also take `1 - tanh^2(s / c)`. Pinned by
-  `TestCpuFpReferenceSdpaGradCheck.Softcap`, `SoftcapClosedFormAndLargeCapLimit` and
-  `TestGpuSdpaSoftcapFp32` (mutations: missing derivative, missing forward cap).
+  `TestCpuFpReferenceSdpaScoreModGradCheck`, `SoftcapClosedFormAndLargeCapLimit` and
+  `TestGpuSdpaScoreModFp32` (mutations: missing derivative, missing forward cap).
 - **Plan:** a first-class attribute will be added; the schema, frontend, backend and engine plumbing is not yet
   done, so nothing in a graph reaches it. Engines that decline from hand-written attribute lists must add it
   to those lists when it lands.

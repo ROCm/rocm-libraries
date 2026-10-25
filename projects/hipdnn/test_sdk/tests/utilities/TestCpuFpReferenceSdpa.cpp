@@ -10,6 +10,8 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/GradientCheckUtilities.hpp>
+#include <optional>
+#include <string>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
@@ -2042,73 +2044,6 @@ TEST(TestCpuFpReferenceSdpaFp64, ExplicitMaskDropoutForwardClosedForm)
     EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(3.0), 1e-6);
 }
 
-// Logit softcap (reference-only extension, SEM-020): scores become c * tanh(s / c) after the
-// scale and before bias and masks. The backward is the exact gradient, including dBias.
-TEST(TestCpuFpReferenceSdpaGradCheck, Softcap)
-{
-    constexpr int64_t BATCH = 2;
-    constexpr int64_t HEADS_Q = 4;
-    constexpr int64_t HEADS_KV = 2;
-    constexpr int64_t SEQ_Q = 3;
-    constexpr int64_t SEQ_KV = 5;
-    constexpr int64_t HEAD_DIM = 4;
-    constexpr float SCALE = 1.5f;
-    constexpr float SOFTCAP = 0.8f; // small cap so tanh is well into its nonlinear range
-
-    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-    Tensor<float> bias({SEQ_Q, SEQ_KV});
-    q.fillWithRandomValues(-0.8f, 0.8f, 9600);
-    k.fillWithRandomValues(-0.8f, 0.8f, 9601);
-    v.fillWithRandomValues(-0.5f, 0.5f, 9602);
-    dO.fillWithRandomValues(-0.5f, 0.5f, 9603);
-    bias.fillWithRandomValues(-0.5f, 0.5f, 9604);
-
-    const auto fwd = [&]() {
-        CpuFpReferenceSdpa::forward(q,
-                                    k,
-                                    v,
-                                    o,
-                                    SdpaFwdOptions<float>{}
-                                        .setScale(SCALE)
-                                        .setMask(&bias)
-                                        .setBand(-1, 0, false)
-                                        .setSoftcap(SOFTCAP));
-    };
-    fwd();
-
-    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
-    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
-    Tensor<float> dBias({SEQ_Q, SEQ_KV});
-    CpuFpReferenceSdpa::backward(q,
-                                 k,
-                                 v,
-                                 o,
-                                 dO,
-                                 dQ,
-                                 dK,
-                                 dV,
-                                 SdpaBwdOptions<float>{}
-                                     .setScale(SCALE)
-                                     .setMask(&bias)
-                                     .setDBias(&dBias)
-                                     .setBand(-1, 0, false)
-                                     .setSoftcap(SOFTCAP));
-
-    auto fwdLoss = [&]() -> double {
-        fwd();
-        return computeDotProductLoss(dO, o);
-    };
-    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (softcap)");
-    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (softcap)");
-    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dV (softcap)");
-    checkGradient(bias, dBias, {SEQ_Q, SEQ_KV}, fwdLoss, "dBias (softcap)");
-}
-
 // Softcap closed form: one query, two keys with scores 3 and 0 (q = [3, 0], k0 = [1, 0],
 // k1 = [0, 0]); with c = 1 the capped scores are tanh(3) and 0, and LSE = ln(e^tanh(3) + 1).
 // A very large cap is (to fp32 precision) no cap.
@@ -2187,27 +2122,46 @@ TEST(TestCpuFpReferenceSdpaFp64, AlibiClosedForm)
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-6);
 }
 
-// ALiBi has no parameters: the backward is the ordinary one through the shifted probabilities.
-TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
+// Score modifiers, checked against finite differences with GQA, a bias + dBias and a causal band.
+// Logit softcap (reference-only extension, SEM-020): scores become c * tanh(s / c) after the scale
+// and before bias and masks, and the backward is the exact gradient, including dBias; the small
+// cap puts tanh well into its nonlinear range. ALiBi has no parameters: the backward is the
+// ordinary one through the shifted probabilities.
+struct ScoreModGradCase
 {
+    const char* name;
+    int64_t seqQ;
+    int64_t seqKv;
+    float scale;
+    std::optional<float> softcap;
+    bool alibi;
+    bool topLeft;
+    unsigned int seed;
+};
+
+class TestCpuFpReferenceSdpaScoreModGradCheck : public ::testing::TestWithParam<ScoreModGradCase>
+{
+};
+
+TEST_P(TestCpuFpReferenceSdpaScoreModGradCheck, MatchesFiniteDifferences)
+{
+    const auto& c = GetParam();
     constexpr int64_t BATCH = 2;
     constexpr int64_t HEADS_Q = 4;
     constexpr int64_t HEADS_KV = 2;
-    constexpr int64_t SEQ = 5;
     constexpr int64_t HEAD_DIM = 4;
-    constexpr float SCALE = 1.2f;
 
-    Tensor<float> q({BATCH, HEADS_Q, SEQ, HEAD_DIM});
-    Tensor<float> k({BATCH, HEADS_KV, SEQ, HEAD_DIM});
-    Tensor<float> v({BATCH, HEADS_KV, SEQ, HEAD_DIM});
-    Tensor<float> o({BATCH, HEADS_Q, SEQ, HEAD_DIM});
-    Tensor<float> dO({BATCH, HEADS_Q, SEQ, HEAD_DIM});
-    Tensor<float> bias({SEQ, SEQ});
-    q.fillWithRandomValues(-0.8f, 0.8f, 9700);
-    k.fillWithRandomValues(-0.8f, 0.8f, 9701);
-    v.fillWithRandomValues(-0.5f, 0.5f, 9702);
-    dO.fillWithRandomValues(-0.5f, 0.5f, 9703);
-    bias.fillWithRandomValues(-0.5f, 0.5f, 9704);
+    Tensor<float> q({BATCH, HEADS_Q, c.seqQ, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, c.seqKv, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, c.seqKv, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, c.seqQ, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, c.seqQ, HEAD_DIM});
+    Tensor<float> bias({c.seqQ, c.seqKv});
+    q.fillWithRandomValues(-0.8f, 0.8f, c.seed);
+    k.fillWithRandomValues(-0.8f, 0.8f, c.seed + 1);
+    v.fillWithRandomValues(-0.5f, 0.5f, c.seed + 2);
+    dO.fillWithRandomValues(-0.5f, 0.5f, c.seed + 3);
+    bias.fillWithRandomValues(-0.5f, 0.5f, c.seed + 4);
 
     const auto fwd = [&]() {
         CpuFpReferenceSdpa::forward(q,
@@ -2215,17 +2169,18 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
                                     v,
                                     o,
                                     SdpaFwdOptions<float>{}
-                                        .setScale(SCALE)
+                                        .setScale(c.scale)
                                         .setMask(&bias)
-                                        .setBand(-1, 0, true)
-                                        .setAlibi(true));
+                                        .setBand(-1, 0, c.topLeft)
+                                        .setSoftcap(c.softcap)
+                                        .setAlibi(c.alibi));
     };
     fwd();
 
-    Tensor<float> dQ({BATCH, HEADS_Q, SEQ, HEAD_DIM});
-    Tensor<float> dK({BATCH, HEADS_KV, SEQ, HEAD_DIM});
-    Tensor<float> dV({BATCH, HEADS_KV, SEQ, HEAD_DIM});
-    Tensor<float> dBias({SEQ, SEQ});
+    Tensor<float> dQ({BATCH, HEADS_Q, c.seqQ, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, c.seqKv, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, c.seqKv, HEAD_DIM});
+    Tensor<float> dBias({c.seqQ, c.seqKv});
     CpuFpReferenceSdpa::backward(q,
                                  k,
                                  v,
@@ -2235,21 +2190,31 @@ TEST(TestCpuFpReferenceSdpaGradCheck, Alibi)
                                  dK,
                                  dV,
                                  SdpaBwdOptions<float>{}
-                                     .setScale(SCALE)
+                                     .setScale(c.scale)
                                      .setMask(&bias)
                                      .setDBias(&dBias)
-                                     .setBand(-1, 0, true)
-                                     .setAlibi(true));
+                                     .setBand(-1, 0, c.topLeft)
+                                     .setSoftcap(c.softcap)
+                                     .setAlibi(c.alibi));
 
     auto fwdLoss = [&]() -> double {
         fwd();
         return computeDotProductLoss(dO, o);
     };
-    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ, HEAD_DIM}, fwdLoss, "dQ (alibi)");
-    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ, HEAD_DIM}, fwdLoss, "dK (alibi)");
-    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ, HEAD_DIM}, fwdLoss, "dV (alibi)");
-    checkGradient(bias, dBias, {SEQ, SEQ}, fwdLoss, "dBias (alibi)");
+    checkGradient(q, dQ, {BATCH, HEADS_Q, c.seqQ, HEAD_DIM}, fwdLoss, "dQ");
+    checkGradient(k, dK, {BATCH, HEADS_KV, c.seqKv, HEAD_DIM}, fwdLoss, "dK");
+    checkGradient(v, dV, {BATCH, HEADS_KV, c.seqKv, HEAD_DIM}, fwdLoss, "dV");
+    checkGradient(bias, dBias, {c.seqQ, c.seqKv}, fwdLoss, "dBias");
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestCpuFpReferenceSdpaScoreModGradCheck,
+    ::testing::Values(ScoreModGradCase{"SoftcapBottomRight", 3, 5, 1.5f, 0.8f, false, false, 9600},
+                      ScoreModGradCase{"AlibiTopLeft", 5, 5, 1.2f, std::nullopt, true, true, 9700}),
+    [](const ::testing::TestParamInfo<ScoreModGradCase>& info) {
+        return std::string(info.param.name);
+    });
 
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
 {

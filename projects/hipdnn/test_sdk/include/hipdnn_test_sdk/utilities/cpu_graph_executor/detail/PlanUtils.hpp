@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
@@ -572,3 +573,281 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
             return false;                                                          \
         }                                                                          \
     } while(0)
+
+/// Element count of a serialized tensor: the product of its dims, one for absent or empty dims (a
+/// scalar), as elementCount gives for the unpacked tensor.
+inline int64_t
+    sdpaOperandElementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    int64_t count = 1;
+    if(tensor.dims() != nullptr)
+    {
+        for(const auto dim : *tensor.dims())
+        {
+            count *= dim;
+        }
+    }
+    return count;
+}
+
+/// Whether an SDPA node's attention mask matches a plan builder keyed on maskDataType: UNSET
+/// builds only mask-free graphs, every other builder only graphs whose mask tensor has exactly
+/// that dtype. Works for forward and backward attributes.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isSupportedSdpaMaskDataType(const SdpaAttributesType& attrs,
+                                 const TensorMap& tensorMap,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType maskDataType)
+{
+    if(maskDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+    {
+        return !attrs.attn_mask_tensor_uid().has_value();
+    }
+    if(!attrs.attn_mask_tensor_uid().has_value())
+    {
+        return false;
+    }
+    CHECK_TENSOR_EXISTS(tensorMap, attrs.attn_mask_tensor_uid().value());
+    CHECK_TENSOR_TYPE(tensorMap, attrs.attn_mask_tensor_uid().value(), maskDataType);
+    return true;
+}
+
+/// The dense SDPA forward gate shared by the CPU and GPU reference plan builders, except the
+/// Q/K/V/O data type checks, which depend on each builder's registered types (the ragged gate is
+/// isSupportedRaggedSdpaFwdNode). Never throws.
+/// - maskDataType: the builder's attention-mask dtype (see isSupportedSdpaMaskDataType).
+/// - fp8Input: whether the builder's Q is fp8. fp8 inputs need all three Q/K/V descales and allow
+///   the sdpa_fp8 softmax / output scaling; other inputs allow neither.
+/// - requireScalarPagedDescale: whether a paged K or V side needs a one-element descale. The GPU
+///   reference reads a paged container in place, whose blocks are not batches; the CPU reference
+///   gathers the pages before dequantizing, so it also takes a per-batch descale.
+template <typename TensorMap>
+bool isSupportedSdpaFwdNode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                            const TensorMap& tensorMap,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType maskDataType,
+                            bool fp8Input,
+                            bool requireScalarPagedDescale)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    CHECK_TENSOR_EXISTS(tensorMap, attrs.q_tensor_uid());
+    CHECK_TENSOR_EXISTS(tensorMap, attrs.k_tensor_uid());
+    CHECK_TENSOR_EXISTS(tensorMap, attrs.v_tensor_uid());
+    CHECK_TENSOR_EXISTS(tensorMap, attrs.o_tensor_uid());
+
+    if(!isSupportedSdpaMaskDataType(attrs, tensorMap, maskDataType))
+    {
+        return false;
+    }
+
+    // Ragged tensors need the ragged plan; read as dense they would give wrong results.
+    CHECK_NO_RAGGED_TENSORS(tensorMap);
+
+    if(!isSupportedSdpaAlibi(attrs))
+    {
+        return false;
+    }
+
+    // Padding: both seq_len tensors (INT32, one value per batch) or neither.
+    if(!isSupportedSdpaPadding(attrs, tensorMap))
+    {
+        return false;
+    }
+
+    // Dropout: cuDNN's explicit-mask form, or Philox dropout checked through the engine's
+    // RNG_DUMP keep mask. Philox without RNG_DUMP has no exact oracle and is declined.
+    const bool philoxWithDump = isSdpaPhiloxDropoutWithDump(attrs, tensorMap);
+    if(!philoxWithDump
+       && (!isSupportedSdpaDropout(attrs, tensorMap) || attrs.rng_dump_tensor_uid().has_value()))
+    {
+        return false;
+    }
+
+    // Paged KV cache: cuDNN layout, which needs padding; see sdpaPagedMaxSeqKv.
+    if(sdpaPagedMaxSeqKv(attrs, tensorMap) < 0)
+    {
+        return false;
+    }
+
+    // cuDNN block-sparse mask: UINT8, one bit per 128 x 128 score tile.
+    if(!isSupportedSdpaBlockMask(attrs, tensorMap))
+    {
+        return false;
+    }
+
+    // Attention sink: FLOAT [1, H, 1, 1].
+    if(!isSupportedSdpaSink(attrs, tensorMap))
+    {
+        return false;
+    }
+
+    // The scale may be baked, pass-by-value or device-resident. It must be one element, and an
+    // ordinary scale tensor must be FLOAT since it is read back as one float.
+    if(!isSupportedSdpaScaleOperand(attrs, tensorMap))
+    {
+        return false;
+    }
+
+    // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's requirement that
+    // q/k/v descales are all provided for fp8) and rejected for non-fp8 inputs. Descales are
+    // read as float.
+    int numQkvDescales = 0;
+    for(const auto uid :
+        {attrs.descale_q_tensor_uid(), attrs.descale_k_tensor_uid(), attrs.descale_v_tensor_uid()})
+    {
+        if(uid.has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+            CHECK_TENSOR_TYPE(tensorMap, uid.value(), DataType::FLOAT);
+            // A pass-by-value descale is staged as one value, so it must be one element.
+            const auto* descale = tensorMap.at(uid.value());
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(descale)
+               && sdpaOperandElementCount(*descale) != 1)
+            {
+                return false;
+            }
+            ++numQkvDescales;
+        }
+    }
+    if((fp8Input && numQkvDescales != 3) || (!fp8Input && numQkvDescales != 0))
+    {
+        return false;
+    }
+    // A paged container's blocks are not batches, so where the reference reads the pages in place
+    // a paged side needs a scalar descale.
+    if(requireScalarPagedDescale)
+    {
+        for(const auto& [tableUid, descaleUid] :
+            {std::pair{attrs.page_table_k_tensor_uid(), attrs.descale_k_tensor_uid()},
+             std::pair{attrs.page_table_v_tensor_uid(), attrs.descale_v_tensor_uid()}})
+        {
+            if(tableUid.has_value() && descaleUid.has_value()
+               && sdpaOperandElementCount(*tensorMap.at(descaleUid.value())) != 1)
+            {
+                return false;
+            }
+        }
+    }
+
+    // cuDNN sdpa_fp8 softmax / output scaling and amax outputs (fp8 inputs only).
+    if(!isSupportedSdpaFp8Scaling(attrs, tensorMap, fp8Input))
+    {
+        return false;
+    }
+
+    // cuDNN Max / Sum_exp row statistics: FLOAT outputs (the references check [B, H, Sq, 1]).
+    for(const auto uid : {attrs.max_tensor_uid(), attrs.sum_exp_tensor_uid()})
+    {
+        if(uid.has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, uid.value());
+            CHECK_TENSOR_TYPE(tensorMap, uid.value(), DataType::FLOAT);
+        }
+    }
+
+    // Supported: log-sum-exp output via the stats tensor. It must exist in the map and be FLOAT
+    // (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced in execute().
+    if(attrs.stats_tensor_uid().has_value())
+    {
+        CHECK_TENSOR_EXISTS(tensorMap, attrs.stats_tensor_uid().value());
+        CHECK_TENSOR_TYPE(tensorMap, attrs.stats_tensor_uid().value(), DataType::FLOAT);
+    }
+
+    return true;
+}
+
+/// The dense SDPA backward gate shared by the CPU and GPU reference plan builders, except the
+/// Q/K/V/O/dO/dQ/dK/dV data type checks, which depend on each builder's registered types. Never
+/// throws. maskDataType is the builder's attention-mask dtype (see isSupportedSdpaMaskDataType).
+template <typename TensorMap>
+bool isSupportedSdpaBwdNode(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+    const TensorMap& tensorMap,
+    hipdnn_flatbuffers_sdk::data_objects::DataType maskDataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    for(const auto uid : {attrs.q_tensor_uid(),
+                          attrs.k_tensor_uid(),
+                          attrs.v_tensor_uid(),
+                          attrs.o_tensor_uid(),
+                          attrs.do_tensor_uid(),
+                          attrs.stats_tensor_uid(),
+                          attrs.dq_tensor_uid(),
+                          attrs.dk_tensor_uid(),
+                          attrs.dv_tensor_uid()})
+    {
+        CHECK_TENSOR_EXISTS(tensorMap, uid);
+    }
+
+    // Stats: FLOAT, rank-3 [B, H, Sq] or rank-4 [B, H, Sq, 1].
+    {
+        const auto* stats = tensorMap.at(attrs.stats_tensor_uid());
+        const auto* statsDims = stats->dims();
+        if(stats->data_type() != DataType::FLOAT || statsDims == nullptr
+           || (statsDims->size() != 3 && (statsDims->size() != 4 || statsDims->Get(3) != 1)))
+        {
+            return false;
+        }
+    }
+
+    if(!isSupportedSdpaMaskDataType(attrs, tensorMap, maskDataType))
+    {
+        return false;
+    }
+
+    if(!isSupportedSdpaAlibi(attrs))
+    {
+        return false;
+    }
+
+    // Padding: both seq_len tensors (INT32, one value per batch) or neither.
+    if(!isSupportedSdpaPadding(attrs, tensorMap))
+    {
+        return false;
+    }
+
+    // Bias gradient: cuDNN's dBias has the bias tensor's shape, so it needs a mask, the same
+    // dims, and (as the builder is keyed on the mask dtype) the mask's dtype.
+    if(attrs.dbias_tensor_uid().has_value())
+    {
+        if(!attrs.attn_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+        CHECK_TENSOR_EXISTS(tensorMap, attrs.dbias_tensor_uid().value());
+        const auto* dBias = tensorMap.at(attrs.dbias_tensor_uid().value());
+        const auto* mask = tensorMap.at(attrs.attn_mask_tensor_uid().value());
+        if(dBias->data_type() != mask->data_type() || dBias->dims() == nullptr
+           || mask->dims() == nullptr
+           || !std::equal(dBias->dims()->begin(),
+                          dBias->dims()->end(),
+                          mask->dims()->begin(),
+                          mask->dims()->end()))
+        {
+            return false;
+        }
+    }
+
+    // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv must be one FLOAT element.
+    if(!isSupportedSdpaDropout(attrs, tensorMap))
+    {
+        return false;
+    }
+    if(attrs.dropout_scale_inv_tensor_uid().has_value())
+    {
+        CHECK_TENSOR_EXISTS(tensorMap, attrs.dropout_scale_inv_tensor_uid().value());
+        const auto* inv = tensorMap.at(attrs.dropout_scale_inv_tensor_uid().value());
+        if(sdpaOperandElementCount(*inv) != 1 || inv->data_type() != DataType::FLOAT
+           || !attrs.dropout_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+    }
+
+    // Ragged tensors need the ragged plan; read as dense they would give wrong results.
+    CHECK_NO_RAGGED_TENSORS(tensorMap);
+
+    // The scale may be baked, pass-by-value or device-resident. It must be one element, and an
+    // ordinary scale tensor must be FLOAT since it is read back as one float.
+    return isSupportedSdpaScaleOperand(attrs, tensorMap);
+}
