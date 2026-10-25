@@ -2,9 +2,19 @@
 
 Native single-value rounding and conversion return values without throwing or
 returning a failure result. `convertScalar<T>` is `noexcept`; like a native cast,
-its caller must satisfy the documented conversion preconditions. `Reject` requires
-representability and complex-to-real input must be real. For non-Boolean integer
-destinations, NaN is outside the domain and infinity requires `Saturate`.
+its caller must satisfy the documented conversion preconditions.
+
+For non-Boolean integer destinations, conversion is `cast<T>(f_T(g(x)))`.
+The rounding operation `g` is `TowardZero` or `NearestEven` and leaves integral
+inputs unchanged. The range operation `f_T` is `Identity` (leave the rounded value
+unchanged), `Saturate` (clamp to T's range), or `ModuloWrap` (reduce modulo 2^N,
+where N is T's bit width, with a two's-complement interpretation for signed T).
+`Identity` requires the rounded value to fit in T before the final cast.
+NaN is outside the domain, and infinity requires `Saturate`.
+Complex-to-real input must have a zero imaginary component.
+Floating destinations use native casts, and Boolean conversion tests
+for a nonzero value; both ignore the integer policies.
+
 These conversions do not validate individual values or assert numerical
 preconditions. Tensor storage conversion uses the same numerical preconditions;
 descriptor and storage-access validation remain separate.

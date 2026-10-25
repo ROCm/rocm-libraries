@@ -135,7 +135,7 @@ namespace rocRoller::hostnumerics
         const size_t                                     columns = floatOutput.shape()[1];
         const roc::hostnumerics::ScalarConversionOptions conversion{
             roc::hostnumerics::IntegerRounding::TowardZero,
-            roc::hostnumerics::IntegerOverflow::Reject,
+            roc::hostnumerics::IntegerOverflow::Identity,
             std::is_same_v<Output, BFloat16> ? roc::hostnumerics::BFloat16Rounding::Truncate
                                              : roc::hostnumerics::BFloat16Rounding::NearestEven};
         return floatOutput.copyConvertedTo(HostReferenceDetail::outputScalarType<Output>(),
