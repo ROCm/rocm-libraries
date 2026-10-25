@@ -23,10 +23,15 @@ import json
 
 import pytest
 
-from benchmarks.common import direct_kernel_sweep as dks
-from benchmarks.common import kernel_label
-from benchmarks.common import kernel_sweep as ks
-from benchmarks.common.kernel_cache import KernelIdentity
+from kernels.conv import aot_jobs as ks
+from kernels.conv import direct_aot_jobs as dks
+from kernels.conv import kernel_label as kernel_label
+from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_REORGANIZE,
+    DIRECT_DGRAD_TRANSPOSE,
+    DIRECT_DGRAD_WMMA,
+)
+from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.arch import ArchTarget
 
 _ARCH = "gfx950"
@@ -40,7 +45,7 @@ def _round_trips(identity: KernelIdentity) -> None:
 
 def _implicit_jobs(direction: str, n_geometries: int):
     target = ArchTarget.from_gfx(_ARCH)
-    geos = ks._geometry_list(target, "bf16")
+    geos = ks._geometry_list(target, "bf16", direction)
     # A spread of geometries, every pipeline and epilogue among them.
     step = max(1, len(geos) // n_geometries)
     return ks._direction_jobs(
@@ -55,11 +60,16 @@ def _implicit_jobs(direction: str, n_geometries: int):
     )
 
 
+# Variants the grid builds only for wave32 (gfx1250): walked there.
+_WAVE32_ONLY = {DIRECT_DGRAD_WMMA: "gfx1250"}
+
+
 def _direct_cells():
-    target = ArchTarget.from_gfx(_ARCH)
     for variant, (direction, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        arch = _WAVE32_ONLY.get(variant, _ARCH)
+        target = ArchTarget.from_gfx(arch)
         for caps in caps_list:
-            yield (_ARCH, target.wave_size, variant, direction, caps, "fp16")
+            yield (arch, target.wave_size, variant, direction, caps, "fp16")
 
 
 @pytest.mark.parametrize("direction", ["fwd", "wgrad", "dgrad"])
@@ -78,14 +88,15 @@ def test_implicit_grid_round_trips(direction):
 
 def test_direct_grid_round_trips():
     """Every direct identity, knobs included, before spec validation."""
-    target = ArchTarget.from_gfx(_ARCH)
     n = 0
     for variant, (direction, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        arch = _WAVE32_ONLY.get(variant, _ARCH)
+        target = ArchTarget.from_gfx(arch)
         for caps in caps_list:
             for dtype in dks.DIRECT_DTYPES:
-                for knobs in dks._knob_grid(variant, _ARCH, dtype):
+                for knobs in dks._knob_grid(variant, arch, dtype):
                     ident = dks._identity(
-                        _ARCH,
+                        arch,
                         target.wave_size,
                         variant,
                         f"direct_{direction}",
@@ -96,12 +107,12 @@ def test_direct_grid_round_trips():
                     _round_trips(ident)
                     n += 1
             for helper, knobs in (
-                (dks._TRANSPOSE, {}),
-                (dks._REORGANIZE, {"fold_k32": True}),
+                (DIRECT_DGRAD_TRANSPOSE, {}),
+                (DIRECT_DGRAD_REORGANIZE, {"fold_k32": True}),
             ):
                 _round_trips(
                     dks._helper_identity(
-                        _ARCH, target.wave_size, helper, caps, knobs, "bf16"
+                        arch, target.wave_size, helper, caps, knobs, "bf16"
                     )
                 )
     assert n > 0
@@ -279,7 +290,7 @@ def test_direct_job_for_identity_is_the_compile_all_job():
         assert cell, variant
         for _, job in cell:
             assert dks.direct_job_for_identity(job.identity) == job
-    assert dks._TRANSPOSE in {
+    assert DIRECT_DGRAD_TRANSPOSE in {
         j.identity.algorithm
         for p in _direct_cells()
         if p[2] == "direct_grouped_dgrad_mfma"
@@ -294,7 +305,7 @@ def test_direct_helper_job_builds_with_its_pipeline_caps():
     _, rows = dks.DIRECT_CAPABILITIES["direct_grouped_dgrad_mfma"]
     row = rows[0]
     ident = dks._helper_identity(
-        _ARCH, 64, dks._REORGANIZE, row, {"fold_k32": False}, "fp16"
+        _ARCH, 64, DIRECT_DGRAD_REORGANIZE, row, {"fold_k32": False}, "fp16"
     )
     assert (ident.pad_h, ident.stride_h) == (0, 0)
     job = dks.direct_job_for_identity(ident)
@@ -307,7 +318,7 @@ def test_direct_helper_job_builds_with_its_pipeline_caps():
         dil_h=row.dil_h,
         dil_w=row.dil_w,
     )
-    assert dks.build_direct_job(job, _ARCH, "fp16")[0] is not None
+    assert dks.direct_kernel_for_job(job, _ARCH, "fp16")[0] is not None
 
 
 def test_direct_job_for_identity_rejects_what_the_grid_cannot_build():

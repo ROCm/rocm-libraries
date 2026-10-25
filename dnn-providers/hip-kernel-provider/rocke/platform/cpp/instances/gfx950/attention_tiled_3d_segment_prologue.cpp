@@ -14,8 +14,7 @@
  *   rocke_gfx950_attention_tiled_3d_emit_q_to_lds         (lines 482-512)
  *   rocke_gfx950_attention_tiled_3d_emit_async_infra      (lines 564-601)
  *   rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row      (lines 81-96)
- *   rocke_gfx950_attention_tiled_3d_issue_k_load          (lines 603-616)
- *   rocke_gfx950_attention_tiled_3d_issue_v_load          (lines 618-631)
+ *   rocke_gfx950_attention_tiled_3d_tile_page_ids         (page-id loader)
  *   rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads (lines 645-701)
  *   rocke_gfx950_attention_tiled_3d_issue_k               (lines 703-707)
  *   rocke_gfx950_attention_tiled_3d_issue_v               (lines 709-713)
@@ -347,7 +346,6 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     const int BLOCK_Q = CFG.BLOCK_Q;
     const int NUM_QH = CFG.NUM_QH;
     const int NUM_SEG = CFG.NUM_SEG;
-    const int PV_K_STEP = CFG.PV_K_STEP;
     const rocke_type_t* dtype = CFG.dtype;
 
     /* ---- grid ids + thread (lines 360-363) ---- */
@@ -358,22 +356,38 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
 
     /* ---- binary search seq_idx (lines 365-372) ----
      * per_token=False (the Python helper default for the block-q search). */
-    ctx->seq_idx = rocke_binary_search_seq_idx(B,
-                                               ctx->cu_q,
-                                               ctx->q_block_global_idx,
-                                               ctx->num_seqs_p,
-                                               BLOCK_Q,
-                                               CFG.binary_search_iters,
-                                               false);
+    if(CFG.DECODE_GRID)
+    {
+        /* all-decode grid: one CTA per sequence along x, no search. */
+        ctx->seq_idx = ctx->q_block_global_idx;
+    }
+    else
+    {
+        ctx->seq_idx = rocke_binary_search_seq_idx(B,
+                                                   ctx->cu_q,
+                                                   ctx->q_block_global_idx,
+                                                   ctx->num_seqs_p,
+                                                   BLOCK_Q,
+                                                   CFG.binary_search_iters,
+                                                   false);
+    }
 
     /* ---- cu_q bounds / per-sequence geometry (lines 373-379) ---- */
     ctx->cu_q_start = rocke_b_global_load_i32(B, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         B, ctx->cu_q, rocke_b_add(B, ctx->seq_idx, rocke_b_const_i32(B, 1)), 0);
     ctx->cur_batch_q_len = rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
-    ctx->q_block_start_idx = rocke_b_add(
-        B, rocke_b_div(B, ctx->cu_q_start, rocke_b_const_i32(B, BLOCK_Q)), ctx->seq_idx);
-    ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
+    if(CFG.DECODE_GRID)
+    {
+        ctx->q_block_start_idx = NULL;
+        ctx->q_block_local_idx = rocke_b_const_i32(B, 0);
+    }
+    else
+    {
+        ctx->q_block_start_idx = rocke_b_add(
+            B, rocke_b_div(B, ctx->cu_q_start, rocke_b_const_i32(B, BLOCK_Q)), ctx->seq_idx);
+        ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
+    }
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
     ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
@@ -428,21 +442,19 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     {
         const int q_shape[2] = {BLOCK_M, HD};
         const int k_shape[3] = {2, T, HD};
+        /* One V slot: V(i) is issued and consumed within iteration i. */
+        const int v_shape[3] = {1, T, HD};
         ctx->Q_lds = rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
-        ctx->V_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Vlds");
-    }
-    {
-        const int p_shape[2] = {BLOCK_M, T};
-        ctx->P_lds = rocke_b_smem_alloc(B, dtype, p_shape, 2, "Plds");
+        ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
 
-    /* ---- PV transpose-read state (gfx950-only, lines 471-472) ----
-     * pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid)
+    /* ---- PV transpose-read state (gfx950-only) ----
+     * pv_tr_reader = TransposeLdsReader(K=16, M=16).bind(b, tid)
      * tr_col_lane  = pv_tr_reader.col */
     {
         rocke_transpose_lds_reader_t r;
-        r.K = PV_K_STEP;
+        r.K = 16;
         r.M = 16;
         ctx->pv_tr_reader = rocke_transpose_lds_reader_bind(B, &r, ctx->tid);
         ctx->tr_col_lane = (ctx->pv_tr_reader != NULL) ? ctx->pv_tr_reader->col : NULL;
@@ -532,30 +544,26 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     ctx->V_lds_addr = rocke_b_smem_addr_of(B, ctx->V_lds);
     ctx->zero_soff = rocke_b_const_i32(B, 0);
 
+    ctx->seq_pages = NULL;
+    memset(ctx->lane_within_b, 0, sizeof(ctx->lane_within_b));
+    ctx->paged_kv_desc = NULL;
     /* seq_base = seq_idx * bt_stride_p (line 592) */
     if(ctx->strided_kv)
     {
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
-
-    /* paged_kv_desc = TensorDescriptor.naive("paged_kv_bytes",
-     *   lengths=[1<<24, T, NUM_KV, HD],
-     *   strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
-     *   coord_names=("physical_block","token","kv_head","dim")
-     * ).transform(
-     *   indirect("tile_idx", into="physical_block", table=block_tables,
-     *            base=seq_base),
-     *   unmerge("linear_half", into=("token","dim"), dims=(T, HD)),
-     * )  (lines 593-601) */
+    if(!CFG.PAGE_IDS)
     {
+        /* paged_kv_desc = naive("paged_kv_bytes", [1<<24, T, NUM_KV, HD], byte
+         * strides).transform(indirect("tile_idx" -> "physical_block",
+         * base=seq_base), unmerge("linear_half" -> ("token","dim"), (T, HD))) */
         const int lengths[4] = {1 << 24, T, NUM_KV, HD};
         const int strides[4]
             = {CFG.kv_stride_blk_b, CFG.kv_stride_tok_b, CFG.kv_stride_h_b, CFG.KV_BYTES};
         const char* coords[4] = {"physical_block", "token", "kv_head", "dim"};
         rocke_tensor_descriptor_t* base
             = rocke_tensor_descriptor_naive(B, "paged_kv_bytes", lengths, 4, strides, coords, 4);
-
         const rocke_transform_t* chain[2];
         const char* into_td[2] = {"token", "dim"};
         const int dims_td[2] = {T, HD};
@@ -563,6 +571,234 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
             B, "tile_idx", "physical_block", ctx->block_tables, ctx->seq_base, NULL, 0);
         chain[1] = rocke_unmerge(B, "linear_half", into_td, 2, dims_td);
         ctx->paged_kv_desc = rocke_tensor_descriptor_transform(B, base, chain, 2);
+    }
+    else if(CFG.N_BLOCKS_PER_TILE > 1 || CFG.WAVE_PAGE_ID_LOAD)
+    {
+        /* A sequence's last tile can reach past its last page; the table entries
+         * there are not the sequence's. Those pages reuse the tile's first page
+         * id (always live); the in_prefix mask discards their tokens. */
+        rocke_value_t* rounded = rocke_b_add(B, ctx->seq_len, rocke_b_const_i32(B, CFG.BS - 1));
+        ctx->seq_pages = rocke_b_div(B, rounded, rocke_b_const_i32(B, CFG.BS));
+    }
+
+    /* Page-id loader (fp16/bf16): the per-lane part of the address is
+     * loop-invariant; the page base goes into soffset per tile. */
+    if(CFG.PAGE_IDS)
+    {
+        rocke_value_t* lane_tok = rocke_b_div(B, ctx->lane_half_base, rocke_b_const_i32(B, HD));
+        rocke_value_t* lane_dim = rocke_b_mod(B, ctx->lane_half_base, rocke_b_const_i32(B, HD));
+        rocke_value_t* tok_b = rocke_b_mul(B, lane_tok, rocke_b_const_i32(B, CFG.kv_stride_tok_b));
+        rocke_value_t* head_b
+            = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, CFG.kv_stride_h_b));
+        rocke_value_t* tok_head = rocke_b_add(B, tok_b, head_b);
+        if(CFG.KV_SWZ)
+        {
+            /* A call's LDS rows are ph + lane_tok (mod chunks per row), with ph =
+             * its first row; ph is a multiple of tokens_per_call and lane_tok <
+             * tokens_per_call, so the sum never wraps. The lane writing LDS
+             * chunk c fetches chunk c ^ row. */
+            /* n_ph = HD * HD / 4096 <= 16 (HD <= 256, as the PV carry arrays assume). */
+            const int n_ph = CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call;
+            rocke_value_t* lane_chunk = rocke_b_div(B, lane_dim, rocke_b_const_i32(B, 8));
+            int ph_i;
+            for(ph_i = 0; ph_i < n_ph && ph_i < CFG.kv_calls_per_tile; ++ph_i)
+            {
+                rocke_value_t* row_ph
+                    = rocke_b_add(B, lane_tok, rocke_b_const_i32(B, ph_i * CFG.tokens_per_call));
+                rocke_value_t* src_chunk = rocke_b_xor(B, lane_chunk, row_ph);
+                rocke_value_t* src_b
+                    = rocke_b_mul(B, src_chunk, rocke_b_const_i32(B, 8 * CFG.KV_BYTES));
+                ctx->lane_within_b[ph_i] = rocke_b_add(B, tok_head, src_b);
+            }
+        }
+        else
+        {
+            rocke_value_t* dim_b = rocke_b_mul(B, lane_dim, rocke_b_const_i32(B, CFG.KV_BYTES));
+            ctx->lane_within_b[0] = rocke_b_add(B, tok_head, dim_b);
+        }
+    }
+}
+
+rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+{
+    rocke_value_t* col_chunk;
+    rocke_value_t* row_ph;
+    rocke_value_t* chunk;
+    rocke_value_t* chunk_col;
+    rocke_value_t* in_chunk;
+    if(!CFG.KV_SWZ)
+    {
+        return col;
+    }
+    col_chunk = rocke_b_div(B, col, rocke_b_const_i32(B, 8));
+    row_ph = rocke_b_mod(B, row, rocke_b_const_i32(B, CFG.KV_CHUNKS_PER_ROW));
+    chunk = rocke_b_xor(B, col_chunk, row_ph);
+    chunk_col = rocke_b_mul(B, chunk, rocke_b_const_i32(B, 8));
+    in_chunk = rocke_b_mod(B, col, rocke_b_const_i32(B, 8));
+    return rocke_b_add(B, chunk_col, in_chunk);
+}
+
+/* _kv_src_linear(linear_half): the async copies write LDS in lane order, so
+ * under the swizzle each lane fetches the element its LDS position holds
+ * (_kv_col is its own inverse). */
+rocke_value_t*
+    rocke_gfx950_attention_tiled_3d_kv_src_linear(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                                  rocke_value_t* linear_half)
+{
+    rocke_value_t* row;
+    rocke_value_t* row_base;
+    rocke_value_t* col;
+    if(!CFG.KV_SWZ)
+    {
+        return linear_half;
+    }
+    row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, CFG.HD));
+    row_base = rocke_b_mul(B, row, rocke_b_const_i32(B, CFG.HD));
+    col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, CFG.HD));
+    return rocke_b_add(B, row_base, rocke_gfx950_attention_tiled_3d_kv_col(ctx, row, col));
+}
+
+/* _load_page_id_window(rel_page): lane l loads the id of the segment's page
+ * rel_page + l; past the sequence's last page it gets 0, never used (see
+ * _window_tile_ids). */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_load_page_id_window(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* rel_page)
+{
+    rocke_value_t* first = rocke_b_add(B, ctx->seg_first_page, rel_page);
+    rocke_value_t* pg = rocke_b_add(B, first, ctx->tid);
+    rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, pg);
+    rocke_value_t* live = rocke_b_cmp_lt(B, pg, ctx->seq_pages);
+    rocke_value_t* other = rocke_b_const_i32(B, 0);
+    return rocke_b_masked_global_load(B, ctx->block_tables, idx, live, other, rocke_i32(), 4);
+}
+
+/* _window_tile_ids(page_id_window, kv_tile_idx): the tile's page ids from the
+ * 64-page window (v_readlane); dead pages reuse the tile's first id, always live. */
+void rocke_gfx950_attention_tiled_3d_window_tile_ids(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx,
+    rocke_value_t** out)
+{
+    const int NB = CFG.N_BLOCKS_PER_TILE;
+    int j;
+    rocke_value_t* first_blk = rocke_b_mul(B, kv_tile_idx, rocke_b_const_i32(B, NB));
+    rocke_value_t* rel = rocke_b_sub(B, first_blk, ctx->seg_first_page);
+    rocke_value_t* lane0 = rocke_b_mod(B, rel, rocke_b_const_i32(B, 64));
+    out[0] = rocke_b_readlane(B, page_id_window, lane0);
+    for(j = 1; j < NB; ++j)
+    {
+        rocke_value_t* lane = rocke_b_add(B, lane0, rocke_b_const_i32(B, j));
+        rocke_value_t* idj = rocke_b_readlane(B, page_id_window, lane);
+        rocke_value_t* blk = rocke_b_add(B, first_blk, rocke_b_const_i32(B, j));
+        rocke_value_t* live = rocke_b_cmp_lt(B, blk, ctx->seq_pages);
+        out[j] = rocke_b_select(B, live, idj, out[0]);
+    }
+}
+
+/* _refill_page_id_window(page_id_window, kv_tile_idx): the window for the next
+ * iteration. If tile kv_tile_idx + 2 starts a new window, load it now (after
+ * this tile's copies, so the explicit waits still cover V(t)); the loop-top
+ * wait completes it before the next iteration reads it. A wave-uniform 0/1-trip
+ * loop is an if with a result (scf_if has none): 0 trips keep the window, 1 trip
+ * loads the next one. It compiles to a scalar branch around the load. */
+rocke_value_t* rocke_gfx950_attention_tiled_3d_refill_page_id_window(
+    rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* page_id_window,
+    rocke_value_t* kv_tile_idx)
+{
+    rocke_value_t* t2 = rocke_b_add(B, kv_tile_idx, rocke_b_const_i32(B, 2));
+    rocke_value_t* t2_blk = rocke_b_mul(B, t2, rocke_b_const_i32(B, CFG.N_BLOCKS_PER_TILE));
+    rocke_value_t* rel2 = rocke_b_sub(B, t2_blk, ctx->seg_first_page);
+    rocke_value_t* rel2_lane = rocke_b_mod(B, rel2, rocke_b_const_i32(B, 64));
+    rocke_value_t* at_start = rocke_b_cmp_eq(B, rel2_lane, rocke_b_const_i32(B, 0));
+    rocke_value_t* t2_live = rocke_b_cmp_lt(B, t2, ctx->tile_end);
+    rocke_value_t* cross = rocke_b_land(B, at_start, t2_live);
+    rocke_value_t* lo = rocke_b_const_i32(B, 0);
+    rocke_value_t* one = rocke_b_const_i32(B, 1);
+    rocke_value_t* zero = rocke_b_const_i32(B, 0);
+    rocke_value_t* trips = rocke_b_select(B, cross, one, zero);
+    rocke_value_t* step = rocke_b_const_i32(B, 1);
+    rocke_iter_arg_t wargs[1];
+    rocke_for_t refill;
+    rocke_value_t* next_window;
+    wargs[0].name = rocke_arena_strdup(&B->arena, "pid_window_r");
+    wargs[0].init = page_id_window;
+    refill = rocke_b_scf_for_iter(B, lo, trips, step, wargs, 1, "pid_window_load", false, true);
+    rocke_b_region_enter(B, refill.body);
+    next_window = rocke_gfx950_attention_tiled_3d_load_page_id_window(ctx, rel2);
+    rocke_b_scf_yield(B, &next_window, 1);
+    rocke_b_region_leave(B);
+    return refill.op->results[0];
+}
+
+/* _tile_page_ids(kv_tile_idx): one guarded block-table load per page of the
+ * tile, made wave-uniform. */
+void rocke_gfx950_attention_tiled_3d_tile_page_ids(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                                   rocke_value_t* kv_tile_idx,
+                                                   rocke_value_t** out)
+{
+    const int NB = CFG.N_BLOCKS_PER_TILE;
+    int j;
+    /* A tile starts below seq_len, so its first page is always live. */
+    rocke_value_t* first_blk = rocke_b_mul(B, kv_tile_idx, rocke_b_const_i32(B, NB));
+    rocke_value_t* first_pid = rocke_b_global_load_i32(
+        B, ctx->block_tables, rocke_b_add(B, ctx->seq_base, first_blk), 0);
+    out[0] = rocke_b_to_sgpr_u32(B, first_pid);
+    for(j = 1; j < NB; ++j)
+    {
+        rocke_value_t* blk = rocke_b_add(B, first_blk, rocke_b_const_i32(B, j));
+        rocke_value_t* idx = rocke_b_add(B, ctx->seq_base, blk);
+        rocke_value_t* live = rocke_b_cmp_lt(B, blk, ctx->seq_pages);
+        rocke_value_t* pid = rocke_b_masked_global_load(
+            B, ctx->block_tables, idx, live, first_pid, rocke_i32(), 4);
+        out[j] = rocke_b_to_sgpr_u32(B, pid);
+    }
+}
+
+/* _issue_paged_tile(src, lds_base, buf_idx, page_ids): one async DMA call per
+ * 64 lanes x 8 halves; the call's page base goes into soffset (i32 path) or a
+ * per-page 64-bit buffer base (i64 path). */
+static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                    rocke_value_t* src,
+                                    rocke_value_t* src_rsrc,
+                                    rocke_value_t* lds_base,
+                                    rocke_value_t* buf_idx,
+                                    rocke_value_t* const* page_ids)
+{
+    int call;
+
+    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, CFG.bytes_per_buf));
+    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
+    rocke_value_t* buf_base = rocke_b_smem_ptr_add(B, lds_base, buf_off_i64);
+    for(call = 0; call < CFG.kv_calls_per_tile; ++call)
+    {
+        const int blk = call / CFG.calls_per_block;
+        const int tok0 = (call % CFG.calls_per_block) * CFG.tokens_per_call;
+        const int ph_i = CFG.KV_SWZ ? (call % (CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call)) : 0;
+        rocke_value_t* voff = rocke_b_add(
+            B, ctx->lane_within_b[ph_i], rocke_b_const_i32(B, tok0 * CFG.kv_stride_tok_b));
+        rocke_value_t* call_rsrc;
+        rocke_value_t* soff;
+        if(CFG.I64_KV_ADDR)
+        {
+            rocke_value_t* pid_i64 = rocke_b_zext(B, page_ids[blk], rocke_i64());
+            rocke_value_t* base_i64
+                = rocke_b_mul(B, pid_i64, rocke_b_const_i64(B, (int64_t)CFG.kv_stride_blk_b));
+            call_rsrc = rocke_b_buffer_rsrc(
+                B, rocke_b_global_ptr_add(B, src, base_i64), ctx->kv_block_bytes_c);
+            soff = ctx->zero_soff;
+        }
+        else
+        {
+            call_rsrc = src_rsrc;
+            soff = rocke_b_mul(B, page_ids[blk], rocke_b_const_i32(B, CFG.kv_stride_blk_b));
+        }
+        rocke_value_t* dst = rocke_b_smem_ptr_add(
+            B, buf_base, rocke_b_const_i64(B, (int64_t)call * CFG.bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
+            B, call_rsrc, dst, voff, soff, CFG.ASYNC_LDS_DWORDS, CFG.KV_CACHE_BITS);
     }
 }
 
@@ -696,10 +932,15 @@ void rocke_gfx950_attention_tiled_3d_emit_q_to_lds(rocke_gfx950_attention_tiled_
  * Load issuers (Python closures, lines 603-713).
  * ============================================================ */
 
-/* _issue_k_load(kv_tile_idx, buf_idx) -- lines 603-616. */
-void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                                  rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx)
+/* _issue_strided_tile(src_rsrc, strides, lds_base, kv_tile_idx, buf_idx): the
+ * strided-KV loader (fp16/bf16 only), one async DMA call per
+ * KV_HALVES_PER_CALL halves at the per-call strided offset. */
+static void rocke__issue_strided_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                      rocke_value_t* src_rsrc,
+                                      const rocke_strided_kv_params_t* strides,
+                                      rocke_value_t* lds_base,
+                                      rocke_value_t* kv_tile_idx,
+                                      rocke_value_t* buf_idx)
 {
     const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
     const int kv_calls_per_tile = CFG.kv_calls_per_tile;
@@ -710,106 +951,24 @@ void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3
 
     rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, bytes_per_buf));
     rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
-    rocke_value_t* K_buf_base = rocke_b_smem_ptr_add(B, ctx->K_lds_addr, buf_off_i64);
+    rocke_value_t* buf_base = rocke_b_smem_ptr_add(B, lds_base, buf_off_i64);
 
     for(call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* call_rsrc = ctx->key_rsrc;
-        rocke_value_t* voff = NULL;
-        if(ctx->strided_kv)
-        {
-            voff = rocke_strided_kv_offset(
-                B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
-        }
-        else if(CFG.I64_KV_ADDR)
-        {
-            /* offset_i64_split folds the per-block byte base into a 64-bit
-             * buffer base (no 2 GiB i32-voffset overflow); only the within-block
-             * byte offset stays in the i32 voffset. */
-            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
-            rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            rocke_value_t* base_i64 = NULL;
-            rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset_i64_split(B,
-                                                             ctx->paged_kv_desc,
-                                                             "physical_block",
-                                                             in_names,
-                                                             in_values,
-                                                             3,
-                                                             &base_i64,
-                                                             &voff,
-                                                             &valid))
-                return;
-            call_rsrc = rocke_b_buffer_rsrc(
-                B, rocke_b_global_ptr_add(B, ctx->key, base_i64), ctx->kv_block_bytes_c);
-        }
-        else
-        {
-            voff = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
-        }
-        rocke_value_t* k_dst = rocke_b_smem_ptr_add(
-            B, K_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
+        rocke_value_t* voff = rocke_strided_kv_offset(
+            B,
+            strides,
+            kv_tile_idx,
+            rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+            ctx->seq_len,
+            CFG.HD,
+            CFG.T);
+        rocke_value_t* dst = rocke_b_smem_ptr_add(
+            B, buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
-            B, call_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
-    }
-}
-
-/* _issue_v_load(kv_tile_idx, buf_idx) -- lines 618-631. */
-void rocke_gfx950_attention_tiled_3d_issue_v_load(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                                  rocke_value_t* kv_tile_idx,
-                                                  rocke_value_t* buf_idx)
-{
-    const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
-    const int kv_calls_per_tile = CFG.kv_calls_per_tile;
-    const int bytes_per_call = CFG.bytes_per_call;
-    const int bytes_per_buf = CFG.bytes_per_buf;
-    const int ASYNC_LDS_DWORDS = CFG.ASYNC_LDS_DWORDS;
-    int call;
-
-    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, bytes_per_buf));
-    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
-    rocke_value_t* V_buf_base = rocke_b_smem_ptr_add(B, ctx->V_lds_addr, buf_off_i64);
-
-    for(call = 0; call < kv_calls_per_tile; ++call)
-    {
-        rocke_value_t* linear_half
-            = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* call_rsrc = ctx->value_rsrc;
-        rocke_value_t* voff = NULL;
-        if(ctx->strided_kv)
-        {
-            voff = rocke_strided_kv_offset(
-                B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
-        }
-        else if(CFG.I64_KV_ADDR)
-        {
-            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
-            rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            rocke_value_t* base_i64 = NULL;
-            rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset_i64_split(B,
-                                                             ctx->paged_kv_desc,
-                                                             "physical_block",
-                                                             in_names,
-                                                             in_values,
-                                                             3,
-                                                             &base_i64,
-                                                             &voff,
-                                                             &valid))
-                return;
-            call_rsrc = rocke_b_buffer_rsrc(
-                B, rocke_b_global_ptr_add(B, ctx->value, base_i64), ctx->kv_block_bytes_c);
-        }
-        else
-        {
-            voff = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
-        }
-        rocke_value_t* v_dst = rocke_b_smem_ptr_add(
-            B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
-        rocke_b_async_buffer_load_lds_addr(
-            B, call_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
+            B, src_rsrc, dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CFG.KV_CACHE_BITS);
     }
 }
 
@@ -871,29 +1030,42 @@ void rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
 /* _issue_k(tile_idx, buf_idx) -- lines 703-707. */
 void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids)
 {
     if(CFG.KV_FP8)
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, false, tile_idx, buf_idx);
     }
+    else if(ctx->strided_kv)
+    {
+        rocke__issue_strided_tile(
+            ctx, ctx->key_rsrc, &ctx->k_strides, ctx->K_lds_addr, tile_idx, buf_idx);
+    }
     else
     {
-        rocke_gfx950_attention_tiled_3d_issue_k_load(ctx, tile_idx, buf_idx);
+        rocke__issue_paged_tile(ctx, ctx->key, ctx->key_rsrc, ctx->K_lds_addr, buf_idx, page_ids);
     }
 }
 
 /* _issue_v(tile_idx, buf_idx) -- lines 709-713. */
 void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
-                                             rocke_value_t* buf_idx)
+                                             rocke_value_t* buf_idx,
+                                             rocke_value_t* const* page_ids)
 {
     if(CFG.KV_FP8)
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, true, tile_idx, buf_idx);
     }
+    else if(ctx->strided_kv)
+    {
+        rocke__issue_strided_tile(
+            ctx, ctx->value_rsrc, &ctx->v_strides, ctx->V_lds_addr, tile_idx, buf_idx);
+    }
     else
     {
-        rocke_gfx950_attention_tiled_3d_issue_v_load(ctx, tile_idx, buf_idx);
+        rocke__issue_paged_tile(
+            ctx, ctx->value, ctx->value_rsrc, ctx->V_lds_addr, buf_idx, page_ids);
     }
 }

@@ -15,8 +15,10 @@
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
 #   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
-#   clients/scripts/sdc_hunt), plus known_bug (assigned dynamically, including per-GPU via
-#   known_bug_platforms).
+#   clients/scripts/sdc_hunt), plus known_bug (assigned by the test generator to
+#   known_bugs.yaml entries with no known_bug_platforms). hipblaslt-test drops every
+#   known-bug case before registration, including per-GPU ones, so no registered test
+#   carries the known_bug token; the tiers below still exclude it.
 #
 #   multi_gpu is the exception: it has no entries in data/, and its tests are
 #   plain gtest suites that carry the token in the suite name. It is deliberately

@@ -6,6 +6,7 @@ python_functions = "test_*"
 markers = [
     "round_trip: exercises hipdnn_validate_descriptors; skipped unless HIPDNN_VALIDATE_DESCRIPTORS is set.",
     "needs_rocm_kpack: builds a real rocm-kpack archive; skipped unless rocm_kpack is importable or HIPKERNELPROVIDER_ROCM_KPACK_DIR is set.",
+    "allow_skip(reason): may skip when the hipDNN build runs the suite with tools/pytest_plugins/hipdnn_strict_skips.py, which fails every other skip.",
 ]
 
 [tool.coverage.run]

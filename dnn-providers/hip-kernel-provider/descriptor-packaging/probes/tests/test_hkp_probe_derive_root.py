@@ -76,13 +76,30 @@ def _embedded(name, ukd_id=None):
     return _ukd(name, ks, ukd_id=ukd_id)
 
 
+# The packer requires these three to be UUIDs: the UED's id, the KMD it names as its
+# metadata, and the UHD its role map binds.
+_UED_ID = "00000000-0000-4000-8000-0000000000e1"
+_KMD_ID = "00000000-0000-4000-8000-0000000000e2"
+_UHD_ID = "00000000-0000-4000-8000-0000000000e3"
+
 # The generic descriptors every KDP of _write_root references.
 _GENERICS = {
     "x.umd.json": {"name": "m", "scope": "kernel", "match_symbol": "m"},
-    "x.ued.json": {"name": "t:e", "heuristic": "uhd", "metadata": "kmd"},
+    "x.ued.json": {
+        "id": _UED_ID,
+        "name": "t:e",
+        "sort_kernel_catalog": {"default": _UHD_ID},
+        "metadata": _KMD_ID,
+    },
     "x.udd.json": {"name": "d", "dispatch_symbol": "d"},
-    "x.uhd.json": {"name": "h", "kind": "native", "payload": "h"},
-    "x.kmd.json": {"name": "k", "fields": []},
+    "x.uhd.json": {
+        "id": _UHD_ID,
+        "name": "h",
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": "h"},
+    },
+    "x.kmd.json": {"id": _KMD_ID, "name": "k", "fields": []},
 }
 
 
@@ -94,7 +111,7 @@ def _write_root(root: Path, ukds, kdp_arch=("gfx950",), kdp_file="x.kdp.json"):
         "name": "x",
         "arch": list(kdp_arch) if kdp_arch is not None else [],
         "matchers": ["umd"],
-        "engine": "ued",
+        "engine": _UED_ID,
         "dispatch": "udd",
         "kernelDescriptors": list(ukds),
     }
@@ -555,7 +572,9 @@ def test_rederive_follows_source_changes(tmp_path):
     (out / "stale_dir").mkdir()
     (out / "stale_dir" / "f.json").write_text("{}")
     _write_root(src, [_rocke("b"), _rocke("0first")])
-    kmd = '{"version": "1.0", "id": "kmd", "name": "k2", "fields": []}\n'
+    kmd = (
+        json.dumps({"version": "1.0", "id": _KMD_ID, "name": "k2", "fields": []}) + "\n"
+    )
     (src / "x.kmd.json").write_text(kmd)
     expect = _derive(src, "gfx950", out)
     assert [e["name"] for e in expect] == ["0first"]
@@ -900,3 +919,73 @@ def test_every_registered_output_type_has_checks():
     assert {k.output for k in kinds.values()} <= set(outputs)
     # ... and no check set is dead.
     assert set(outputs) <= {k.output for k in kinds.values()}
+
+
+# --- multi-launch UKDs (`sources`) ---------------------------------------------
+def _rocke_sources(name, launches, spec=None, arch=None):
+    """A multi-launch rocke UKD. `launches` maps each launch name to (builder, role)."""
+    sources = {}
+    for launch, (builder, role) in launches.items():
+        entry = {
+            "kind": "rocke",
+            "source": "s.py",
+            "builder": builder,
+            "spec": dict(spec) if spec is not None else {"block": 64},
+        }
+        if role is not None:
+            entry["role"] = role
+        sources[launch] = entry
+    ukd = _ukd(name, {}, arch)
+    del ukd["kernel_source"]
+    ukd["version"] = "1.1"
+    ukd["sources"] = sources
+    return ukd
+
+
+_DECODE_MERGE = {"decode": ("b1", None), "merge": ("b1", "merge")}
+
+
+def test_expect_lists_each_launch_with_its_authored_role(tmp_path):
+    _write_root(
+        tmp_path / "src", [_rocke_sources("m", _DECODE_MERGE), _rocke("s", "b9")]
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    by_name = {e["name"]: e for e in expect}
+    assert by_name["m"] == {
+        "kdp": "x.kdp.json",
+        "name": "m",
+        "kind": "rocke",
+        "arch": "gfx950",
+        "launches": {"decode": None, "merge": "merge"},
+    }
+    # A single-launch UKD keeps the entry shape every existing root records.
+    assert set(by_name["s"]) == {"kdp", "name", "kind", "arch"}
+
+
+def test_launches_are_part_of_the_compile_group_key(tmp_path):
+    ukds = [
+        _rocke_sources("m_a", _DECODE_MERGE),
+        _rocke_sources("m_b", _DECODE_MERGE),
+        # Same builder for `decode`, another one for the second launch: a different path.
+        _rocke_sources("m_other", {"decode": ("b1", None), "reduce": ("b2", None)}),
+        # The builder `m_a` uses, but one launch: not the same compile group either.
+        _rocke("single", "b1"),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_a", "m_other", "single"]
+
+
+def test_sweep_covers_the_values_of_every_launch(tmp_path):
+    # `decode` carries one spec in both UKDs; only `merge` varies, so the value of the
+    # second launch is what decides that both are packed.
+    def ukd(name, merge_block):
+        built = _rocke_sources(name, _DECODE_MERGE)
+        built["sources"]["merge"]["spec"] = {"block": merge_block}
+        return built
+
+    _write_root(
+        tmp_path / "src", [ukd("m_64", 64), ukd("m_128", 128), ukd("m_64b", 64)]
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]

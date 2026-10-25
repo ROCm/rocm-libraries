@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Logical TF32 contracts and strict native parity, independent of GPU access."""
+
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -25,6 +27,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.examples.gfx942.tf32_numerics import rne_bits
+from rocke.tests.engines import assert_both_engines_reject
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
     Tf32MmaProbeSpec,
@@ -128,13 +131,14 @@ def test_mma_requires_logical_tf32(dtype, n):
 @pytest.mark.parametrize("gfx", ["gfx950", "gfx1151", "gfx1250"])
 def test_rejects_unsupported_target(gfx):
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec())
-    with pytest.raises(ValueError, match="gfx942"):
-        _lower_kernel_to_llvm_python(kernel, arch=gfx)
-    with pytest.raises(ValueError, match="gfx942"):
+    message = (
+        f"no MMA instruction found for 'mfma_f32_16x16x8_xf32' on '{gfx}' -- the "
+        "target's MMA catalog does not list it; it is listed for gfx942"
+    )
+    assert_both_engines_reject(kernel, gfx, ValueError, message)
+    # The C++ HIP lowerer is checked against the same text by the rocke_tf32 ctest.
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
         lower_kernel_to_hip(kernel, arch=gfx)
-    native = pytest.importorskip("rocke_engine")
-    with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(kernel), arch=gfx)
 
 
 def test_arithmetic_rejected_after_serialization():
@@ -377,7 +381,11 @@ def tf32_recipe_replay_cli():
     path = Path(executable).resolve()
     if not path.is_file():
         pytest.skip(f"TF32 native replay CLI not found: {path}")
-    return path
+    from rocke.portable_ir.src import online
+
+    resolved = online.resolve_replay_cli_path(build=False)
+    assert resolved is not None
+    return Path(resolved)
 
 
 @pytest.mark.parametrize("m", [16, 32])
