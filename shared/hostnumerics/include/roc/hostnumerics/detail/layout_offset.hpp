@@ -24,9 +24,9 @@ enum class LayoutError {
     CoordinateOutOfRange,
 };
 
-// For CoordinateRankMismatch, value and limit are the coordinate and shape ranks.
-// For CoordinateOutOfRange, value is the coordinate on axis `dimension` and limit
-// is that axis's extent. Other errors leave these fields zero.
+// Rank failures carry the supplied and expected ranks in value and limit.
+// Other failures identify an axis, or an invalid order entry's position, in
+// dimension. Coordinate, extent and order failures also carry value and limit.
 struct LayoutFailure {
     LayoutError error;
     size_t dimension = 0;
@@ -82,9 +82,10 @@ class LayoutOffset {
         ptrdiff_t result = offset;
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             const auto delta = getOffsetMultiply(indices[dimension], strides[dimension]);
-            if (!delta) return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow});
+            if (!delta)
+                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, dimension});
             const auto sum = getOffsetAdd(result, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow});
+            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, dimension});
             result = *sum;
         }
         return result;

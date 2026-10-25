@@ -12,6 +12,7 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -41,12 +42,19 @@ inline constexpr std::string_view message(StorageError error) noexcept {
 }
 
 struct StorageFailure {
-    std::variant<StorageError, LayoutError> cause;
+    std::variant<StorageError, LayoutFailure> cause;
     StorageFailure(StorageError error) noexcept : cause(error) {}
-    StorageFailure(LayoutError error) noexcept : cause(error) {}
+    StorageFailure(LayoutFailure error) noexcept : cause(error) {}
 };
-inline constexpr std::string_view message(const StorageFailure& failure) noexcept {
-    return std::visit([](auto error) { return message(error); }, failure.cause);
+inline std::string message(const StorageFailure& failure) {
+    return std::visit(
+        [](const auto& error) -> std::string {
+            if constexpr (std::is_same_v<std::decay_t<decltype(error)>, LayoutFailure>)
+                return error.message();
+            else
+                return std::string(message(error));
+        },
+        failure.cause);
 }
 
 Expected<size_t, StorageFailure> getStorageBytesForLayout(ScalarType type,

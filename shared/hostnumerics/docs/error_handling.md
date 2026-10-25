@@ -26,6 +26,8 @@ Expected compatibility, support and descriptor-translation failures use explicit
 results or checks. Callers inspect those results to select a backend, materialize
 an operand, or reject a descriptor. They must not infer recovery decisions from
 an exception type or its message.
+New fallible queries should follow this result convention; existing throwing
+conveniences, such as `Shape::linearIndex`, report terminal failures.
 
 Internal fallible helpers return `detail::Expected<T, E>`, a C++20 subset of the
 `std::expected` model. Values construct directly; errors use `detail::Unexpected`.

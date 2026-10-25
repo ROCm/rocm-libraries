@@ -554,7 +554,7 @@ namespace TensileLite::Client::hostnumerics
                 auto contiguous = Layout::getContiguousLayoutLastDimensionFastest(Shape{m, n});
                 if(!contiguous)
                     return failure(TranslationFailureCode::InvalidDescriptor,
-                                   std::string(message(contiguous.error())));
+                                   contiguous.error().message());
                 const auto bytes = roc::hostnumerics::detail::getStorageBytesForLayout(
                     operationAccumulatorType, *contiguous);
                 if(!bytes)
