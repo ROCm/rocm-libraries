@@ -258,27 +258,12 @@ std::optional<int64_t> mergedGridBlocks(int64_t batch,
     {
         return std::nullopt;
     }
-    return *blocks;
+    return blocks;
 }
 
 // ---------------------------------------------------------------------------
 // Graph match and kernel match
 // ---------------------------------------------------------------------------
-
-/// Whether any node of the graph is an SDPA-backward node. Only such a graph hears why it
-/// was declined: graph_match sees every graph the catalog misses on, and a line for each
-/// convolution or normalization graph would bury the attention ones.
-bool hasSdpaBackwardNode(const MatchContext& context)
-{
-    for(const auto& node : context.graph.nodeWrappers())
-    {
-        if(node->attributesType() == data_objects::NodeAttributes::SdpaBackwardAttributes)
-        {
-            return true;
-        }
-    }
-    return false;
-}
 
 /// The output (batch, head) planes of the dBias reduce launch, one grid row each: the axes
 /// the dBias keeps. 0 when the graph's dBias is not broadcast; int64 max on overflow.
@@ -302,108 +287,11 @@ void logDecline(std::string_view cause, const std::string& detail)
     HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME << " declined the graph [" << cause << "]: " << detail);
 }
 
-/// The bias's LDS staging rule: every non-unit stride a multiple of 8 elements (the matcher
-/// records 0 on a broadcast or unit axis), a row stride of at least ceil8(Skv) (the kernel's
-/// bias chunk contract), and a 16-byte aligned base.
-bool stagesBias(const bwd::SdpaBwdProblem& problem)
-{
-    constexpr int64_t VECTOR_ELEMENTS = 8;
-    constexpr int64_t ALIGNMENT_BYTES = 16;
-    return problem.biasStrides.batch % VECTOR_ELEMENTS == 0
-           && problem.biasStrides.head % VECTOR_ELEMENTS == 0
-           && problem.biasStrides.seq % VECTOR_ELEMENTS == 0
-           && (problem.biasStrides.seq == 0
-               || problem.biasStrides.seq >= bwd::detail::ceilToVector(problem.seqLenKv))
-           && problem.biasAlignmentBytes % ALIGNMENT_BYTES == 0;
-}
-
 /// The largest query tile (block_q) of the dK/dV role among the shipped gqa_pack == 1 merged
 /// objects: 64 at head dims 32 to 160 and 32 at 192, from resolving each object's dK/dV
 /// knobs through the descriptor generator's build policy. It is not a descriptor field, so
-/// the pack_split bound below uses this graph-level maximum.
+/// the pack_split bound uses this graph-level maximum.
 constexpr int64_t PACK_MAX_BLOCK_Q = 64;
-
-/// Whether every span a gqa_pack object binds, from head 0 of the group over its G heads,
-/// fits the 32-bit buffer descriptor: Q, dO and O, the statistics and, when present, the
-/// bias; and whether the kernel's pack_split multiply-high is exact for every packed row it
-/// can address: (Sq * G + 2 * block_q) * Sq < 2^31, the rows Sq * G plus the pad to an even
-/// tile count. A graph that is not grouped has no packed span.
-bool packedSpansFit(const bwd::SdpaBwdProblem& problem)
-{
-    if(problem.numHeads <= problem.numKvHeads)
-    {
-        return false;
-    }
-    const int64_t group = problem.numHeads / problem.numKvHeads;
-    const auto packedRows = bwd::detail::checkedProduct({problem.seqLenQ, group});
-    if(!packedRows || *packedRows > INT32_LIMIT)
-    {
-        return false;
-    }
-    const auto splitBound
-        = bwd::detail::checkedProduct({*packedRows + 2 * PACK_MAX_BLOCK_Q, problem.seqLenQ});
-    if(!splitBound || *splitBound >= (int64_t{1} << 31))
-    {
-        return false;
-    }
-    const auto spanFits = [&](int64_t rows,
-                              int64_t seqStride,
-                              int64_t width,
-                              int64_t headStride,
-                              int64_t elementBytes) {
-        const auto slab = bwd::detail::slabElements(rows, seqStride, width);
-        const auto heads = bwd::detail::checkedProduct({group - 1, headStride});
-        if(!slab || !heads || *heads > INT32_LIMIT)
-        {
-            return false;
-        }
-        const auto bytes = bwd::detail::checkedProduct({*slab + *heads, elementBytes});
-        return bytes.has_value() && *bytes <= INT32_LIMIT;
-    };
-    const int64_t rowsQ = problem.seqLenQ - 1;
-    constexpr int64_t ELEMENT_BYTES = bwd::detail::BYTES_PER_ELEMENT;
-    constexpr int64_t STATS_BYTES = 4;
-    if(!spanFits(rowsQ,
-                 problem.q.seq,
-                 bwd::detail::ceilToVector(problem.headDimQk),
-                 problem.q.head,
-                 ELEMENT_BYTES)
-       || !spanFits(rowsQ,
-                    problem.dO.seq,
-                    bwd::detail::ceilToVector(problem.headDimV),
-                    problem.dO.head,
-                    ELEMENT_BYTES)
-       || !spanFits(rowsQ,
-                    problem.o.seq,
-                    bwd::detail::ceilToVector(problem.headDimV),
-                    problem.o.head,
-                    ELEMENT_BYTES))
-    {
-        return false;
-    }
-    // The statistics: HT packs the group's heads contiguously, TH interleaves them one
-    // element apart.
-    const auto statsElements
-        = problem.statsLayout == bwd::StatsLayout::HT
-              ? bwd::detail::checkedProduct({group, problem.seqLenQ})
-              : bwd::detail::checkedProduct({problem.seqLenQ, problem.numHeads});
-    if(!statsElements)
-    {
-        return false;
-    }
-    const int64_t statsExtra = problem.statsLayout == bwd::StatsLayout::HT ? 0 : group - 1;
-    const auto statsBytes = bwd::detail::checkedProduct({*statsElements + statsExtra, STATS_BYTES});
-    if(!statsBytes || *statsBytes > INT32_LIMIT)
-    {
-        return false;
-    }
-    if(problem.biasUid == bwd::NO_UID)
-    {
-        return true;
-    }
-    return spanFits(
-        rowsQ, problem.biasStrides.seq, problem.seqLenKv, problem.biasStrides.head, ELEMENT_BYTES);
-}
 
 /**
  * @brief Graph-scoped applicability: the shared backward matcher's contract, with what
@@ -414,7 +302,7 @@ bool packedSpansFit(const bwd::SdpaBwdProblem& problem)
  */
 std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& context)
 {
-    if(!hasSdpaBackwardNode(context))
+    if(!native::hasSdpaBackwardNode(context))
     {
         return std::nullopt;
     }
@@ -449,9 +337,15 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
         logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
-    const int64_t graphClass = problem.biasUid != bwd::NO_UID ? CLASS_BIAS
-                               : problem.masked               ? CLASS_CAUSAL
-                                                              : CLASS_PLAIN;
+    int64_t graphClass = CLASS_PLAIN;
+    if(problem.biasUid != bwd::NO_UID)
+    {
+        graphClass = CLASS_BIAS;
+    }
+    else if(problem.masked)
+    {
+        graphClass = CLASS_CAUSAL;
+    }
 
     BoundTokens bound;
     bound[std::string(CLASS_TOKEN)] = graphClass;
@@ -463,8 +357,9 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     // The matcher guarantees Hq % Hk == 0, so more query heads than key heads is a group; a
     // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
     // graph is served by the non-pack objects, which rebase per head.
-    bound[std::string(GQA_PACK_TOKEN)] = int64_t{packedSpansFit(problem) ? 1 : 0};
-    bound[std::string(BIAS_STAGING_TOKEN)] = int64_t{stagesBias(problem) ? 1 : 0};
+    bound[std::string(GQA_PACK_TOKEN)]
+        = int64_t{native::packedSpansFit(problem, PACK_MAX_BLOCK_Q) ? 1 : 0};
+    bound[std::string(BIAS_STAGING_TOKEN)] = int64_t{native::stagesBias(problem) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
@@ -642,7 +537,7 @@ bwd::SdpaBwdProblem problemOf(const MatchContext& context)
     auto matched = bwd::matchSdpaBackward(context);
     if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
     {
-        return std::move(*problem);
+        return *problem;
     }
     const auto& decline = std::get<bwd::Decline>(matched);
     failBadParam("the graph no longer matches [" + decline.cause + "]: " + decline.detail);
@@ -687,7 +582,7 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
     plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
-        const double p = static_cast<double>(problem.dropoutP);
+        const auto p = static_cast<double>(problem.dropoutP);
         plan.dropoutThreshold = native::dropoutThreshold(p);
         plan.dropoutScale = static_cast<float>(1.0 / (1.0 - p));
     }

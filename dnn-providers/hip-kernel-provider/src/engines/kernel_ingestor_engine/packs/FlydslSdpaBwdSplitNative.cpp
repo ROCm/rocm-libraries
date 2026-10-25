@@ -196,7 +196,11 @@ constexpr int64_t PACK_MAX_BLOCK_Q = 64;
 
 constexpr std::string_view slotName(Slot slot)
 {
-    return slot == Slot::PREP ? "prep" : slot == Slot::DKDV ? "dkdv" : "dq";
+    if(slot == Slot::PREP)
+    {
+        return "prep";
+    }
+    return slot == Slot::DKDV ? "dkdv" : "dq";
 }
 
 /// "<engine> declined the graph [<rule or cause>]: <detail>", at INFO: hipDNN reports a
@@ -421,9 +425,15 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         return std::nullopt;
     }
 
-    const int64_t graphClass = problem.biasUid != bwd::NO_UID ? CLASS_BIAS
-                               : problem.masked               ? CLASS_CAUSAL
-                                                              : CLASS_PLAIN;
+    int64_t graphClass = CLASS_PLAIN;
+    if(problem.biasUid != bwd::NO_UID)
+    {
+        graphClass = CLASS_BIAS;
+    }
+    else if(problem.masked)
+    {
+        graphClass = CLASS_CAUSAL;
+    }
 
     BoundTokens bound;
     bound[std::string(CLASS_TOKEN)] = graphClass;
@@ -489,7 +499,7 @@ std::optional<int64_t> floorOf(const KernelDefinition& kernel, int64_t tile, std
 {
     if(const auto number = flydsl_sdpa::integerMetadata(kernel, FLOOR_FIELD))
     {
-        return *number;
+        return number;
     }
     const auto text = flydsl_sdpa::stringMetadata(kernel, FLOOR_FIELD);
     if(!text)
@@ -861,7 +871,7 @@ bwd::SdpaBwdProblem problemOf(const MatchContext& context)
     auto matched = bwd::matchSdpaBackward(context, bwd::MatchOptions{true});
     if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
     {
-        return std::move(*problem);
+        return *problem;
     }
     const auto& decline = std::get<bwd::Decline>(matched);
     failBadParam("the graph no longer matches [" + decline.cause + "]: " + decline.detail);
@@ -935,7 +945,7 @@ SplitPlan planFor(Slot slot,
     plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
-        const double p = static_cast<double>(problem.dropoutP);
+        const auto p = static_cast<double>(problem.dropoutP);
         plan.dropoutThreshold = native::dropoutThreshold(p);
         plan.dropoutScale = static_cast<float>(1.0 / (1.0 - p));
     }
@@ -1013,7 +1023,7 @@ struct PrepKernargs
     }
 };
 
-/// The dK/dV kernel's arguments (`_PARAMS["dkdv"]`): 53 arguments.
+/// The dK/dV kernel's arguments (`_PARAMS["dkdv"]`): 51 arguments.
 struct DkdvKernargs
 {
     void* q = nullptr;
@@ -1110,7 +1120,7 @@ struct DkdvKernargs
     }
 };
 
-/// The dQ kernel's arguments (`_PARAMS["dq"]`): 56 arguments.
+/// The dQ kernel's arguments (`_PARAMS["dq"]`): 51 arguments.
 struct DqKernargs
 {
     void* q = nullptr;
@@ -1212,7 +1222,11 @@ const std::vector<KernelArgument>& signatureOfSlot(Slot slot)
     static const auto s_prep = native::signatureOf<PrepKernargs>();
     static const auto s_dkdv = native::signatureOf<DkdvKernargs>();
     static const auto s_dq = native::signatureOf<DqKernargs>();
-    return slot == Slot::PREP ? s_prep : slot == Slot::DKDV ? s_dkdv : s_dq;
+    if(slot == Slot::PREP)
+    {
+        return s_prep;
+    }
+    return slot == Slot::DKDV ? s_dkdv : s_dq;
 }
 
 // ---------------------------------------------------------------------------

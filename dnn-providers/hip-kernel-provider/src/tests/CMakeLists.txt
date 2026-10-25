@@ -421,6 +421,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheMergedSignature
         )
     endif()
+    # The split engine's slots are ops of their own (prep, dkdv, dq) that ship the same
+    # architectures; its descriptor-only engine folder has none. The census reads a shard only
+    # where all three slots ship.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE
+       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv
+       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq}
+            SUITES TestFlydslSdpaBwdSplitPacks
+            EXPECTED_CASES
+                IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
+                ShipsEverySplitRowOnceAndNoKernelInTwoSlots
+                EveryKernelDeclaresItsSlotsSignature
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests

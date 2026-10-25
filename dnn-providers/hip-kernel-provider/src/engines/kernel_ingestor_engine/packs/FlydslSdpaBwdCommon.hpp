@@ -426,7 +426,7 @@ public:
                 return *std::move(verdict);
             }
         }
-        return std::move(_problem);
+        return _problem;
     }
 
 private:
@@ -502,16 +502,16 @@ private:
                                 {"dQ", a.dq_tensor_uid(), true},
                                 {"dK", a.dk_tensor_uid(), true},
                                 {"dV", a.dv_tensor_uid(), true}};
-        const std::pair<const char*, flatbuffers::Optional<int64_t>> optional[]
-            = {{"scale", a.scale_tensor_uid()},
-               {"bias", a.attn_mask_tensor_uid()},
-               {"seq_len_q", a.seq_len_q_tensor_uid()},
-               {"seq_len_kv", a.seq_len_kv_tensor_uid()},
-               {"seed", a.seed_tensor_uid()},
-               {"offset", a.offset_tensor_uid()},
-               {"dropout_mask", a.dropout_mask_tensor_uid()},
-               {"dropout_scale", a.dropout_scale_tensor_uid()},
-               {"dropout_scale_inv", a.dropout_scale_inv_tensor_uid()}};
+        const std::array<std::pair<const char*, flatbuffers::Optional<int64_t>>, 9> optional
+            = {{{"scale", a.scale_tensor_uid()},
+                {"bias", a.attn_mask_tensor_uid()},
+                {"seq_len_q", a.seq_len_q_tensor_uid()},
+                {"seq_len_kv", a.seq_len_kv_tensor_uid()},
+                {"seed", a.seed_tensor_uid()},
+                {"offset", a.offset_tensor_uid()},
+                {"dropout_mask", a.dropout_mask_tensor_uid()},
+                {"dropout_scale", a.dropout_scale_tensor_uid()},
+                {"dropout_scale_inv", a.dropout_scale_inv_tensor_uid()}}};
         for(const auto& [label, uid] : optional)
         {
             if(uid.has_value())
@@ -542,9 +542,9 @@ private:
         return std::nullopt;
     }
 
-    Verdict expectDims(const Operand& operand,
-                       const std::array<int64_t, 4>& expected,
-                       std::string_view why) const
+    static Verdict expectDims(const Operand& operand,
+                              const std::array<int64_t, 4>& expected,
+                              std::string_view why)
     {
         const auto& dims = dimsOf(operand);
         if(!std::equal(dims.begin(), dims.end(), expected.begin()))
@@ -691,6 +691,8 @@ private:
     /// DT-4: max(Dqk, Dv) above MAX_HEAD_DIM declines [head_size]. DT-5: unequal Dqk and Dv are
     /// accepted; tile routing is the engine's. DT-6: any group size is accepted, a head count
     /// that is not a multiple of the key/value heads declines [gqa].
+    // Every step shares one signature for the table in run(); this one reads only.
+    // NOLINTNEXTLINE(readability-make-member-function-const)
     Verdict checkHeads()
     {
         if(std::max(_problem.headDimQk, _problem.headDimV) > MAX_HEAD_DIM)
@@ -903,7 +905,7 @@ private:
 
     static std::optional<int64_t> optionalLong(const flatbuffers::Optional<int64_t>& value)
     {
-        return value.has_value() ? std::optional<int64_t>(value.value()) : std::nullopt;
+        return value;
     }
 
     /// MW-1: both deprecated causal flags decline. MW-2: a flag implies right bound 0 unless
@@ -1094,7 +1096,7 @@ private:
         std::array<int64_t, 4> strides{};
     };
 
-    Verdict checkSharedBiasLayout(const Operand& operand)
+    static Verdict checkSharedBiasLayout(const Operand& operand)
     {
         const auto& dims = dimsOf(operand);
         const auto& strides = stridesOf(operand);
@@ -1169,7 +1171,7 @@ private:
         const std::array<int64_t, 4> target{
             _problem.batch, _problem.numHeads, _problem.seqLenQ, _problem.seqLenKv};
         BiasView view;
-        if(biasDims.size() == 0 || biasDims.size() > SDPA_RANK)
+        if(biasDims.empty() || biasDims.size() > SDPA_RANK)
         {
             return Decline{"attn_mask",
                            describe(bias) + " rank " + std::to_string(biasDims.size())
@@ -1181,7 +1183,7 @@ private:
             view.dims[axis] = axis < lead ? 1 : biasDims.Get(axis - lead);
             view.strides[axis] = axis < lead ? 0 : biasStrides.Get(axis - lead);
             const bool mayBroadcast = axis != DIM_AXIS;
-            if(view.dims[axis] != target[axis] && !(mayBroadcast && view.dims[axis] == 1))
+            if(view.dims[axis] != target[axis] && (!mayBroadcast || view.dims[axis] != 1))
             {
                 return Decline{"attn_mask",
                                describe(bias) + " dims " + listOf(biasDims)
@@ -1364,7 +1366,7 @@ private:
         const float p
             = a.dropout_probability().has_value() ? a.dropout_probability().value() : 0.0F;
         // Written so a NaN fails.
-        if(!(p >= 0.0F && p < 1.0F))
+        if(std::isnan(p) || p < 0.0F || p >= 1.0F)
         {
             return Decline{"dropout",
                            "dropout_probability " + std::to_string(p) + " is outside [0, 1)"};

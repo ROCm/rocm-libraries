@@ -140,7 +140,7 @@ SdpaBwdSpec withWindow(const SdpaBwdSpec& spec)
     });
 }
 
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, std::vector<int64_t> dims = {})
+SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
 {
     return spec.withEdit([=](SdpaBwdGraph& g) {
         addBias(g, dims);
@@ -321,6 +321,8 @@ constexpr uint64_t WORKSPACE = 0x70000000;
 
 void* asPointer(uint64_t address)
 {
+    // A fake address, only ever compared and offset into, never dereferenced.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
 }
 
@@ -514,7 +516,11 @@ const ParamList& reduceParams()
 
 const ParamList& paramsOf(Slot slot)
 {
-    return slot == Slot::PREP ? prepParams() : slot == Slot::DKDV ? dkdvParams() : dqParams();
+    if(slot == Slot::PREP)
+    {
+        return prepParams();
+    }
+    return slot == Slot::DKDV ? dkdvParams() : dqParams();
 }
 
 size_t imageBytes(const ParamList& params)
@@ -693,8 +699,8 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, EveryRegionEndsWithinTheSharedBytesAndNone
         }
         // The seed is uploaded exactly when it is not a 64-bit device tensor.
         const bool uploads = shape.seedForm != flydsl_sdpa_bwd::SeedForm::NONE
-                             && !(shape.seedForm == flydsl_sdpa_bwd::SeedForm::DEVICE
-                                  && shape.seedWidth == flydsl_sdpa_bwd::SeedWidth::INT64);
+                             && (shape.seedForm != flydsl_sdpa_bwd::SeedForm::DEVICE
+                                 || shape.seedWidth != flydsl_sdpa_bwd::SeedWidth::INT64);
         EXPECT_EQ(bound->count("ws.seed.offset") != 0, uploads);
 
         std::sort(regions.begin(), regions.end());
@@ -911,9 +917,9 @@ TEST(TestFlydslSdpaBwdSplitKernel, ADqObjectThatStagesTheBiasNeedsTheStagingCont
     // A bias row stride of 17 is not a multiple of 8 elements.
     const auto unstaged = baseSpec().withEdit([](SdpaBwdGraph& g) {
         auto& bias = addBias(g);
-        bias.strides = {8 * 16 * 17, 16 * 17, 17, 1};
+        bias.strides = {int64_t{8} * 16 * 17, int64_t{16} * 17, 17, 1};
     });
-    RowSpec staged = biasRow();
+    const RowSpec staged = biasRow();
     RowSpec direct = biasRow();
     direct.biasStage = "direct";
     EXPECT_FALSE(serves(Slot::DQ, unstaged, staged));
@@ -1045,7 +1051,7 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
             if(broadcast)
             {
                 // The broadcast dBias lives at the scratch offset, not the front.
-                skip.push_back("DB");
+                skip.emplace_back("DB");
             }
             expectSharedValuesEqual(valuesOf(slot, dump), mergedValues, skip, 40);
         }
@@ -1179,7 +1185,7 @@ TEST(TestFlydslSdpaBwdSplitLaunch, TheDqReduceRunsOnlyForABroadcastDbiasAndTheSc
     ASSERT_TRUE(reduced.reduces);
     EXPECT_EQ(reduced.reduceSymbol, REDUCE_SYMBOL);
     EXPECT_EQ(reduced.reduceBlock, 256U);
-    EXPECT_EQ(reduced.scratchBytes, size_t{2 * 8 * 16 * 16 * 2});
+    EXPECT_EQ(reduced.scratchBytes, size_t{2} * 8 * 16 * 16 * 2);
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     const auto bound = matchesGraph(splitSymbols(Slot::DQ), fixture.context());
     ASSERT_TRUE(bound.has_value());
@@ -1221,7 +1227,7 @@ TEST(TestFlydslSdpaBwdSplitLaunchFp32, DbiasScratchAndReduceGridAreSizedByTheEle
     const auto dump = dumpOf(Slot::DQ, spec, single);
     ASSERT_TRUE(dump.reduces);
     // fp32 elements in the workspace, and a reduce thread owns 4 columns: 16 * 5 items.
-    EXPECT_EQ(dump.scratchBytes, size_t{2 * 8 * 16 * 20 * 4});
+    EXPECT_EQ(dump.scratchBytes, size_t{2} * 8 * 16 * 20 * 4);
     EXPECT_EQ(dump.reduceGrid, (std::array<unsigned int, 3>{1, 1, 1}));
     const auto values = valuesOf(Slot::DQ, dump);
     EXPECT_EQ(values.at("stride_db_seq_q"), 20U);
@@ -1288,7 +1294,7 @@ TEST(TestFlydslSdpaBwdSplitDispatch, EachSlotsWorkspaceBytesAreItsScratchOnly)
     };
     EXPECT_EQ(bytes(Slot::PREP), 0U);
     EXPECT_EQ(bytes(Slot::DKDV), 0U);
-    EXPECT_EQ(bytes(Slot::DQ), size_t{2 * 8 * 16 * 16 * 2});
+    EXPECT_EQ(bytes(Slot::DQ), size_t{2} * 8 * 16 * 16 * 2);
 
     const GraphFixture plain(buildSdpaBwdGraph(baseSpec()));
     const auto plainBound = matchesGraph(splitSymbols(Slot::DQ), plain.context());
