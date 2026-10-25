@@ -5,7 +5,7 @@
 # R3 designed StreamK config for gfx1250 codegen characterization.
 #
 # Goal: exercise the arch-specific and VGPR-constant paths in
-# Tensile/Components/StreamK.py that are only reached on gfx1250
+# tensilelite/Components/StreamK.py that are only reached on gfx1250
 # (methodology-A missing ranges: 78-153, 202-291, 316-409).
 #
 # Coverage targets:

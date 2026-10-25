@@ -29,10 +29,11 @@ from textwrap import dedent, indent
 import pytest
 import yaml
 
-import Tensile
-from Tensile.resources import custom_kernel_text
-import Tensile.TensileLogic.HandleCustomKernel as hck_mod
-from Tensile.AddCustomConfig import (
+import tensilelite
+import tensilelite.CustomKernels as ck_mod
+import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.resources import custom_kernel_text
+from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
     _fmt_yaml_scalar,
@@ -41,13 +42,14 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from Tensile.Common.ValidParameters import (
+from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
+    _readEmbeddedYaml,
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -57,8 +59,8 @@ from Tensile.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
-from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
-from Tensile.ValidateMetadata import validate_all
+from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
+from tensilelite.ValidateMetadata import validate_all
 
 pytestmark = pytest.mark.unit
 
@@ -106,7 +108,7 @@ def test_validate_external_requires_full_custom_kernel_fields(tmp_path):
 
 
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
-    """Tensile-generated kernels carry only InternalSupportParams.KernArgsVersion;
+    """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
     write_kernel(tmp_path / "tensile.s", """\
           InternalSupportParams:
@@ -568,7 +570,7 @@ def test_build_config_full_mi_emits_wavetile():
 def test_parse_tensile_yaml_malformed_raises(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text("BenchmarkProblems: [\n")
-    with pytest.raises(RuntimeError, match="Failed to parse Tensile YAML"):
+    with pytest.raises(RuntimeError, match="Failed to parse TensileLite YAML"):
         _parse_tensile_yaml(str(p))
 
 
@@ -959,12 +961,54 @@ def test_build_from_metadata_numworkgroups_grid():
     assert ck["grid"][0] == "TilesXYBatchGSU"
 
 
+@pytest.mark.parametrize("segment, padding", [(16, 4), (12, None)])
+def test_build_from_metadata_pads_trailing_group_size(segment, padding):
+    """The kernarg segment can end past the trailing groupSize; the gap is padding."""
+    full = _kernel_yaml([dict(_D_ARG, **{".offset": 0}),
+                         {".name": "groupSize", ".size": 4, ".offset": 8,
+                          ".value_kind": "by_value"}])
+    full["amdhsa.kernels"][0][".kernarg_segment_size"] = segment
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+    assert ck["args"][-1]["semantic"] == "ScaleBlockSizeA"
+    assert ck["args"][-1].get("padding") == padding
+
+
 def test_build_from_metadata_default_multidim_grid():
     # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
     )
     assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+@pytest.mark.parametrize("name", ["foreign_WGM", "foreign_WGM_"])
+def test_build_from_metadata_wgm_name_without_rocroller_args_stays_multidim(name):
+    ck = _buildCustomKernelFromMetadata(
+        name, _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
+    )
+    assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+def test_build_from_metadata_rocroller_wgm_args_flatten_workgroup_x():
+    wgm = {
+        "type": "CommandArgument",
+        "name": "WGM",
+        ".size": 4,
+        ".value_kind": "by_value",
+    }
+    magic = {
+        ".name": "MagicMultiple_22",
+        ".size": 4,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int32"},
+        ".expression": {"type": "MagicMultiple", "arg": wgm},
+    }
+    ck = _buildCustomKernelFromMetadata(
+        "not_named_for_wgm",
+        _kernel_yaml([magic, _D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    assert ck["grid"] == ["TilesXY", "One", "Batch"]
 
 
 def test_build_from_metadata_macrotile_name_fallback():
@@ -1042,6 +1086,168 @@ def test_read_custom_kernel_config_non_mapping_raises(tmp_path):
     with pytest.raises(RuntimeError, match="must be a YAML mapping"):
         readCustomKernelConfig("k", str(tmp_path))
 
+def _write_metadata(path, yaml_text):
+    path.write_text(".amdgpu_metadata\n---\n" + dedent(yaml_text) + "...\ns_nop 0\n")
+
+def test_read_custom_kernel_config_parses_only_the_config_section(tmp_path):
+    # The rest of the metadata can be 1 MB of rocRoller kernel graph, so only
+    # custom.config is parsed. A broken amdhsa section is not noticed by this
+    # read; parsing the whole block still reports it.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          InternalSupportParams:
+            KernArgsVersion: 0
+        amdhsa.kernels: [unclosed
+        """)
+    expected = {"InternalSupportParams": {"KernArgsVersion": 0}}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        _readEmbeddedYaml("k", str(tmp_path))
+
+def test_read_custom_kernel_config_entry_with_comments_blank_lines_and_neighbours(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        amdhsa.version: [1, 2]
+        custom.config:
+          # a comment
+          A: 1
+
+          B:
+            - x
+            - y
+        # a comment in column 0 does not end the entry
+          C: {d: 2}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": ["x", "y"], "C": {"d": 2}}
+
+def test_read_custom_kernel_config_flow_style_entry(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {A: 1, B: [2, 3]}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": [2, 3]}
+
+def test_read_custom_kernel_config_quoted_key_takes_the_whole_block_path(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        "custom.config":
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_duplicate_entry_takes_the_whole_block_path(tmp_path):
+    # PyYAML keeps the last of two duplicate keys, so slicing on the first one
+    # would return a different config from a whole-block parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: 1
+        other: 0
+        custom.config:
+          A: 2
+        """)
+    contents = ck_mod.getCustomKernelContents("k", str(tmp_path))
+    assert ck_mod._customConfigYaml(contents) is None
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 2}
+
+def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_whole_block_path(tmp_path):
+    # The first column-0 "custom.config:" line is part of a multi-line quoted
+    # scalar, not a key.
+    _write_metadata(tmp_path / "k.s", """\
+        note: "text
+        custom.config: not a key"
+        custom.config:
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+@pytest.mark.parametrize("indicator", ["|", ">", "|+"])
+@pytest.mark.parametrize("configIsLast", [False, True])
+def test_read_custom_kernel_config_keeps_the_final_newline_of_a_block_scalar(
+    tmp_path, indicator, configIsLast
+):
+    # A block scalar ending the custom.config entry keeps its final newline,
+    # whether another key follows the entry or the entry ends the block.
+    _write_metadata(tmp_path / "k.s", f"""\
+        custom.config:
+          A: 1
+          B: {indicator}
+            text
+        """ + ("" if configIsLast else "amdhsa.kernels: []\n"))
+    expected = {"A": 1, "B": "text\n"}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    assert ck_mod._readEmbeddedYaml("k", str(tmp_path))["custom.config"] == expected
+
+def test_read_custom_kernel_config_without_the_entry_still_raises(tmp_path):
+    _write_metadata(tmp_path / "k.s", "amdhsa.kernels: []\n")
+    with pytest.raises(RuntimeError, match="has no custom.config"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_error_inside_the_entry_is_reported(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: [1
+        """)
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_flow_mapping_closed_in_column_zero(tmp_path):
+    # Valid YAML, but the closing brace in column 0 ends the slice before the
+    # mapping is closed, so the slice alone does not parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {
+          A: 1
+        }
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_alias_to_an_anchor_outside_the_entry(tmp_path):
+    # The anchor is defined before custom.config, outside the slice.
+    _write_metadata(tmp_path / "k.s", """\
+        shared: &p {A: 1}
+        custom.config:
+          X: *p
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"X": {"A": 1}}
+
+def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
+    # Kernels whose file is under 600 KB keep the whole-block comparison cheap.
+    # One rocRoller kernel, about 1 MB of metadata and about 0.5 s to parse in
+    # full, is added so that a rocRoller kernel is compared as well. The other
+    # rocRoller kernels are read through the same slice by validate_all in
+    # test_custom_kernel_cli, but their content is not compared here.
+    paths = [p for p in iterCustomKernelFiles() if os.path.getsize(p) < 600_000]
+    assert paths
+    names = [os.path.basename(p)[:-2] for p in paths] + [_LARGE_METADATA_KERNEL]
+    for name in names:
+        assert readCustomKernelConfig(name) == _readEmbeddedYaml(name)["custom.config"], name
+
+_REAL_ENTRY = "custom.config:\n  A: 1\n"
+
+@pytest.mark.parametrize("before", [
+    pytest.param("", id="plain"),
+    pytest.param("custom.config:x: 1\n", id="key-continues-after-the-colon"),
+    pytest.param("customXconfig:\n  Z: 0\n", id="other-character-for-the-dot"),
+    pytest.param('note: "see custom.config: here"\n', id="text-inside-a-line"),
+    pytest.param("outer:\n  custom.config:\n    Z: 0\n", id="indented"),
+])
+def test_custom_config_yaml_slices_the_real_entry_past_lookalike_lines(before):
+    # readCustomKernelConfig returns the right config even when a lookalike
+    # makes it parse the whole block, so the config alone cannot show that the
+    # slice was used. The whole block of a rocRoller kernel is about 1 MB.
+    contents = ".amdgpu_metadata\n---\n" + before + _REAL_ENTRY + "...\ns_nop 0\n"
+    assert ck_mod._customConfigYaml(contents) == _REAL_ENTRY
+
+def test_custom_config_yaml_is_the_whole_entry_and_nothing_else_for_shipped_kernels():
+    # Every shipped kernel takes the slice, and the slice holds custom.config
+    # and no other top-level key. A scanner that returns None, or one that does
+    # not stop at the end of the entry, would still give the right config
+    # through a whole-block parse, so check the slice itself.
+    names = [os.path.basename(p)[:-2] for p in iterCustomKernelFiles()]
+    assert names
+    for name in names:
+        text = ck_mod._customConfigYaml(ck_mod.getCustomKernelContents(name))
+        assert text is not None, name
+        assert list(yaml.load(text, Loader=ck_mod.SafeLoader)) == ["custom.config"], name
 
 def test_build_from_metadata_non_dict_yaml_raises():
     with pytest.raises(RuntimeError, match="no parseable .amdgpu_metadata"):
@@ -1216,7 +1422,7 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
 
@@ -1315,7 +1521,7 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
 
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     for name, key in ranges.items():
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):
@@ -1327,3 +1533,64 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
             if dim in config.get("AssertSizeLessThan", {}):
                 assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
         assert key[6] >= config["AssertSummationElementMultiple"], name
+
+
+# ---------------------------------------------------------------------------
+# Embedded metadata parse cost
+# ---------------------------------------------------------------------------
+
+# rocRoller kernels embed their kernel graph in .amdgpu_metadata, about 13k YAML
+# lines against about 175 for other custom kernels, so they are the case where
+# the loader choice matters and where the two loaders have the most to disagree on.
+_LARGE_METADATA_KERNEL = (
+    "RR_GEMM_TN_FP8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+)
+
+
+@pytest.mark.skipif(not hasattr(yaml, "CSafeLoader"), reason="PyYAML is built without libyaml")
+def test_embedded_metadata_is_parsed_with_libyaml(monkeypatch):
+    loaders = []
+    realLoad = yaml.load
+
+    def spy(stream, Loader):
+        loaders.append(Loader)
+        return realLoad(stream, Loader=Loader)
+
+    # yaml.safe_load also routes through yaml.load, so a revert to it is caught.
+    monkeypatch.setattr(ck_mod.yaml, "load", spy)
+    readCustomKernelConfig(_LARGE_METADATA_KERNEL)
+
+    assert loaders == [yaml.CSafeLoader]
+
+
+def test_get_custom_kernel_config_parses_whole_metadata_block_once(tmp_path, monkeypatch):
+    # No CustomKernel block, so the config is inferred from amdhsa.kernels and
+    # the whole block is needed. It is parsed once, after the custom.config slice.
+    write_kernel(tmp_path / "metadata_only.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+    wholeBlockParses = []
+    realRead = ck_mod._readEmbeddedYaml
+
+    def spy(name, directory=None, customConfigOnly=False):
+        if not customConfigOnly:
+            wholeBlockParses.append(name)
+        return realRead(name, directory, customConfigOnly)
+
+    monkeypatch.setattr(ck_mod, "_readEmbeddedYaml", spy)
+    config = getCustomKernelConfig("metadata_only", {}, str(tmp_path))
+
+    assert config["CustomKernel"]["args"][0]["semantic"] == "AddressD"
+    assert wholeBlockParses == ["metadata_only"]
+
+
+def test_metadata_loader_matches_pure_python_safe_loader():
+    lines = custom_kernel_text(_LARGE_METADATA_KERNEL).splitlines()
+    start = lines.index("---") + 1
+    end = lines.index("...", start)
+    expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
+
+    assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected

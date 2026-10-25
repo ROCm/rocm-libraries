@@ -366,11 +366,17 @@ bool hipblaslt_client_global_filters(const Arguments& args)
 }
 
 /********************************************************************************************
- * Function which matches Arguments with a category, accounting for arg.known_bug_platforms *
+ * Returns true when a parameter is a known bug that must not run on the current platform.  *
  ********************************************************************************************/
-bool match_test_category(const Arguments& arg, const char* category)
+bool is_known_bug_for_platform(const Arguments& arg)
 {
-    // category is currently unused as "_" for all categories
+    // Unconditional known-bug entries are tagged category == "known_bug" at
+    // gentest time (no known_bug_platforms list).
+    if(!strcmp(arg.category, "known_bug"))
+        return true;
+
+    // Per-GPU known bugs: the parameter is a known bug only when the current arch
+    // is listed in the entry's known_bug_platforms.
     if(*arg.known_bug_platforms)
     {
         // Regular expression for token delimiters
@@ -380,7 +386,8 @@ bool match_test_category(const Arguments& arg, const char* category)
         char* archName;
         if(hipblasLtGetArchName(&archName) != HIPBLAS_STATUS_SUCCESS)
             return false;
-        static const std::string platform(archName);
+        const std::string platform(archName);
+        free(archName);
 
         // Token iterator
         std::cregex_token_iterator iter{arg.known_bug_platforms,
@@ -391,22 +398,12 @@ bool match_test_category(const Arguments& arg, const char* category)
         // Iterate across tokens in known_bug_platforms, looking for matches with platform
         for(; iter != std::cregex_token_iterator(); ++iter)
         {
-            // If a platform matches, set category to "known_bug"
             if(!strcasecmp(iter->str().c_str(), platform.c_str()))
-            {
-                // We know that underlying arg object is non-const, so we can use const_cast
-                strcpy(const_cast<char*>(arg.category), "known_bug");
-                break;
-            }
+                return true;
         }
-        free(archName);
     }
 
-    // we are now bypassing the category key
-    // Return whether arg.category matches the requested category
-    // return !strcmp(arg.category, category);
-
-    return true;
+    return false;
 }
 
 TEST(aux_handle_test, set_sm_count_target_default_is_zero)

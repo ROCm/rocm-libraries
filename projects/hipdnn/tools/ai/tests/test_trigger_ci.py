@@ -158,7 +158,7 @@ def _inputs(dispatch_cmd):
 BRANCH = ["--branch", "users/someone/feature"]
 MULTI_ARCH = [*BRANCH, "dispatch", "-w", "multi-arch"]
 
-# A workflow named like therock-ci.yml, so the tests below do not depend on
+# Stands in for therock-multi-arch-ci.yml, so the tests below do not depend on
 # which inputs the real one has a default for.
 FAKE_WORKFLOW = """\
 name: Fake
@@ -196,14 +196,14 @@ def test_gh_auth_failure_shows_gh_error(trigger_mod, gh, monkeypatch, capsys):
 
 
 def test_input_without_default_is_required(trigger_mod, gh, monkeypatch, capsys):
-    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
+    gh.workflows["therock-multi-arch-ci.yml"] = FAKE_WORKFLOW
     code = _exit_code(
         trigger_mod,
         monkeypatch,
         *BRANCH,
         "dispatch",
         "-w",
-        "therock-ci",
+        "multi-arch",
         "-f",
         "families=gfx950",
         "-f",
@@ -218,14 +218,14 @@ def test_input_without_default_is_required(trigger_mod, gh, monkeypatch, capsys)
 def test_unknown_input_is_rejected_with_the_current_list(
     trigger_mod, gh, monkeypatch, capsys
 ):
-    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
+    gh.workflows["therock-multi-arch-ci.yml"] = FAKE_WORKFLOW
     code = _exit_code(
         trigger_mod,
         monkeypatch,
         *BRANCH,
         "dispatch",
         "-w",
-        "therock-ci",
+        "multi-arch",
         "-f",
         "projects=all",
         "-f",
@@ -235,8 +235,8 @@ def test_unknown_input_is_rejected_with_the_current_list(
     assert code == 1
     err = capsys.readouterr().err
     assert (
-        "therock-ci.yml at 'users/someone/feature' has no input linux_test_labels"
-        in err
+        "therock-multi-arch-ci.yml at 'users/someone/feature' has no input "
+        "linux_test_labels" in err
     )
     assert "its inputs are: projects, families (default 'gfx94X')" in err
     assert gh.dispatched == []
@@ -260,7 +260,7 @@ def test_malformed_field_is_rejected(
         *BRANCH,
         "dispatch",
         "-w",
-        "therock-ci",
+        "multi-arch",
         *fields,
         "--dry-run",
     )
@@ -287,24 +287,26 @@ def test_workflow_without_dispatch_trigger_is_rejected(
 
 
 def test_reuse_build_needs_the_baseline_inputs(trigger_mod, gh, monkeypatch, capsys):
-    gh.workflows["therock-ci.yml"] = FAKE_WORKFLOW
+    # Deliberately not multi-arch: that is the one workflow which does declare
+    # baseline_run_id and prebuilt_stages (asserted by
+    # test_checkout_workflows_are_dispatchable), so it cannot stand in for a
+    # workflow that lacks them. This uses the real hipdnn-superbuild-ci.yml,
+    # which has a workflow_dispatch trigger but no inputs, rather than a fake.
     code = _exit_code(
         trigger_mod,
         monkeypatch,
         *BRANCH,
         "dispatch",
         "-w",
-        "therock-ci",
-        "-f",
-        "projects=all",
+        "hipdnn-superbuild",
         "--reuse-build",
         str(BASELINE_ID),
         "--dry-run",
     )
     assert code == 1
     assert (
-        "--reuse-build needs baseline_run_id, prebuilt_stages, which therock-ci.yml"
-        in capsys.readouterr().err
+        "--reuse-build needs baseline_run_id, prebuilt_stages, which "
+        "hipdnn-superbuild-ci.yml" in capsys.readouterr().err
     )
     assert gh.dispatched == []
 
@@ -436,7 +438,7 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
         "-f",
         "linux_amdgpu_families=gfx94X",
         "-f",
-        "linux_test_labels=test:hipdnn",
+        "pr_labels=test:hipdnn",
         "--yes",
     )
     assert len(gh.dispatched) == 1
@@ -444,7 +446,7 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
     assert cmd[cmd.index("--ref") + 1] == "users/someone/feature"
     assert _inputs(cmd) == {
         "linux_amdgpu_families": "gfx94X",
-        "linux_test_labels": "test:hipdnn",
+        "pr_labels": "test:hipdnn",
     }
     assert "cancels" not in capsys.readouterr().err
 
@@ -535,7 +537,7 @@ def test_reuse_build_accepts_path_with_ref_suffix(trigger_mod, gh):
 @pytest.mark.parametrize(
     "field, value, message",
     [
-        ("path", ".github/workflows/therock-ci.yml", "is a run of"),
+        ("path", ".github/workflows/hipdnn-superbuild-ci.yml", "is a run of"),
         ("repo", "someone/rocm-libraries", "built code from someone/rocm-libraries"),
         ("head_sha", OTHER_SHA, f"built {OTHER_SHA[:11]}, but 'x' is at"),
         ("status", "in_progress", "is still in_progress"),
@@ -585,7 +587,7 @@ def test_dispatch_inputs_reads_defaults_and_flow_style(trigger_mod):
     assert trigger_mod.dispatch_inputs("on: [push]\n") is None
 
 
-@pytest.mark.parametrize("alias", ["therock-ci", "multi-arch", "hipdnn-superbuild"])
+@pytest.mark.parametrize("alias", ["multi-arch", "hipdnn-superbuild"])
 def test_checkout_workflows_are_dispatchable(trigger_mod, alias):
     path = WORKFLOWS_DIR / trigger_mod.WORKFLOWS[alias]
     assert path.is_file(), f"{alias} points to missing {path}"

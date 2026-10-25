@@ -901,7 +901,7 @@ TEST_F(TestGfx1151WmmaAttentionPacks, ExposesTheConfiguredKnobs)
 TEST_F(TestGfx1151WmmaAttentionPacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "hipkernel.gfx1151_wmma_attention.score");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx1151_wmma_attention.score");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx1151_wmma_attention.score"));
 }
 

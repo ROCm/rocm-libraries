@@ -93,6 +93,7 @@ endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
+        hipblaslt-benchmark
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
         ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}

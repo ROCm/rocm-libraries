@@ -251,9 +251,8 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
     EXPECT_EQ(error.get_message().find("score modifier"), std::string::npos);
 }
 
-// set_causal_mask(true) forwards a bare bool to hipDNN (the cuDNN compound
-// alignment/right-bound side effects are intentionally NOT replicated). A causal
-// graph must still validate — the mask is a first-class hipDNN attribute.
+// set_causal_mask(true) mirrors cuDNN: it sets TOP_LEFT alignment and right_bound = 0
+// rather than the deprecated causal_mask bool. A causal graph must still validate.
 TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
 {
     fe::graph::Graph graph;

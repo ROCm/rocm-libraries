@@ -216,3 +216,14 @@ dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.m
 See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 for the distinction between raw FP32 payloads and explicit RNE preparation,
 and for a reproducible comparison through both engines.
+
+## FP64 operands
+
+On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks). A/B take
+one f64 element per lane, as `f64` or a one-element `vec<f64x1>` (reinterpreted
+with one bitcast); another number format is rejected. C/D take four and one, so
+`IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
+follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see
+the [MFMA atom catalog](mfma_atom_catalog.md)). The probe instance
+`instances/gfx942/f64_mma_probe.py` drives both atoms through both engines.

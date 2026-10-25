@@ -116,6 +116,7 @@ attributes #0 = {
 | `tile.mfma_f32_32x32x8_f16`    | `llvm.amdgcn.mfma.f32.32x32x8f16(<4xhalf>, <4xhalf>, <16xfloat>, 0,0,0)`   |
 | `tile.mfma_f32_32x32x16_f16`   | `llvm.amdgcn.mfma.f32.32x32x16.f16(<8xhalf>, <8xhalf>, <16xfloat>, 0,0,0)` |
 | `tile.mfma_f32_4x4x4_f16`      | `llvm.amdgcn.mfma.f32.4x4x4f16(<4xhalf>, <4xhalf>, <4xfloat>, 0,0,0)`      |
+| `tile.mfma_f32_4x4x4_bf16`     | `llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4xi16>, <4xi16>, <4xfloat>, 0,0,0)`    |
 | `tile.readfirstlane`           | `llvm.amdgcn.readfirstlane.{i32,i64}`                                      |
 | `tile.pin_sgpr`                | `asm volatile("" : "+s"(x))`                                               |
 | `tile.wave_all` / `wave_any`   | `ballot.i64` + compare                                                     |
@@ -171,7 +172,7 @@ amd_comgr_action_data_get_data(EXECUTABLE)           # extract bytes
 Libraries are loaded from the default ROCm library locations or the dynamic
 linker search path. The HSACO bytes returned are ready for `hipModuleLoadData`.
 
-`ComgrTimings(bc, relocatable, executable)` returns per-stage seconds; `compile_kernel` converts to ms in the artifact.
+`ComgrTimings(bc, link, relocatable, executable)` returns per-stage seconds (`link` is 0.0 for a single module); `compile_kernel` converts to ms in the artifact.
 
 ## HIP Debug Lowering
 
@@ -183,7 +184,7 @@ This backend emits readable HIP C++:
 - typedef aliases for ext-vector types: `f16x4`, `f32x16`, `i32x4`, `boolx8`, etc.;
 - builtin shims for clang-unfriendly intrinsics (`ds.read.tr16.b64`, `raw.ptr.buffer.load.lds`);
 - `__shared__ <elem> name_storage[...]` for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*` for matrix ops;
 - inline `asm volatile("" : "+s"(x))` for `pin_sgpr`;
 - normal C++ `for` / `if` for structured control flow.

@@ -400,6 +400,8 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+_INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
+
 ################################################################################
 # ProblemType
 # name of solution should begin with name of problemType, and arguments can be listed out explicitly
@@ -429,6 +431,13 @@ _defaultProblemType = {
     "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
+    # W4A16 group scales: dense [M][ceil(K/G)] of DataTypeB.
+    # Int4 A only: [g] = fixed group g, several = runtime group (32, 64 or 128).
+    "ScaleBlockSizesA": [],
+    # Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
+    "ScaleZeroPointA": False,
+    # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
+    "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
@@ -967,7 +976,7 @@ class ProblemType(Mapping):
               raise Exception("SetConstStride%s=%s anchorDim=%u is not in IndexAssignments%s"%(tc, sc, anchorDim, tc))
 
     # Bias
-    # If compute data type is not equal to dest data type, tensile will run conversion kernel.
+    # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
     if "UseBias" in config:
       if self["ComputeDataType"] != self["DestDataType"]:
@@ -1186,7 +1195,7 @@ class ProblemType(Mapping):
     state["NumIndicesBatch"] = len(state["IndicesBatch"])
     state["NumIndicesSummation"] = len(state["IndicesSummation"])
     if not state["AllowNoFreeDims"] and state["NumIndicesFree"] < 2 :
-      raise Exception("Tensile requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
+      raise Exception("TensileLite requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
 
     # by default, unroll index will be the last/inner summation index
     state["IndexUnroll"] = state["IndicesSummation"][len(state["IndicesSummation"])-1]
@@ -1383,6 +1392,12 @@ class ProblemType(Mapping):
       name.append("SAB")
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
+    groups = self["ScaleBlockSizesA"]
+    if groups:
+      # Runtime-group types take the group at launch, so they get G, not a size.
+      name.append("SABB%s%s%s" % ("G" if len(groups) > 1 else groups[0],
+                                  "ZP" if self["ScaleZeroPointA"] else "",
+                                  _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
     if self["UseGateResidual"]:

@@ -7,21 +7,32 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
-
-* Hessenberg reduction routines
-    * GEHD2
-    * GEHRD
 * Equilibration of general and positive definite matrices
     * GEEQU, GEEQUB, POEQU, POEQUB, LAQGE, LAQSY, LAQHE
     * GEEQU_64, GEEQUB_64, POEQU_64, POEQUB_64, LAQGE_64, LAQSY_64, LAQHE_64
 
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
+## rocSOLVER 3.38.0 for ROCm 10.2.0
+
+### Added
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
 
 * Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
 
-### Removed
 ### Optimized
 
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
@@ -33,9 +44,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
-
-### Known issues
-### Upcoming changes
 
 
 

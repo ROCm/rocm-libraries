@@ -336,12 +336,12 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithCompatibleOptionalAttributesViaCApi
         .set_dbias(dBias)
         .set_alibi_mask(true)
         .set_padding_mask(true)
-        .set_causal_mask(true)
-        .set_causal_mask_bottom_right(true)
         .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+    sdpaNode->attributes.causal_mask = true;
+    sdpaNode->attributes.causal_mask_bottom_right = true;
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

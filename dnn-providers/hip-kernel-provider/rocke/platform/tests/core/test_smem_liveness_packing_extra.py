@@ -34,6 +34,7 @@ from rocke.core.ir import (
     BF8E5M2,
     F16,
     F32,
+    F64,
     FP8E4M3,
     I8,
     KernelDef,
@@ -247,6 +248,20 @@ def test_byte_alloc_after_odd_half_alloc_is_16b_aligned(half_elem):
     assert offsets["H"] % 4 == 0
     assert offsets["B"] % 16 == 0, "byte alloc must be 16-byte aligned even after f16"
     assert offsets["B"] >= 260, "byte alloc must sit past the live f16 region"
+    assert pool % 16 == 0
+
+
+def test_f64_alloc_after_two_byte_alloc_is_8b_aligned():
+    """An f64 allocation is aligned to its 8-byte element, not the 4-byte
+    default. A live 2-byte f16 allocation ends at byte 2; the 4-byte rule
+    would place the f64 buffer at byte 4, where each double straddles two
+    8-byte words. The C++ engine pins the same rule in test_f64_lowering.cpp."""
+    op_h, vh = _alloc("%H", _smem(F16, 1))  # 2 bytes, align 4
+    op_d, vd = _alloc("%D", _smem(F64, 2))  # 16 bytes, align 8
+    op_u = _use(vh, vd)  # both live -> the f64 alloc opens a fresh slot
+    offsets, pool = _pack(op_h, op_d, op_u)
+    assert offsets["H"] == 0
+    assert offsets["D"] == 8, "f64 alloc must be 8-byte aligned"
     assert pool % 16 == 0
 
 

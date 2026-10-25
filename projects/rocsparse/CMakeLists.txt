@@ -120,10 +120,6 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
-option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
-option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
-option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
 option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
 option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 

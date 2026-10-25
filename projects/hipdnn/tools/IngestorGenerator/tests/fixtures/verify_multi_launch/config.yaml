@@ -1,0 +1,45 @@
+# Source of the committed bundle under bundle/: one engine whose two kernels each
+# launch the rocKE wmma_fmha_decode builder's primary kernel ("decode") and its
+# "merge" companion. Regenerate from IngestorGenerator/ with the command in README.md.
+dialect: packaged
+kernel_source_kind: rocke
+engine:
+  name: hipkernel:VerifyMultiLaunch
+  knobs: []
+  heuristic: none
+
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+- name: seqlen_q
+  type: int
+  default_value: 1
+
+specialization:
+  metadata_fields: [head_size]
+  matcher_only_fields: [dtype, seqlen_q]
+  bindings:
+    head_size: {field: head_size}
+  vocabulary: {}
+
+packs:
+- name: decode
+  arch: [gfx1151]
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx1151/wmma_fmha_decode.py
+    builder: build_wmma_fmha_decode_module
+    launches:
+      decode: {}
+      merge: {role: merge}
+  kernels:
+  - name: decode.fp16_d64
+    kernel_source:
+      spec: {head_size: 64}
+    metadata: {dtype: FP16, head_size: 64, seqlen_q: 1}
+  - name: decode.fp16_d128
+    kernel_source:
+      spec: {head_size: 128}
+    metadata: {dtype: FP16, head_size: 128, seqlen_q: 1}

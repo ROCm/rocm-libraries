@@ -80,7 +80,7 @@ int parseArgs(int argc, char** argv, size_t* m, size_t* n, hipblaslt_initializat
                     return EXIT_FAILURE;
                 }
 
-                *init = string2hipblaslt_initialization(initStr);
+                *init = string2hipblaslt_initialization(initStr).value();
             }
         }
         else

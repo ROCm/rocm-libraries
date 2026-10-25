@@ -222,6 +222,56 @@ def chiplet_transform_chunked_dynamic(
     return b.select(in_full_block, new_wgid, wgid)
 
 
+def chiplet_transform_chunked_runtime(
+    b: IRBuilder,
+    wgid: Value,
+    *,
+    num_wgs: Value,
+    num_xcds: int,
+    chunk_size: Value | None = None,
+) -> Value:
+    """XCD-contiguous remap whose chunk is a runtime value too.
+
+    :func:`chiplet_transform_chunked_dynamic` keeps ``chunk_size`` a
+    compile-time constant, which only suits kernels whose locality unit does
+    not depend on the problem. Here both the grid and the chunk are i32 SSA
+    values: by default ``chunk = max(1, num_wgs / num_xcds)`` -- the launch
+    split into ``num_xcds`` contiguous runs, one per XCD -- or the caller's
+    ``chunk_size`` (e.g. the workgroups of one image row band, computed from
+    the kernargs). Only ``num_xcds`` stays compile-time: it is a property of
+    the GPU family, not of the problem.
+
+    The arithmetic is the closed form of
+    :func:`python_chiplet_transform_chunked` with ``block = num_xcds *
+    chunk``; workgroups past the last full block keep their id, so the map is
+    a bijection of ``[0, num_wgs)`` for every positive ``num_wgs`` and chunk.
+    The chunk is clamped to 1 so a grid smaller than ``num_xcds`` (chunk 0)
+    is the identity rather than a divide by zero.
+    """
+    if num_xcds <= 0:
+        raise ValueError(
+            f"chiplet_transform_chunked_runtime: invalid args num_xcds={num_xcds}"
+        )
+    c_num_xcds = b.const_i32(int(num_xcds))
+    c_one = b.const_i32(1)
+    if chunk_size is None:
+        chunk_size = b.div(num_wgs, c_num_xcds)
+    chunk = b.smax(chunk_size, c_one)
+    block = b.mul(chunk, c_num_xcds)
+
+    # limit = (num_wgs / block) * block  (largest full-block boundary)
+    limit = b.mul(b.div(num_wgs, block), block)
+
+    xcd = b.mod(wgid, c_num_xcds)
+    local_pid = b.div(wgid, c_num_xcds)
+    chunk_idx = b.div(local_pid, chunk)
+    pos_in_chunk = b.mod(local_pid, chunk)
+
+    new_wgid = b.add(b.add(b.mul(chunk_idx, block), b.mul(xcd, chunk)), pos_in_chunk)
+    in_full_block = b.cmp_lt(wgid, limit)
+    return b.select(in_full_block, new_wgid, wgid)
+
+
 def super_tile_swizzle_dynamic(
     b: IRBuilder,
     wgid: Value,
@@ -347,6 +397,20 @@ def python_chiplet_transform_chunked(
     chunk_idx = local_pid // chunk_size
     pos_in_chunk = local_pid % chunk_size
     return chunk_idx * block + xcd * chunk_size + pos_in_chunk
+
+
+def python_chiplet_transform_chunked_runtime(
+    wgid: int,
+    *,
+    num_wgs: int,
+    num_xcds: int,
+    chunk_size: int | None = None,
+) -> int:
+    """Pure-Python reference for :func:`chiplet_transform_chunked_runtime`."""
+    chunk = num_wgs // num_xcds if chunk_size is None else chunk_size
+    return python_chiplet_transform_chunked(
+        wgid, num_wgs=num_wgs, num_xcds=num_xcds, chunk_size=max(1, chunk)
+    )
 
 
 def python_super_tile_swizzle(

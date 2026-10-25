@@ -90,13 +90,10 @@ jobs:
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   library-uniqueness:
-    name: "hipBLASLt library uniqueness"
+    name: "hipBLASLt library UID uniqueness"
     needs: changes
     if: needs.changes.outputs.library-uniqueness == 'true'
     uses: ./.github/workflows/component-ci-library-uniqueness.yml
-    with:
-      docker_image: ${{ needs.changes.outputs.docker-image }}
-      linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   component-ci-summary:
     name: "Component CI Summary"

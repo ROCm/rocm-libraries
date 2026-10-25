@@ -24,6 +24,38 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
+# torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
+# the batch images past that offset come back wrong (measured with MIOpen on a
+# 4.8 GB fp32 activation). The forward and backward-data references therefore
+# run batch slices whose fp32 operands stay below a 2^31-byte cap -- well under
+# the 2^32 break point, so a slice can never straddle it -- and concatenate
+# them; every image is independent in those two directions.
+_MAX_SLICE_BYTES = 2**31 - 1
+
+
+def _out_extent(i: int, f: int, s: int, pad: int, d: int) -> int:
+    return (i + 2 * pad - d * (f - 1) - 1) // s + 1
+
+
+def _image_elems(p) -> int:
+    """Elements of one image's input or output activation, whichever is larger."""
+    out = (
+        _out_extent(p.Hi, p.Y, p.sH, p.pH, p.dH)
+        * _out_extent(p.Wi, p.X, p.sW, p.pW, p.dW)
+        * p.K
+    )
+    inp = p.Hi * p.Wi * p.C
+    if p.is_3d:
+        out *= _out_extent(p.Di, p.Z, p.sD, p.pD, p.dD)
+        inp *= p.Di
+    return max(out, inp)
+
+
+def _batch_slices(p, n: int):
+    """``[(n0, count), ...]`` covering a batch of ``n`` in fp32-safe slices."""
+    step = max(1, _MAX_SLICE_BYTES // (4 * _image_elems(p)))
+    return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
+
 
 def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference weight gradient for a convolution problem.
@@ -85,10 +117,13 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     Returns:
         Input gradient as a float32 torch.Tensor in NHWC layout.
     """
+    slices = _batch_slices(p, dY.shape[0])
+    if len(slices) > 1:
+        return torch.cat([dgrad_reference(dY[n0 : n0 + n], W, p) for n0, n in slices])
     dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
     W_t = W.float().cuda().permute(0, 3, 1, 2).contiguous()  # KYXC -> KCYX
     dX_nchw = torch.nn.grad.conv2d_input(
-        input_size=(p.N, p.C, p.Hi, p.Wi),
+        input_size=(dY.shape[0], p.C, p.Hi, p.Wi),
         weight=W_t,
         grad_output=dY_t,
         stride=(p.sH, p.sW),
@@ -119,8 +154,12 @@ def conv_reference(
     Returns:
         Reference output as a float32 torch.Tensor.
     """
+    slices = _batch_slices(p, A.shape[0])
+    if len(slices) > 1:
+        return torch.cat(
+            [conv_reference(A[n0 : n0 + n], B, p, out_dtype) for n0, n in slices]
+        )
     if not p.is_3d:
-        A_t = A.float().cuda().permute(0, 3, 1, 2)  # NHWC -> NCHW
         # B layout is KYXC with C = C_total. PyTorch F.conv2d expects weights
         # shaped [K, C/groups, Y, X]. Each filter stores cpg channels contiguously
         # at the start of its C dimension; slice to cpg then permute.
@@ -128,18 +167,37 @@ def conv_reference(
         B_t = (
             B.float().cuda()[:, :, :, :Cg].permute(0, 3, 1, 2)
         )  # [K,Y,X,Cg]->[K,Cg,Y,X]
-        result = (
-            F.conv2d(
-                A_t,
-                B_t,
-                stride=(p.sH, p.sW),
-                padding=(p.pH, p.pW),
-                dilation=(p.dH, p.dW),
-                groups=p.groups,
+        # The backend's conv produces garbage once an fp32 operand passes
+        # 2**31 bytes (seen on an 8x768x768x256 batch: the last image is
+        # wrong), so a large batch is convolved a few images at a time.
+        n_img, h_img, w_img, c_img = A.shape
+        # The padded input extent bounds the output's (stride >= 1).
+        out_bound = (h_img + 2 * p.pH) * (w_img + 2 * p.pW) * B.shape[0]
+        img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
+        per_chunk = ((1 << 31) - 1) // img_bytes
+        if per_chunk < 1:
+            raise ValueError(
+                f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
+                f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
+                "the batch split cannot make it fit"
             )
-            .permute(0, 2, 3, 1)  # NCHW -> NHWC
-            .contiguous()
-        )
+        parts = []
+        for n0 in range(0, n_img, per_chunk):
+            A_t = A[n0 : n0 + per_chunk].float().cuda().permute(0, 3, 1, 2)
+            parts.append(
+                F.conv2d(
+                    A_t,
+                    B_t,
+                    stride=(p.sH, p.sW),
+                    padding=(p.pH, p.pW),
+                    dilation=(p.dH, p.dW),
+                    groups=p.groups,
+                )
+                .permute(0, 2, 3, 1)  # NCHW -> NHWC
+                .contiguous()
+            )
+            del A_t
+        result = parts[0] if len(parts) == 1 else torch.cat(parts)
     else:
         A_t = A.float().cuda().permute(0, 4, 1, 2, 3)  # NDHWC -> NCDHW
         Cg = p.C // p.groups

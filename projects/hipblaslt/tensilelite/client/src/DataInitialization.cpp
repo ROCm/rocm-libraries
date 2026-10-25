@@ -966,6 +966,9 @@ namespace TensileLite
             , m_workspaceSize(problemFactory.workspaceSize())
             , m_pruneMode(args["prune-mode"].as<PruneSparseMode>())
             , m_mxScaleFormat(args["mx-scale-format"].as<int>())
+            , m_mxDataGenerator(args.count("mx-data-generator")
+                                    ? args["mx-data-generator"].as<int>()
+                                    : -1)
 
         {
             {
@@ -1383,6 +1386,15 @@ namespace TensileLite
                           << ToString(m_cdata[i].init) << std::endl;
             }
 
+            if(m_mxDataGenerator == 1)
+                std::cout << "MX data generator: on, A/B come from mxDataGenerator for MX and "
+                             "non-MX FP8/BF8 inputs"
+                          << std::endl;
+            else if(m_mxDataGenerator == 0)
+                std::cout << "MX data generator: off, A/B use init-a/init-b as non-MX inputs, "
+                             "MX scales use init-mx-a/init-mx-b"
+                          << std::endl;
+
             // Need refactor, gemm a, b, c, d only
             m_problemDependentData = 0;
             for(size_t i = 0; i < 4; i++)
@@ -1398,6 +1410,8 @@ namespace TensileLite
             if(args.count("mx-a-block") && args["mx-a-block"].as<int>() > 0)
                 m_problemDependentData = true;
             if(args.count("mx-b-block") && args["mx-b-block"].as<int>() > 0)
+                m_problemDependentData = true;
+            if(m_mxDataGenerator == 1)
                 m_problemDependentData = true;
 
             allocNewCPUInputs();
@@ -1746,6 +1760,9 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGroupedGemm const& problem)
         {
+            if(m_mxDataGenerator == 1)
+                throw std::runtime_error("mx-data-generator=1 is not supported for grouped GEMM");
+
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 if(m_problemDependentData)
@@ -1832,6 +1849,23 @@ namespace TensileLite
             if(useMXGenerator)
                 initializeMXData(problem);
 
+            bool const generateNonMXAB = !useMXGenerator && m_mxDataGenerator == 1;
+            if(generateNonMXAB)
+            {
+                if(problem.sparse())
+                    throw std::runtime_error("mx-data-generator=1 does not support sparse problems");
+                initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::A,
+                                             ContractionProblemGemm::TENSOR::MXSA,
+                                             problem.a(),
+                                             problem.transA(),
+                                             /*isMatrixA=*/true);
+                initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::B,
+                                             ContractionProblemGemm::TENSOR::MXSB,
+                                             problem.b(),
+                                             problem.transB(),
+                                             /*isMatrixA=*/false);
+            }
+
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
@@ -1843,6 +1877,10 @@ namespace TensileLite
                                       || i == ContractionProblemGemm::TENSOR::B
                                       || i == ContractionProblemGemm::TENSOR::MXSA
                                       || i == ContractionProblemGemm::TENSOR::MXSB))
+                    continue;
+
+                if(generateNonMXAB && (i == ContractionProblemGemm::TENSOR::A
+                                       || i == ContractionProblemGemm::TENSOR::B))
                     continue;
 
                 if(m_problemDependentData)
@@ -2054,6 +2092,7 @@ namespace TensileLite
             // generated together); non-MX sides (mixed-mode A=MX, B=BF16) fall back
             // to the default initArray path so buffers don't stay uninitialised.
             auto const& tensors = problem.tensors();
+            bool const  abFromInitArray = (m_mxDataGenerator == 0);
 
             auto initTensorFromDefault = [&](int i) {
                 for(auto& p : m_vdata[i].pristine)
@@ -2132,6 +2171,13 @@ namespace TensileLite
                       bool                    isMatrixA,
                       MXScaleLayout           swizzleLayout,
                       bool*                   preswizzledFlag) {
+                  if(abFromInitArray && dataDesc.dataType() != rocisa::DataType::Float8
+                     && dataDesc.dataType() != rocisa::DataType::BFloat8
+                     && dataDesc.dataType() != rocisa::DataType::Float4)
+                      throw std::runtime_error(
+                          "mx-data-generator=0 supports only Float8/BFloat8/Float4 MX data, got "
+                          + TensileLite::ToString(dataDesc.dataType()));
+
                   auto         rows       = dataDesc.sizes()[0];
                   auto         cols       = dataDesc.sizes()[1];
                   auto         stride     = dataDesc.strides()[1];
@@ -2228,31 +2274,78 @@ namespace TensileLite
                   size_t const compactFree   = dataDesc.sizes()[freeIdx];
                   size_t const scaleElemSize = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                   bool const   kFast         = (boundIdx == 0);
-                  for(size_t b = 0; b < batchCount; b++)
+
+                  // Per-batch scales in generateMXInput's natural (pre-swizzle, unpadded)
+                  // order; only used when the generator is bypassed.
+                  std::vector<std::vector<uint8_t>> naturalScales;
+                  if(abFromInitArray)
                   {
-                      auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                      + b * dataBatchStrideBytes;
-                      auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
-                                       + b * scaleBatchStrideBytes;
-                      generateMXInput(hipDataT,
-                                      hipScaleT,
-                                      dataPtr,
-                                      scalePtr,
-                                      rows,
-                                      cols,
-                                      stride,
-                                      transposed,
-                                      isMatrixA ? mxBlock : 1,
-                                      isMatrixA ? 1 : mxBlock,
-                                      isMatrixA,
-                                      MXScaleLayout::None,
-                                      initModeToMXMethod(dataInitMode),
-                                      -1.0f,
-                                      1.0f,
-                                      initModeToMXMethod(scaleInitMode));
-                      if(kFast)
-                          restrideMXScaleBufferKFast(
-                              scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                      initArray(dataDesc.dataType(),
+                                dataInitMode,
+                                pristineData.cpuInput.valid.get(),
+                                dataDesc);
+
+                      // Scales follow init-mx-a/b, but only the entries generateMXInput
+                      // would emit are kept so the K-block padding stays zero exactly as
+                      // in the generated layout.
+                      std::vector<uint8_t> initScale(scaleDesc.totalAllocatedBytes());
+                      initArray(scaleDesc.dataType(), scaleInitMode, initScale.data(), scaleDesc);
+                      size_t const naturalBytes
+                          = ((rows + mxBlock - 1) / mxBlock) * cols * scaleElemSize;
+                      naturalScales.resize(batchCount);
+                      for(size_t b = 0; b < batchCount; b++)
+                      {
+                          uint8_t const* src     = initScale.data() + b * scaleBatchStrideBytes;
+                          auto&          natural = naturalScales[b];
+                          natural.resize(naturalBytes);
+                          if(kFast)
+                          {
+                              for(size_t f = 0; f < compactFree; f++)
+                                  std::memcpy(natural.data() + f * compactKBlocks * scaleElemSize,
+                                              src + f * paddedKBlocks * scaleElemSize,
+                                              compactKBlocks * scaleElemSize);
+                          }
+                          else
+                          {
+                              std::memcpy(natural.data(), src, naturalBytes);
+                          }
+
+                          auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
+                                           + b * scaleBatchStrideBytes;
+                          std::memcpy(scalePtr, natural.data(), naturalBytes);
+                          if(kFast)
+                              restrideMXScaleBufferKFast(
+                                  scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                      }
+                  }
+                  else
+                  {
+                      for(size_t b = 0; b < batchCount; b++)
+                      {
+                          auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
+                                          + b * dataBatchStrideBytes;
+                          auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
+                                           + b * scaleBatchStrideBytes;
+                          generateMXInput(hipDataT,
+                                          hipScaleT,
+                                          dataPtr,
+                                          scalePtr,
+                                          rows,
+                                          cols,
+                                          stride,
+                                          transposed,
+                                          isMatrixA ? mxBlock : 1,
+                                          isMatrixA ? 1 : mxBlock,
+                                          isMatrixA,
+                                          MXScaleLayout::None,
+                                          initModeToMXMethod(dataInitMode),
+                                          -1.0f,
+                                          1.0f,
+                                          initModeToMXMethod(scaleInitMode));
+                          if(kFast)
+                              restrideMXScaleBufferKFast(
+                                  scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                      }
                   }
 
                   // When the kernel needs a swizzled scale, regenerate it with the
@@ -2298,25 +2391,51 @@ namespace TensileLite
                       std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
                       for(size_t b = 0; b < batchCount; b++)
                       {
-                          auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                          + b * dataBatchStrideBytes;
                           auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
-                          generateMXInput(hipDataT,
-                                          hipScaleT,
-                                          dataPtr,
-                                          scalePtr,
-                                          rows,
-                                          cols,
-                                          stride,
-                                          transposed,
-                                          isMatrixA ? mxBlock : 1,
-                                          isMatrixA ? 1 : mxBlock,
-                                          isMatrixA,
-                                          swizzleLayout,
-                                          initModeToMXMethod(dataInitMode),
-                                          -1.0f,
-                                          1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                          if(abFromInitArray)
+                          {
+                              // Same swizzle and arguments generateMXInput applies to
+                              // its natural scales.
+                              auto const&          natural = naturalScales[b];
+                              std::vector<uint8_t> swizzled;
+                              if(swizzleLayout == MXScaleLayout::GFX950)
+                              {
+                                  size_t const mnExtent
+                                      = (kBlocksSw > 0 && natural.size() % kBlocksSw == 0)
+                                            ? natural.size() / kBlocksSw
+                                            : mnExtentSw;
+                                  swizzled = DGen::preSwizzleScalesGFX950(natural,
+                                                                          {mnExtent, kBlocksSw});
+                              }
+                              else
+                              {
+                                  swizzled = DGen::preSwizzleScalesGFX1250(
+                                      natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
+                              }
+                              std::memcpy(scalePtr, swizzled.data(), swizzled.size());
+                          }
+                          else
+                          {
+                              auto* dataPtr
+                                  = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
+                                    + b * dataBatchStrideBytes;
+                              generateMXInput(hipDataT,
+                                              hipScaleT,
+                                              dataPtr,
+                                              scalePtr,
+                                              rows,
+                                              cols,
+                                              stride,
+                                              transposed,
+                                              isMatrixA ? mxBlock : 1,
+                                              isMatrixA ? 1 : mxBlock,
+                                              isMatrixA,
+                                              swizzleLayout,
+                                              initModeToMXMethod(dataInitMode),
+                                              -1.0f,
+                                              1.0f,
+                                              initModeToMXMethod(scaleInitMode));
+                          }
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
@@ -2335,7 +2454,8 @@ namespace TensileLite
             static std::atomic<bool> warnedScaleInitUnsupported{false};
             auto warnIfScaleInitUnsupported
                 = [&](int dataTensorEnum, int scaleTensorEnum) {
-                      if(warnedScaleInitUnsupported.load(std::memory_order_relaxed))
+                      if(abFromInitArray
+                         || warnedScaleInitUnsupported.load(std::memory_order_relaxed))
                           return;
                       auto const& dataInit  = m_vdata[dataTensorEnum].init;
                       auto const& scaleInit = m_vdata[scaleTensorEnum].init;
@@ -2379,7 +2499,14 @@ namespace TensileLite
             {
                 // A is non-MX: seed via the default initArray path so it doesn't
                 // get skipped by the MX-aware default loop.
-                initTensorFromDefault(ContractionProblemGemm::TENSOR::A);
+                if(m_mxDataGenerator == 1)
+                    initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::A,
+                                                 ContractionProblemGemm::TENSOR::MXSA,
+                                                 problem.a(),
+                                                 problem.transA(),
+                                                 /*isMatrixA=*/true);
+                else
+                    initTensorFromDefault(ContractionProblemGemm::TENSOR::A);
                 if(problem.mxBlockA() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSA);
             }
@@ -2402,9 +2529,75 @@ namespace TensileLite
             else
             {
                 // B is non-MX: same fallback as the A side.
-                initTensorFromDefault(ContractionProblemGemm::TENSOR::B);
+                if(m_mxDataGenerator == 1)
+                    initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::B,
+                                                 ContractionProblemGemm::TENSOR::MXSB,
+                                                 problem.b(),
+                                                 problem.transB(),
+                                                 /*isMatrixA=*/false);
+                else
+                    initTensorFromDefault(ContractionProblemGemm::TENSOR::B);
                 if(problem.mxBlockB() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
+            }
+        }
+
+        // The generated bytes depend on the block size, so this must match the MX
+        // runs being compared against (MXBlockA/B: 32) for A/B to come out identical.
+        static constexpr size_t kNonMXGeneratorBlock = 32;
+
+        void DataInitialization::initNonMXSideWithMXGenerator(int                     dataTensorEnum,
+                                                              int                     scaleTensorEnum,
+                                                              TensorDescriptor const& dataDesc,
+                                                              bool                    transposed,
+                                                              bool                    isMatrixA)
+        {
+            if(dataDesc.dataType() != rocisa::DataType::Float8
+               && dataDesc.dataType() != rocisa::DataType::BFloat8)
+                throw std::runtime_error(
+                    "mx-data-generator=1 supports only Float8/BFloat8 non-MX A/B, got "
+                    + TensileLite::ToString(dataDesc.dataType()));
+
+            auto& pristine = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
+            if(pristine.initDescriptor[0] == dataDesc)
+                return;
+            pristine.initDescriptor[0] = dataDesc;
+
+            size_t const rows       = dataDesc.sizes()[0];
+            size_t const cols       = dataDesc.sizes()[1];
+            size_t const stride     = dataDesc.strides()[1];
+            size_t const batchCount = dataDesc.sizes().size() > 2 ? dataDesc.sizes()[2] : 1;
+            size_t const batchStrideBytes
+                = batchCount > 1
+                      ? multiplyElementSize(dataDesc.strides()[2], dataDesc.elementBytes())
+                      : 0;
+
+            // Non-MX inputs have no scale tensor; the generator still emits one
+            // E8M0 byte per block, which is discarded.
+            std::vector<uint8_t> scratchScale(
+                ((rows + kNonMXGeneratorBlock - 1) / kNonMXGeneratorBlock)
+                * ((stride * cols + rows - 1) / rows));
+
+            for(size_t b = 0; b < batchCount; b++)
+            {
+                auto* dataPtr
+                    = static_cast<uint8_t*>(pristine.cpuInput.valid.get()) + b * batchStrideBytes;
+                generateMXInput(hipMxDataTypeForDataGenerator(dataDesc.dataType()),
+                                hipMxScaleTypeForDataGenerator(rocisa::DataType::E8),
+                                dataPtr,
+                                scratchScale.data(),
+                                rows,
+                                cols,
+                                stride,
+                                transposed,
+                                isMatrixA ? kNonMXGeneratorBlock : 1,
+                                isMatrixA ? 1 : kNonMXGeneratorBlock,
+                                isMatrixA,
+                                MXScaleLayout::None,
+                                initModeToMXMethod(m_vdata[dataTensorEnum].init),
+                                -1.0f,
+                                1.0f,
+                                initModeToMXMethod(m_vdata[scaleTensorEnum].init));
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -2415,6 +2608,16 @@ namespace TensileLite
             // against a build that doesn't include mxDataGenerator support.
             throw std::runtime_error(
                 "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
+        }
+
+        void DataInitialization::initNonMXSideWithMXGenerator(int /*dataTensorEnum*/,
+                                                              int /*scaleTensorEnum*/,
+                                                              TensorDescriptor const& /*dataDesc*/,
+                                                              bool /*transposed*/,
+                                                              bool /*isMatrixA*/)
+        {
+            throw std::runtime_error(
+                "mx-data-generator=1 requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
         }
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 

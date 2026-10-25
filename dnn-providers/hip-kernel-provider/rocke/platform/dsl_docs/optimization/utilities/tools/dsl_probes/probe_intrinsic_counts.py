@@ -77,7 +77,6 @@ DEFAULT_INTRINSIC_PATTERNS = {
     "global.load": r"@llvm\.amdgcn\.global\.load",
     "global.store": r"@llvm\.amdgcn\.global\.store",
     "ds.read.tr16.b64": r"@llvm\.amdgcn\.ds\.read\.tr16\.b64",
-    "ds.read.tr16.b128": r"@llvm\.amdgcn\.ds\.read\.tr16\.b128",
     "ds.bpermute": r"@llvm\.amdgcn\.ds\.bpermute",
     "ds.swizzle": r"@llvm\.amdgcn\.ds\.swizzle",
     "permlane32.swap": r"@llvm\.amdgcn\.permlane32\.swap",
