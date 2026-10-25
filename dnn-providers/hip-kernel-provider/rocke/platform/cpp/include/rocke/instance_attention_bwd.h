@@ -81,10 +81,13 @@
  * (ROCKE_ERR_NOTIMPL). The builder runs the body unit's full
  * BwdTileGeometry.from_spec check (lane-map proofs included).
  *
+ * AttnBwdSpec.dq_spec (the split dQ kernel's spec) is
+ * rocke_attn_bwd_spec_dq_spec in rocke/instance_attention_bwd_dq.h.
+ *
  * Not ported (host-only or other units): INERT_KNOBS, DECLARATION_ONLY,
- * NOT_YET_EFFECTIVE_KNOBS (sweep bookkeeping), AttnBwdSpec.dq_spec (the split
- * dQ kernel's spec, P8), the lane-map proofs of BwdTileGeometry.check inside
- * validate (the builder runs them), BwdLdsRequest.from_geometry, and the
+ * NOT_YET_EFFECTIVE_KNOBS (sweep bookkeeping), the lane-map proofs of
+ * BwdTileGeometry.check inside validate (the builder runs them),
+ * BwdLdsRequest.from_geometry, and the
  * pass-1 root copies of _emit_main other than the "stash" one (the
  * _MIRROR_FRESH_ROOTS constant selects it, so the others are dead code).
  */
@@ -360,9 +363,22 @@ rocke_kernel_def_t* rocke_build_attn_bwd_main_new(rocke_ir_builder_t* b,
 
 #ifdef __cplusplus
 #include <string>
+#include <vector>
 
 namespace rocke_attn_bwd
 {
+/* Value sets of attention_bwd.py the split dQ spec checks against. */
+extern const std::vector<std::string> BWD_DTYPES;
+extern const std::vector<int> BWD_HEAD_SIZES;
+extern const std::vector<std::string> SEQ_MODES;
+extern const std::vector<int> STAGE_VECS;
+extern const std::vector<std::string> MASK_CLASSES;
+extern const std::vector<std::string> WS_LAYOUTS;
+extern const std::vector<std::string> SPLIT_DQ_ARCHS;
+/* SHA-1 of a byte string, lower-case hex (salted_kernel_name's digest). */
+std::string sha1_hex(const std::string& msg);
+/* `name and name.replace("_", "").isalnum()` (NotImplError beyond U+00FF). */
+bool name_ok(const char* name);
 const rocke_attn_bwd_arch_facts_t& arch_facts(const std::string& arch);
 struct RegEstimate
 {
