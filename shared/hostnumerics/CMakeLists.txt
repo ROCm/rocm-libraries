@@ -36,7 +36,7 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
             include/roc/hostnumerics/scalar_type.hpp
             include/roc/hostnumerics/shape.hpp
-            include/roc/hostnumerics/output_selection.hpp
+            include/roc/hostnumerics/index_selection.hpp
             include/roc/hostnumerics/detail/prime.hpp
             include/roc/hostnumerics/expected.hpp
 )
