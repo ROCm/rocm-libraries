@@ -54,9 +54,9 @@ namespace
             SCOPED_TRACE(int(apiType));
             const auto type = hipblaslt::hostnumerics::scalarType(apiType);
             hn::Tensor stored(type, hn::Layout(hn::Shape{batches, m, n}, {stride, 1, ld}, 0));
-            std::vector<hn::FreivaldsPlan> plans;
-            hn::ScalarConversionOptions    conversion;
-            conversion.integerOverflow = hn::IntegerOverflow::Saturate;
+            std::vector<hn::FreivaldsPlan>    plans;
+            const hn::ScalarConversionOptions conversion{hn::IntegerRounding::TowardZero,
+                                                         hn::IntegerOverflow::Saturate};
             for(size_t batch = 0; batch < batches; ++batch)
             {
                 hn::Tensor a(hn::ScalarType::Float32, hn::Shape{m, k});

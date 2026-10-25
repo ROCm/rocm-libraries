@@ -139,13 +139,13 @@ TEST(PreparedIteration, OutputSelectionOrdersAgreeWithShapeAndLayout) {
     EXPECT_THROW(detail::IndexIteration(shape, invalid.indexOrder()), std::runtime_error);
 }
 
-TEST(PreparedIteration, CheckedPublicAccessAndNumericalChecksRemain) {
+TEST(PreparedIteration, PublicAccessChecksAndValueReturningConversion) {
     Tensor tensor(ScalarType::Float32, Shape{2});
-    tensor.storeFrom({0}, std::numeric_limits<float>::infinity());
     EXPECT_THROW(tensor.loadAs<float>({2}), std::runtime_error);
     EXPECT_THROW(tensor.storeFrom({2}, 1.0f), std::runtime_error);
+    tensor.storeFrom({0}, 1.75f);
     const detail::RuntimeTensorReader<int64_t> integerReader(tensor);
-    EXPECT_THROW(integerReader({0}), std::runtime_error);
+    EXPECT_EQ(integerReader({0}), 1);
     const auto affine = GenerationRecipe::realOnly(
         GenerationRecipe::affineIndexRemainder(
             {.dimensionCoefficients = {std::numeric_limits<int64_t>::max()},
@@ -153,7 +153,7 @@ TEST(PreparedIteration, CheckedPublicAccessAndNumericalChecksRemain) {
              .positiveDivisor = 7}),
         {});
     EXPECT_THROW(generate(tensor, affine), std::runtime_error);
-    EXPECT_TRUE(std::isinf(tensor.loadAs<float>({0})));
+    EXPECT_EQ(tensor.loadAs<float>({0}), 1.75f);
 }
 
 TEST(PreparedIteration, HugeZeroStrideRunAndInvalidEmptyOrders) {
