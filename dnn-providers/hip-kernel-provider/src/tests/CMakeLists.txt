@@ -421,17 +421,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheMergedSignature
         )
     endif()
-    # The split engine's slots are ops of their own (prep, dkdv, dq) that ship the same
-    # architectures; its descriptor-only engine folder has none. The census reads a shard only
-    # where all three slots ship.
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE
-       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
-       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv
-       AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+    # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
+    # engine folder has none. The census reads a shard only for an arch where all three slots
+    # ship.
+    set(_hkp_split_arches)
+    foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+        if(_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+           AND _arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv)
+            list(APPEND _hkp_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_split_arches)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq}
+            ARCHES ${_hkp_split_arches}
             SUITES TestFlydslSdpaBwdSplitPacks
             EXPECTED_CASES
                 IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
