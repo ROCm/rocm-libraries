@@ -3,8 +3,10 @@
 
 """Shared prep / convert kernels of the attention backward (all families).
 
-Python-only family glue (no C++ twin; packs pin ``ROCKE_BACKEND=python``).
-One spec, :class:`AttnBwdAuxSpec`, drives four builders:
+Family glue with a byte-identical C++ twin
+(``platform/cpp/include/rocke/instance_attention_bwd_aux.h``; parity pair
+``tests/parity/attention_bwd_aux_emit.{py,c}``). The packs still pin
+``ROCKE_BACKEND=python``. One spec, :class:`AttnBwdAuxSpec`, drives four builders:
 
 * ``build_attn_bwd_prep``: per query row ``lse2 = lse * LOG2E`` and
   ``Dsum = rowsum(dO * O)`` (fp32), both gated on one
