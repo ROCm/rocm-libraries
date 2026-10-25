@@ -103,7 +103,7 @@ Target integerFromBits(uint64_t raw) noexcept {
 }
 
 // Convert to bits without a failure result. Width and overflow policy must be
-// valid; under Reject, the input must fit. For signed eight-bit output,
+// valid; under Identity, the input must fit. For signed eight-bit output,
 // ModuloWrap maps 128 to 0x80 and Saturate maps it to 0x7f.
 template <typename Integral>
 uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signedDestination,
@@ -119,7 +119,7 @@ uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signed
 }
 
 // Round and convert without a failure result. Width and policies must be valid.
-// NaN is outside the domain; infinity is permitted only under Saturate. Reject
+// NaN is outside the domain; infinity is permitted only under Saturate. Identity
 // requires the rounded value to fit. NearestEven maps 2.5 to 2 and 3.5 to 4.
 template <typename Floating>
 uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signedDestination,

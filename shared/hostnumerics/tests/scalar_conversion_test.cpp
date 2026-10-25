@@ -14,28 +14,33 @@ namespace {
 using namespace roc::hostnumerics;
 
 TEST(ScalarConversionTutorial, Rounding) {
-    // Both integer policies are explicit. Reject requires the rounded result to fit;
-    // it does not check the input or report an error.
+    // Integer conversion is cast<T>(f_T(g(x))). Both policies are explicit:
+    // g rounds TowardZero or NearestEven; f_T applies Identity, Saturate, or
+    // ModuloWrap. Identity leaves g(x) unchanged, so it must already fit in T.
 
     // TowardZero drops the fractional part; negative values move toward zero too.
-    EXPECT_EQ(convertScalar<int32_t>(3.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              3);
-    EXPECT_EQ(convertScalar<int32_t>(-3.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              -3);
-
-    EXPECT_EQ(convertScalar<int32_t>(2.75, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              3);
     EXPECT_EQ(
-        convertScalar<int32_t>(-2.75, {IntegerRounding::NearestEven, IntegerOverflow::Reject}), -3);
+        convertScalar<int32_t>(3.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}), 3);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-3.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}),
+        -3);
+
+    EXPECT_EQ(
+        convertScalar<int32_t>(2.75, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 3);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-2.75, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -3);
     // Halfway values choose the even integer, including on the negative side.
-    EXPECT_EQ(convertScalar<int32_t>(2.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              2);
-    EXPECT_EQ(convertScalar<int32_t>(3.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              4);
-    EXPECT_EQ(convertScalar<int32_t>(-2.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              -2);
-    EXPECT_EQ(convertScalar<int32_t>(-3.5, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-              -4);
+    EXPECT_EQ(
+        convertScalar<int32_t>(2.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 2);
+    EXPECT_EQ(
+        convertScalar<int32_t>(3.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}), 4);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-2.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -2);
+    EXPECT_EQ(
+        convertScalar<int32_t>(-3.5, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+        -4);
 }
 
 TEST(ScalarConversionTutorial, Overflow) {
@@ -55,8 +60,9 @@ TEST(ScalarConversionTutorial, Overflow) {
 
     // Rounding happens first: 127.5 truncates to 127 but rounds to 128 with
     // NearestEven. The latter needs Saturate or ModuloWrap to satisfy the contract.
-    EXPECT_EQ(convertScalar<int8_t>(127.5, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              127);
+    EXPECT_EQ(
+        convertScalar<int8_t>(127.5, {IntegerRounding::TowardZero, IntegerOverflow::Identity}),
+        127);
     EXPECT_EQ(
         convertScalar<int8_t>(127.5, {IntegerRounding::NearestEven, IntegerOverflow::Saturate}),
         127);
@@ -64,10 +70,10 @@ TEST(ScalarConversionTutorial, Overflow) {
         convertScalar<int8_t>(127.5, {IntegerRounding::NearestEven, IntegerOverflow::ModuloWrap}),
         -128);
 
-    // A negative fraction can still satisfy Reject for an unsigned destination:
+    // A negative fraction can still use Identity for an unsigned destination:
     // TowardZero produces zero before representability matters.
-    EXPECT_EQ(convertScalar<uint8_t>(-0.75, {IntegerRounding::TowardZero, IntegerOverflow::Reject}),
-              0);
+    EXPECT_EQ(
+        convertScalar<uint8_t>(-0.75, {IntegerRounding::TowardZero, IntegerOverflow::Identity}), 0);
 }
 
 TEST(ScalarConversionTutorial, FloatingAndBooleanDestinations) {
@@ -117,27 +123,27 @@ TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
     // Real-to-complex supplies a zero imaginary part. Complex-to-complex converts
     // both components; integer rounding policies do not round floating components.
     EXPECT_EQ(convertScalar<std::complex<double>>(
-                  1.25f, {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                  1.25f, {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               std::complex<double>(1.25, 0.0));
-    EXPECT_EQ(
-        convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5},
-                                           {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
-        std::complex<float>(1.25f, -2.5f));
+    EXPECT_EQ(convertScalar<std::complex<float>>(
+                  std::complex<double>{1.25, -2.5},
+                  {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+              std::complex<float>(1.25f, -2.5f));
 
     // Complex-to-real requires a zero imaginary part, then converts the real part.
     // A nonzero imaginary part violates an unchecked caller precondition.
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0},
-                                     {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                                     {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               4);
 
     // A C++ enum source converts using its underlying numeric value.
     enum class Sample : int16_t { Negative = -3 };
     EXPECT_EQ(convertScalar<int32_t>(Sample::Negative,
-                                     {IntegerRounding::NearestEven, IntegerOverflow::Reject}),
+                                     {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               -3);
 }
 
-constexpr ScalarConversionOptions reject{IntegerRounding::TowardZero, IntegerOverflow::Reject};
+constexpr ScalarConversionOptions identity{IntegerRounding::TowardZero, IntegerOverflow::Identity};
 constexpr ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
 constexpr ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
 
@@ -162,8 +168,8 @@ TYPED_TEST(IntegerConversion, PreservesLimitsAndAppliesSignednessPolicies) {
     using T = TypeParam;
     constexpr T minimum = std::numeric_limits<T>::min();
     constexpr T maximum = std::numeric_limits<T>::max();
-    EXPECT_EQ(convertScalar<T>(minimum, reject), minimum);
-    EXPECT_EQ(convertScalar<T>(maximum, reject), maximum);
+    EXPECT_EQ(convertScalar<T>(minimum, identity), minimum);
+    EXPECT_EQ(convertScalar<T>(maximum, identity), maximum);
     if constexpr (std::is_signed_v<T>) {
         EXPECT_EQ(convertScalar<T>(std::numeric_limits<uint64_t>::max(), saturate), maximum);
         EXPECT_EQ(convertScalar<T>(std::numeric_limits<uint64_t>::max(), wrap), -1);
@@ -174,13 +180,13 @@ TYPED_TEST(IntegerConversion, PreservesLimitsAndAppliesSignednessPolicies) {
 }
 
 TEST(ScalarConversion, PreservesNarrowIntegerLimits) {
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{-128}, reject), -128);
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{127}, reject), 127);
+    EXPECT_EQ(convertScalar<int8_t>(int16_t{-128}, identity), -128);
+    EXPECT_EQ(convertScalar<int8_t>(int16_t{127}, identity), 127);
 
-    EXPECT_EQ(convertScalar<uint8_t>(uint16_t{255}, reject), 255);
-    EXPECT_EQ(convertScalar<int8_t>(-128.75, reject), -128);
-    EXPECT_EQ(convertScalar<int8_t>(127.75, reject), 127);
-    EXPECT_EQ(convertScalar<uint8_t>(-0.75, reject), 0);
+    EXPECT_EQ(convertScalar<uint8_t>(uint16_t{255}, identity), 255);
+    EXPECT_EQ(convertScalar<int8_t>(-128.75, identity), -128);
+    EXPECT_EQ(convertScalar<int8_t>(127.75, identity), 127);
+    EXPECT_EQ(convertScalar<uint8_t>(-0.75, identity), 0);
 }
 
 template <typename T>
@@ -192,13 +198,13 @@ TYPED_TEST(FloatingIntegerConversion, ConvertsWideBounds) {
     using T = TypeParam;
     const T twoTo63 = std::ldexp(T{1}, 63);
     const T twoTo64 = std::ldexp(T{1}, 64);
-    EXPECT_EQ(convertScalar<int64_t>(-twoTo63, reject), std::numeric_limits<int64_t>::min());
+    EXPECT_EQ(convertScalar<int64_t>(-twoTo63, identity), std::numeric_limits<int64_t>::min());
 
     // The previous representable value is 2^64 minus one floating-point ULP.
     constexpr int precision =
         std::numeric_limits<T>::digits < 64 ? std::numeric_limits<T>::digits : 64;
     const auto gap = uint64_t{1} << (64 - precision);
-    EXPECT_EQ(convertScalar<uint64_t>(std::nextafter(twoTo64, T{0}), reject),
+    EXPECT_EQ(convertScalar<uint64_t>(std::nextafter(twoTo64, T{0}), identity),
               std::numeric_limits<uint64_t>::max() - (gap - 1));
     EXPECT_EQ(convertScalar<int64_t>(twoTo63, wrap), std::numeric_limits<int64_t>::min());
     EXPECT_EQ(convertScalar<uint64_t>(twoTo64, wrap), 0);
@@ -238,7 +244,7 @@ TEST(ScalarConversion, SaturatesInfinity) {
 }
 
 TEST(ScalarConversion, ConvertsComplexComponents) {
-    const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Reject};
+    const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Identity};
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, nearest), 4);
     EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0}, wrap), -2.25);
     EXPECT_EQ(convertScalar<std::complex<double>>(1.25f, wrap), std::complex<double>(1.25, 0.0));
@@ -248,7 +254,7 @@ TEST(ScalarConversion, ConvertsComplexComponents) {
 
 TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
     enum class SignedValue : int16_t { Negative = -129, Positive = 128 };
-    EXPECT_EQ(convertScalar<int32_t>(true, reject), 1);
+    EXPECT_EQ(convertScalar<int32_t>(true, identity), 1);
     EXPECT_EQ(convertScalar<uint8_t>(false, wrap), 0);
     EXPECT_EQ(convertScalar<int8_t>(SignedValue::Positive, wrap), -128);
     EXPECT_EQ(convertScalar<int8_t>(SignedValue::Negative, saturate), -128);
@@ -266,7 +272,7 @@ TEST(ScalarConversion, RequiresExplicitPolicies) {
     static_assert(!ConvertsWithoutPolicies<double>);
     static_assert(std::is_same_v<decltype(convertScalar<int8_t>(128, wrap)), int8_t>);
     EXPECT_EQ(convertScalar<int8_t>(128, wrap), -128);
-    EXPECT_EQ(convertScalar<int8_t>(2.5, reject), 2);
+    EXPECT_EQ(convertScalar<int8_t>(2.5, identity), 2);
     EXPECT_EQ(convertScalar<std::complex<double>>(1.5, wrap), std::complex<double>(1.5, 0.0));
 }
 
@@ -274,7 +280,7 @@ TYPED_TEST(IntegerConversion, PoliciesMatchIndependentIntegerExpectations) {
     using T = TypeParam;
     const auto check = [](auto value, int rounded, const ScalarConversionOptions& options) {
         const bool fits = std::in_range<T>(rounded);
-        if (options.integerOverflow == IntegerOverflow::Reject && !fits) return;
+        if (options.integerOverflow == IntegerOverflow::Identity && !fits) return;
         T expected = static_cast<T>(rounded);
         if (options.integerOverflow == IntegerOverflow::Saturate && !fits)
             expected = std::cmp_less(rounded, std::numeric_limits<T>::min())
@@ -283,7 +289,7 @@ TYPED_TEST(IntegerConversion, PoliciesMatchIndependentIntegerExpectations) {
         EXPECT_EQ(convertScalar<T>(value, options), expected);
     };
     for (int input = -300; input <= 300; ++input) {
-        for (const auto options : {reject, saturate, wrap}) {
+        for (const auto options : {identity, saturate, wrap}) {
             check(input, input, options);
             for (const double offset : {-0.75, -0.5, 0.0, 0.5, 0.75}) {
                 const double value = input + offset;

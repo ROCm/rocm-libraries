@@ -43,15 +43,15 @@ TEST(ScalarRounding, NearestEvenAndTowardZeroIgnoreHostRoundingMode) {
         {-2.25, -2, -2},
         {-2.75, -3, -2},
     }};
-    const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Reject};
-    const ScalarConversionOptions reject{IntegerRounding::TowardZero, IntegerOverflow::Reject};
+    const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Identity};
+    const ScalarConversionOptions identity{IntegerRounding::TowardZero, IntegerOverflow::Identity};
     for (const int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
         ASSERT_EQ(std::fesetround(mode), 0);
         for (const auto& test : cases) {
             // A runtime load prevents constant folding under the default rounding mode.
             volatile double value = test.value;
             EXPECT_EQ(convertScalar<int32_t>(value, nearest), test.nearest);
-            EXPECT_EQ(convertScalar<int32_t>(value, reject), test.truncated);
+            EXPECT_EQ(convertScalar<int32_t>(value, identity), test.truncated);
         }
         volatile double positiveTie = 127.5;
         volatile double negativeTie = -128.5;
