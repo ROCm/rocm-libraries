@@ -491,7 +491,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     """
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_wgrad as dw
-    from kernels.common import conv_direct_dw_wgrad_mfma as dwm
+    from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_grouped_wgrad_mfma as gwm
     from kernels.common import conv_direct_nongrouped as dn
@@ -504,7 +504,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
         "direct_wgrad_gather": wg.build_wgrad_gather,
-        "direct_wgrad_dw_mfma": dwm.build_dw_wgrad_mfma,
+        "direct_wgrad_dw_mfma": dwmf.build_dw_wgrad_mfma,
         "direct_wgrad_grouped_mfma": gwm.build_grouped_wgrad_mfma,
         DIRECT_WGRAD_FOLD: dw.build_dw_wgrad_fold,
         "direct_grouped": dc.build_direct_conv,
