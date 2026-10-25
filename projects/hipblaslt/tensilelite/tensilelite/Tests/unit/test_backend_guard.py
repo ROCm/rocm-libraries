@@ -11,7 +11,7 @@ import types
 import pytest
 
 import rocisa
-from Tensile.TensileCreateLibrary.Run import _assertCorrectBackendForKernel, _GFX1250
+from tensilelite.TensileCreateLibrary.Run import _assertCorrectBackendForKernel, _GFX1250
 
 pytestmark = pytest.mark.unit
 
