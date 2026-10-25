@@ -88,8 +88,9 @@ label per cell (the C-body trick). `atom`, `addr_fn`, `detail_first` refine bord
   physical map is `dword = (lds_base_bytes + elem*elem_bytes) // 4`, `(depth, bank) = divmod(dword, nbanks)`;
   `4//elem_bytes` elements pack per bank. The base shifts every element's **bank by `base_dwords mod nbanks`**
   and its **depth by `base_dwords // nbanks`** -- so B / buffer-1 do NOT start at address 0. Default 0 =
-  A / buffer-0 / a standalone single-buffer tile. (The `addr_fn`'s row stride must ALSO be the true memref
-  stride -- e.g. `_bufs*free` for a double-buffered `[tile_k, _bufs*free]` tile, not `free`.)
+  A / buffer-0 / a standalone single-buffer tile. (The `addr_fn`'s row stride must ALSO be the true row
+  stride, the LDS descriptor's outer stride -- e.g. `_bufs*free` for a double-buffered `[tile_k][_bufs*free]`
+  buffer, not `free`.)
 - `label_by` = `"flow"` (logical datum) | `"thread"` (`T{lane}R{reg}`). `compact_rows=False` keeps the TRUE
   physical depths (store stride shows as gaps); `True` drops empty rows (denser, hides the stride).
   `dense_rows=40`: above this many depth rows, each occupied row collapses to one `block` summary label.
@@ -178,7 +179,7 @@ destination, and the starting/reorder-intermediate states carry none. The reorde
 - `flow_load_phase(*, load_desc, dims, nbanks, elem_bytes, lds_base_bytes=0, store_desc=None, dest="lds",
   scope="wave", cooperative=False, n_waves=1, wave=0, stride=None, pad=0, swizzle=None, ...)` -- global
   thread-tile -> register file -> LDS (or a register-prefetch target). `scope="macro"` makes the register
-  stage a per-wave strip. Pass `stride` = the true memref row stride.
+  stage a per-wave strip. Pass `stride` = the true row stride (the LDS descriptor's outer stride).
 - `flow_mma_phase(mma, *, a_enc=None, b_enc=None, dims_a=("M","K"), dims_b=("N","K"), trace_a=None,
   trace_b=None, **tee_overrides)` -- the tee (A/B wave operands -> derived C).
 - `flow_epilogue_phase(mma, *, nbanks, elem_bytes, lds_base_bytes=0, c_store_desc=None, dims_c=("M","N"),
@@ -220,9 +221,10 @@ which image) lives in the `/layout-viz` skill, not here.
 1. **Dtype drives bank packing.** `elem_bytes` is required; `4//elem_bytes` elements pack per 4-byte bank
    (f16 -> 2, f32 -> 1). Addresses are in ELEMENTS, banks/depths in DWORDS.
 2. **Bank count is explicit.** `nbanks` is required (gfx90a -> 32). No silent assumption.
-3. **LDS base + true stride.** Feed the operand/buffer's real `lds_base_bytes` and the true memref row
+3. **LDS base + true stride.** Feed the operand/buffer's real `lds_base_bytes` and the true row
    `stride` (`_bufs*free` for a double-buffered tile); base 0 / single-buffer stride is valid ONLY for
-   A / buffer-0 / a standalone single-buffer tile. Read the kernel's real `smem_alloc` layout -- do not guess.
+   A / buffer-0 / a standalone single-buffer tile. The LDS buffer is flat, so its layout is the LDS tensor
+   descriptor: read the kernel's real descriptor strides (a pad is a larger outer stride) -- do not guess.
 4. **Placement != conflict.** These views place data; conflict-free-ness (half-stripe parity) is the
    empirically-validated `/bank-conflict` path.
 5. **Labels flow INVARIANT; only an explicit relabel changes them.** A datum's label is its identity; a
@@ -241,10 +243,11 @@ which image) lives in the `/layout-viz` skill, not here.
 6a. **ORDER THE REGISTER AXIS BY MEMORY — the tensor descriptor decides, NOT the encoding index.** A
    memory-facing register panel (a store's registers, a load's registers) MUST lay its vreg axis out in the
    order the DESCRIPTOR's strides give (`addr_fn` from the recorded `strides`), because the encoding/vreg index
-   is NOT physical memory order. **C (and any operand) can be row- OR col-major — the descriptor is the only
-   authority**: col-major C ⇒ M is stride-1 ⇒ columns run M-fast; row-major C ⇒ N is stride-1 ⇒ columns run
-   N-fast. Sort `range(nreg)` by `addr_fn(*fwd[(lane0, r)])` and pass it as `vreg_values`. ✗ NEVER lay the
-   register axis out by encoding index — that renders an M-contiguous (col-major) store as N-fast and
+   is NOT physical memory order. **C (and any operand) can be M-contiguous OR N-contiguous -- the descriptor
+   is the only authority**: an M-contiguous C (M is stride-1) has columns running M-fast; an N-contiguous C
+   (N is stride-1) has columns running N-fast. Sort `range(nreg)` by `addr_fn(*fwd[(lane0, r)])` and pass
+   it as `vreg_values`. ✗ NEVER lay the register axis out by encoding index — that renders an M-contiguous
+   store as N-fast and
    CONTRADICTS the ASM (`objdump` shows `global_store_dwordx2/x4` over M-adjacent elements). This is a
    consequence of "a transaction = contiguous MEMORY run → CONSECUTIVE vregs": the panel must show that
    consecutiveness, so the reader (and the shade) see the real coalescing.

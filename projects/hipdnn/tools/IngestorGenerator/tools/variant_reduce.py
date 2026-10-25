@@ -828,7 +828,7 @@ def write_selection(selection, names, out) -> int:
             continue
         entry = {
             "name": kernel.name,
-            "kernel_source": kernel.kernel_source.as_document(),
+            "kernel_source": kernel.kernel_source.authored_document(),
             "metadata": dict(kernel.metadata),
         }
         if kernel.arch:

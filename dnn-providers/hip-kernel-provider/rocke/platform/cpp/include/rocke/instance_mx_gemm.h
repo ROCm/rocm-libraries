@@ -16,7 +16,7 @@
  *   (+ convenience: build -> lower)   rocke_mx_gemm_lower_to_llvm(...)
  *
  * The MX GEMM uses the OCP MX-spec shared-exponent format: each 32-element
- * mantissa block carries one 8-bit unbiased E8M0 scale. v1 ships fp8e4m3 /
+ * mantissa block carries one 8-bit biased E8M0 scale (bias 127). v1 ships fp8e4m3 /
  * bf8e5m2 mantissa, group_k=32, 16x16 tiles, wave64, f32 output. The body
  * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0 decode +
  * scale-apply chain (decode_mx_scale_e8m0).

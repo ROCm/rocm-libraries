@@ -110,8 +110,12 @@ TEST(TestPointwisePacks, EveryEmbeddedSourceKeyResolvesInTheCompiledInTable)
         {
             for(const auto& kernel : pack.kernels)
             {
-                if(kernel.source.kind
-                   != hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE)
+                // A multi-launch kernel's launches are all kpack (the loader refuses any
+                // other kind), and its unused `source` defaults to EMBEDDED_SOURCE with no
+                // file, so it would read here as an embedded kernel naming nothing.
+                if(!kernel.sources.empty()
+                   || kernel.source.kind
+                          != hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE)
                 {
                     continue;
                 }

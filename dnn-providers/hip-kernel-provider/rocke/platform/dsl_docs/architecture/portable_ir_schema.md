@@ -170,7 +170,7 @@ take the operand directly.
 
 `magic_multiplier` / `magic_shift` return the two operands of a strength-reduced
 unsigned division — `n // d` compiled as `(umul_hi(n, M) + n) >> s`, which is what
-`helpers/transforms.py::do_magic_division` emits. They exist because those two
+`helpers/magic_division.py::do_magic_division` emits. They exist because those two
 integers are *not* arithmetic on the divisor: the shift is `ceil(log2 d)` and the
 multiplier depends on `d`'s odd part, so a recipe that stays parametric in a
 divisor has to regenerate them rather than carry a formula. The divisor must

@@ -50,12 +50,23 @@ rocsparse_status rocsparse::csrildlt0_kernel_launch(rocsparse_handle         han
         launch = rocsparse::find_csrildlt0_kernel_hash_launch(handle, csrildlt0_info, A);
     }
 
+    const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
     RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
                                        0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
+                                       sizeof(int32_t) * A->rows * A_batch_count,
                                        handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrildlt0_info, A, diag, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot. The diagonal
+    // copy stays per instance: it only reads the shared values.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csrildlt0_info->get_singularity_numeric_exact(), A->batch_count));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csrildlt0_info->get_singularity_numeric_near(), A->batch_count));
+    }
 
     return rocsparse_status_success;
 }

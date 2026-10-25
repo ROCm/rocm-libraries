@@ -146,7 +146,7 @@ def TensileRetuneLibrary(userArgs):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  Tensile Retune Library v{}".format(__version__))
+    print1("#  TensileLite Retune Library v{}".format(__version__))
 
     # argument parsing and related setup
     argParser = argparse.ArgumentParser()
@@ -156,7 +156,7 @@ def TensileRetuneLibrary(userArgs):
                            help="Where to run benchmarks and output results")
     argParser.add_argument("SizeFile", type=os.path.realpath, nargs="?",
                            help="Yaml file with sizes to tune; same format as the 'ProblemSizes' "
-                           "section of a regular Tensile config "
+                           "section of a regular TensileLite config "
                            "(https://github.com/ROCmSoftwarePlatform/Tensile/wiki/Benchmark-Protocol)",
                            default=None)
     argParser.add_argument("--update-method", "-u", dest="updateMethod",

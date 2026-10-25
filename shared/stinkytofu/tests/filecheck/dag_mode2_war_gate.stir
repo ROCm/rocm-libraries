@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-esm2-track-valu-vsrc --ds-read-per-cap=1048576 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-esm2-track-valu-vsrc --print-output
 #
 # mode2 WAR gate (WmmaVgprSrcToDsWrite): a ds_load that overwrites a vgpr a WMMA read is held
 # back until enough later matrix ops have issued. The gap is counted in matrix ops, so only a

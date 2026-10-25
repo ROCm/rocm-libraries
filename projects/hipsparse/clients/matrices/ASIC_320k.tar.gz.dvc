@@ -1,0 +1,6 @@
+outs:
+- path: ASIC_320k.tar.gz
+  remote: sparse-matrices
+  md5: fcfaf8a25c8f49b8d29f138f3c65c08f
+  size: 11301444
+  hash: md5
