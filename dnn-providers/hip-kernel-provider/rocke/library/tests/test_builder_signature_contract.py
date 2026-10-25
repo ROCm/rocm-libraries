@@ -288,6 +288,43 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_segments",
     ),
     "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    "kernels.gfx950.gemm_rich_epilogue.epilogue.EpiKnobs": (),
+    "kernels.gfx950.gemm_rich_epilogue.epilogue.RichEpilogueSpec": (),
+    # hipTensor monokernels (experimental): the plan / problem is the shape;
+    # every knob is defaulted.
+    "kernels.gfx950.hiptensor_mono.contraction_plan.ContractionPlan": (
+        "K",
+        "M",
+        "N",
+        "dcol",
+        "drow",
+        "ext",
+        "k_order",
+        "m_order",
+        "modes_a",
+        "modes_b",
+        "modes_d",
+        "n_order",
+        "ops",
+        "swapped",
+        "vec_d",
+    ),
+    "kernels.gfx950.hiptensor_mono.permute_gather.PermuteGatherSpec": ("permute",),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.OperandPackSpec": ("plan",),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionKnobs": (),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionSpec": (
+        "plan",
+    ),
+    "kernels.gfx950.hiptensor_mono.task_queue.QueueKnobs": (),
+    "kernels.gfx950.hiptensor_mono.task_queue.QueuePlan": (
+        "block_size",
+        "name",
+        "ops",
+        "tensors",
+    ),
+    "kernels.gfx950.hiptensor_mono.task_queue.TaskQueueSpec": ("plan",),
+    "kernels.gfx950.hiptensor_mono.transpose_lds.TransposeLdsSpec": ("cols", "rows"),
+    "kernels.gfx950.tensor_network_mono.circuit_kernel.CircuitSpec": ("n", "phases"),
     # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
     # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
@@ -297,6 +334,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+    # Reached through PermuteGatherSpec.permute (the permute_nd problem).
+    "rocke.instances.common.permute_nd.PermuteSpec": ("perm", "x_shape"),
     # Convolution specs (migrated from platform to library in AICK-5627).
     # Required fields are the problem shape; everything else carries a default.
     "kernels.common._conv_implicit_gemm_common.ConvProblem": (

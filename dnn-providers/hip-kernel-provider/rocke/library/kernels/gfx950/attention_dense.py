@@ -813,6 +813,17 @@ def build_attention_dense(
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
+    # back-to-back GEMM (Python side channel ``spec._score_identity``): the score
+    # map is the identity, P = scale * S (no running max, no exp, no 1/l), so the
+    # kernel computes E = scale * (Q K^T) V with the [Sq, Sk] intermediate kept in
+    # registers (rounded once to the storage type for the PV MFMA, as a 2-GEMM
+    # composition rounds its stored intermediate).
+    _IDENT = bool(getattr(spec, "_score_identity", False))
+    if _IDENT:
+        if LAZY_RESCALE:
+            raise ValueError("_score_identity needs lazy_rescale=False")
+        if spec.emit_lse or spec.causal or spec.sliding_window > 0:
+            raise ValueError("_score_identity: no LSE / causal / window")
     use_sinks = spec.use_sinks
 
     K_STEPS = D // 16
@@ -837,7 +848,7 @@ def build_attention_dense(
     # correct pitch from their LDS tensor shape either way.
     ROWS_PER_INSTR = 128 // D
 
-    b = IRBuilder(spec.kernel_name())
+    b = IRBuilder(spec.kernel_name() + ("_b2b" if _IDENT else ""))
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
 
@@ -1255,7 +1266,15 @@ def build_attention_dense(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
 
+    def _pmap(sv, neg_m):
+        """Score -> P: exp2(s * qk_scale - m) (softmax) or scale * s (_score_identity)."""
+        if _IDENT:
+            return b.fmul(sv, scale)
+        return _exp2(b.fma(sv, qk_scale, neg_m))
+
     def softmax_max(s_reg, m_i):
+        if _IDENT:
+            return m_i, b.const_f32(1.0), None
         local_max = neg_inf
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1349,7 +1368,7 @@ def build_attention_dense(
                 if slot is None:
                     break
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+                p_vals[nsub][i] = _pmap(s_reg[nsub][i], neg_m)
                 n_emit += 1
             if SCHED_GROUP:
                 b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -1358,7 +1377,7 @@ def build_attention_dense(
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+            p_vals[nsub][i] = _pmap(s_reg[nsub][i], neg_m)
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1441,10 +1460,7 @@ def build_attention_dense(
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
-    p0_vals = [
-        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
-        for nsub in range(N_SUB)
-    ]
+    p0_vals = [[_pmap(s0[nsub][i], neg_m0) for i in range(16)] for nsub in range(N_SUB)]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
         for i in range(16):
@@ -1617,7 +1633,9 @@ def build_attention_dense(
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
-    if spec.emit_lse:
+    if _IDENT:
+        rcp_l = b.const_f32(1.0)
+    elif spec.emit_lse:
         positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:

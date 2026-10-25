@@ -10,7 +10,8 @@
  *   arith.fadd/fsub/fmul/fdiv/fneg/fabs/fma/fmax3/fmin3 (float),
  *   arith.cmp/fcmp, arith.fmax/fmin,
  *   arith.select/and/or/not/smax/smin/umax/umin/xor/shl/lshr/umul_hi_i32,
- *   math.exp2/log2/rcp/rcp_fast/sqrt/rsqrt/tanh,
+ *   math.exp2/log2/exp/log/rcp/rcp_fast/sqrt/rsqrt/tanh (f64: the
+ *   f64_math_programs.inc expansions),
  *   gpu.thread_id / gpu.block_id.
  *
  * Every shared helper (rocke_ll_emit, rocke_ll_operand, rocke_ll_llvm_type,
@@ -22,6 +23,8 @@
 
 #include <stdio.h>
 #include <string.h>
+
+#include <string>
 
 namespace ckc
 {
@@ -297,6 +300,19 @@ static void _op_arith_fma(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* c = op->operands[2];
     const char* ty_name = a->type ? a->type->name : NULL;
+    if(ty_name && strcmp(ty_name, "f64") == 0)
+    {
+        /* f64 is always fused (llvm.fma): the error-free transforms built on
+         * it need the single rounding, not fmuladd's may-fuse. */
+        rocke_ll_need(L, "fma.f64");
+        rocke_ll_emitf(L,
+                       "  %s = call double @llvm.fma.f64(double %s, double %s, double %s)",
+                       res->name,
+                       rocke_ll_operand(L, a),
+                       rocke_ll_operand(L, b),
+                       rocke_ll_operand(L, c));
+        return;
+    }
     const char* llvm_ty = ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
@@ -335,7 +351,8 @@ static void ll_fminmax3(rocke_lower_t* L,
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* c = op->operands[2];
     const char* ty_name = a->type ? a->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(L,
@@ -746,14 +763,104 @@ static void _op_arith_umul_hi_i32(rocke_lower_t* L, const rocke_op_t* op)
 
 /* ------------------------------------------------------------------ math.* */
 
+/* One step of an f64 math program: "%<fresh hint> = <text>", with $0..$2 in
+ * `text` replaced by the operands; an operand is the op input (-1) or the
+ * result of an earlier step (its index). */
+typedef struct rocke_f64_math_step
+{
+    const char* hint;
+    const char* text;
+    int nargs;
+    int args[3];
+} rocke_f64_math_step_t;
+
+typedef struct rocke_f64_math_program
+{
+    const char* op_name;
+    const char* const* keys;
+    int num_keys;
+    const rocke_f64_math_step_t* steps;
+    int num_steps;
+} rocke_f64_math_program_t;
+
+#include "f64_math_programs.inc"
+
+static int ll_is_f64(const rocke_value_t* v)
+{
+    return v && v->type && v->type->name && strcmp(v->type->name, "f64") == 0;
+}
+
+/* Python _emit_f64_program: expand an f64 math op into its program. Every
+ * step gets a fresh SSA name in program order; the last defines the result. */
+static void ll_emit_f64_program(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const rocke_f64_math_program_t* prog = NULL;
+    for(size_t i = 0; i < sizeof(k_f64_math_programs) / sizeof(k_f64_math_programs[0]); ++i)
+    {
+        if(strcmp(k_f64_math_programs[i].op_name, op->name) == 0)
+        {
+            prog = &k_f64_math_programs[i];
+            break;
+        }
+    }
+    if(prog == NULL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "%s: no f64 expansion", op->name);
+        return;
+    }
+    for(int k = 0; k < prog->num_keys; ++k)
+    {
+        rocke_ll_need(L, prog->keys[k]);
+    }
+    const char* x = rocke_ll_operand(L, op->operands[0]);
+    const char** names
+        = (const char**)rocke_arena_alloc(&L->arena, sizeof(const char*) * prog->num_steps);
+    if(names == NULL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "f64 math names");
+        return;
+    }
+    for(int s = 0; s < prog->num_steps - 1; ++s)
+    {
+        names[s] = rocke_ll_fresh(L, prog->steps[s].hint);
+    }
+    names[prog->num_steps - 1] = res->name;
+    for(int s = 0; s < prog->num_steps; ++s)
+    {
+        const rocke_f64_math_step_t* step = &prog->steps[s];
+        std::string text;
+        for(const char* c = step->text; *c; ++c)
+        {
+            if(c[0] == '$' && c[1] >= '0' && c[1] <= '9' && (c[1] - '0') < step->nargs)
+            {
+                int a = step->args[c[1] - '0'];
+                text += a < 0 ? x : names[a];
+                ++c;
+            }
+            else
+            {
+                text += *c;
+            }
+        }
+        rocke_ll_emitf(L, "  %s = %s", names[s], text.c_str());
+    }
+}
+
 /* Shared body for the f32-only unary intrinsic math ops. `intrin` is the LLVM
  * intrinsic suffix after "@llvm." (e.g. "exp2.f32", "amdgcn.rcp.f32"); `key`
- * is the _need() key. */
+ * is the _need() key. With `f64_program`, an f64 operand expands to its
+ * f64_math program instead. */
 static void ll_math_f32_unary(rocke_lower_t* L,
                               const rocke_op_t* op,
                               const char* op_label,
                               const char* key,
-                              const char* intrin)
+                              const char* intrin,
+                              bool f64_program = false)
 {
     const rocke_value_t* res = ll_result(op);
     if(!rocke_ll_live(L) || !res)
@@ -761,29 +868,48 @@ static void ll_math_f32_unary(rocke_lower_t* L,
         return;
     }
     const rocke_value_t* v = op->operands[0];
+    if(f64_program && ll_is_f64(v))
+    {
+        ll_emit_f64_program(L, op);
+        return;
+    }
     if(!(v->type && v->type->name && strcmp(v->type->name, "f32") == 0))
     {
-        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "math.%s currently supports f32", op_label);
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      f64_program ? "math.%s currently supports f32 and f64"
+                                  : "math.%s currently supports f32",
+                      op_label);
     }
     rocke_ll_need(L, key);
     rocke_ll_emitf(
         L, "  %s = call float @llvm.%s(float %s)", res->name, intrin, rocke_ll_operand(L, v));
 }
 
-/* Python _op_math_exp2. */
+/* Python _op_math_exp2 (f64: f64_math program). */
 static void _op_math_exp2(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "exp2", "exp2.f32", "exp2.f32");
+    ll_math_f32_unary(L, op, "exp2", "exp2.f32", "exp2.f32", true);
+}
+/* Python _op_math_exp -> llvm.exp.f32 (f64: f64_math program). */
+static void _op_math_exp(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_math_f32_unary(L, op, "exp", "exp.f32", "exp.f32", true);
+}
+/* Python _op_math_log -> llvm.log.f32 (f64: f64_math program). */
+static void _op_math_log(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_math_f32_unary(L, op, "log", "log.f32", "log.f32", true);
 }
 /* Python _op_math_exp2_fast -> llvm.amdgcn.exp2.f32 (native v_exp_f32, no guard). */
 static void _op_math_exp2_fast(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "exp2_fast", "amdgcn.exp2.f32", "amdgcn.exp2.f32");
 }
-/* Python _op_math_log2. */
+/* Python _op_math_log2 (f64: f64_math program). */
 static void _op_math_log2(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "log2", "log2.f32", "log2.f32");
+    ll_math_f32_unary(L, op, "log2", "log2.f32", "log2.f32", true);
 }
 
 /* Python _op_math_rcp: fdiv 1.0, x (NOT an intrinsic; type-generic). */
@@ -817,15 +943,15 @@ static void _op_math_rcp_fast(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "rcp_fast", "rcp.f32", "amdgcn.rcp.f32");
 }
-/* Python _op_math_sqrt -> llvm.sqrt.f32. */
+/* Python _op_math_sqrt -> llvm.sqrt.f32 (f64: llvm.sqrt.f64 program). */
 static void _op_math_sqrt(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "sqrt", "sqrt.f32", "sqrt.f32");
+    ll_math_f32_unary(L, op, "sqrt", "sqrt.f32", "sqrt.f32", true);
 }
-/* Python _op_math_rsqrt -> llvm.amdgcn.rsq.f32. */
+/* Python _op_math_rsqrt -> llvm.amdgcn.rsq.f32 (f64: 1 / sqrt program). */
 static void _op_math_rsqrt(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_math_f32_unary(L, op, "rsqrt", "rsqrt.f32", "amdgcn.rsq.f32");
+    ll_math_f32_unary(L, op, "rsqrt", "rsqrt.f32", "amdgcn.rsq.f32", true);
 }
 /* Python _op_math_tanh -> composition of lowerable scalar primitives. */
 static void _op_math_tanh(rocke_lower_t* L, const rocke_op_t* op)
@@ -836,11 +962,16 @@ static void _op_math_tanh(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     rocke_value_t* v = op->operands[0];
+    if(ll_is_f64(v))
+    {
+        ll_emit_f64_program(L, op);
+        return;
+    }
     if(!v->type || !v->type->name || strcmp(v->type->name, "f32") != 0)
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
-                      "math.tanh requires f32 operand, got %s",
+                      "math.tanh requires f32 or f64 operand, got %s",
                       (v->type && v->type->name) ? v->type->name : "(null)");
         return;
     }
@@ -1003,6 +1134,8 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_MATH_SQRT, _op_math_sqrt);
     rocke_ll_set_handler(ROCKE_OP_MATH_RSQRT, _op_math_rsqrt);
     rocke_ll_set_handler(ROCKE_OP_MATH_TANH, _op_math_tanh);
+    rocke_ll_set_handler(ROCKE_OP_MATH_EXP, _op_math_exp);
+    rocke_ll_set_handler(ROCKE_OP_MATH_LOG, _op_math_log);
 
     rocke_ll_set_handler(ROCKE_OP_GPU_THREAD_ID, _op_gpu_thread_id);
     rocke_ll_set_handler(ROCKE_OP_GPU_BLOCK_ID, _op_gpu_block_id);

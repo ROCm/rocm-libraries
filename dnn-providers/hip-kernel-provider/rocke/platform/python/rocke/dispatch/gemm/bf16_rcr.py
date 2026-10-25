@@ -9,13 +9,16 @@ dtypes/layouts. It reuses the same machinery as :mod:`fp16_rcr`:
 * the dtype-/layout-generic request validation (:func:`rcr_request_errors`),
 * a declared :class:`Capability` per candidate, whose explicit ``arches`` list
   keeps RDNA/WMMA candidates off CDNA arches and CDNA candidates off RDNA ones,
-* the generic config predicate (:func:`gemm_config_supported`), which is already
-  dtype-agnostic (it consults the per-arch MMA catalog).
+* the generic config predicate plus the builder's validity gate
+  (:func:`universal_spec_supported` = :func:`gemm_config_supported`, which is
+  already dtype-agnostic (it consults the per-arch MMA catalog), then
+  ``is_valid_spec``).
 
-The only material difference from the fp16 case is the MMA atom geometry: bf16
-on CDNA has no 32x32 atom (only 16x16x16 / 16x16x32 on gfx950, 16x16x16 on
-gfx942), so the CDNA cshuffle candidate uses a 16x16x16 warp tile with a 4x4
-warp grid rather than fp16's 32x32 / 2x2.
+The only material difference from the fp16 case is the MMA atom geometry of
+the CDNA cshuffle candidate: it uses a 16x16 warp tile with a 4x4 warp grid
+rather than fp16's 32x32 / 2x2. (This is a historical choice, not an atom gap:
+the arch catalog has bf16 32x32x8 on gfx90a/gfx942 and 32x32x8 / 32x32x16 on
+gfx950. The DTL ping-pong candidate shares fp16's 16x16 geometry.)
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from ...instances.common.gemm_universal import (
     TraitSpec,
     UniversalGemmSpec,
     build_universal_gemm,
+    check_launch_shape,
 )
 from ..core import (
     CandidateRegistry,
@@ -47,15 +51,34 @@ from ..core import (
 )
 from .binding import gemm_rcr_binding
 from .common import (
+    DTL_PINGPONG_ARCHES,
     GEMM_DIM_VOCABULARY,
     GemmRequest,
     apply_split_k,
+    dtl_pingpong_sweep_variants,
+    dtl_pingpong_tile_trait,
+    dtl_pingpong_admit,
+    dtl_ring_pad_admit,
+    dtl_ring_pad_tile_trait,
+    dtl_ring_small_admit,
+    dtl_ring_small_sweep_variants,
+    dtl_ring_small_tile_trait,
+    rilv_admits,
+    rilv_spec_tile_trait,
+    rilv_pad_admits,
+    rilv_pad_tile_trait,
+    rilv_shortk_admits,
+    rilv_shortk_tile_trait,
+    big_grid_tile_trait,
+    dtl_big_grid_body,
+    DTL_RING_PAD_ARCHES,
+    DTL_RING_SMALL_ARCHES,
+    persistent_grid,
     rcr_request_errors,
 )
 from .support import (
-    gemm_config_supported,
     request_shape_supported,
-    support_query_from_universal_spec,
+    universal_spec_supported,
 )
 
 _FAMILY = "gemm_bf16_rcr"
@@ -85,8 +108,9 @@ def _make_spec(
 
 
 def _spec_cdna_cshuffle(req: GemmRequest, name: str) -> UniversalGemmSpec:
-    # bf16 CDNA has no 32x32 atom, so the 128x128 cshuffle tile is built from a
-    # 16x16x16 atom with a 4x4 warp grid (block_size = 4*4*64 = 1024). tile_k
+    # The 128x128 cshuffle tile is built from a 16x16 atom with a 4x4 warp
+    # grid (block_size = 4*4*64 = 1024); a historical choice -- bf16 32x32 atoms
+    # do exist on CDNA (see the module docstring). tile_k
     # widens to the largest atom K available on the arch (32 on gfx950).
     tile_k = 32 if req.arch == "gfx950" else 16
     warp_tile_k = 32 if req.arch == "gfx950" else 16
@@ -106,6 +130,48 @@ def _spec_cdna_cshuffle(req: GemmRequest, name: str) -> UniversalGemmSpec:
         ),
         trait=TraitSpec(pipeline="compv4", scheduler="intrawave", epilogue="cshuffle"),
     )
+
+
+def _spec_cdna_dtl_pingpong(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    # The DTL ping-pong body (see ``common.dtl_pingpong_tile_trait``): 256x256
+    # block, 16 waves, DTL + depth-1 prefetch + element swizzle + A/B CACHE_ALL
+    # + chiplet swizzle (the ring form of it on gfx950).
+    tile, trait = dtl_pingpong_tile_trait(req.arch)
+    big = big_grid_tile_trait(req)
+    if big is not None:
+        # very large grids -> the persistent AGPR interleave body or the ring
+        # with chiplet wgm 4 + iglp1 (common.dtl_big_grid_body)
+        tile, trait = big
+    if rilv_admits(req):
+        # the 4-wave AGPR row-interleave body + nt vector epilogue
+        # (``common.rilv_spec_tile_trait``)
+        tile, trait = rilv_spec_tile_trait(req)
+    elif rilv_shortk_admits(req):
+        # aligned short K (``common.rilv_shortk_admits``)
+        tile, trait = rilv_shortk_tile_trait(req)
+    return _make_spec(name=name, arch=req.arch, tile=tile, trait=trait)
+
+
+def _spec_cdna_dtl_ring_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    # 128x128x64 8-wave DTL ring with pad + exact DTL bounds
+    # (``common.dtl_ring_small_tile_trait``) for poorly filled 256x256 waves.
+    tile, trait = dtl_ring_small_tile_trait(
+        req.arch, req.K, req.M, req.N, dtype=req.dtype
+    )
+    return _make_spec(name=name, arch=req.arch, tile=tile, trait=trait)
+
+
+def _spec_cdna_dtl_ring_pad(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    # the 16-wave persistent ring with pad + exact DTL bounds
+    # (``common.dtl_ring_pad_tile_trait``) for ragged M / N.
+    tile, trait = dtl_ring_pad_tile_trait(
+        req.arch, dtl_big_grid_body(req, ragged=True) == "agpr_ilv"
+    )
+    if rilv_pad_admits(req):
+        # the row-interleave body with the vector epilogue's branch-free
+        # bounds (``common.rilv_pad_tile_trait``)
+        tile, trait = rilv_pad_tile_trait(req)
+    return _make_spec(name=name, arch=req.arch, tile=tile, trait=trait)
 
 
 def _spec_cdna_mem(req: GemmRequest, name: str) -> UniversalGemmSpec:
@@ -212,6 +278,11 @@ def _make_candidate(
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arches: Tuple[str, ...],
     shapes: Tuple[ShapeRange, ...] = (),
+    admit: Callable[[GemmRequest, UniversalGemmSpec], Tuple[bool, str]] | None = None,
+    sweep_variants: (
+        Callable[[UniversalGemmSpec, str], Sequence[UniversalGemmSpec]] | None
+    ) = None,
+    split_k: bool = True,
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -222,12 +293,13 @@ def _make_candidate(
         if not ok:
             return False, why
         spec = spec_fn(req, name)
-        ok, why = gemm_config_supported(
-            support_query_from_universal_spec(spec, arch=req.arch)
-        )
+        ok, why = universal_spec_supported(spec, arch=req.arch)
         if not ok:
             return False, why
-        return request_shape_supported(req, spec)
+        ok, why = request_shape_supported(req, spec)
+        if not ok or admit is None:
+            return ok, why
+        return admit(req, spec)
 
     def select(req: OperatorRequest) -> UniversalGemmSpec:
         ok, why = candidate.admits(req)
@@ -237,7 +309,8 @@ def _make_candidate(
         # Engage split-K for skinny/tall-N decode shapes that leave the device
         # idle; a no-op (returns the spec unchanged) for shapes that already
         # fill the device, keeping the default / square path byte-identical.
-        return apply_split_k(req, spec_fn(req, name))
+        spec = spec_fn(req, name)
+        return apply_split_k(req, spec) if split_k else spec
 
     candidate = KernelCandidate(
         name=name,
@@ -254,7 +327,15 @@ def _make_candidate(
         signature=lambda _spec: gemm_args_signature(dtype="bf16"),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        sweep_space=lambda req: (
+            (
+                tuple(sweep_variants(select(req), req.arch))
+                if sweep_variants is not None
+                else (select(req),)
+            )
+            if candidate.admits(req)[0]
+            else ()
+        ),
         build=build_universal_gemm,
         bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="bf16"),
     )
@@ -264,6 +345,12 @@ def _make_candidate(
 def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     t = spec.tile
     assert isinstance(req, GemmRequest)
+    # the launch shape must fit the body (request_shape_supported already
+    # routes such requests elsewhere; this guards direct users of the spec)
+    check_launch_shape(spec, req.M, req.N, req.K)
+    if spec.trait.persistent_ctas:
+        # persistent tile loop: launch only the P workgroups that own tiles
+        return persistent_grid(spec, req.M, req.N)
     # Split-K adds a Z dimension of ``split_k`` K-slice CTAs per (m,n) tile;
     # split_k == 1 (default) collapses to the canonical 2D grid.
     return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
@@ -286,6 +373,37 @@ GEMM_BF16_REGISTRY = CandidateRegistry(
 )
 GEMM_BF16_REGISTRY.extend(
     (
+        _make_candidate(
+            name="universal_gemm_bf16_cdna_dtl_ring_small",
+            spec_id="cdna_dtl_ring_small",
+            priority=4,
+            spec_fn=_spec_cdna_dtl_ring_small,
+            arches=DTL_RING_SMALL_ARCHES,
+            admit=dtl_ring_small_admit,
+            sweep_variants=dtl_ring_small_sweep_variants,
+            split_k=False,
+        ),
+        _make_candidate(
+            name="universal_gemm_bf16_cdna_dtl_ring_pad",
+            spec_id="cdna_dtl_ring_pad",
+            priority=6,
+            spec_fn=_spec_cdna_dtl_ring_pad,
+            arches=DTL_RING_PAD_ARCHES,
+            admit=dtl_ring_pad_admit,
+            split_k=False,
+        ),
+        _make_candidate(
+            name="universal_gemm_bf16_cdna_dtl_pingpong",
+            spec_id="cdna_dtl_pingpong_256x256",
+            priority=5,
+            spec_fn=_spec_cdna_dtl_pingpong,
+            arches=DTL_PINGPONG_ARCHES,
+            admit=dtl_pingpong_admit,
+            sweep_variants=dtl_pingpong_sweep_variants,
+            # Selected without split-K: the admission model compares the
+            # single-K-pass kernels it was calibrated on (see common.py).
+            split_k=False,
+        ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_cshuffle",
             spec_id="cdna_cshuffle_default",

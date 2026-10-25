@@ -284,7 +284,36 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "dtl_prefetch",
                               "active_tile_skip",
                               "lds_k_pad",
-                              "lds_swizzle"};
+                              "lds_swizzle",
+                              "split_k",
+                              "emit_sched_hints",
+                              "cshuffle_no_alias",
+                              "ab_double_buffer",
+                              "interwave_setprio",
+                              "dtl_stages",
+                              "dtl_issue_spread",
+                              "dtl_frag_prefetch",
+                              "dtl_stream_barrier",
+                              "mfma_swap_ab",
+                              "iglp_opt",
+                              "persistent_ctas",
+                              "acc_agpr",
+                              "mfma_interleave",
+                              "acc_agpr_pin",
+                              "ilv_dtl_every",
+                              "ilv_barrier_after",
+                              "ilv_merge",
+                              "lds_swizzle_r",
+                              "dtl_hoist",
+                              "streamk",
+                              "dtl_tight_rsrc",
+                              "pad_fast_tile",
+                              "ilv_early_release",
+                              "ilv_release_at",
+                              "ilv_acquire_at",
+                              "acc_out_vgpr",
+                              "ilv_read_span",
+                              "ilv_dtl_span"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -322,6 +351,56 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
         spec->trait.lds_k_pad = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
         spec->trait.lds_swizzle = dict_bool(tr, "lds_swizzle", spec->trait.lds_swizzle);
+        /* split_k / emit_sched_hints / cshuffle_no_alias (Python
+         * universal_gemm_spec_to_dict sends them) */
+        spec->trait.split_k = dict_int(tr, "split_k", spec->trait.split_k);
+        if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
+        {
+            spec->trait.emit_sched_hints_set = true;
+            spec->trait.emit_sched_hints = tr["emit_sched_hints"].cast<bool>();
+        }
+        spec->trait.cshuffle_no_alias
+            = dict_bool(tr, "cshuffle_no_alias", spec->trait.cshuffle_no_alias);
+        if(tr.contains("ab_double_buffer") && !tr["ab_double_buffer"].is_none())
+        {
+            spec->trait.ab_double_buffer_set = true;
+            spec->trait.ab_double_buffer = tr["ab_double_buffer"].cast<bool>();
+        }
+        spec->trait.interwave_setprio
+            = dict_bool(tr, "interwave_setprio", spec->trait.interwave_setprio);
+        spec->trait.dtl_stages = dict_int(tr, "dtl_stages", spec->trait.dtl_stages);
+        spec->trait.dtl_issue_spread
+            = dict_bool(tr, "dtl_issue_spread", spec->trait.dtl_issue_spread);
+        spec->trait.dtl_frag_prefetch
+            = dict_bool(tr, "dtl_frag_prefetch", spec->trait.dtl_frag_prefetch);
+        spec->trait.dtl_stream_barrier
+            = dict_bool(tr, "dtl_stream_barrier", spec->trait.dtl_stream_barrier);
+        spec->trait.mfma_swap_ab = dict_bool(tr, "mfma_swap_ab", spec->trait.mfma_swap_ab);
+        if(tr.contains("iglp_opt") && !tr["iglp_opt"].is_none())
+        {
+            spec->trait.iglp_opt_set = true;
+            spec->trait.iglp_opt = tr["iglp_opt"].cast<int>();
+        }
+        spec->trait.persistent_ctas = dict_int(tr, "persistent_ctas", spec->trait.persistent_ctas);
+        spec->trait.acc_agpr = dict_bool(tr, "acc_agpr", spec->trait.acc_agpr);
+        spec->trait.mfma_interleave = dict_bool(tr, "mfma_interleave", spec->trait.mfma_interleave);
+        spec->trait.acc_agpr_pin = dict_bool(tr, "acc_agpr_pin", spec->trait.acc_agpr_pin);
+        spec->trait.ilv_dtl_every = dict_int(tr, "ilv_dtl_every", spec->trait.ilv_dtl_every);
+        spec->trait.ilv_barrier_after
+            = dict_int(tr, "ilv_barrier_after", spec->trait.ilv_barrier_after);
+        spec->trait.ilv_merge = dict_bool(tr, "ilv_merge", spec->trait.ilv_merge);
+        spec->trait.lds_swizzle_r = dict_int(tr, "lds_swizzle_r", spec->trait.lds_swizzle_r);
+        spec->trait.dtl_hoist = dict_bool(tr, "dtl_hoist", spec->trait.dtl_hoist);
+        spec->trait.streamk = dict_bool(tr, "streamk", spec->trait.streamk);
+        spec->trait.dtl_tight_rsrc = dict_bool(tr, "dtl_tight_rsrc", spec->trait.dtl_tight_rsrc);
+        spec->trait.pad_fast_tile = dict_bool(tr, "pad_fast_tile", spec->trait.pad_fast_tile);
+        spec->trait.ilv_early_release
+            = dict_int(tr, "ilv_early_release", spec->trait.ilv_early_release);
+        spec->trait.ilv_release_at = dict_int(tr, "ilv_release_at", spec->trait.ilv_release_at);
+        spec->trait.ilv_acquire_at = dict_int(tr, "ilv_acquire_at", spec->trait.ilv_acquire_at);
+        spec->trait.acc_out_vgpr = dict_bool(tr, "acc_out_vgpr", spec->trait.acc_out_vgpr);
+        spec->trait.ilv_read_span = dict_int(tr, "ilv_read_span", spec->trait.ilv_read_span);
+        spec->trait.ilv_dtl_span = dict_int(tr, "ilv_dtl_span", spec->trait.ilv_dtl_span);
     }
 
     /* ---- data ---- */
@@ -437,7 +516,36 @@ SpecHolder build_spec(const py::dict& root)
                               "dtl_prefetch",
                               "active_tile_skip",
                               "lds_k_pad",
-                              "lds_swizzle"};
+                              "lds_swizzle",
+                              "split_k",
+                              "emit_sched_hints",
+                              "cshuffle_no_alias",
+                              "ab_double_buffer",
+                              "interwave_setprio",
+                              "dtl_stages",
+                              "dtl_issue_spread",
+                              "dtl_frag_prefetch",
+                              "dtl_stream_barrier",
+                              "mfma_swap_ab",
+                              "iglp_opt",
+                              "persistent_ctas",
+                              "acc_agpr",
+                              "mfma_interleave",
+                              "acc_agpr_pin",
+                              "ilv_dtl_every",
+                              "ilv_barrier_after",
+                              "ilv_merge",
+                              "lds_swizzle_r",
+                              "dtl_hoist",
+                              "streamk",
+                              "dtl_tight_rsrc",
+                              "pad_fast_tile",
+                              "ilv_early_release",
+                              "ilv_release_at",
+                              "ilv_acquire_at",
+                              "acc_out_vgpr",
+                              "ilv_read_span",
+                              "ilv_dtl_span"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -476,6 +584,58 @@ SpecHolder build_spec(const py::dict& root)
             = dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
         h.spec.trait.lds_k_pad = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);
         h.spec.trait.lds_swizzle = dict_bool(tr, "lds_swizzle", h.spec.trait.lds_swizzle);
+        /* split_k / emit_sched_hints / cshuffle_no_alias (Python
+         * universal_gemm_spec_to_dict sends them) */
+        h.spec.trait.split_k = dict_int(tr, "split_k", h.spec.trait.split_k);
+        if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
+        {
+            h.spec.trait.emit_sched_hints_set = true;
+            h.spec.trait.emit_sched_hints = tr["emit_sched_hints"].cast<bool>();
+        }
+        h.spec.trait.cshuffle_no_alias
+            = dict_bool(tr, "cshuffle_no_alias", h.spec.trait.cshuffle_no_alias);
+        if(tr.contains("ab_double_buffer") && !tr["ab_double_buffer"].is_none())
+        {
+            h.spec.trait.ab_double_buffer_set = true;
+            h.spec.trait.ab_double_buffer = tr["ab_double_buffer"].cast<bool>();
+        }
+        h.spec.trait.interwave_setprio
+            = dict_bool(tr, "interwave_setprio", h.spec.trait.interwave_setprio);
+        h.spec.trait.dtl_stages = dict_int(tr, "dtl_stages", h.spec.trait.dtl_stages);
+        h.spec.trait.dtl_issue_spread
+            = dict_bool(tr, "dtl_issue_spread", h.spec.trait.dtl_issue_spread);
+        h.spec.trait.dtl_frag_prefetch
+            = dict_bool(tr, "dtl_frag_prefetch", h.spec.trait.dtl_frag_prefetch);
+        h.spec.trait.dtl_stream_barrier
+            = dict_bool(tr, "dtl_stream_barrier", h.spec.trait.dtl_stream_barrier);
+        h.spec.trait.mfma_swap_ab = dict_bool(tr, "mfma_swap_ab", h.spec.trait.mfma_swap_ab);
+        if(tr.contains("iglp_opt") && !tr["iglp_opt"].is_none())
+        {
+            h.spec.trait.iglp_opt_set = true;
+            h.spec.trait.iglp_opt = tr["iglp_opt"].cast<int>();
+        }
+        h.spec.trait.persistent_ctas
+            = dict_int(tr, "persistent_ctas", h.spec.trait.persistent_ctas);
+        h.spec.trait.acc_agpr = dict_bool(tr, "acc_agpr", h.spec.trait.acc_agpr);
+        h.spec.trait.mfma_interleave
+            = dict_bool(tr, "mfma_interleave", h.spec.trait.mfma_interleave);
+        h.spec.trait.acc_agpr_pin = dict_bool(tr, "acc_agpr_pin", h.spec.trait.acc_agpr_pin);
+        h.spec.trait.ilv_dtl_every = dict_int(tr, "ilv_dtl_every", h.spec.trait.ilv_dtl_every);
+        h.spec.trait.ilv_barrier_after
+            = dict_int(tr, "ilv_barrier_after", h.spec.trait.ilv_barrier_after);
+        h.spec.trait.ilv_merge = dict_bool(tr, "ilv_merge", h.spec.trait.ilv_merge);
+        h.spec.trait.lds_swizzle_r = dict_int(tr, "lds_swizzle_r", h.spec.trait.lds_swizzle_r);
+        h.spec.trait.dtl_hoist = dict_bool(tr, "dtl_hoist", h.spec.trait.dtl_hoist);
+        h.spec.trait.streamk = dict_bool(tr, "streamk", h.spec.trait.streamk);
+        h.spec.trait.dtl_tight_rsrc = dict_bool(tr, "dtl_tight_rsrc", h.spec.trait.dtl_tight_rsrc);
+        h.spec.trait.pad_fast_tile = dict_bool(tr, "pad_fast_tile", h.spec.trait.pad_fast_tile);
+        h.spec.trait.ilv_early_release
+            = dict_int(tr, "ilv_early_release", h.spec.trait.ilv_early_release);
+        h.spec.trait.ilv_release_at = dict_int(tr, "ilv_release_at", h.spec.trait.ilv_release_at);
+        h.spec.trait.ilv_acquire_at = dict_int(tr, "ilv_acquire_at", h.spec.trait.ilv_acquire_at);
+        h.spec.trait.acc_out_vgpr = dict_bool(tr, "acc_out_vgpr", h.spec.trait.acc_out_vgpr);
+        h.spec.trait.ilv_read_span = dict_int(tr, "ilv_read_span", h.spec.trait.ilv_read_span);
+        h.spec.trait.ilv_dtl_span = dict_int(tr, "ilv_dtl_span", h.spec.trait.ilv_dtl_span);
     }
 
     /* ---- data ---- */
@@ -4312,9 +4472,9 @@ PYBIND11_MODULE(rocke_engine, m)
 
     m.def(
         "f64_mma_probe_serialize_ir",
-        [](int m, int k) {
+        [](int m, int k, const std::string& arch) {
             rocke_ir_builder_t b;
-            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe_arch(&b, m, k, arch.c_str());
             char* text = nullptr;
             rocke_status_t status
                 = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
@@ -4327,7 +4487,8 @@ PYBIND11_MODULE(rocke_engine, m)
             return result;
         },
         py::arg("m") = 16,
-        py::arg("k") = 4);
+        py::arg("k") = 4,
+        py::arg("arch") = "gfx942");
 
     m.def(
         "tf32_mma_probe_serialize_ir",

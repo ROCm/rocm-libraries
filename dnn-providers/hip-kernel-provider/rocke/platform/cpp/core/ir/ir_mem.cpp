@@ -690,6 +690,16 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* expect,
                                  const char* scope)
 {
+    rocke_b_global_flag_wait_eq_ex(b, ptr, idx, expect, scope, NULL);
+}
+
+void rocke_b_global_flag_wait_eq_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* idx,
+                                    rocke_value_t* expect,
+                                    const char* scope,
+                                    const char* ordering)
+{
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
     if(!rocke_i_live(b))
@@ -722,11 +732,20 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
         (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
         return;
     }
+    if(ordering == NULL)
+        ordering = "acquire";
+    if(strcmp(ordering, "acquire") != 0 && strcmp(ordering, "monotonic") != 0)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag wait ordering '%s'", ordering);
+        return;
+    }
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = expect;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "scope", scope);
+    if(strcmp(ordering, "acquire") != 0)
+        rocke_attr_set_str(b, &a, "ordering", ordering);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 

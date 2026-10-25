@@ -145,18 +145,23 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
+| Operation validation | `operation_validation_test` | Tensor descriptors without extents or with non-positive extents or negative strides; contraction modes the kernels can't address (more than six per group, no M or N mode, a mode carried by one tensor only, repeated modes, mismatched extents), binary and trinary; an outer product checked exactly against a loop; non-unary operand operators; elementwise and reduction plans either refused or executed with the loop result |
+| Workspace | `workspace_size_test` | `hiptensorEstimateWorkspaceSize` with a null, fresh and used preference, `HIPTENSOR_PLAN_REQUIRED_WORKSPACE` below a large limit, binary and trinary contractions executed with exactly the reported workspace and checked exactly against a loop; no workspace for elementwise operations and reductions |
 | Elementwise — permute | `rank{2-6}_elementwise_permute_test` | All rank/type combinations |
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | Binary elementwise ops |
 | Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | Trinary elementwise ops |
+| Elementwise — zero scaling factors | `elementwise_zero_scale_test` | Binary, trinary and permutation with a zero scaling factor and NaN, Inf, or `NULL` in that input (also through `HIPTENSOR_OP_LOG`), reused plans and a broadcast input, checked exactly against an independent loop reference |
+| Elementwise — f64 unary operators | `elementwise_f64_unary_op_test` | Every unary operator in f64 binary, trinary, permutation and reduction operations, against the host `long double` math library within 64 ulp of the terms |
 | Elementwise — scalars and operators | `elementwise_scalar_op_test` | Scalars with a BF16 compute descriptor, the order of `opAB` and `opABC` in trinary operations, and a permutation plan executed again with another `alpha`, checked exactly against an independent loop reference |
 | Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary) |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
 | Reduction — scalars | `reduction_scalar_test` | Scalars with a BF16 compute descriptor, checked exactly against an independent loop reference |
+| Reduction — semantics | `reduction_semantics_test` | C copied to a strided D on a non-blocking stream that is still writing C; zero `alpha` or `beta` with NaN or `NULL` inputs; reductions that keep every mode (rank 1, BF16, permuted output) executed twice, checked exactly against an independent loop reference |
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test`, `contraction_test_utils_test`, `contraction_layout_test`, `elementwise_scalar_op_test`, `reduction_scalar_test`, `alloc_failure_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test`, `contraction_test_utils_test`, `contraction_layout_test`, `elementwise_scalar_op_test`, `elementwise_zero_scale_test`, `elementwise_f64_unary_op_test`, `reduction_scalar_test`, `reduction_semantics_test`, `operation_validation_test`, `workspace_size_test`, `alloc_failure_test`.
 
 **CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`, `device_support_test`). `device_support_test` runs on hosts with or without a GPU, and checks the device only through `hiptensorCreate`.
 

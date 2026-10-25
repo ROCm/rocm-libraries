@@ -14,6 +14,7 @@ from pathlib import Path
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.instances.common.gemm_universal import launch_shape_error
 from rocke.runtime.hip_module import get_device_arch
 
 
@@ -80,8 +81,18 @@ class TestDispatchGemmRuntime(unittest.TestCase):
         return output
 
     def test_small_shapes_verify_against_cpu_reference(self):
-        for shape in ((128, 128, 64), (256, 256, 128)):
+        # The kernel is the 4096^3 pick, reused at smaller shapes: only shapes
+        # inside its launch-shape validity are meaningful (a body without
+        # pad_m / pad_n / pad_k has no bounds checks, so a shape below its
+        # output tile reads and writes out of bounds). Derive them from the
+        # dispatched tile instead of hardcoding one tile size.
+        t = self.spec.tile
+        for shape in (
+            (t.tile_m, t.tile_n, 2 * t.tile_k),
+            (2 * t.tile_m, 2 * t.tile_n, 4 * t.tile_k),
+        ):
             with self.subTest(shape=shape):
+                self.assertIsNone(launch_shape_error(self.spec, *shape))
                 out = self._run_manifest(shape, verify=True, timeout=120)
                 self.assertIn("bad=0/", out)
                 self.assertIn("Perf:", out)

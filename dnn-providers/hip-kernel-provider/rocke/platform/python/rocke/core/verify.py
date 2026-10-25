@@ -38,6 +38,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _FLAG_WAIT_ORDERINGS,
     _assume_range_errors,
     _int_add_wrap_error,
     _int_cmp_pred_error,
@@ -105,6 +106,8 @@ _UNARY_SAME_TYPE = {
     "arith.not",
     "math.exp2",
     "math.log2",
+    "math.exp",
+    "math.log",
     "math.rcp",
     "math.rcp_fast",
     "math.sqrt",
@@ -338,9 +341,11 @@ class _Verifier:
                     f"operand type {op.operands[0].type.name}",
                     op,
                 )
-            if name == "math.tanh" and op.operands[0].type.name != "f32":
+            if name in ("math.tanh", "math.exp", "math.log") and op.operands[
+                0
+            ].type.name not in ("f32", "f64"):
                 self.err(
-                    f"math.tanh requires f32 operand, got "
+                    f"{name} requires f32 or f64 operand, got "
                     f"{op.operands[0].type.name}",
                     op,
                 )
@@ -451,7 +456,9 @@ class _Verifier:
                 if v.type.name != "i32":
                     self.err(f"{name}: {what} must be i32, got {v.type.name}", op)
             orderings = (
-                _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
+                _FLAG_STORE_ORDERINGS
+                if name == "memref.global_flag_store"
+                else _FLAG_WAIT_ORDERINGS
             )
             self._check_sync_attrs(op, orderings)
 

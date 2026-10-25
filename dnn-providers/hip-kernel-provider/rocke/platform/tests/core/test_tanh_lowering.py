@@ -74,7 +74,7 @@ class TestTanhBuilderContract(unittest.TestCase):
                 x = b.param("x", dtype)
                 with self.assertRaisesRegex(
                     ValueError,
-                    rf"^math\.tanh requires f32 operand, got {dtype.name}$",
+                    rf"^math\.tanh requires f32 or f64 operand, got {dtype.name}$",
                 ):
                     b.tanh(x)
 
@@ -86,7 +86,7 @@ class TestTanhBuilderContract(unittest.TestCase):
                 b._op("math.tanh", [x], [dtype], result_name_hint="tanh")
                 errors = [d.message for d in verify(b.kernel) if d.severity == ERROR]
                 self.assertIn(
-                    f"math.tanh requires f32 operand, got {dtype.name}", errors
+                    f"math.tanh requires f32 or f64 operand, got {dtype.name}", errors
                 )
 
 

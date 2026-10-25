@@ -219,6 +219,7 @@ class _DiskCache:
         winner: str,
         ms: float,
         all_ms: Dict[str, float],
+        meta: dict[str, Any] | None = None,
     ) -> None:
         h = _cache_key_to_str(key)
         # Filter non-finite entries so the on-disk JSON stays strict-spec
@@ -231,6 +232,7 @@ class _DiskCache:
             "winner": winner,
             "ms": float(ms),
             "all": {k: float(v) for k, v in all_ms.items() if math.isfinite(v)},
+            **(meta or {}),
         }
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,6 +319,26 @@ class Autotuner:
         ``bench_fn`` has its own defaults).
     verbose
         Print one progress line per config + a final winner line.
+    strategy
+        ``None`` (default) measures every config. A strategy name from
+        :data:`rocke.dispatch.tuning.search.STRATEGY_NAMES` (``"portfolio"``,
+        ``"de"``, ``"tpe"``, ``"hill"``, ...) or ``"auto"`` (enumerate when
+        the list fits the budget, else the default portfolio) searches the
+        config list instead: each config's spec (and ``extra``) is flattened
+        to fields,
+        the strategy moves through field space, and at most ``budget``
+        configs are measured. Requires ``check_fn``.
+    budget
+        Measurements a strategy may spend per key (default: a quarter of the
+        configs, at least 8).
+    check_fn
+        ``(config, **runtime_args) -> bool | (bool, reason)``: the numeric
+        check every config must pass before it is timed. Mandatory with a
+        strategy: a config that fails is never picked, however fast.
+    seed / search_options
+        Strategy seed, and extra keyword arguments for
+        :func:`rocke.dispatch.tuning.search.tune` (``confirm``, ``prior``,
+        ``warm``, ``strategy_options``, ...).
     """
 
     def __init__(
@@ -330,9 +352,27 @@ class Autotuner:
         warmup_iters: int = 10,
         bench_iters: int = 50,
         verbose: bool = False,
+        strategy: str | None = None,
+        budget: int | None = None,
+        check_fn: Callable[..., Any] | None = None,
+        seed: int = 0,
+        search_options: dict[str, Any] | None = None,
     ) -> None:
         if not configs:
             raise ValueError("Autotuner: empty config list")
+        if strategy is not None and check_fn is None:
+            raise ValueError(
+                "Autotuner: strategy search needs check_fn - every searched "
+                "config must pass a numeric check before it is timed"
+            )
+        if budget is not None and int(budget) < 1:
+            raise ValueError(f"Autotuner: budget={budget}, expected >= 1")
+        self.strategy = strategy
+        self.budget = budget
+        self.check_fn = check_fn
+        self.seed = int(seed)
+        self.search_options = dict(search_options or {})
+        self.last_search = None
         self.configs = list(configs)
         self._by_name = {c.name: c for c in self.configs}
         if len(self._by_name) != len(self.configs):
@@ -351,9 +391,16 @@ class Autotuner:
         if self.verbose:
             print(msg, file=sys.stderr)
 
+    def _cache_key(self, key: tuple[Any, ...]) -> tuple[Any, ...]:
+        """A search's winner is cached apart from a full sweep's (it was
+        picked from a subset), under its strategy, budget and seed."""
+        if self.strategy is None:
+            return key
+        return ("search", self.strategy, self.budget, self.seed) + key
+
     def _select(self, **runtime_args: Any) -> AutotuneConfig:
         key = tuple(self.key_fn(**runtime_args))
-        cached_name = self.cache.get(key)
+        cached_name = self.cache.get(self._cache_key(key))
         if cached_name is not None and cached_name in self._by_name:
             return self._by_name[cached_name]
         self._emit(f"[autotune] sweeping {len(self.configs)} configs for key={key!r}")
@@ -376,13 +423,25 @@ class Autotuner:
             if row.error is not None and self.verbose:
                 self._emit(f"[autotune]   {row.config_name:30s}: SKIP {row.error}")
 
-        winner, results = autotune_sweep(
-            self.configs,
-            bench_fn=_bench,
-            on_progress=_on_progress,
-        )
+        if self.strategy is not None:
+            winner, results = self._search(_bench, runtime_args)
+        else:
+            winner, results = autotune_sweep(
+                self.configs,
+                bench_fn=_bench,
+                on_progress=_on_progress,
+            )
         all_ms = {r.config_name: r.ms_per_iter for r in results}
-        self.cache.put(key, winner.name, all_ms[winner.name], all_ms)
+        meta = None
+        if self.strategy is not None:
+            # "all" then lists only the measured configs
+            meta = {
+                "mode": f"search:{self.strategy}",
+                "partial": len(results) < len(self.configs),
+            }
+        self.cache.put(
+            self._cache_key(key), winner.name, all_ms[winner.name], all_ms, meta
+        )
         if self.verbose:
             sorted_rows = sorted(
                 (r for r in results if r.is_ok),
@@ -393,6 +452,63 @@ class Autotuner:
                 f"({sorted_rows[0].ms_per_iter * 1e3:.2f} us/iter)"
             )
         return winner
+
+    def _search(
+        self, bench: Callable[[AutotuneConfig], float], runtime_args: dict[str, Any]
+    ) -> tuple[AutotuneConfig, list[AutotuneResult]]:
+        """Search the config list with ``self.strategy`` (lazy import: the
+        search engine lives in the dispatch layer)."""
+        from ..dispatch.tuning.search import Budget, flatten_spec, search_configs
+
+        budget = self.budget or max(8, math.ceil(len(self.configs) / 4))
+        budget = min(int(budget), len(self.configs))
+
+        def flat(cfg: AutotuneConfig) -> dict[str, object]:
+            return {
+                **flatten_spec(cfg.spec, "spec."),
+                **flatten_spec(cfg.extra, "extra."),
+            }
+
+        def check(cfg: AutotuneConfig):
+            return self.check_fn(cfg, **runtime_args)
+
+        options = {"confirm": 0, **self.search_options}
+        index, result = search_configs(
+            self.configs,
+            measure=lambda cfg, fidelity: bench(cfg),
+            check=check,
+            flatten=flat,
+            strategy=self.strategy,
+            budget=Budget(evaluations=budget),
+            seed=self.seed,
+            **options,
+        )
+        self.last_search = result
+        rows: list[AutotuneResult] = []
+        names = {}
+        for ob in result.observations:
+            if ob.cached or ob.key is None:
+                continue
+            cfg = self.configs[result.index[ob.key]]
+            if cfg.name in names:
+                continue
+            names[cfg.name] = True
+            if ob.ok:
+                rows.append(AutotuneResult(cfg.name, ob.value))
+            else:
+                rows.append(
+                    AutotuneResult(cfg.name, float("inf"), f"{ob.status}: {ob.detail}")
+                )
+        if index is None:
+            joined = "; ".join(f"{r.config_name}={r.error}" for r in rows if r.error)
+            raise RuntimeError(
+                f"autotune search: every measured config failed; errors: {joined}"
+            )
+        self._emit(
+            f"[autotune] {self.strategy}: measured {len(rows)} of "
+            f"{len(self.configs)} configs"
+        )
+        return self.configs[index], rows
 
     # ----- public -------------------------------------------------
 

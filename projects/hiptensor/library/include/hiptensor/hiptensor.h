@@ -115,13 +115,14 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorReadKernelCacheFromFile(hiptensorHan
 //! @param[out] desc A pointer to the `hiptensorTensorDescriptor_t` object to be allocated.
 //! @param[in] numModes The number of modes (dimensions) for the tensor.
 //! @param[in] lens An array specifying the extent (length) of each mode; all values must be greater than zero.
-//! @param[in] strides An array where `strides[i]` is the displacement between consecutive elements in the i-th mode. If `NULL`, a generalized packed column-major memory layout is assumed (strides increase monotonically from left to right).
+//! @param[in] strides An array where `strides[i]` is the displacement between consecutive elements in the i-th mode; negative strides are not supported. If `NULL`, a generalized packed column-major memory layout is assumed (strides increase monotonically from left to right).
 //! @param[in] dataType The data type of the tensor elements.
 //! @param[in] alignmentRequirement The memory alignment requirement for the tensor.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` if the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` if the handle is not initialized.
 //! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` if the data type is not supported.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` if any parameters are invalid.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` if any parameters are invalid, for example `lens` is `NULL` with `numModes` greater than zero, or an extent is not positive.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` if a stride is negative.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorCreateTensorDescriptor(const hiptensorHandle_t      handle,
                                     hiptensorTensorDescriptor_t* desc,
@@ -141,6 +142,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @brief Allocates and initializes a `hiptensorOperationDescriptor` object for a tensor contraction of the form \f$D = \alpha \mathcal{A} \mathcal{B} + \beta \mathcal{C}\f$.
 //!
 //! @details Free this object by calling `hiptensorDestroyOperationDescriptor()`.
+//! Every mode must be carried by exactly two of A, B and D: a mode of A and D (M), of B and D (N),
+//! or of A and B (K, contracted). The kernels address at least one and at most six M modes, at
+//! least one and at most six N modes, and at most six K modes. A mode carried by one tensor only,
+//! a mode repeated within a tensor, or more modes than that returns `HIPTENSOR_STATUS_NOT_SUPPORTED`;
+//! a mode with different extents in two tensors returns `HIPTENSOR_STATUS_INVALID_VALUE`.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[out] desc Pointer to the `hiptensorOperationDescriptor_t` object that will be allocated and populated with contraction operation details.
 //! @param[in] descA Tensor descriptor for A, specifying data type, modes, and strides.
@@ -259,11 +265,18 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @brief Fetches information from an existing plan.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] plan The existing plan (created via `hiptensorCreatePlan` or `hiptensorCreatePlanAutotuned`).
-//! @param[in] attr The attribute to retrieve.
+//! @param[in] attr The attribute to retrieve. `HIPTENSOR_PLAN_REQUIRED_WORKSPACE` (a `uint64_t`) is the
+//! workspace in bytes the plan's kernel needs, which is at most the `workspaceSizeLimit` the plan was
+//! created with; elementwise operations and reductions need none. It is the workspace of the kernel
+//! selected when the plan was created. With `HIPTENSOR_CACHE_MODE_PEDANTIC`, a plan-cache entry or
+//! `HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL` can make an execution run another candidate kernel, whose
+//! workspace this value does not bound; such an execution returns
+//! `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` when the workspace passed is too small for it.
 //! @param[out] buf Buffer that will contain the requested attribute information upon successful return.
-//! @param[in] sizeInBytes Size of `buf` in bytes.
+//! @param[in] sizeInBytes Size of `buf` in bytes; must be the size of the attribute.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `plan` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` is not the size of the attribute.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                                              const hiptensorPlan_t    plan,
                                                              hiptensorPlanAttribute_t attr,
@@ -271,14 +284,20 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHand
                                                              size_t                   sizeInBytes);
 
 //! @brief Calculates the workspace size needed for a specific operation.
+//! @details For a contraction, the workspace the kernels that can run it need: the largest of them
+//! (`HIPTENSOR_WORKSPACE_DEFAULT` or `HIPTENSOR_WORKSPACE_MAX`), so that a plan created with it as
+//! `workspaceSizeLimit` can select any of them, or the smallest (`HIPTENSOR_WORKSPACE_MIN`). A
+//! trinary contraction also needs room for its intermediate tensor \f$A B\f$. Elementwise operations
+//! and reductions need no workspace. After `hiptensorCreatePlan`, `HIPTENSOR_PLAN_REQUIRED_WORKSPACE`
+//! gives the workspace of the selected kernel.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] desc Opaque structure encoding the operation details.
-//! @param[in] planPref Opaque structure limiting the viable candidate space.
+//! @param[in] planPref Opaque structure limiting the viable candidate space. May be `NULL`.
 //! @param[in] workspacePref Parameter that affects workspace size calculation.
 //! @param[out] workspaceSizeEstimate The estimated workspace size in bytes needed for the operation.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle or `desc` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `workspaceSizeEstimate` is `NULL`.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                    const hiptensorOperationDescriptor_t desc,
@@ -328,10 +347,13 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] pref Opaque structure limiting the applicable kernels. May be `nullptr` to use the defaults of `hiptensorCreatePlanPreference` with `HIPTENSOR_ALGO_DEFAULT` and `HIPTENSOR_JIT_MODE_NONE`. The plan keeps its own copy, so `pref` may be shared by several plans, changed, or destroyed afterwards.
 //! @param[in] workspaceSizeLimit Maximum workspace size in bytes that the operation may use.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When a viable kernel is found.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When no viable kernel can be found, or when a tensor, including the intermediate `A * B` of a trinary contraction, exceeds the size limit of the kernels: its elements, from the lowest to the highest addressed by its lengths and strides, span 2^31 bytes or more (for complex types, per real or imaginary part), or, for an `HIPTENSOR_R_64F` permutation or elementwise binary or trinary operation with an input laid out differently from the output, 2^29 bytes or more. The limits are conservative, so some tensors at or above them would also have given correct results.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When no viable kernel can be found (for elementwise operations and reductions: no
+//! kernel for the data types, the output's rank or the reduced modes; a reduction whose C and D differ in descriptor or modes,
+//! whose C carries a mode A does not, or with a mode repeated within a tensor), or when a tensor, including the intermediate `A * B` of a trinary contraction, exceeds the size limit of the kernels: its elements, from the lowest to the highest addressed by its lengths and strides, span 2^31 bytes or more (for complex types, per real or imaginary part), or, for an `HIPTENSOR_R_64F` permutation or elementwise binary or trinary operation with an input laid out differently from the output, 2^29 bytes or more. The limits are conservative, so some tensors at or above them would also have given correct results.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` When the provided workspace is too small.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error), for example a reduction
+//! whose C has a mode with another extent than in A.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                                        hiptensorPlan_t*                     plan,
                                                        const hiptensorOperationDescriptor_t desc,
@@ -383,6 +405,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
 //!   + \beta\; op_\mathcal{D}(\mathcal{D}_{{modes}_\mathcal{D}})\f$.
 //!
 //! Free this object by calling `hiptensorDestroyOperationDescriptor()`.
+//! The contraction runs as \f$T = A B\f$ followed by \f$E = \alpha\, T C + \beta D\f$, and each step must meet the
+//! mode requirements of `hiptensorCreateContraction`, otherwise `HIPTENSOR_STATUS_NOT_SUPPORTED` (or
+//! `HIPTENSOR_STATUS_INVALID_VALUE` for mismatched extents) is returned.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[out] desc Pointer to the `hiptensorOperationDescriptor_t` that will be populated.
 //! @param[in] descA Tensor descriptor for A.
@@ -472,8 +497,9 @@ HIPTENSOR_EXPORT const char* hiptensorGetErrorString(const hiptensorStatus_t err
 //! \f]
 //! @param[in] handle Opaque handle containing hipTensor's library context.
 //! @param[in] plan Opaque handle with permutation information.
-//! @param[in] alpha Scaling factor for A (typeScalar type). Pointer to host memory.
-//! @param[in] A Multi-mode tensor (typeA type) with nmodeA modes. Pointer to GPU-accessible memory.
+//! @param[in] alpha Scaling factor for A (typeScalar type). Pointer to host memory. If alpha is zero, A is not read and opA is not
+//! applied, so NaN or Inf in A, or produced by opA, does not reach B, and B is zero.
+//! @param[in] A Multi-mode tensor (typeA type) with nmodeA modes. Pointer to GPU-accessible memory. May be `NULL` if alpha is zero.
 //! @param[in,out] B Multi-mode tensor (typeB type) with nmodeB modes. Pointer to GPU-accessible memory.
 //! @param[in] stream HIP stream for all operations.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
@@ -541,10 +567,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //!
 //! @param[in] handle Opaque handle containing hipTensor's library context.
 //! @param[in] plan Opaque handle with elementwise operation information.
-//! @param[in] alpha Scaling factor for A. Host memory pointer.
-//! @param[in] A Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D.
-//! @param[in] gamma Scaling factor for C. Host memory pointer.
-//! @param[in] C Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D.
+//! @param[in] alpha Scaling factor for A. Host memory pointer. If alpha is zero, A is not read and opA is not applied: the term is
+//! exactly zero, so NaN or Inf in A, or produced by opA, does not reach D.
+//! @param[in] A Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D. May be `NULL` if alpha is zero.
+//! @param[in] gamma Scaling factor for C. Host memory pointer. If gamma is zero, C is not read and opC is not applied.
+//! @param[in] C Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D. May be `NULL` if gamma is zero.
 //! @param[out] D Multi-mode tensor in GPU-accessible memory. C and D may be identical only if descC == descD.
 //! @param[in] stream Stream for performing the operation.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
@@ -619,12 +646,13 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //!
 //! @param[in] handle Opaque handle containing hipTensor's library context.
 //! @param[in] plan Opaque handle with elementwise operation information.
-//! @param[in] alpha Scaling factor for A. Host memory pointer.
-//! @param[in] A Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D.
+//! @param[in] alpha Scaling factor for A. Host memory pointer. If a scaling factor is zero, its tensor is not read and its operator
+//! is not applied: the term is exactly zero, so NaN or Inf in the tensor, or produced by its operator, does not reach D.
+//! @param[in] A Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D. May be `NULL` if alpha is zero.
 //! @param[in] beta Scaling factor for B. Host memory pointer.
-//! @param[in] B Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D.
+//! @param[in] B Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D. May be `NULL` if beta is zero.
 //! @param[in] gamma Scaling factor for C. Host memory pointer.
-//! @param[in] C Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D.
+//! @param[in] C Multi-mode tensor in GPU-accessible memory. Must not overlap with elements written to D. May be `NULL` if gamma is zero.
 //! @param[out] D Multi-mode tensor in GPU-accessible memory. C and D may be identical only if descC == descD.
 //! @param[in] stream Stream for performing the operation.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
@@ -680,10 +708,14 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //!
 //! @param[in] handle An opaque handle representing the hipTensor library context.
 //! @param[in] plan Opaque handle with elementwise operation information.
-//! @param[in] alpha Scaling for A. Its data type is determined by 'descCompute'. Pointer to the host memory.
-//! @param[in] A Pointer to the data corresponding to A in device memory. Pointer to the GPU-accessible memory. The data accessed via this pointer must not overlap with the elements written to D.
-//! @param[in] beta Scaling for C. Its data type is determined by 'descCompute'. Pointer to the host memory.
-//! @param[in] C Pointer to the data corresponding to C in device memory. Pointer to the GPU-accessible memory.
+//! @param[in] alpha Scaling for A. Its data type is determined by 'descCompute'. Pointer to the host memory. If alpha is zero, A is
+//! not read and opA is not applied, so D is \f$\beta\, op_C(C)\f$.
+//! @param[in] A Pointer to the data corresponding to A in device memory. Pointer to the GPU-accessible memory. The data accessed via this pointer must not overlap with the elements written to D. May be `NULL` if alpha is zero.
+//! @param[in] beta Scaling for C. Its data type is determined by 'descCompute'. Pointer to the host memory. If beta is zero, neither
+//! C nor the previous contents of D are read.
+//! @param[in] C Pointer to the data corresponding to C in device memory. Pointer to the GPU-accessible memory. May be `NULL` if beta is
+//! zero. When C and D differ, C is copied to D on `stream` before the reduction, element by element where D's elements are not
+//! contiguous.
 //! @param[out] D Pointer to the data corresponding to C in device memory. Pointer to the GPU-accessible memory.
 //! @param[out] workspace Scratchpad (device) memory of size --at least-- `workspaceSize` bytes.
 //! @param[in] workspaceSize Please use \ref hiptensorEstimateWorkspaceSize() to query the required workspace.

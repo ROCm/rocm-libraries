@@ -26,6 +26,7 @@
 
 set(HIPTENSOR_REDUCTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_reduction.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_epilogue.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_reference.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_reference_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution.cpp

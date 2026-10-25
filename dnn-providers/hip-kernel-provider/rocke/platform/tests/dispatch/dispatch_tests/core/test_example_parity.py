@@ -49,11 +49,25 @@ NORM_SHAPE = dict(rows=4096, cols=4096)
 # those candidates exist *for*, not padding to satisfy a reachability check:
 # the bf16 decode candidate caps M at 32, and b1024_v8 spans 8192 columns.
 GEMM_DECODE_MNK = (16, 4096, 4096)
+# examples/gfx950/gemm_perf_square_warpspec: a large square the 256x256 DTL
+# ping-pong candidate exists for (its cost-model admission rejects small ones).
+GEMM_SQUARE_MNK = (8192, 8192, 8192)
+# the shapes the two gfx950 ring candidates exist for -- a
+# square whose 256x256 tiles fill a quarter wave (the small-tile ring) and a
+# ragged-N canonical contraction row of the hipTensor cases (the padded ring)
+GEMM_SMALL_SQUARE_MNK = (2048, 2048, 2048)
+GEMM_RAGGED_MNK = (15360, 13440, 1536)
 NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
 
 
 def _gemm_reqs(arch, spec_id, dtype):
-    for m, n, k in (GEMM_MNK, GEMM_DECODE_MNK):
+    for m, n, k in (
+        GEMM_MNK,
+        GEMM_DECODE_MNK,
+        GEMM_SQUARE_MNK,
+        GEMM_SMALL_SQUARE_MNK,
+        GEMM_RAGGED_MNK,
+    ):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 
 

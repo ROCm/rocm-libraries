@@ -254,7 +254,7 @@ namespace hiptensor
             return mValid;
         }
 
-        bool appliesScalarsAndOps(std::vector<float> const&               scalarValues,
+        bool appliesScalarsAndOps(std::vector<double> const&              scalarValues,
                                   std::vector<hiptensorOperator_t> const& operators) const override
         {
             using Traits = MetaTraits<DeviceOp>;

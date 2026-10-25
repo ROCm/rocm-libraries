@@ -67,6 +67,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/quant.py` | `QDType`, `QUANT_MAX_ABS`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
 | `helpers/scan.py` | `lds_zero_i32`, `block_histogram_i32`, `block_exclusive_scan_i32`. Block-wide cooperative scan + histogram primitives. |
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
+| `helpers/task_schedule.py` | `Stage`, `Dep`, `TaskTable` (`validate`, `place`, `cta_of`, `task_of`, `lds_barriers`), `ValidationError`, `ordered_after_all`, `validate_stack`. Host-only (no IR) model of a persistent kernel's static task table: deadlock freedom on a resident grid, dataflow coverage, cross-layer write-after-read. Used by `library/kernels/gfx950/hiptensor_mono`. |
 | `helpers/streamk.py` | `StreamKPartition`, `StreamKReductionStrategy`, `compute_streamk_grid_size`, `emit_streamk_decode`, `streamk_num_macro_tiles`. Tile-id decode + grid sizing for the StreamK GEMM family. |
 | `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32`, `dequant_i4_byte_to_fp8_pair`, `dequant_i4_byte_to_bf8_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
 | `helpers/mx_scale.py` | `decode_mx_scale_e8m0`, `apply_mx_scale`, `load_and_decode_mx_scale_byte`. OCP MX shared-exponent decode + per-block fmul. |

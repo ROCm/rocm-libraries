@@ -326,6 +326,40 @@ namespace hiptensor
         }
     }
 
+    bool isUnaryOperator(hiptensorOperator_t op)
+    {
+        switch(op)
+        {
+        case HIPTENSOR_OP_IDENTITY:
+        case HIPTENSOR_OP_SQRT:
+        case HIPTENSOR_OP_RELU:
+        case HIPTENSOR_OP_CONJ:
+        case HIPTENSOR_OP_RCP:
+        case HIPTENSOR_OP_SIGMOID:
+        case HIPTENSOR_OP_TANH:
+        case HIPTENSOR_OP_EXP:
+        case HIPTENSOR_OP_LOG:
+        case HIPTENSOR_OP_ABS:
+        case HIPTENSOR_OP_NEG:
+        case HIPTENSOR_OP_SIN:
+        case HIPTENSOR_OP_COS:
+        case HIPTENSOR_OP_TAN:
+        case HIPTENSOR_OP_SINH:
+        case HIPTENSOR_OP_COSH:
+        case HIPTENSOR_OP_ASIN:
+        case HIPTENSOR_OP_ACOS:
+        case HIPTENSOR_OP_ATAN:
+        case HIPTENSOR_OP_ASINH:
+        case HIPTENSOR_OP_ACOSH:
+        case HIPTENSOR_OP_ATANH:
+        case HIPTENSOR_OP_CEIL:
+        case HIPTENSOR_OP_FLOOR:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     std::string algoTypeToString(hiptensorAlgo_t algoType)
     {
         switch(algoType)

@@ -222,6 +222,13 @@ CK DSL provides built-in swizzle support via tile descriptor transforms.
 - Simpler addressing (fewer ALU ops)
 - Best for abundant LDS (gfx950: 160KB)
 
+**Universal-GEMM `lds_swizzle` row shift.** The universal GEMM's element-granular XOR
+swizzle `col ^= ((row >> R) % 2^W) << L` uses R = 0 by default, which is conflict-free
+for 16x16x32 fragments at tile_k 64 but not for 16x16x32 at tile_k 32 or 32x32x16 at
+tile_k 32 / 64 (2-way to 4-way `ds_read_b128` conflicts on gfx950). `TraitSpec.lds_swizzle_r`
+sets R; predict the right value with `rocke.analysis.lds` (the lds-bank-conflict-expert
+skill) for the exact fragment lane map before measuring.
+
 ### 4.2 Enabling Padding Swizzle
 
 ```python
@@ -416,6 +423,136 @@ On CDNA (256 arch_vgpr + 256 accum_vgpr per SIMD):
 - Switch to 32×32 MFMA (fewer accumulators)
 
 ---
+
+### 8.3 AGPR accumulators for 128x128-per-wave tiles (gfx950, `acc_agpr`)
+
+A 4-wave 256x256 block with 128x128 per wave needs 256 f32 accumulator registers per
+lane: the whole AGPR file. `TraitSpec.acc_agpr` makes the universal GEMM build it
+cleanly; three compiler interactions decide whether it does (details and measurements
+in `examples/gfx950/gemm_perf_square_warpspec/AGPR_CASE_STUDY.md`):
+
+- **Constant-seeded loop-carried vectors are split.** AMDGPU CodeGenPrepare breaks a
+  large PHI whose incoming value is a constant into scalar PHIs; seed accumulators
+  from an opaque `asm "", "=a,0"` of the zero vector instead.
+- **The MFMA form is a compiler choice.** `amdgpu-agpr-alloc` alone selects the AGPR
+  destination form on some LLVM builds; newer ones select the VGPR form and copy
+  between files around every MFMA. The kernel attr `mfma_agpr_form` adds
+  `-mllvm -amdgpu-mfma-vgpr-form=0` to the compile options for the LLVM 21+ flavors
+  (decided by the lowering flavor, not by the compiler that happens to load). Always check
+  the ISA of the compiler that will actually build the kernel (`v_mfma ... a[..]`
+  destinations, no `v_accvgpr_mov` in the loop, no scratch).
+- **The loop exit can copy every AGPR at once.** Hand accumulators out per atom with an
+  ordered `asm sideeffect "", "=a,0"` right before their conversion (or, with split-K,
+  right before their atomic adds).
+- Each AGPR / interleave lever is admitted only where its bodies passed GPU numerics: all of them on
+  gfx942 and gfx950, none on gfx90a yet. On gfx942 the AGPR bodies pass but lose to the
+  16-wave ring body.
+
+With one wave per SIMD nothing hides a stall: interleave the next fragments' `ds_read`s
+and the DTL issues one behind each MFMA and pin the order with `sched_barrier(0)`
+(`mfma_interleave`, `ilv_merge`), and check that no MFMA carries two of them. At a
+board power cap a higher per-clock MFMA efficiency mostly turns into a lower clock;
+compare sustained throughput and clock, not only short hot runs.
+
+### 8.4 Persistent loops, stream-K, ragged and small problems (gfx950)
+
+Details and measurements: `examples/gfx950/gemm_perf_square_warpspec/DTL_RING_SHAPES_CASE_STUDY.md`.
+
+- **The tile shape has to fit the problem before anything else matters.** A 256x256 tile
+  that fills a quarter of the last wave wastes most of the device; a 128x128 8-wave DTL
+  ring (or, for K % 64 == 32, a 128x128x32 / 256x128x32 interleave ring) took small
+  problems up substantially. The dispatcher picks it when the 256x256 last-wave fill is
+  below 0.75 (`cdna_dtl_ring_small`).
+- **One workgroup per CU needs a deeper ring.** When the small tiles fit a single wave,
+  no co-resident workgroup hides the DMA latency, and the 2-stage ring stalls on a full
+  `vmcnt(0)` drain every K tile (WaveScope). The 3-stage fragment-prefetch interleave
+  form of the same tile removes that stall; with more than one wave of tiles the lighter
+  2-stage body is faster again.
+- **Gate a new candidate on every axis its evidence did not cover.** The first
+  small-tile and pad rules looked only at last-wave fill and tile count and admitted
+  small-K shapes nobody had measured; several of those lost to the default. Where an
+  alternative candidate exists, give the new one the same K floor as its neighbours (or
+  measure the regime first); where none exists (ragged M / N), admit and measure.
+- **Fit dispatch thresholds against held-out shapes.** A rule fitted to the shapes that
+  motivated it (here: "big grids take the wgm-4 body") can be wrong a few tiles away;
+  two refits of the big-grid rule each failed on the next round of held-out shapes before
+  the third held. Write the rule, then measure shapes chosen before the measurement.
+- **Ragged M / N on the DTL ring.** `pad_m` / `pad_n` only guard the epilogue stores; the
+  DMA loads of rows past M / N still have to stay inside the buffer. `dtl_tight_rsrc`
+  bases every DTL resource at the tile origin with the operand's remaining bytes as its
+  range, so the hardware range check returns zeros there (`soffset` 0, so the result
+  does not depend on whether the check includes `soffset`). `pad_fast_tile` branches once
+  per tile to an unguarded epilogue for tiles fully inside M x N (the per-element compares
+  are expensive at short K without it). The dispatcher's `cdna_dtl_ring_pad` candidate
+  serves shapes that previously had no candidate; at small K on a moderate grid the
+  small-tile ring serves them better.
+- **Stream-K needs every workgroup of its pool resident.** An owner spins on partials of
+  higher-index workgroups, so a pool larger than `CUs x workgroups per CU` hangs instead
+  of failing: make that a validity rule (LDS and worst-case register occupancy) and check
+  the live device at launch (partitioned modes have fewer CUs).
+- **Stream-K's cost is its partial traffic.** With a full 256x256 f32 partial tile per
+  contributing workgroup the fixup moves on the order of the operands' bytes at short K,
+  and the one partition built (DP + 2-tile SK over the whole pool) lost everywhere
+  measured. That is a statement about this partition, not about stream-K: SK over the
+  remainder tiles only, over just the idle workgroups of the last wave, smaller SK tiles
+  and narrower partials are untried.
+- **Never spin on an acquire load on gfx942 / gfx950.** An agent-scope acquire is
+  `buffer_inv sc1`: spinning on it invalidates the XCD's L2 every iteration and slowed the
+  whole kernel severalfold. Spin with `global_flag_wait_eq(..., ordering="monotonic")`
+  and put one `fence(scope="agent", ordering="acquire")` after the wait.
+- **Chiplet rasterization of very large grids.** Narrower super-tile groups
+  (`chiplet_wgm=4`) help on very large tile counts, at small K, once A + B outgrow most of
+  the MALL, and on wide grids from a moderate K on -- through shorter DTL latency per K
+  tile and fewer waits, not a higher L2 hit rate (the PMC shows more DRAM reads). The
+  16-wave ring with wgm 4 + `iglp_opt(1)` is the better aligned body while A + B fit the
+  MALL, the 4-wave AGPR body beyond; on moderate grids wgm 4 loses and the wgm-8 ring
+  stays (`common.dtl_big_grid_body`).
+
+### 8.5 Row-interleave dispatch classes (gfx950)
+
+The gfx950 GEMM dispatcher (`dispatch/gemm/common.py`, `rilv_*`) serves large aligned,
+short-K and ragged problems with a 4-wave AGPR body (2x2 waves of 128x128, tile_k 64,
+2-stage DTL ring) whose LDS tile is row-interleaved (`lds_row_interleave`, 32-byte pad
+per KiB: conflict-free `ds_read_b128`, one address VGPR per fragment stream) and whose
+epilogue writes 16-byte non-temporal vector stores straight from the accumulators
+(`rilv_vec_epilogue`, `rve_store_nt`; `rve_pad` 2 on ragged M / N). The K tile runs
+the `hb_sched` slot schedule (front-loaded fragment reads, release / acquire barriers)
+with `dtl_soff0`, `dtl_addr_spread`, `hb_dtl_delay`, `kloop_unroll`, `hb_skew`,
+`hb_tile_lgkm0`, `das_late` and `mfma_serpentine`.
+
+- **Classes.** Aligned (M, N multiples of 256, K % 64 == 0, K >= `RILV_MIN_K`, at
+  least `RILV_MIN_TILES` 256x256 tiles); aligned short K (`RILV_SHORTK_MIN_K` <= K <
+  `RILV_MIN_K` with a well-filled last wave); ragged M / N (`rilv_pad_admits`). The
+  grid is persistent on every CU at short K with more than `RILV_PERSIST_MIN_WAVES`
+  waves of tiles, else non-persistent with chiplet wgm 16 / chunk 8 (wgm 32 / chunk 2
+  on the ragged long-K class).
+- **Retained alternatives.** `ROCKE_GEMM_RILV_BODY` (`asm_loop`, `sia`, `base`) and
+  `ROCKE_GEMM_RILV_HB_LOOP=asm_loop` select bodies that did not win; the module
+  constants `RILV_ASM_LOOP_*`, `RILV_LONGK_GRID`, `RILV_PAD_HB_TILE_LGKM0` and
+  `RILV_PAD_DAS_LATE` are default-off knobs (`das_late` with the exact DTL bounds
+  makes LLVM spill the accumulators to scratch).
+- **MFMA issue order.** `mfma_serpentine` (odd A rows walk the B fragments backwards)
+  is on for the tuned, pad and short-K merged-interleave bodies (`RILV_SERPENTINE`); it
+  only reorders independent MFMAs, so results are bit-identical. The alternative
+  orders `mfma_order` 2 (odd K atoms reversed: forces register copies) and 3
+  (serpentine columns: no better than `mfma_serpentine`) are default-off knobs.
+- **XCD-local stream-K tail (not dispatched).** `rilv_streamk_tail_admits` /
+  `rilv_streamk_tail_trait` turn the tuned body into a persistent `streamk` +
+  `sk_xcd_local` loop for aligned long-K grids with many waves and a near-empty last
+  wave. The admission constants are fitted on a few shapes and the effect varied
+  between nodes, so the dispatcher does not call them; a caller must also allocate the
+  stream-K workspace (`streamk_workspace_bytes`).
+- **Threshold provenance.** The `RILV_*` and `SMALL_TILE_SHORTK_*` K / tile-count
+  thresholds were calibrated on a fixed gfx950 shape set; several sit on K values or
+  tile counts of that set (for example `RILV_HB_MIN_K`, `RILV_MIN_K`,
+  `RILV_PERSIST_MAX_K`, `SMALL_TILE_SHORTK_MAX_K`, `RILV_PAD_FAST_TILE_MIN_TILES`) and
+  the regions between them were not validated on held-out shapes. Treat them as policy
+  defaults and re-calibrate (interleaved sustained windows, full-output numerics before
+  and after timing) when the shape population changes.
+- **Scope.** gfx950, packed RCR, f16 / bf16, alpha = 1 / beta = 0, non-batched when
+  persistent. `is_valid_spec` rejects `rilv_vec_epilogue`, `persistent_ctas` and
+  `mfma_swap_ab` with a fused epilogue (`helpers.fuse`). The levers are Python-only
+  (see `architecture/engines_and_switching.md`, "Python-only universal-GEMM levers").
 
 ## 9. Performance Metrics
 

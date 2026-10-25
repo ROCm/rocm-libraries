@@ -22,6 +22,11 @@ _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 # to reach the decode candidate.
 _DIMS = (1, 2, 16, 32, 64, 128, 256, 512, 1024, 4096)
 _SHAPES = tuple((m, n, k) for m in _DIMS for n in _DIMS for k in _DIMS)
+# Plus one large square: the 256x256 DTL ping-pong candidate is admitted by its
+# cost model only for shapes large enough to amortise its big tile; and one
+# large ragged shape: the padded 256x256 ring takes ragged M / N only where its
+# tiles fill the device.
+_SHAPES += ((8192, 8192, 8192), (8192, 8000, 8192))
 
 
 def _requests(arch: str, dtype: str):

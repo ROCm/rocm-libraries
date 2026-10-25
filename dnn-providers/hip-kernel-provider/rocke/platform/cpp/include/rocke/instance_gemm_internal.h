@@ -104,6 +104,9 @@ typedef struct rocke_gemm_build_ctx
     /* batched && active_tile_skip only (NULL otherwise) */
     rocke_value_t* sorted_token_ids;
     rocke_value_t* slot_size_p;
+    /* trait.streamk only (NULL otherwise): ready flags (i32) + partials (f32) */
+    rocke_value_t* sk_flags;
+    rocke_value_t* sk_part;
 
     /* ---- per-lane MMA fragment widths (_atom_frag_lengths(op)) -- */
     int a_per_lane;
@@ -163,6 +166,9 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* block_m_off; /* row tile base (chiplet-swizzle aware)     */
     rocke_value_t* block_n_off; /* col tile base                             */
 
+    /* ---- interwave_setprio MFMA-cluster priority bookends -- */
+    bool interwave; /* _interwave = trait.interwave_setprio */
+
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
     bool prefetch; /* _prefetch = trait.dtl_prefetch            */
     bool db; /* _db   (compv4 software-pipelined DB)       */
@@ -173,6 +179,15 @@ typedef struct rocke_gemm_build_ctx
     int lds_k; /* _lds_k = block_k + lds_pad                */
     rocke_value_t* A_smem; /* smem_alloc A_smem                         */
     rocke_value_t* B_smem; /* smem_alloc B_smem                         */
+    /* ---- alias-scoped DTL ring (trait.dtl_stages >= 2) -- *
+     * one A and one B allocation per stage ("A_smem_s{j}" / "B_smem_s{j}");
+     * A_smem / B_smem alias stage 0. */
+    int stages; /* _stages (0 = historical body)            */
+    rocke_value_t* A_stg[4];
+    rocke_value_t* B_stg[4];
+    bool swap_ab; /* _swap_ab = trait.mfma_swap_ab             */
+    /* the persistent staged body ran the epilogue per tile */
+    bool staged_persistent_done;
 
     /* ---- per-warp MFMA tile counts -- */
     int mfmas_m; /* t.mfmas_per_warp_m                        */
@@ -253,6 +268,27 @@ typedef struct rocke_gemm_build_ctx
  * uniformity even when they only read spec/op, so a body TU never re-derives
  * state already on the ctx. ----- */
 
+/* ab_double_buffer_decision(...): whether the compv4 VGPR-staged AB LDS double
+ * buffer (_emit_kloop_db) is emitted. Pure; single source for the validity gate,
+ * the build-ctx setup and the load phase. Mirrors the Python function of the
+ * same name (gemm_universal.py). */
+bool rocke_gemm_ab_db_decision(const rocke_gemm_universal_spec_t* spec,
+                               const rocke_archtarget_t* target);
+
+/* lds_swizzle_params(a_per_lane, b_per_lane, block_k) -> (R, W, L) of the
+ * lds_swizzle permutation col ^= ((row >> R) % 2^W) << L. Pure and env-free;
+ * single source for the validity gate and the build ctx (which applies the
+ * CK_SWZ_R/W/L debug overrides on top). Mirrors the Python function of the
+ * same name (gemm_universal.py). */
+void rocke_gemm_lds_swizzle_params(
+    int a_per_lane, int b_per_lane, int block_k, int* out_r, int* out_w, int* out_l);
+
+/* DTL_BUFFER_NUM_RECORDS (gemm_universal.py): num_records of the A/B buffer
+ * resources of the direct-to-LDS load path. Loads past it return 0, so a DTL
+ * kernel is only correct while each operand is at most this many bytes (the
+ * dispatcher enforces it per request). */
+#define ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS 0x7FFF0000
+
 /* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
@@ -263,6 +299,10 @@ void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_f
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op);
 
 /* _emit_mma(b, op, a, bb, c): target-neutral D = a*bb + c via rocke_b_mma. */
+/* _mma_ab tail: pin an MFMA result to the AGPR file when trait.acc_agpr. */
+rocke_value_t* rocke_gemm_pin_acc_agpr(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* d);
 rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
                                    const rocke_mmaop_t* op,
                                    rocke_value_t* a,
@@ -375,6 +415,27 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx);
  * back to _simple when loads_per_tile > 63). */
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx);
 
+/* _emit_kloop_staged(ctx): the alias-scoped DTL ring (dtl_stages >= 2) and its
+ * DTL ring levers, incl. the persistent overlapped-epilogue body
+ * (gemm_build_staged.cpp). */
+void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx);
+
+/* _emit_store_swapped_acc (mfma_swap_ab): direct epilogue writing the C^T
+ * accumulator as kCM1PerLane-wide vector stores (gemm_epilogue.cpp). */
+void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* lane,
+                                       rocke_value_t* const* accs,
+                                       int num_accs,
+                                       rocke_value_t* m_base_off,
+                                       rocke_value_t* n_base_off,
+                                       int c_per_lane,
+                                       const rocke_type_t* storage_dtype,
+                                       rocke_value_t* M,
+                                       rocke_value_t* N,
+                                       rocke_value_t* C,
+                                       rocke_value_t* batch_off_c);
+
 /* _emit_epilogue(ctx): dispatch to the cshuffle or default epilogue using
  * ctx->for_results and the captured warp/lane/offset Values. */
 void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx);
@@ -412,6 +473,24 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
 
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
  * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
+/* _acc_agpr_out(b, spec, acc): with trait.acc_agpr, hand one accumulator out of
+ * the AGPRs (ordered asm "", "=a,0"); identity otherwise. */
+rocke_value_t* rocke_gemm_acc_agpr_out(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* acc);
+
+/* build_universal_gemm's _ep_default(vals, bm, bn, batch_off_c, fused): the
+ * default epilogue of one output tile; with trait.pad_fast_tile a uniform
+ * branch sends tiles fully inside M x N to the unguarded (pad-free) body. */
+void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
+                           rocke_value_t* const* vals,
+                           int num_vals,
+                           rocke_value_t* bm,
+                           rocke_value_t* bn,
+                           rocke_value_t* batch_off_c,
+                           void* fused_epilogue,
+                           bool fused_is_mde);
+
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,

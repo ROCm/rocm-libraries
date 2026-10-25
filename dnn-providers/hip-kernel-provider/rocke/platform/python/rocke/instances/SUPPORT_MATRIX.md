@@ -41,8 +41,30 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 `elementwise` and `reduce2d` also accept `dtype="f64"` (native f64
-compute, `vec=2`). f64 elementwise is limited to the native f64 ops `copy`,
-`neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max` and `min`.
+compute, `vec=2`). f64 elementwise runs every op except the f32-constant
+activations (`gelu_tanh`, `quick_gelu`, `silu` / `swish`, `swiglu`, `geglu`):
+`copy`, `neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max`, `min`, `exp`, `exp2`,
+`log`, `log2`, `tanh`, `sigmoid`, `sqrt`, `rsqrt` and `rcp`.
+
+## f64 / complex-f64 GETT (strided GEMM, tensor contraction)
+
+| Instance | gfx90a | gfx942 | gfx950 |
+|---|:--:|:--:|:--:|
+| `gett_f64` (real and interleaved complex) | ✅ | ✅ | ✅ |
+
+`v_mfma_f64_16x16x4_f64`, f64 accumulator, every operand read through its own
+strides; see `dsl_docs/instances/gett_f64.md`.
+
+## f16 / bf16 tensor contraction (native GETT)
+
+| Instance | gfx90a | gfx942 | gfx950 |
+|---|:--:|:--:|:--:|
+| `tensor/gett` (`TensorGettSpec`, f32 accumulation, alpha / beta) | ❌ | ❌ | ✅ |
+
+One launch reads both operands in place through their mode strides and writes the
+permuted D; gfx950 only (`ds_read_b64_tr_b16`). Operands need an even fastest free
+run (16-byte DTL lanes when it is a multiple of 8, else 4-byte lanes); batch /
+Hadamard modes are not supported. Python engine only.
 
 ---
 

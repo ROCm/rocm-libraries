@@ -30,6 +30,7 @@ set(HIPTENSOR_ELEMENTWISE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_permute.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_binary.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_elementwise_trinary.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_execute.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_binary_solution_rank2_double_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_binary_solution_rank2_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_binary_solution_rank2_half_instances.cpp

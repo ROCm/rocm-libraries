@@ -14,7 +14,13 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Callable, Optional, Sequence, Tuple
 
-from ..core import Capability, KernelCandidate, OperatorRequest, normalize_selector
+from ..core import (
+    Capability,
+    KernelCandidate,
+    OperatorRequest,
+    normalize_selector,
+    opt_in_probe,
+)
 from .identity import key_of
 from .space import KnobSpace, Verdict
 from .walk import current_sweep_level
@@ -163,6 +169,16 @@ def make_tuned_candidate(
         b, _why = resolve_base(req)
         return space.sample(b, n, seed)
 
+    def search(req: OperatorRequest):
+        probe = opt_in_probe(req, candidate)
+        ok, why = candidate.admits(probe)
+        if not ok:
+            raise ValueError(f"{name} does not admit the request: {why}")
+        b, why = resolve_base(probe)
+        if b is None:
+            raise ValueError(f"{name} has no tuning base for the request: {why}")
+        return space, b
+
     candidate = KernelCandidate(
         name=name,
         family=family,
@@ -178,6 +194,7 @@ def make_tuned_candidate(
         block=block,
         sweep_space=sweep,
         sample_space=sample,
+        search_space=search,
         build=build,
         bind_torch=bind_torch,
         opt_in=True,

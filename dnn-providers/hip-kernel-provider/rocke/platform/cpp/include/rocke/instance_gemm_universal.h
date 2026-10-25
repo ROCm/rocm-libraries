@@ -121,6 +121,88 @@ typedef struct rocke_gemm_trait_spec
      * and the barrier is elided -> lower small-tile latency, more LDS. Only
      * affects the cshuffle epilogue; False keeps byte-identical output. */
     bool cshuffle_no_alias; /* default false */
+    /* compv4 (VGPR-staged, non-DTL) AB LDS double buffer. Python:
+     * Optional[bool] = None. ab_double_buffer_set==false mirrors None (the
+     * historical automatic rule: direct epilogue only, and only when the
+     * doubled AB fits 2 WG/CU). When set, ab_double_buffer forces the choice;
+     * is_valid_spec rejects it off the compv4 non-DTL body. */
+    bool ab_double_buffer_set; /* false => Python None (automatic) */
+    bool ab_double_buffer;
+    /* Opt-in MFMA-cluster priority bookends (Python interwave_setprio, default
+     * false): sched_barrier(0); s_setprio(1); <K-atom MFMA cluster>;
+     * s_setprio(0); sched_barrier(0). scheduler="interwave" alone keeps the
+     * historical (intrawave) emission. MFMA only. */
+    bool interwave_setprio;
+    /* ---- DTL ring levers (all default-off; the defaults keep every
+     * existing kernel byte-identical). Python TraitSpec fields of the same
+     * names; see gemm_universal.py for the full rationale. ---- */
+    /* Alias-scoped DTL LDS ring: 0 = historical dtl_prefetch body; N >= 2 = one
+     * A and one B allocation per stage + lds_alias_scopes + a K-loop unrolled
+     * by N with static stages and a partial vmcnt((N-2)*loads) wait. */
+    int dtl_stages; /* default 0 */
+    /* dtl_stages >= 2: issue the next tile's DTL loads between the MFMAs. */
+    bool dtl_issue_spread;
+    /* dtl_stages >= 2: one-K-atom-ahead fragment register prefetch + the
+     * per-tile wait/barrier/DTL issue in front of the last K atom's MFMAs. */
+    bool dtl_frag_prefetch;
+    /* dtl_stages >= 2: the in-stream barrier without the fragment prefetch. */
+    bool dtl_stream_barrier;
+    /* MFMA fed (B, A): the accumulator holds C^T -> 8-byte vector stores in
+     * the direct epilogue (MFMA, default epilogue, no pad_n / split-K). */
+    bool mfma_swap_ab;
+    /* Python iglp_opt: Optional[int]. iglp_opt_set==false => None. */
+    bool iglp_opt_set;
+    int iglp_opt;
+    /* Persistent tile loop with the next tile's DTL prologue issued before the
+     * current tile's epilogue stores (0 = off). */
+    int persistent_ctas;
+    /* MFMA accumulators in AGPRs (agpr_alloc = (n, n), n =
+     * per-lane accumulator registers; opaque "=a,0" asm zero seed). */
+    bool acc_agpr;
+    /* (dtl_frag_prefetch body): every next-K-atom fragment ds_read and
+     * every DTL issue between two MFMAs, each MFMA + its slot fenced by
+     * sched_barrier(0) (Tensile-style interleave). */
+    bool mfma_interleave;
+    /* (acc_agpr): pin every MFMA result to the AGPR file
+     * (asm "", "=a,0" after each MFMA). */
+    bool acc_agpr_pin;
+    /* (mfma_interleave): 0 = spread the DTL issues evenly over the
+     * cluster; k >= 1 = one every k MFMAs from the first MFMA on. */
+    int ilv_dtl_every;
+    /* (mfma_interleave): the first k MFMAs of the K tile's last cluster
+     * go in front of its wait + barrier (0 = barrier first). */
+    int ilv_barrier_after;
+    /* (mfma_interleave): ds_reads and DTL issues on one merged schedule. */
+    bool ilv_merge;
+    /* row shift R of the lds_swizzle XOR key (-1 = geometry default). */
+    int lds_swizzle_r;
+    /* (dtl_stages >= 2): one buffer resource + soffset per operand and
+     * K tile for the DTL loads. */
+    bool dtl_hoist;
+    /* (persistent_ctas = P): stream-K tail balancing in the
+     * persistent loop (in-kernel DP + 2-tile SK partition, linear fixup with
+     * self-cleaning ready flags; params SkFlags / SkPart). */
+    bool streamk;
+    /* (dtl_stages >= 2): DTL buffer resources based at the tile origin
+     * with num_records = the operand bytes left (rows past M / N read 0). */
+    bool dtl_tight_rsrc;
+    /* (pad_m / pad_n, default epilogue): uniform full-tile branch to the
+     * unguarded epilogue. */
+    bool pad_fast_tile;
+    /* Early-release interleave levers, all default off. ilv_early_release (0..3):
+     * split the per-tile sync into release + acquire (1: inside the last atom;
+     * 2: release in the atom before it; 3: as 2 with the DTL issues spread over
+     * the atom boundary). ilv_release_at / ilv_acquire_at: their MFMA
+     * positions (0 = auto). */
+    int ilv_early_release;
+    int ilv_release_at;
+    int ilv_acquire_at;
+    /* epilogue AGPR hand-out asm "", "=v,0" instead of "=a,0" */
+    bool acc_out_vgpr;
+    /* front-load a cluster's ds_reads / DTL issues into the first p % of its
+     * MFMAs (0 = off) */
+    int ilv_read_span;
+    int ilv_dtl_span;
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */
@@ -161,6 +243,9 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void);
 /* WarpTileBlockSizeMixin._init_block_size(): when block_size==0, derive it as
  * warp_m*warp_n*warp_k*wave_size. Idempotent. Call after filling the spec. */
 void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec);
+
+/* Python acc_agpr_regs(spec): per-lane accumulator registers of one wave. */
+int rocke_gemm_acc_agpr_regs(const rocke_gemm_universal_spec_t* spec);
 
 /* UniversalGemmSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

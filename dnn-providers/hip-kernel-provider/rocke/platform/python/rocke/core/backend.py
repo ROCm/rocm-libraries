@@ -458,6 +458,98 @@ def _import_engine():
 # ------------------------------------------------- spec dict serialization
 
 
+# TraitSpec levers that only the Python engine builds (no C++ instance mirror yet): (field, default). A converter
+# that dropped one would make the cpp / both paths build a different kernel
+# than Python, so every converter refuses them instead.
+_PYTHON_ONLY_GEMM_LEVERS = (
+    # row-interleave LDS layout and hb_sched slot schedule
+    ("lds_row_interleave", False),
+    ("rilv_pad", 16),
+    ("hb_sched", False),
+    ("hb_rel_slot", -1),
+    ("hb_acq_slot", -1),
+    ("hb_read_every", 1),
+    ("hb_dtl_every", 0),
+    ("hb_acq_b_slot", -1),
+    ("hb_split_rel", False),
+    ("hb_rel_gap", 4),
+    # SIA-style K-tile schedule and vector epilogue
+    ("sia_sched", False),
+    ("sia_b_first", False),
+    ("sia_plr", False),
+    ("sia_single_lgkm", False),
+    ("sia_split_rel", False),
+    ("sia_split_acq", False),
+    ("sia_dtl_spread", False),
+    ("sia_read_every", 2),
+    ("sia_rel_gap", 4),
+    ("sia_acq_gap", 3),
+    ("sia_dtl_stride", 3),
+    ("sia_tensile", False),
+    ("sia_use_order", False),
+    ("sia_merge_sync", False),
+    ("rilv_vec_epilogue", False),
+    ("rve_store_nt", False),
+    # DTL issue economy
+    ("dtl_rsrc_word3", 0),
+    ("dtl_soff0", False),
+    ("kloop_unroll", 1),
+    ("dtl_addr_spread", False),
+    ("hb_dtl_delay", 0),
+    # hb_sched loop copies per SIMD parity
+    ("hb_skew", 0),
+    # StaggerU K start offset and MFMA issue order (mfma_serpentine is
+    # order 1, mfma_order the alternative orders)
+    ("stagger_u", 0),
+    ("stagger_u_stride", 1),
+    ("stagger_u_map", 0),
+    ("mfma_serpentine", False),
+    ("mfma_order", 0),
+    # vector-epilogue bounds and XCD-local stream-K
+    ("rve_pad", False),
+    ("sk_xcd_local", False),
+    # ragged / pad class
+    ("dtl_tight_ragged_only", False),
+    ("k_stagger_rc", 0),
+    # early stage free / split wait
+    ("ilv_early_free", 0),
+    ("ilv_ef_spread", False),
+    ("ilv_split_wait", 0),
+    # wave-specialized ping-pong
+    ("pingpong", 0),
+    ("pp_wait_late", False),
+    ("pp_mix_reads", 0),
+    ("pp_spread_lo", 0),
+    # hand-ordered main loop
+    ("asm_loop", ""),
+    ("asm_loop_table", ""),
+    ("asm_loop_prio", 0),
+    ("asm_loop_skew", 0),
+    ("fr0_loop_order", False),
+    ("asm_loop_rawrd", False),
+    # instruction economy
+    ("hb_tile_lgkm0", 0),
+    ("dtl_base_fold", False),
+    ("hb_skew_dtl", 0),
+    ("das_anchor", False),
+    ("das_late", False),
+    ("k_stagger", 0),
+    ("k_stagger_tiles", 0),
+    ("k_stagger_map", 0),
+    ("dtl_clamp_k", False),
+)
+
+
+def _refuse_python_only_levers(tr: Any) -> None:
+    """Raise NotImplementedError when ``tr`` sets a Python-engine-only lever."""
+    bad = [k for k, off in _PYTHON_ONLY_GEMM_LEVERS if getattr(tr, k, off) != off]
+    if bad:
+        raise NotImplementedError(
+            f"TraitSpec {', '.join(bad)}: implemented by the Python engine only "
+            "(no C++ mirror yet); lower it with backend='python'"
+        )
+
+
 def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """Translate a :class:`UniversalGemmSpec` into the flat dict the
     ``rocke_engine`` GEMM binding consumes.
@@ -470,6 +562,7 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     t = spec.tile
     tr = spec.trait
     d = spec.data
+    _refuse_python_only_levers(tr)
     return dict(
         name=spec.name,
         # tile geometry
@@ -503,6 +596,9 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         active_tile_skip=tr.active_tile_skip,
         lds_k_pad=tr.lds_k_pad,
         lds_swizzle=tr.lds_swizzle,
+        # split-K, schedule hints, cshuffle aliasing and the DTL ring / AGPR /
+        # persistent levers (one list shared with the wrapper converters)
+        **_gemm_lever_keys(tr),
         # data
         dtype_a=d.dtype_a,
         dtype_b=d.dtype_b,
@@ -661,6 +757,47 @@ def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
 # =====================================================================
 
 
+def _gemm_lever_keys(tr: Any) -> Dict[str, Any]:
+    """The TraitSpec levers beyond the phase-1 keys (split-K, schedule hints,
+    cshuffle aliasing and the DTL ring / AGPR / persistent levers). The binding
+    parses every one of these (rocke_engine.cpp fill_universal_spec /
+    build_spec); a converter that drops one makes the cpp / both paths build a
+    different kernel than Python."""
+    _refuse_python_only_levers(tr)
+    return dict(
+        split_k=tr.split_k,
+        emit_sched_hints=tr.emit_sched_hints,
+        cshuffle_no_alias=tr.cshuffle_no_alias,
+        ab_double_buffer=tr.ab_double_buffer,
+        interwave_setprio=tr.interwave_setprio,
+        dtl_stages=tr.dtl_stages,
+        dtl_issue_spread=tr.dtl_issue_spread,
+        dtl_frag_prefetch=tr.dtl_frag_prefetch,
+        dtl_stream_barrier=tr.dtl_stream_barrier,
+        mfma_swap_ab=tr.mfma_swap_ab,
+        iglp_opt=tr.iglp_opt,
+        persistent_ctas=tr.persistent_ctas,
+        acc_agpr=tr.acc_agpr,
+        mfma_interleave=tr.mfma_interleave,
+        acc_agpr_pin=tr.acc_agpr_pin,
+        ilv_dtl_every=tr.ilv_dtl_every,
+        ilv_barrier_after=tr.ilv_barrier_after,
+        ilv_merge=tr.ilv_merge,
+        lds_swizzle_r=tr.lds_swizzle_r,
+        dtl_hoist=tr.dtl_hoist,
+        streamk=tr.streamk,
+        dtl_tight_rsrc=tr.dtl_tight_rsrc,
+        pad_fast_tile=tr.pad_fast_tile,
+        # early-release interleave levers
+        ilv_early_release=tr.ilv_early_release,
+        ilv_release_at=tr.ilv_release_at,
+        ilv_acquire_at=tr.ilv_acquire_at,
+        acc_out_vgpr=tr.acc_out_vgpr,
+        ilv_read_span=tr.ilv_read_span,
+        ilv_dtl_span=tr.ilv_dtl_span,
+    )
+
+
 def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
     """Flatten the tile/trait pair shared by the GEMM-wrapper families
     (batched / grouped / flatmm) into the dict the binding consumes.
@@ -701,6 +838,8 @@ def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
         active_tile_skip=tr.active_tile_skip,
         lds_k_pad=tr.lds_k_pad,
         lds_swizzle=tr.lds_swizzle,
+        # the wrappers carry every lever too
+        **_gemm_lever_keys(tr),
         wave_size=spec.wave_size,
         block_size=spec.block_size,
     )

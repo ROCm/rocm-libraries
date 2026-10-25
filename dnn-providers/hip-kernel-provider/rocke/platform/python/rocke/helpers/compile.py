@@ -86,7 +86,12 @@ from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import _lower_kernel_to_llvm_python
+from ..core.lower_llvm import (
+    LLVM_FLAVORS,
+    _is_modern_flavor,
+    _lower_kernel_to_llvm_python,
+    _resolve_llvm_flavor,
+)
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir, build_hsaco_from_llvm_modules
 
@@ -496,14 +501,46 @@ def _lower_llvm_via_backend(
     )
 
 
-def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
-    """Return AMDGPU codegen options implied by kernel attrs."""
+def _comgr_options_for_kernel(
+    kernel: KernelDef, llvm_flavor: Optional[str] = None
+) -> List[str]:
+    """Return AMDGPU codegen options implied by kernel attrs.
+
+    The options are a pure function of the kernel attrs and the LLVM flavor
+    the kernel is compiled for. llvm_flavor defaults to the flavor the
+    LLVM lowerer resolves (ROCKE_LLVM_FLAVOR or the COMGR-loaded
+    compiler); it is only resolved for kernels whose options depend on it.
+    """
 
     options = ["-O3"]
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    elif kernel.attrs.get("mfma_agpr_form"):
+        if llvm_flavor is None:
+            llvm_flavor = _resolve_llvm_flavor()
+        if _flavor_has_mfma_form_option(llvm_flavor):
+            # AGPR-accumulator kernels (gemm acc_agpr): some compilers
+            # select the VGPR MFMA form despite amdgpu-agpr-alloc and then
+            # copy the accumulators between the register files every
+            # iteration; force the AGPR form.
+            options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form=0"])
+    # ``llvm_options`` (kernel attr, e.g. the tensor GETT ``llvm_opts`` knob):
+    # extra ``-mllvm`` codegen options; absent -> unchanged options
+    for opt in kernel.attrs.get("llvm_options", ()) or ():
+        options.extend(["-mllvm", str(opt)])
     return options
+
+
+def _flavor_has_mfma_form_option(llvm_flavor: str) -> bool:
+    """``-amdgpu-mfma-vgpr-form`` exists from LLVM 21 on, i.e. for every
+    flavor but llvm20 (an LLVM 20 compiler rejects the unknown option, and
+    selects the AGPR form for an ``amdgpu-agpr-alloc`` kernel anyway)."""
+    if llvm_flavor not in LLVM_FLAVORS:
+        raise ValueError(
+            f"unknown LLVM flavor {llvm_flavor!r}; expected one of {LLVM_FLAVORS}"
+        )
+    return _is_modern_flavor(llvm_flavor)
 
 
 def _is_zero_agpr_alloc(value: object) -> bool:

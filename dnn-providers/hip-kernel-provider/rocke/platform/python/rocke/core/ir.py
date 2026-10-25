@@ -271,6 +271,9 @@ _FENCE_SCOPES = ("workgroup", "agent", "system")
 # Orderings each op accepts; the verifier checks serialized IR against these.
 _FENCE_ORDERINGS = ("acquire", "release", "acq_rel", "seq_cst")
 _FLAG_STORE_ORDERINGS = ("monotonic", "release", "seq_cst")
+# memref.global_flag_wait_eq: "acquire" (default; the attr is then omitted) or
+# "monotonic" (relaxed spin; the caller fences once after it)
+_FLAG_WAIT_ORDERINGS = ("acquire", "monotonic")
 
 # Element types an LDS vector access (``smem_load_vN`` and ``smem_store_vN``)
 # admits, in the order its refusal lists them. One list for both directions
@@ -1471,6 +1474,24 @@ class IRBuilder:
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
 
+    def exp(self, a: Value) -> Value:
+        """Natural exponential of an f32 or f64 value.
+
+        f32 lowers to ``llvm.exp.f32``. f64 has no AMDGPU instruction or
+        intrinsic lowering, so it expands to the :mod:`rocke.core.f64_math`
+        program (within 1 ulp). Prefer this over ``exp2(x * log2(e))`` for f64:
+        rounding ``x * log2(e)`` loses up to 10 bits for large ``|x|``.
+        """
+        if a.type not in (F32, F64):
+            raise ValueError(f"math.exp requires f32 or f64 operand, got {a.type.name}")
+        return self._op("math.exp", [a], [a.type], result_name_hint="exp").result
+
+    def log(self, a: Value) -> Value:
+        """Natural logarithm of an f32 or f64 value (``llvm.log.f32`` / f64 expansion)."""
+        if a.type not in (F32, F64):
+            raise ValueError(f"math.log requires f32 or f64 operand, got {a.type.name}")
+        return self._op("math.log", [a], [a.type], result_name_hint="log").result
+
     def rcp(self, a: Value) -> Value:
         return self._op("math.rcp", [a], [a.type], result_name_hint="rcp").result
 
@@ -1493,14 +1514,17 @@ class IRBuilder:
         return self._op("math.rsqrt", [a], [a.type], result_name_hint="rsq").result
 
     def tanh(self, a: Value) -> Value:
-        """Return the f32 hyperbolic tangent of ``a``.
+        """Return the f32 or f64 hyperbolic tangent of ``a``.
 
         Narrow activation users must promote to f32 explicitly and cast the
-        result back. Keeping the core operation f32-only prevents an invalid
-        narrow intrinsic from reaching the AMDGPU lowerer.
+        result back. Keeping the core operation f32/f64-only prevents an
+        invalid narrow intrinsic from reaching the AMDGPU lowerer. f64 expands
+        to the :mod:`rocke.core.f64_math` program.
         """
-        if a.type != F32:
-            raise ValueError(f"math.tanh requires f32 operand, got {a.type.name}")
+        if a.type not in (F32, F64):
+            raise ValueError(
+                f"math.tanh requires f32 or f64 operand, got {a.type.name}"
+            )
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
@@ -2208,6 +2232,7 @@ class IRBuilder:
         expect: Value,
         *,
         scope: str = "agent",
+        ordering: str = "acquire",
     ) -> None:
         """Spin until the i32 flag ``ptr[idx]`` equals ``expect``.
 
@@ -2216,6 +2241,12 @@ class IRBuilder:
         the producer released before setting the flag. The loop is the only
         data-dependent trip count in the IR; it is a leaf op so structured
         control flow stays ``scf.for`` / ``scf.if`` only.
+
+        ``ordering="monotonic"`` spins on a relaxed atomic load instead and
+        leaves the acquire to the caller (one ``fence(scope, "acquire")``
+        after the wait). On gfx942 / gfx950 every agent-scope acquire load
+        also invalidates the XCD's L2 (``buffer_inv sc1``), so an acquire
+        spin thrashes the cache of every workgroup on that XCD while it waits.
         """
         _check_flag_ptr("global_flag_wait_eq", ptr)
         if expect.type.name != "i32":
@@ -2224,10 +2255,15 @@ class IRBuilder:
             )
         if scope not in _FENCE_SCOPES:
             raise ValueError(f"unknown flag scope {scope!r}")
+        if ordering not in _FLAG_WAIT_ORDERINGS:
+            raise ValueError(f"unknown flag wait ordering {ordering!r}")
+        attrs = {"scope": scope}
+        if ordering != "acquire":
+            attrs["ordering"] = ordering
         self._op(
             "memref.global_flag_wait_eq",
             [ptr, idx, expect],
-            attrs={"scope": scope},
+            attrs=attrs,
         )
 
     def fp16_zero(self) -> Value:
@@ -4487,7 +4523,8 @@ class IRBuilder:
         intrinsic.
 
         Args:
-        coherency: AMDGPU buffer-load cache-policy bits (0..3). One of
+        coherency: AMDGPU buffer-load cache-policy bits (0..3, optionally
+        ``| 16`` = SC1 on gfx940+). One of
         :data:`CACHE_ALL` (0, default), :data:`CACHE_GLOBAL`
         (1, GLC / SC0), :data:`CACHE_STREAM` (2, SLC / NT),
         :data:`NON_TEMPORAL` (3, both). The bits go into the last
@@ -4499,8 +4536,12 @@ class IRBuilder:
             raise ValueError(
                 f"async_buffer_load_lds_addr dwords must be 1, 3, or 4 (got {dwords})"
             )
-        if coherency not in (0, 1, 2, 3):
-            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        # bits 0..1 = SC0 / NT; bit 4 = SC1 (gfx940+ scope bit, the CPol::SCC
+        # position): 17 = ``sc0 sc1``, hipBLASLt's B-operand DTL policy on gfx950
+        if int(coherency) & ~0x13:
+            raise ValueError(
+                f"coherency must be 0..3, optionally | 16 (got {coherency})"
+            )
         self._op(
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
@@ -5191,7 +5232,9 @@ class IRBuilder:
             result_name_hint="gaddr",
         ).result
 
-    def buffer_rsrc(self, ptr: Value, num_bytes: Value) -> Value:
+    def buffer_rsrc(
+        self, ptr: Value, num_bytes: Value, word3: Optional[int] = None
+    ) -> Value:
         """Build an AMDGPU 128-bit buffer resource descriptor.
 
         Wraps `@llvm.amdgcn.make.buffer.rsrc.p1(ptr, stride=0,
@@ -5199,11 +5242,23 @@ class IRBuilder:
         (typed `<4 x i32>` here for printing; LLVM internally treats it
         as `ptr addrspace(8)`) and is consumed by `buffer_load_vN` and
         `async_buffer_load_lds`.
+
+        ``word3`` (optional): the descriptor DWORD3 (flags) for this
+        resource instead of the target default (CDNA ``0x00027000``); e.g.
+        ``0x00020000`` (DATA_FORMAT 32, NUM_FORMAT 0 -- hipBLASLt's / CK's
+        gfx94x/gfx950 value). Unset (default) adds no attribute, so the IR
+        of every existing kernel is unchanged.
         """
+        attrs = None
+        if word3 is not None:
+            if not 0 <= int(word3) < (1 << 32):
+                raise ValueError(f"buffer_rsrc word3 must be a u32 (got {word3})")
+            attrs = {"word3": int(word3)}
         return self._op(
             "tile.buffer_rsrc",
             [ptr, num_bytes],
             [VectorType(I32, 4)],
+            attrs=attrs,
             result_name_hint="rsrc",
         ).result
 
@@ -5924,6 +5979,8 @@ PURE_OP_NAMES = {
     "math.exp2",
     "math.exp2_fast",
     "math.log2",
+    "math.exp",
+    "math.log",
     "math.rcp",
     "math.rcp_fast",
     "math.sqrt",

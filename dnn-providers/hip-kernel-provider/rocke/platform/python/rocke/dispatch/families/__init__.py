@@ -45,6 +45,13 @@ of a constraint that silently never matches.
 
 from __future__ import annotations
 
+from .gett_f64 import (
+    GETT_F64_REGISTRY,
+    GettF64Request,
+    dispatch_gett_f64,
+    dispatch_gett_f64_all,
+    gett_f64_sweep_space,
+)
 from .moe import (
     MOE_REGISTRY,
     MoeRequest,
@@ -61,8 +68,20 @@ from .norm import (
     norm_sweep_space,
     registered_norm_combos,
 )
+from .tensor_gett import (
+    TENSOR_GETT_REGISTRY,
+    TensorGettRequest,
+    dispatch_tensor_gett,
+    dispatch_tensor_gett_all,
+    tensor_gett_sweep_space,
+)
 
 __all__ = [
+    "GETT_F64_REGISTRY",
+    "GettF64Request",
+    "dispatch_gett_f64",
+    "dispatch_gett_f64_all",
+    "gett_f64_sweep_space",
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",
@@ -75,4 +94,9 @@ __all__ = [
     "dispatch_norm_all",
     "norm_sweep_space",
     "registered_norm_combos",
+    "TENSOR_GETT_REGISTRY",
+    "TensorGettRequest",
+    "dispatch_tensor_gett",
+    "dispatch_tensor_gett_all",
+    "tensor_gett_sweep_space",
 ]

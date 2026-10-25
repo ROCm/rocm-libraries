@@ -82,47 +82,14 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     /* LDS XOR swizzle. _SWZ = spec.trait.lds_swizzle. */
     ctx->swz = spec->trait.lds_swizzle;
     {
-        /* _ilog2 / _swz_elem / _swz_slots / _auto_l / _auto_w geometry. */
-        int swz_elem = (ctx->a_per_lane == ctx->b_per_lane) ? ctx->a_per_lane : 0;
-        int swz_slots
-            = (swz_elem && (ctx->block_k % swz_elem == 0)) ? (ctx->block_k / swz_elem) : 0;
-        int auto_l = -1; /* -1 represents Python None */
-        int auto_w = -1;
-        if(swz_elem && (swz_elem & (swz_elem - 1)) == 0)
-        {
-            int v = swz_elem, lg = 0;
-            while(v > 1)
-            {
-                v >>= 1;
-                ++lg;
-            }
-            auto_l = lg;
-        }
-        if(swz_slots && (swz_slots & (swz_slots - 1)) == 0)
-        {
-            int v = swz_slots, lg = 0;
-            while(v > 1)
-            {
-                v >>= 1;
-                ++lg;
-            }
-            auto_w = lg;
-        }
+        /* lds_swizzle_params (env-free single source shared with the validity
+         * gate), then os.environ.get(CK_SWZ_{R,W,L}, default): the debug
+         * overrides Python honours too, so sweep parity holds. */
         int def_r, def_w, def_l;
-        if(auto_l >= 0 && auto_w >= 0 && auto_w >= 1)
-        {
-            def_r = 0;
-            def_w = auto_w;
-            def_l = auto_l;
-        }
-        else
-        {
-            def_r = 3;
-            def_w = 1;
-            def_l = 4;
-        }
-        /* os.environ.get(CK_SWZ_{R,W,L}, default). The faithful port honours the
-         * same env overrides as Python so sweep parity holds. */
+        rocke_gemm_lds_swizzle_params(
+            ctx->a_per_lane, ctx->b_per_lane, ctx->block_k, &def_r, &def_w, &def_l);
+        if(spec->trait.lds_swizzle_r >= 0)
+            def_r = spec->trait.lds_swizzle_r; /* AGPR / interleave knob */
         const char* er = getenv("CK_SWZ_R");
         const char* ew = getenv("CK_SWZ_W");
         const char* el = getenv("CK_SWZ_L");
@@ -191,16 +158,7 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     /* _, _db, _two_buf = _ab_lds_plan(spec, arch). The db/two_buf decision is
      * pure host arithmetic; ported inline (mirrors _ab_lds_plan). */
     {
-        long ab_single = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k) * 2;
-        bool db_fits_2wg = false;
-        if(ctx->target)
-        {
-            /* (2*ab_single)*2 <= lds_capacity_bytes */
-            db_fits_2wg = rocke_archtarget_fits_lds(ctx->target, (2 * ab_single) * 2);
-        }
-        bool db = (strcmp(spec->trait.pipeline, "compv4") == 0)
-                  && (strcmp(spec->trait.epilogue, "cshuffle") != 0) && !spec->trait.direct_to_lds
-                  && db_fits_2wg;
+        bool db = rocke_gemm_ab_db_decision(spec, ctx->target);
         ctx->db = db;
         ctx->two_buf = spec->trait.dtl_prefetch || db;
     }
@@ -332,7 +290,7 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
         ctx->dtl_b_passes = (ctx->dtl_b_chunks + spec->block_size - 1) / spec->block_size;
         ctx->dtl_pass_bytes = spec->block_size * ctx->dtl_bytes_per_lane;
 
-        ctx->dtl_big_bytes = rocke_b_const_i32(b, 0x7FFF0000);
+        ctx->dtl_big_bytes = rocke_b_const_i32(b, ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS);
         ctx->dtl_a_rsrc = rocke_b_buffer_rsrc(b, ctx->A, ctx->dtl_big_bytes);
         ctx->dtl_b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->dtl_big_bytes);
         ctx->dtl_a_lds_base = rocke_b_smem_addr_of(b, ctx->A_smem);

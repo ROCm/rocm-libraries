@@ -258,6 +258,11 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* expect = op->operands[2];
     const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+    if(ordering == NULL)
+        ordering = "acquire";
+    else if(strcmp(ordering, "acquire") != 0 && strcmp(ordering, "monotonic") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s: unknown ordering '%s'", op->name, ordering);
     const char* gep = rocke_ll_fresh(L, "gep");
     rocke_ll_block_t* cur = rocke_ll_current(L);
     rocke_ll_block_t* spin;
@@ -279,10 +284,11 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     hit = rocke_ll_fresh(L, "flag.hit");
     rocke_ll_block_emitf(L,
                          spin,
-                         "  %s = load atomic i32, ptr addrspace(1) %s%s acquire, align 4",
+                         "  %s = load atomic i32, ptr addrspace(1) %s%s %s, align 4",
                          val,
                          gep,
-                         ll_syncscope(L, scope));
+                         ll_syncscope(L, scope),
+                         ordering);
     rocke_ll_block_emitf(
         L, spin, "  %s = icmp eq i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
     done = rocke_ll_new_block(L, "flag.done");
@@ -997,7 +1003,8 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
         intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1";
         nb_text = rocke_arena_printf(&L->arena, "i32 %s", rocke_ll_operand(L, num_bytes));
     }
-    word3 = L->backend->buffer_rsrc_word3;
+    /* optional per-resource DWORD3 (Python IRBuilder.buffer_rsrc(word3=)) */
+    word3 = (int)ll_attr_int(op, "word3", (int64_t)L->backend->buffer_rsrc_word3);
     rocke_ll_emitf(L,
                    "  %s = call ptr addrspace(8) @%s("
                    "ptr addrspace(1) %s, i16 0, %s, i32 %d)",

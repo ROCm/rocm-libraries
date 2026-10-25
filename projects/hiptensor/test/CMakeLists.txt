@@ -462,6 +462,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_cache_unit_test|NONE"
   "contraction_selection_test|NONE"
   "large_tensor_test|NONE"
+  "operation_validation_test|NONE"
+  "workspace_size_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
@@ -471,6 +473,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "contraction_test_utils_test|NONE"
   "elementwise_output_strides_test|NONE"
   "elementwise_scalar_op_test|NONE"
+  "elementwise_zero_scale_test|NONE"
+  "elementwise_f64_unary_op_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
   "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
   "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
@@ -493,6 +497,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "rank5_reduction_test|03_reduction/rank5_test_params.yaml"
   "rank6_reduction_test|03_reduction/rank6_test_params.yaml"
   "reduction_scalar_test|NONE"
+  "reduction_semantics_test|NONE"
 )
 
 # Bench (performance) tests encoded as "binary|config". Same encoding as

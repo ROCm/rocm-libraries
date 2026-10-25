@@ -15,6 +15,16 @@ additional `TraitSpec` lever.
 > findings (what worked, what only *looked* like a lever, and the structural reason
 > the kernel lands at ~0.81× of hand-tuned rocBLAS at boost clock).
 
+> The step past rung F -- per-stage LDS allocations with alias scopes, which remove
+> the backend's LDS-DMA alias wait, and the levers measured on top of it -- is
+> written up in [`RING_CASE_STUDY.md`](RING_CASE_STUDY.md).
+>
+> The 4-wave 128x128-per-wave body with AGPR accumulators (and the compiler
+> interactions it needed) is written up in [`AGPR_CASE_STUDY.md`](AGPR_CASE_STUDY.md).
+> The persistent / stream-K levers (persistent in-stream bodies, stream-K, exact DTL bounds for ragged shapes,
+> the full-tile epilogue fast path, small-tile and big-grid dispatch) are in
+> [`DTL_RING_SHAPES_CASE_STUDY.md`](DTL_RING_SHAPES_CASE_STUDY.md).
+
 > **A note on the directory name.** The directory is named `warpspec`, but the
 > shipped kernel uses the production universal-GEMM body with these traits — it is
 > **not** a producer/consumer warp-specialized pipeline, and no warp specialization

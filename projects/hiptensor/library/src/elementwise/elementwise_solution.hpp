@@ -72,7 +72,7 @@ namespace hiptensor
 
         // Whether the instance applies the given scalars and operators. The pass-through
         // permutation instances ignore both, so they only serve alpha == 1 with identity ops.
-        virtual bool appliesScalarsAndOps(std::vector<float> const&               scalarValues,
+        virtual bool appliesScalarsAndOps(std::vector<double> const&              scalarValues,
                                           std::vector<hiptensorOperator_t> const& operators) const
             = 0;
 

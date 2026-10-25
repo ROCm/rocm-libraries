@@ -21,6 +21,23 @@ for the per-instance arch grid.
 
 ABI: `(A, B, C, M, N, K)` for plain GEMM, with `stride_a/b/c` added for batched.
 
+f64 and complex-f64 GEMM / tensor contraction:
+[`gett_f64.py`](../../python/rocke/instances/common/gett_f64.py) (`GettF64Problem`,
+`GettF64Spec`) and its host planner
+[`gett_f64_plan.py`](../../python/rocke/instances/common/gett_f64_plan.py); doc
+`instances/gett_f64.md`. gfx90a / gfx942 / gfx950.
+
+f16 / bf16 tensor contraction (native GETT, one launch, no permute pass):
+[`tensor/gett.py`](../../python/rocke/instances/common/tensor/gett.py) (`TensorGettSpec`,
+`GettKnobs`, `GettHooks`) and its host planner
+[`tensor/gett_plan.py`](../../python/rocke/instances/common/tensor/gett_plan.py);
+dispatcher family `dispatch/families/tensor_gett.py`. gfx950; Python engine only.
+
+Fused operand prologues for the universal GEMM (f32 operands with bf16 split
+emulation, unary opA / opB, interleaved complex-f32 B):
+[`gemm_prologue.py`](../../python/rocke/instances/common/gemm_prologue.py)
+(`Prologue`, `attach_prologue`); Python engine only.
+
 Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 
 Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: `RCR`.

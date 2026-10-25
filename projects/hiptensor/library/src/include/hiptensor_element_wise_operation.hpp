@@ -42,6 +42,14 @@
 #define HIPTENSOR_UNARY_INLINE __attribute__((noinline))
 #endif
 
+// Internal unary operator, never accepted through the API (the create functions only accept the
+// operators of hiptensorOperator_t that apply to one operand): its result is zero whatever the
+// operand. It replaces the operator of an operand whose scaling factor is zero, so that the
+// operand's value and the result of its own operator, which may be NaN or Inf, do not reach the
+// output as 0 * op(x).
+inline constexpr hiptensorOperator_t HIPTENSOR_OP_INTERNAL_ZERO
+    = static_cast<hiptensorOperator_t>(125);
+
 namespace ck
 {
     namespace tensor_operation
@@ -260,6 +268,9 @@ namespace ck
                         break;
                     case HIPTENSOR_OP_FLOOR:
                         hiptensor_floor(y, x);
+                        break;
+                    case HIPTENSOR_OP_INTERNAL_ZERO:
+                        y = T(0);
                         break;
                     default:
                         hiptensor_identity(y, x);

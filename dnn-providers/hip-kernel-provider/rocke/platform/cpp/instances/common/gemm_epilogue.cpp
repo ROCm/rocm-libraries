@@ -24,6 +24,7 @@
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Dispatch helpers for the attached fused epilogue (Python's runtime method
  * resolution on the _fused_epilogue object). The pointer is the FusedEpilogue
@@ -163,6 +164,31 @@ rocke_value_t* rocke_gemm_load_smem_vec(rocke_ir_builder_t* b,
 }
 
 /* =====================================================================
+ * _acc_agpr_out : with trait.acc_agpr, hand one accumulator
+ * out of the AGPRs at its point of use through an ordered (side-effecting)
+ * asm "", "=a,0"; identity otherwise.
+ * ===================================================================== */
+rocke_value_t* rocke_gemm_acc_agpr_out(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* acc)
+{
+    rocke_inline_asm_opts_t opts;
+    const rocke_type_t* ty;
+    rocke_op_t* op;
+    if(!spec->trait.acc_agpr || acc == NULL)
+        return acc;
+    memset(&opts, 0, sizeof opts);
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    ty = acc->type;
+    /* acc_out_vgpr: the tied VGPR operand makes the AGPR -> VGPR copy the asm's
+     * own input copy (no AGPR -> AGPR move + hazard nops) */
+    op = rocke_b_inline_asm(
+        b, "", spec->trait.acc_out_vgpr ? "=v,0" : "=a,0", &acc, 1, &ty, 1, &opts);
+    return op != NULL ? op->results[0] : NULL;
+}
+
+/* =====================================================================
  * _emit_mfma_acc_scatter
  * ===================================================================== */
 
@@ -261,7 +287,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                 = rocke_b_add(b, m_base_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
             for(ni = 0; ni < mfmas_n; ++ni)
             {
-                rocke_value_t* acc = accs[flat];
+                rocke_value_t* acc = rocke_gemm_acc_agpr_out(b, spec, accs[flat]);
                 rocke_value_t* acc_h;
                 rocke_value_t* c_n;
                 flat += 1;
@@ -360,6 +386,115 @@ static void gemm_default_store_cell(rocke_ir_builder_t* b,
         h = rocke_gemm_fe_apply_scalar(b, u->fused_epilogue, h, c_m, c_n);
     }
     gemm_default_store_masked(u, c_m, c_n, c_off, h);
+}
+
+/* _emit_store_swapped_acc (mfma_swap_ab): the accumulator holds C^T, so each
+ * run of kCM1PerLane consecutive slots is kCM1PerLane consecutive N columns of
+ * one C row -> one kCM1PerLane-wide vector store per run. Mirrors the Python
+ * op order exactly. */
+void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* lane,
+                                       rocke_value_t* const* accs,
+                                       int num_accs,
+                                       rocke_value_t* m_base_off,
+                                       rocke_value_t* n_base_off,
+                                       int c_per_lane,
+                                       const rocke_type_t* storage_dtype,
+                                       rocke_value_t* M,
+                                       rocke_value_t* N,
+                                       rocke_value_t* C,
+                                       rocke_value_t* batch_off_c)
+{
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
+    int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
+    int kc_m1 = 0;
+    int kc_nlane = 0;
+    int elem_bytes = rocke_i_type_bits(storage_dtype) / 8;
+    rocke_value_t* ramp[ROCKE_GEMM_MAX_ACCS];
+    rocke_value_t* c_nlane;
+    rocke_value_t* lane_mn;
+    rocke_value_t* p_lane[2];
+
+    (void)num_accs;
+    const rocke_mfma_atom_t* atom
+        = rocke_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    if(rocke_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != ROCKE_OK)
+        return;
+    rocke_tile_distribution_encoding_t* c_enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, c_enc);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    c_nlane = rocke_b_const_i32(b, kc_nlane);
+    lane_mn = rocke_b_mod(b, lane, c_nlane); /* MFMA output column -> C row (M) */
+    p_lane[0] = rocke_b_div(b, lane, c_nlane);
+    p_lane[1] = lane_mn;
+    {
+        int i;
+        rocke_value_t* const* ps[1] = {p_lane};
+        int ps_counts[1] = {2};
+        for(i = 0; i < c_per_lane; ++i)
+        {
+            rocke_value_t* ys[2]
+                = {rocke_b_const_i32(b, i / kc_m1), rocke_b_const_i32(b, i % kc_m1)};
+            rocke_value_t* x_out[2] = {NULL, NULL};
+            if(!rocke_tile_distribution_calculate_x(b, c_dist, ys, 2, ps, ps_counts, 1, x_out, 2))
+                return;
+            ramp[i] = x_out[0]; /* MFMA output row -> C column (N) */
+        }
+    }
+    {
+        int flat = 0;
+        int mi, ni, g, r;
+        for(mi = 0; mi < mfmas_m; ++mi)
+        {
+            rocke_value_t* c_m;
+            rocke_value_t* row_off;
+            {
+                rocke_value_t* cst = rocke_b_const_i32(b, mi * t->warp_tile_m);
+                rocke_value_t* in = rocke_b_add(b, cst, lane_mn);
+                c_m = rocke_b_add(b, m_base_off, in);
+            }
+            row_off = rocke_b_mul(b, c_m, N);
+            if(batch_off_c != NULL)
+                row_off = rocke_b_add(b, batch_off_c, row_off);
+            for(ni = 0; ni < mfmas_n; ++ni)
+            {
+                /* acc_agpr: hand the atom out of the AGPRs at its use (identity
+                 * without acc_agpr) */
+                rocke_value_t* acc_h = rocke_b_vec_cast_f32_to(
+                    b, rocke_gemm_acc_agpr_out(b, spec, accs[flat]), storage_dtype);
+                rocke_value_t* n_tile;
+                flat += 1;
+                n_tile = rocke_b_add(b, n_base_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+                for(g = 0; g < c_per_lane / kc_m1; ++g)
+                {
+                    rocke_value_t* c_n = rocke_b_add(b, n_tile, ramp[g * kc_m1]);
+                    rocke_value_t* vals[ROCKE_GEMM_MAX_ACCS];
+                    rocke_value_t* vec;
+                    rocke_value_t* off;
+                    for(r = 0; r < kc_m1; ++r)
+                        vals[r] = rocke_b_vec_extract(b, acc_h, g * kc_m1 + r);
+                    vec = rocke_b_vec_pack(b, vals, kc_m1, storage_dtype);
+                    off = rocke_b_add(b, row_off, c_n);
+                    if(spec->trait.pad_m)
+                    {
+                        rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_lt(b, c_m, M));
+                        rocke_b_region_enter(b, iff.then_region);
+                        rocke_b_global_store_vN(b, C, off, vec, kc_m1, kc_m1 * elem_bytes);
+                        rocke_b_region_leave(b);
+                    }
+                    else
+                    {
+                        rocke_b_global_store_vN(b, C, off, vec, kc_m1, kc_m1 * elem_bytes);
+                    }
+                }
+            }
+        }
+    }
 }
 
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
@@ -468,6 +603,30 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
         rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;
+
+        if(spec->trait.mfma_swap_ab)
+        {
+            if(fused_epilogue != NULL)
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "mfma_swap_ab does not support a fused epilogue");
+                return;
+            }
+            rocke_gemm_emit_store_swapped_acc(b,
+                                              spec,
+                                              lane,
+                                              accs,
+                                              num_accs,
+                                              block_warp_m_off,
+                                              block_warp_n_off,
+                                              c_per_lane,
+                                              storage_dtype,
+                                              M,
+                                              N,
+                                              C,
+                                              batch_off_c);
+            return;
+        }
 
         u.b = b;
         u.spec = spec;
@@ -631,7 +790,8 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                 = rocke_b_add(b, block_warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
             for(ni = 0; ni < mfmas_n; ++ni)
             {
-                rocke_value_t* acc = accs[flat];
+                /* acc_agpr: one atom out of the AGPRs at a time (_acc_agpr_out) */
+                rocke_value_t* acc = rocke_gemm_acc_agpr_out(b, spec, accs[flat]);
                 rocke_value_t* c_n;
                 flat += 1;
                 c_n = rocke_b_add(
@@ -978,22 +1138,107 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
     }
     else
     {
+        rocke_gemm_ep_default(ctx,
+                              ctx->for_results,
+                              ctx->num_for_results,
+                              ctx->block_m_off,
+                              ctx->block_n_off,
+                              ctx->batch_off_c,
+                              fused_ep,
+                              fused_is_mde);
+    }
+}
+
+/* =====================================================================
+ * _ep_default: the default epilogue of one output tile;
+ * with trait.pad_fast_tile, full tiles take the pad-free body.
+ * ===================================================================== */
+void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
+                           rocke_value_t* const* vals,
+                           int num_vals,
+                           rocke_value_t* bm,
+                           rocke_value_t* bn,
+                           rocke_value_t* batch_off_c,
+                           void* fused_epilogue,
+                           bool fused_is_mde)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_gemm_universal_spec_t* spec = ctx->spec;
+    rocke_value_t* full = NULL;
+    rocke_gemm_universal_spec_t nopad;
+    rocke_if_else_t ie;
+    if(!spec->trait.pad_fast_tile)
+    {
         rocke_gemm_emit_epilogue_default(b,
                                          spec,
                                          ctx->op,
-                                         ctx->for_results,
-                                         ctx->num_for_results,
+                                         vals,
+                                         num_vals,
                                          ctx->warp_m_idx,
                                          ctx->warp_n_idx,
                                          ctx->lane,
-                                         ctx->block_m_off,
-                                         ctx->block_n_off,
+                                         bm,
+                                         bn,
                                          ctx->M,
                                          ctx->N,
                                          ctx->C,
                                          ctx->c_per_lane,
-                                         ctx->batch_off_c,
-                                         fused_ep,
+                                         batch_off_c,
+                                         fused_epilogue,
                                          fused_is_mde);
+        return;
     }
+    if(spec->trait.pad_m)
+    {
+        rocke_value_t* e = rocke_b_add(b, bm, ctx->c_block_m);
+        full = rocke_b_cmp_le(b, e, ctx->M);
+    }
+    if(spec->trait.pad_n)
+    {
+        rocke_value_t* e = rocke_b_add(b, bn, ctx->c_block_n);
+        rocke_value_t* fn = rocke_b_cmp_le(b, e, ctx->N);
+        full = full == NULL ? fn : rocke_b_land(b, full, fn);
+    }
+    nopad = *spec;
+    nopad.trait.pad_m = false;
+    nopad.trait.pad_n = false;
+    ie = rocke_b_scf_if_else(b, full);
+    rocke_b_region_enter(b, ie.then_region);
+    rocke_gemm_emit_epilogue_default(b,
+                                     &nopad,
+                                     ctx->op,
+                                     vals,
+                                     num_vals,
+                                     ctx->warp_m_idx,
+                                     ctx->warp_n_idx,
+                                     ctx->lane,
+                                     bm,
+                                     bn,
+                                     ctx->M,
+                                     ctx->N,
+                                     ctx->C,
+                                     ctx->c_per_lane,
+                                     batch_off_c,
+                                     fused_epilogue,
+                                     fused_is_mde);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, ie.else_region);
+    rocke_gemm_emit_epilogue_default(b,
+                                     spec,
+                                     ctx->op,
+                                     vals,
+                                     num_vals,
+                                     ctx->warp_m_idx,
+                                     ctx->warp_n_idx,
+                                     ctx->lane,
+                                     bm,
+                                     bn,
+                                     ctx->M,
+                                     ctx->N,
+                                     ctx->C,
+                                     ctx->c_per_lane,
+                                     batch_off_c,
+                                     fused_epilogue,
+                                     fused_is_mde);
+    rocke_b_region_leave(b);
 }

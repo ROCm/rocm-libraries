@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <algorithm>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
@@ -62,6 +63,156 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
         }
     }
     return false;
+}
+
+// The kernels split the modes of one contraction step (inputs X and Y, output Z) into three
+// groups: M (in X and Z), N (in Y and Z) and K (in X and Y). The normalization in
+// contraction_solution.cpp writes each group into a vector of MaxNumDimsM / MaxNumDimsN /
+// MaxNumDimsK entries and needs at least one M and one N mode, so anything else would write
+// past those vectors or read a mode that is not there. Rejected here, before a descriptor exists:
+//  - a mode repeated within one tensor;
+//  - an output mode that neither input carries, or a mode that only one tensor carries;
+//  - no M mode or no N mode, or more modes in a group than the kernels address;
+//  - a mode shared by two tensors with different extents (HIPTENSOR_STATUS_INVALID_VALUE).
+// A mode shared by all three tensors (a batch mode) is rejected by hasSharedBatchMode().
+static hiptensorStatus_t checkContractionModes(char const*                     apiFuncName,
+                                               char const*                     nameX,
+                                               std::vector<int32_t> const&     modeX,
+                                               std::vector<std::size_t> const& lengthsX,
+                                               char const*                     nameY,
+                                               std::vector<int32_t> const&     modeY,
+                                               std::vector<std::size_t> const& lengthsY,
+                                               char const*                     nameZ,
+                                               std::vector<int32_t> const&     modeZ,
+                                               std::vector<std::size_t> const& lengthsZ)
+{
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    char msg[256];
+
+    struct Tensor
+    {
+        char const*                     name;
+        std::vector<int32_t> const&     modes;
+        std::vector<std::size_t> const& lengths;
+    };
+    Tensor const tensors[] = {{nameX, modeX, lengthsX}, {nameY, modeY, lengthsY}, {nameZ, modeZ, lengthsZ}};
+
+    for(auto const& t : tensors)
+    {
+        auto seen = std::set<int32_t>();
+        for(auto mode : t.modes)
+        {
+            if(!seen.insert(mode).second)
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Contraction where mode '%c' (%d) is repeated within %s is not supported",
+                         static_cast<char>(mode),
+                         mode,
+                         t.name);
+                logger->logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
+    }
+
+    auto contains = [](std::vector<int32_t> const& modes, int32_t mode) {
+        return std::find(modes.cbegin(), modes.cend(), mode) != modes.cend();
+    };
+
+    // Each mode must be carried by exactly two of the three tensors.
+    for(std::size_t i = 0; i < 3; i++)
+    {
+        auto const& t      = tensors[i];
+        auto const& other1 = tensors[(i + 1) % 3];
+        auto const& other2 = tensors[(i + 2) % 3];
+        for(auto mode : t.modes)
+        {
+            if(!contains(other1.modes, mode) && !contains(other2.modes, mode))
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Contraction where mode '%c' (%d) is carried by %s only (neither %s nor "
+                         "%s carries it) is not supported",
+                         static_cast<char>(mode),
+                         mode,
+                         t.name,
+                         other1.name,
+                         other2.name);
+                logger->logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
+    }
+
+    // A mode shared by two tensors must have the same extent in both.
+    for(std::size_t i = 0; i < 3; i++)
+    {
+        auto const& t     = tensors[i];
+        auto const& other = tensors[(i + 1) % 3];
+        for(std::size_t j = 0; j < t.modes.size(); j++)
+        {
+            auto it = std::find(other.modes.cbegin(), other.modes.cend(), t.modes[j]);
+            if(it != other.modes.cend()
+               && other.lengths[std::distance(other.modes.cbegin(), it)] != t.lengths[j])
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Mode '%c' (%d) has a different extent in tensor %s than in tensor %s",
+                         static_cast<char>(t.modes[j]),
+                         t.modes[j],
+                         t.name,
+                         other.name);
+                logger->logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_INVALID_VALUE;
+            }
+        }
+    }
+
+    std::size_t numM = 0, numN = 0, numK = 0;
+    for(auto mode : modeZ)
+    {
+        contains(modeX, mode) ? numM++ : numN++;
+    }
+    for(auto mode : modeX)
+    {
+        numK += contains(modeY, mode) && !contains(modeZ, mode) ? 1 : 0;
+    }
+
+    if(numM == 0 || numN == 0)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Contraction where %s carries no mode of %s (M modes: %zu, N modes: %zu) is not "
+                 "supported",
+                 nameZ,
+                 numM == 0 ? nameX : nameY,
+                 numM,
+                 numN);
+        logger->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(numM > std::size_t(MaxNumDimsM) || numN > std::size_t(MaxNumDimsN)
+       || numK > std::size_t(MaxNumDimsK))
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Contraction with %zu M, %zu N and %zu K modes is not supported (at most %d, %d "
+                 "and %d)",
+                 numM,
+                 numN,
+                 numK,
+                 MaxNumDimsM,
+                 MaxNumDimsN,
+                 MaxNumDimsK);
+        logger->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 // The additive input of a contraction is addressed through its own modes and
@@ -161,6 +312,112 @@ inline auto toVoidVec(std::unordered_map<std::size_t, hiptensor::ContractionSolu
     return result;
 }
 
+// The registered kernels for the operation's contraction type, data types and operators: the
+// candidates every selection algorithm starts from. `typeBias` and `typeOut` are the types of the
+// additive input and of the output (C and D for a binary contraction, D and E for a trinary one).
+static std::vector<hiptensor::ContractionSolution*>
+    contractionCandidates(hiptensorOperationDescriptor const& desc,
+                          hiptensorDataType_t                 typeA,
+                          hiptensorDataType_t                 typeB,
+                          hiptensorDataType_t                 typeBias,
+                          hiptensorDataType_t                 typeOut,
+                          bool                                hasUnaryOp)
+{
+    auto& instances = hiptensor::ContractionSolutionInstances::instance();
+    auto  all       = toContractionSolutionVec(instances->allSolutions().solutions());
+    auto  solutionQ = hiptensor::ContractionSolutionRegistry::Query{all}
+                         .query((hiptensor::ContractionOpId_t)desc.mContractionOpId)
+                         .query(typeA, typeB, typeBias, typeOut, desc.mDescCompute);
+    solutionQ = hasUnaryOp ? solutionQ.query(HIPTENSOR_OP_UNKNOWN, HIPTENSOR_OP_UNKNOWN)
+                           : solutionQ.query(HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY);
+    return toContractionSolutionVec(solutionQ.solutions());
+}
+
+// The workspace a kernel needs for one contraction step, or nothing if it cannot run the step.
+static std::optional<uint64_t>
+    contractionStepWorkspace(hiptensor::ContractionSolution*       solution,
+                             std::vector<std::size_t> const&       aLengths,
+                             std::vector<std::size_t> const&       aStrides,
+                             std::vector<int32_t> const&           aModes,
+                             std::vector<std::size_t> const&       bLengths,
+                             std::vector<std::size_t> const&       bStrides,
+                             std::vector<int32_t> const&           bModes,
+                             std::vector<std::size_t> const&       dLengths,
+                             std::vector<std::size_t> const&       dStrides,
+                             std::vector<int32_t> const&           dModes,
+                             std::vector<std::size_t> const&       eLengths,
+                             std::vector<std::size_t> const&       eStrides,
+                             std::vector<int32_t> const&           eModes,
+                             hiptensor::ContractionUnaryOps const& unaryOps)
+{
+    if(!solution->initArgs(nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           aLengths,
+                           aStrides,
+                           aModes,
+                           bLengths,
+                           bStrides,
+                           bModes,
+                           dLengths,
+                           dStrides,
+                           dModes,
+                           eLengths,
+                           eStrides,
+                           eModes,
+                           unaryOps,
+                           nullptr))
+    {
+        solution->resetArgs();
+        return std::nullopt;
+    }
+    auto workspace = static_cast<uint64_t>(solution->workspaceSize());
+    solution->resetArgs();
+    return workspace;
+}
+
+// The workspace a kernel needs for the binary contraction `desc`, or nothing if it cannot run it.
+static std::optional<uint64_t> contractionWorkspace(hiptensor::ContractionSolution*     solution,
+                                                    hiptensorOperationDescriptor const& desc)
+{
+    return contractionStepWorkspace(solution,
+                                    hiptensor::getTensorLengths(desc.mDescA),
+                                    hiptensor::getTensorStrides(desc.mDescA),
+                                    desc.mModeA,
+                                    hiptensor::getTensorLengths(desc.mDescB),
+                                    hiptensor::getTensorStrides(desc.mDescB),
+                                    desc.mModeB,
+                                    hiptensor::getTensorLengths(desc.mDescC),
+                                    hiptensor::getTensorStrides(desc.mDescC),
+                                    desc.mModeC,
+                                    hiptensor::getTensorLengths(desc.mDescD),
+                                    hiptensor::getTensorStrides(desc.mDescD),
+                                    desc.mModeD,
+                                    {desc.mOpA, desc.mOpB, desc.mOpC});
+}
+
+// Combines the workspace of the kernels that can run a problem: the largest (any kernel the
+// selection may pick can then run), or the smallest for HIPTENSOR_WORKSPACE_MIN.
+static void accumulateWorkspace(std::optional<uint64_t>&      total,
+                                uint64_t                      workspace,
+                                hiptensorWorksizePreference_t workspacePref)
+{
+    if(!total)
+    {
+        total = workspace;
+    }
+    else
+    {
+        total = workspacePref == HIPTENSOR_WORKSPACE_MIN ? std::min(*total, workspace)
+                                                         : std::max(*total, workspace);
+    }
+}
+
+// The workspace the kernels that can run the contraction need (see accumulateWorkspace), from the
+// registered kernels, so that it does not depend on the preference having been used for a plan.
 hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t              handle,
                                               const hiptensorOperationDescriptor_t desc,
                                               const hiptensorPlanPreference_t      planPref,
@@ -188,56 +445,31 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
     hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
-    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, planPref);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, workspaceSize);
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
     }
 
-    *workspaceSize = 0u;
+    bool hasUnaryOp = (desc->mOpA != HIPTENSOR_OP_IDENTITY) || (desc->mOpB != HIPTENSOR_OP_IDENTITY)
+                      || (desc->mOpC != HIPTENSOR_OP_IDENTITY);
+    auto candidates = contractionCandidates(*desc,
+                                            desc->mDescA->mType,
+                                            desc->mDescB->mType,
+                                            desc->mDescC ? desc->mDescC->mType
+                                                         : hiptensor::NONE_TYPE,
+                                            desc->mDescD->mType,
+                                            hasUnaryOp);
 
-    for(auto* candidate : planPref->mCandidates)
+    std::optional<uint64_t> total;
+    for(auto* solution : candidates)
     {
-        auto* solution = (hiptensor::ContractionSolution*)candidate;
-        if(solution->initArgs(nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              hiptensor::getTensorLengths(desc->mDescA),
-                              hiptensor::getTensorStrides(desc->mDescA),
-                              desc->mModeA,
-                              hiptensor::getTensorLengths(desc->mDescB),
-                              hiptensor::getTensorStrides(desc->mDescB),
-                              desc->mModeB,
-                              hiptensor::getTensorLengths(desc->mDescC),
-                              hiptensor::getTensorStrides(desc->mDescC),
-                              desc->mModeC,
-                              hiptensor::getTensorLengths(desc->mDescD),
-                              hiptensor::getTensorStrides(desc->mDescD),
-                              desc->mModeD,
-                              {},
-                              nullptr))
+        if(auto workspace = contractionWorkspace(solution, *desc))
         {
-            if(*workspaceSize == 0)
-            {
-                *workspaceSize = solution->workspaceSize();
-            }
-            else
-            {
-                if(workspacePref == HIPTENSOR_WORKSPACE_MIN)
-                {
-                    *workspaceSize = std::min(*workspaceSize, solution->workspaceSize());
-                }
-                else
-                {
-                    *workspaceSize = std::max(*workspaceSize, solution->workspaceSize());
-                }
-            }
+            accumulateWorkspace(total, *workspace, workspacePref);
         }
     }
+    *workspaceSize = total.value_or(0u);
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -312,6 +544,21 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                  sharedMode);
         logger->logError("hiptensorCreateContraction", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(auto status = checkContractionModes("hiptensorCreateContraction",
+                                           "A",
+                                           modeAV,
+                                           descA->mLengths,
+                                           "B",
+                                           modeBV,
+                                           descB->mLengths,
+                                           "D",
+                                           modeDV,
+                                           descD->mLengths);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     // C given without modes is taken to carry D's modes.
@@ -929,9 +1176,14 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
              elapsedTimeMs);
     logger->logPerformanceTrace("hiptensorInitContractionPlan", msg);
 
-    // Assign the contraction descriptor
+    // Assign the contraction descriptor. The plan requires the workspace of the selected kernel,
+    // which the selection kept within workspaceSizeLimit. Known limitation: with
+    // HIPTENSOR_CACHE_MODE_PEDANTIC, PlancacheAutotuneMgr::setAutotune can switch the plan to
+    // another candidate at execution (plan-cache hit or incremental autotune) whose workspace
+    // is not bounded by mRequiredWorkspace; that execution then reports
+    // HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE for a workspace of exactly the required size.
     pref->mSolution          = winner;
-    plan->mRequiredWorkspace = workspaceSizeLimit;
+    plan->mRequiredWorkspace = contractionWorkspace(winner, *desc).value_or(0u);
     plan->mOpDesc            = desc;
     plan->mPref              = pref;
 
@@ -1164,6 +1416,46 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
+    // Both steps must be contractions the kernels can address.
+    auto lengthsT = buildTrinaryContractionIntermediateDescriptor(
+                        modeTV, descA, modeAV, descB, modeBV, descE->mType)
+                        .mLengths;
+    for(auto const& [nameX, modeX, lengthsX, nameY, modeY, lengthsY, nameZ, modeZ, lengthsZ] :
+        {std::tuple{"A",
+                    &modeAV,
+                    &descA->mLengths,
+                    "B",
+                    &modeBV,
+                    &descB->mLengths,
+                    "T (A * B)",
+                    &modeTV,
+                    &lengthsT},
+         std::tuple{"T (A * B)",
+                    &modeTV,
+                    &lengthsT,
+                    "C",
+                    &modeCV,
+                    &descC->mLengths,
+                    "E",
+                    &modeEV,
+                    &descE->mLengths}})
+    {
+        if(auto status = checkContractionModes("hiptensorCreateContractionTrinary",
+                                               nameX,
+                                               *modeX,
+                                               *lengthsX,
+                                               nameY,
+                                               *modeY,
+                                               *lengthsY,
+                                               nameZ,
+                                               *modeZ,
+                                               *lengthsZ);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     // D given without modes is taken to carry E's modes.
     if(descD != nullptr)
     {
@@ -1246,11 +1538,52 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
-// Estimate the minimum workspace required for a trinary contraction.
-//
-// The workspace must be large enough to hold the intermediate tensor T
-// (256-byte aligned).  Additional space beyond this minimum may be used
-// by individual kernels for internal scratchpads.
+// The workspace of a trinary contraction kernel: the intermediate T (256-byte aligned) followed by
+// the larger of the kernel's scratch for its two steps, or nothing if it cannot run both steps.
+static std::optional<uint64_t>
+    trinaryContractionWorkspace(hiptensor::ContractionSolution*     solution,
+                                hiptensorOperationDescriptor const& desc,
+                                std::vector<int32_t> const&         modeT,
+                                hiptensorTensorDescriptor const&    descT)
+{
+    auto step1 = contractionStepWorkspace(solution,
+                                          hiptensor::getTensorLengths(desc.mDescA),
+                                          hiptensor::getTensorStrides(desc.mDescA),
+                                          desc.mModeA,
+                                          hiptensor::getTensorLengths(desc.mDescB),
+                                          hiptensor::getTensorStrides(desc.mDescB),
+                                          desc.mModeB,
+                                          descT.mLengths,
+                                          descT.mStrides,
+                                          modeT,
+                                          descT.mLengths,
+                                          descT.mStrides,
+                                          modeT,
+                                          {desc.mOpA, desc.mOpB, HIPTENSOR_OP_IDENTITY});
+    auto step2 = contractionStepWorkspace(solution,
+                                          descT.mLengths,
+                                          descT.mStrides,
+                                          modeT,
+                                          hiptensor::getTensorLengths(desc.mDescC),
+                                          hiptensor::getTensorStrides(desc.mDescC),
+                                          desc.mModeC,
+                                          hiptensor::getTensorLengths(desc.mDescD),
+                                          hiptensor::getTensorStrides(desc.mDescD),
+                                          desc.mModeD,
+                                          hiptensor::getTensorLengths(desc.mDescE),
+                                          hiptensor::getTensorStrides(desc.mDescE),
+                                          desc.mModeE,
+                                          {HIPTENSOR_OP_IDENTITY, desc.mOpC, desc.mOpD});
+    if(!step1 || !step2)
+    {
+        return std::nullopt;
+    }
+    return alignUp256(tensorByteSize(descT)) + std::max(*step1, *step2);
+}
+
+// Estimate the workspace required for a trinary contraction: the intermediate tensor T
+// (256-byte aligned) plus the scratch of the kernels that can run both steps (see
+// accumulateWorkspace).
 hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
     const hiptensorHandle_t              handle,
     const hiptensorOperationDescriptor_t desc,
@@ -1276,11 +1609,8 @@ hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
     hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
-    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, planPref);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, workspaceSizeEstimate);
     if(checkResult != HIPTENSOR_STATUS_SUCCESS) { return checkResult; }
-    
-    *workspaceSizeEstimate = 0u;
 
     auto modeT = computeTrinaryContractionIntermediateModes(desc->mModeA, desc->mModeB,
                                           desc->mModeC, desc->mModeE);
@@ -1290,54 +1620,29 @@ hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB,
         tDataType);
 
-    auto tBytes = tensorByteSize(intermediateDesc);
-    auto tBytesAligned = alignUp256(tBytes);
+    bool hasUnaryOp = (desc->mOpA != HIPTENSOR_OP_IDENTITY) || (desc->mOpB != HIPTENSOR_OP_IDENTITY)
+                      || (desc->mOpC != HIPTENSOR_OP_IDENTITY)
+                      || (desc->mOpD != HIPTENSOR_OP_IDENTITY);
+    auto candidates = contractionCandidates(*desc,
+                                            desc->mDescA->mType,
+                                            desc->mDescB->mType,
+                                            desc->mDescD ? desc->mDescD->mType
+                                                         : hiptensor::NONE_TYPE,
+                                            desc->mDescE->mType,
+                                            hasUnaryOp);
 
-    uint64_t kernelWs = 0u;
-
-    for(auto* candidate : planPref->mCandidates)
+    std::optional<uint64_t> total;
+    for(auto* solution : candidates)
     {
-        auto* solution = (hiptensor::ContractionSolution*)candidate;
-        if(solution->initArgs(nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              nullptr,
-                              intermediateDesc.mLengths,
-                              intermediateDesc.mStrides,
-                              modeT,
-                              hiptensor::getTensorLengths(desc->mDescC),
-                              hiptensor::getTensorStrides(desc->mDescC),
-                              desc->mModeC,
-                              hiptensor::getTensorLengths(desc->mDescD),
-                              hiptensor::getTensorStrides(desc->mDescD),
-                              desc->mModeD,
-                              hiptensor::getTensorLengths(desc->mDescE),
-                              hiptensor::getTensorStrides(desc->mDescE),
-                              desc->mModeE,
-                              {},
-                              nullptr))
+        if(auto workspace
+           = trinaryContractionWorkspace(solution, *desc, modeT, intermediateDesc))
         {
-            if(kernelWs == 0)
-            {
-                kernelWs = solution->workspaceSize();
-            }
-            else
-            {
-                if(workspacePref == HIPTENSOR_WORKSPACE_MIN)
-                {
-                    kernelWs = std::min(kernelWs, solution->workspaceSize());
-                }
-                else
-                {
-                    kernelWs = std::max(kernelWs, solution->workspaceSize());
-                }
-            }
+            accumulateWorkspace(total, *workspace, workspacePref);
         }
     }
 
-    *workspaceSizeEstimate = tBytesAligned + kernelWs;
+    // T is needed whatever kernel is selected.
+    *workspaceSizeEstimate = total.value_or(alignUp256(tensorByteSize(intermediateDesc)));
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -1656,8 +1961,11 @@ hiptensorStatus_t contractionTrinaryInitPlan(
              elapsedTimeMs);
     logger->logPerformanceTrace("contractionTrinaryInitPlan", msg);
 
+    // The plan requires T and the selected kernel's scratch, which the selection kept within
+    // workspaceSizeLimit.
     pref->mSolution          = winner;
-    plan->mRequiredWorkspace = workspaceSizeLimit;
+    plan->mRequiredWorkspace
+        = trinaryContractionWorkspace(winner, *desc, modeT, intermediateDesc).value_or(tBytesAligned);
     plan->mOpDesc            = desc;
     plan->mPref              = pref;
 

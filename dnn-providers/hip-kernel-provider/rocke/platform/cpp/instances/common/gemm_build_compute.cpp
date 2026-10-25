@@ -167,7 +167,31 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
         /* _mma_cluster(a_rows, b_cols): bracket each m-row's MFMA cluster
          * with s_setprio(1)/(0) + sched_barrier(0) only when both the
          * swizzle (reference-faithful mode) AND the schedule-hint policy are
-         * on. _sched_hints defaults OFF on gfx950 (take the measured uplift). */
+         * on. _sched_hints defaults OFF on gfx950.
+         * interwave_setprio (opt-in): sched_barrier(0); s_setprio(1); the whole
+         * mfmas_m x mfmas_n cluster; s_setprio(0); sched_barrier(0). */
+        if(ctx->interwave)
+        {
+            rocke_b_sched_barrier(b, 0);
+            rocke_b_s_setprio(b, 1);
+            for(mi = 0; mi < mfmas_m; ++mi)
+            {
+                for(ni = 0; ni < mfmas_n; ++ni)
+                {
+                    int flat = mi * mfmas_n + ni;
+                    /* _mma_ab: mfma_swap_ab feeds (B, A); acc_agpr pins the result */
+                    out_accs[flat] = ctx->swap_ab
+                                         ? rocke_gemm_emit_mma(
+                                               b, ctx->op, b_cols[ni], a_rows[mi], out_accs[flat])
+                                         : rocke_gemm_emit_mma(
+                                               b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
+                    out_accs[flat] = rocke_gemm_pin_acc_agpr(b, ctx->spec, out_accs[flat]);
+                }
+            }
+            rocke_b_s_setprio(b, 0);
+            rocke_b_sched_barrier(b, 0);
+            continue;
+        }
         for(mi = 0; mi < mfmas_m; ++mi)
         {
             if(ctx->swz && ctx->sched_hints)
@@ -176,7 +200,10 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
             {
                 int flat = mi * mfmas_n + ni;
                 out_accs[flat]
-                    = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
+                    = ctx->swap_ab
+                          ? rocke_gemm_emit_mma(b, ctx->op, b_cols[ni], a_rows[mi], out_accs[flat])
+                          : rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
+                out_accs[flat] = rocke_gemm_pin_acc_agpr(b, ctx->spec, out_accs[flat]);
             }
             if(ctx->swz && ctx->sched_hints)
             {
@@ -201,7 +228,13 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
  * ===================================================================== */
 void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx)
 {
-    if(ctx->prefetch)
+    if(ctx->stages >= 2)
+    {
+        rocke_gemm_emit_kloop_staged(ctx);
+        if(ctx->staged_persistent_done) /* persistent: the epilogue ran per tile */
+            return;
+    }
+    else if(ctx->prefetch)
         rocke_gemm_emit_kloop_prefetch(ctx);
     else if(ctx->db)
         rocke_gemm_emit_kloop_db(ctx);

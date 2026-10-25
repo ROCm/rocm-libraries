@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Spec-driven native mirror of instances/gfx942/f64_mma_probe.py. */
+/* Spec-driven native mirror of instances/common/f64_mma_probe.py. */
 #include "rocke/arch_target.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/instance_f64_mma_probe.h"
@@ -8,6 +8,12 @@
 #include <stdio.h>
 
 rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int k)
+{
+    return rocke_build_f64_mma_probe_arch(b, m, k, "gfx942");
+}
+
+rocke_kernel_def_t*
+    rocke_build_f64_mma_probe_arch(rocke_ir_builder_t* b, int m, int k, const char* arch)
 {
     char name[64];
     snprintf(name, sizeof(name), "f64_mma_probe_m%d_k%d", m, k);
@@ -23,9 +29,14 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
         /* m -> (B slab rows, B/C/D columns) per K step of 4. */
         int slab_rows = m == 16 ? 4 : 16;
         int cols = m == 16 ? 16 : 4;
-        const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx942");
-        const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
-            &target->mma, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL);
+        const rocke_arch_target_t* target = arch ? rocke_arch_target_from_gfx(arch) : NULL;
+        const rocke_mma_op_t* atom
+            = target ? rocke_mma_catalog_op_for_shape(
+                           &target->mma, "mma", "fp64", "fp64", "fp64", m, m, 4, NULL)
+                     : NULL;
+        if(atom == NULL)
+            return (rocke_kernel_def_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "f64 MMA probe: %s has no f64 atom", arch ? arch : "(null)");
         rocke_param_opts_t opts = {};
         opts.align = 8;
         opts.align_set = true;

@@ -472,6 +472,11 @@ typedef enum rocke_opcode
     /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
     ROCKE_OP_ARITH_FDOT2,
 
+    /* math.exp / math.log, natural base. Last in the enum, so no earlier opcode
+     * value changes. */
+    ROCKE_OP_MATH_EXP,
+    ROCKE_OP_MATH_LOG,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -872,6 +877,9 @@ rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_sqrt(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rsqrt(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a);
+/* Natural exp / log of an f32 or f64 value (f64 expands to f64_math programs). */
+rocke_value_t* rocke_b_exp(rocke_ir_builder_t* b, rocke_value_t* a);
+rocke_value_t* rocke_b_log(rocke_ir_builder_t* b, rocke_value_t* a);
 
 /* ----- casts / conversions ----- */
 rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
@@ -948,6 +956,14 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* idx,
                                  rocke_value_t* expect,
                                  const char* scope);
+/* IRBuilder.global_flag_wait_eq(..., ordering=): NULL / "acquire" = the plain
+ * op (no ordering attr); "monotonic" = relaxed spin (caller fences after). */
+void rocke_b_global_flag_wait_eq_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* idx,
+                                    rocke_value_t* expect,
+                                    const char* scope,
+                                    const char* ordering);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,

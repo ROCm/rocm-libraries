@@ -64,7 +64,10 @@ bool rocke_elementwise_is_unary(const rocke_elementwise_spec_t* spec)
            || rocke_ew_streq(op, "relu") || rocke_ew_streq(op, "gelu_tanh")
            || rocke_ew_streq(op, "quick_gelu") || rocke_ew_streq(op, "silu")
            || rocke_ew_streq(op, "swish") || rocke_ew_streq(op, "tanh")
-           || rocke_ew_streq(op, "sigmoid") || rocke_ew_streq(op, "exp2");
+           || rocke_ew_streq(op, "sigmoid") || rocke_ew_streq(op, "exp2")
+           || rocke_ew_streq(op, "exp") || rocke_ew_streq(op, "log") || rocke_ew_streq(op, "log2")
+           || rocke_ew_streq(op, "sqrt") || rocke_ew_streq(op, "rsqrt")
+           || rocke_ew_streq(op, "rcp");
 }
 
 bool rocke_elementwise_is_binary(const rocke_elementwise_spec_t* spec)
@@ -138,13 +141,18 @@ static bool rocke_ew_reason(char* reason, size_t cap, const char* msg)
     return false;
 }
 
-/* _F64_OPS: ops with a native f64 lowering; the exp2-based activations are
- * f32-only, so f64 is limited to this set. */
+/* _F64_OPS: ops computed in f64 for f64 I/O. The f32-constant activations
+ * (gelu_tanh, quick_gelu, silu/swish and the gated binaries) stay
+ * f16/bf16-only. */
 static bool rocke_ew_is_f64_op(const char* op)
 {
     return rocke_ew_streq(op, "copy") || rocke_ew_streq(op, "neg") || rocke_ew_streq(op, "abs")
            || rocke_ew_streq(op, "relu") || rocke_ew_streq(op, "add") || rocke_ew_streq(op, "sub")
-           || rocke_ew_streq(op, "mul") || rocke_ew_streq(op, "max") || rocke_ew_streq(op, "min");
+           || rocke_ew_streq(op, "mul") || rocke_ew_streq(op, "max") || rocke_ew_streq(op, "min")
+           || rocke_ew_streq(op, "exp2") || rocke_ew_streq(op, "tanh")
+           || rocke_ew_streq(op, "sigmoid") || rocke_ew_streq(op, "exp")
+           || rocke_ew_streq(op, "log") || rocke_ew_streq(op, "log2") || rocke_ew_streq(op, "sqrt")
+           || rocke_ew_streq(op, "rsqrt") || rocke_ew_streq(op, "rcp");
 }
 
 bool rocke_elementwise_is_valid_spec(const rocke_elementwise_spec_t* spec,
@@ -257,12 +265,49 @@ static rocke_value_t* rocke_ew_apply_unary(rocke_ir_builder_t* b, rocke_value_t*
     {
         return rocke_b_exp2(b, x);
     }
+    if(rocke_ew_streq(op, "exp"))
+    {
+        return rocke_b_exp(b, x);
+    }
+    if(rocke_ew_streq(op, "log"))
+    {
+        return rocke_b_log(b, x);
+    }
+    if(rocke_ew_streq(op, "log2"))
+    {
+        return rocke_b_log2(b, x);
+    }
+    if(rocke_ew_streq(op, "sqrt"))
+    {
+        return rocke_b_sqrt(b, x);
+    }
+    if(rocke_ew_streq(op, "rsqrt"))
+    {
+        return rocke_b_rsqrt(b, x);
+    }
+    if(rocke_ew_streq(op, "rcp"))
+    {
+        return rocke_b_rcp(b, x);
+    }
     if(rocke_ew_streq(op, "tanh"))
     {
+        if(strcmp(x->type->name, "f64") == 0)
+        {
+            return rocke_b_tanh(b, x);
+        }
         return rocke_tanh_via_exp2(b, x);
     }
     if(rocke_ew_streq(op, "sigmoid"))
     {
+        if(strcmp(x->type->name, "f64") == 0)
+        {
+            /* 1 / (1 + e^-x) in f64, one builder call per statement. */
+            rocke_value_t* one = rocke_b_const_f64(b, 1.0);
+            rocke_value_t* neg = rocke_b_fneg(b, x);
+            rocke_value_t* e = rocke_b_exp(b, neg);
+            rocke_value_t* den = rocke_b_fadd(b, one, e);
+            return rocke_b_rcp(b, den);
+        }
         return rocke_sigmoid_via_exp2(b, x);
     }
     if(rocke_ew_streq(op, "silu") || rocke_ew_streq(op, "swish"))

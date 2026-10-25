@@ -87,6 +87,14 @@ add_hiptensor_unit_test(large_tensor_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/large_tensor_test.cpp
     )
+add_hiptensor_unit_test(operation_validation_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/operation_validation_test.cpp
+    )
+add_hiptensor_unit_test(workspace_size_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/workspace_size_test.cpp
+    )
 
 # Has its own main: the shared one stops early on the hosts this test is about.
 add_hiptensor_unit_test(device_support_test

@@ -110,9 +110,24 @@ class TestDispatchWiring(unittest.TestCase):
         # grid Z dim == split_k
         self.assertEqual(r.grid[2], r.spec.trait.split_k)
 
-    def test_square_dispatch_unchanged(self):
+    def test_square_dispatch_has_no_split_k(self):
+        # A square that fills the device never engages split-K, whichever
+        # candidate the admission model picks for it.
         r = dispatch_gemm_bf16(_bf16(4096, 4096, 4096))
-        self.assertEqual(r.candidate.spec_id, "cdna_cshuffle_default")
+        self.assertEqual(r.spec.trait.split_k, 1)
+        self.assertEqual(r.grid[2], 1)
+
+    def test_dtl_pingpong_never_split(self):
+        # 2304^2 (81 tiles of 256x256) would engage split-K for a 256-tile
+        # kernel; the DTL candidates are selected without it (the small-tile
+        # ring takes this poorly filled wave; the ping-pong / ring
+        # candidate keeps split-K off where it is selected, e.g. 4096^3).
+        r = dispatch_gemm_bf16(_bf16(2304, 2304, 2304))
+        self.assertEqual(r.candidate.spec_id, "cdna_dtl_ring_small")
+        self.assertEqual(r.spec.trait.split_k, 1)
+        self.assertEqual(r.grid[2], 1)
+        r = dispatch_gemm_bf16(_bf16(4096, 4096, 4096))
+        self.assertEqual(r.candidate.spec_id, "cdna_dtl_pingpong_256x256")
         self.assertEqual(r.spec.trait.split_k, 1)
         self.assertEqual(r.grid[2], 1)
 

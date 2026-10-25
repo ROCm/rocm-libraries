@@ -33,6 +33,23 @@ The C++ formatter also accepts a scalar integer and uses a looser string parser
 than the Python formatter. Input-validation parity is therefore not currently
 guaranteed even though both engines emit the same LLVM attribute spelling.
 
+## The other direction: forcing the AGPR form
+
+The universal GEMM's `TraitSpec.acc_agpr` reserves exactly the accumulator registers
+(`agpr_alloc = (n, n)`) and sets the kernel attribute `mfma_agpr_form`, for which the
+Python compile path passes `-mllvm -amdgpu-mfma-vgpr-form=0` whenever the kernel is
+lowered for an LLVM 21+ flavor (`llvm22` / `llvm23`; LLVM 20 has no such option). The
+decision is a function of the kernel attributes and the lowering flavor only (the same
+`ROCKE_LLVM_FLAVOR` / COMGR resolution the LLVM lowerer uses), so an offline
+`lower_kernel_for_comgr` with a pinned flavor records the same options as a live compile.
+Some newer LLVM builds otherwise select the VGPR MFMA form despite the reservation. Like
+`mfma_vgpr_form`, the option is not part of the emitted IR, so it does not affect byte
+identity; the C++ engine sets the same kernel attribute. A process-level check found no effect of the
+option on kernels compiled later in the same process. `acc_agpr` is admitted only on
+the targets where its bodies passed GPU full-output numerics (gfx942 and gfx950; not
+gfx90a yet), and setting the `ROCKE_EXP_AGPR_ALLOC` experiment together with it is an
+error.
+
 ## Tradeoff
 
 VGPR-form MFMA can remove AGPR-to-VGPR copies in pipelines that perform VALU

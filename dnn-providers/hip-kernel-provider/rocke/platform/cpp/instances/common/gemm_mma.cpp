@@ -158,6 +158,28 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
+ * _mma_ab tail : with trait.acc_agpr_pin the MFMA result is
+ * pinned to the AGPR file through asm "", "=a,0" (not side-effecting);
+ * identity otherwise.
+ * ====================================================================== */
+rocke_value_t* rocke_gemm_pin_acc_agpr(rocke_ir_builder_t* b,
+                                       const rocke_gemm_universal_spec_t* spec,
+                                       rocke_value_t* d)
+{
+    rocke_inline_asm_opts_t opts;
+    const rocke_type_t* ty;
+    rocke_op_t* op;
+    if(!spec->trait.acc_agpr_pin || d == NULL)
+        return d;
+    memset(&opts, 0, sizeof opts);
+    opts.sideeffect = false;
+    opts.sideeffect_set = true;
+    ty = d->type;
+    op = rocke_b_inline_asm(b, "", "=a,0", &d, 1, &ty, 1, &opts);
+    return op != NULL ? op->results[0] : NULL;
+}
+
+/* ====================================================================== *
  * _emit_zero_acc_op(b, op): zero accumulator sized from op.c_frag_len.
  *   return b.zero_vec_f32(op.c_frag_len)
  * ====================================================================== */

@@ -25,7 +25,7 @@ static int expect_narrow_rejection(const rocke_type_t* type)
 
     const char* expected = type == rocke_f16() ? "f16" : "bf16";
     char message[128];
-    snprintf(message, sizeof(message), "math.tanh requires f32 operand, got %s", expected);
+    snprintf(message, sizeof(message), "math.tanh requires f32 or f64 operand, got %s", expected);
 
     bool rejected = false;
     try
@@ -94,7 +94,8 @@ static int expect_verifier_rejection(const rocke_type_t* type)
     {
         const char* expected = type == rocke_f16() ? "f16" : "bf16";
         char message[128];
-        snprintf(message, sizeof(message), "math.tanh requires f32 operand, got %s", expected);
+        snprintf(
+            message, sizeof(message), "math.tanh requires f32 or f64 operand, got %s", expected);
         for(size_t i = 0; i < count; ++i)
         {
             if(diags[i].severity == ROCKE_DIAG_ERROR && strcmp(diags[i].message, message) == 0)

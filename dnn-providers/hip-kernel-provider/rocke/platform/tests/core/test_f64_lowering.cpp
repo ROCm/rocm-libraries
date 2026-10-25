@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 /*
  * test_f64_lowering.cpp -- C++ engine coverage for the f64 op boundary.
- * Mirrors TestHipF64Rejection / TestF64VectorArith in
+ * Mirrors TestHipF64Rejection (f64 math lowers in double, rcp_fast is
+ * rejected) / TestF64VectorArith in
  * tests/core/test_amdgpu_lowering_ops.py, and the C++ builder side of
  * tests/core/test_f64_conversions.py (the explicit f32 <-> f64 conversions)
  * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64 and
@@ -107,23 +108,71 @@ static rocke_value_t* build_f64_kernel(rocke_ir_builder_t* b, f64_op op)
 
 static int test_unsupported_ops_rejected()
 {
-    for(int op = OP_EXP2; op <= OP_VECTOR_FMA; ++op)
+    /* Only the single-instruction approximation has no f64 form. */
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "f64_reject") == ROCKE_OK);
+    build_f64_kernel(&b, OP_RCP_FAST);
+    CHECK(rocke_ir_builder_ok(&b));
+
+    rocke_strbuf_t hip;
+    CHECK(rocke_strbuf_init(&hip, 0) == 0);
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = "gfx942";
+    CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_ERR_NOTIMPL);
+    rocke_strbuf_free(&hip);
+
+    char* llvm_text = NULL;
+    CHECK(rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text)
+          == ROCKE_ERR_NOTIMPL);
+    std::free(llvm_text);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+/* Mirrors TestHipF64Rejection.test_f64_ops_lower_in_double: each op keeps
+ * f64 end to end (a declaration the LLVM module must carry, the HIP double
+ * spelling, and no float in either). */
+static int test_f64_ops_lower_in_double()
+{
+    struct
+    {
+        f64_op op;
+        const char* decl;
+        const char* hip_form;
+    } cases[] = {
+        {OP_EXP2, "declare double @llvm.ldexp.f64.i32(double, i32)", "= exp2("},
+        {OP_LOG2, "declare { double, i32 } @llvm.frexp.f64.i32(double)", "= log2("},
+        {OP_SQRT, "declare double @llvm.sqrt.f64(double)", "= sqrt("},
+        {OP_RSQRT, "declare double @llvm.sqrt.f64(double)", "= 1.0 / sqrt("},
+        {OP_FMA, "declare double @llvm.fma.f64(double, double, double)", "= fma("},
+        {OP_FMAX3, "declare double @llvm.maxnum.f64(double, double)", " > "},
+        {OP_FMIN3, "declare double @llvm.minnum.f64(double, double)", " < "},
+        {OP_VECTOR_FMA,
+         "declare <2 x double> @llvm.fma.v2f64(<2 x double>, <2 x double>, <2 x double>)",
+         "] = fma("},
+    };
+    for(const auto& c : cases)
     {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "f64_reject") == ROCKE_OK);
-        build_f64_kernel(&b, static_cast<f64_op>(op));
+        CHECK(rocke_ir_builder_init(&b, "f64_ok") == ROCKE_OK);
+        build_f64_kernel(&b, c.op);
         CHECK(rocke_ir_builder_ok(&b));
 
         rocke_strbuf_t hip;
         CHECK(rocke_strbuf_init(&hip, 0) == 0);
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx942";
-        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_ERR_NOTIMPL);
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_OK);
+        CHECK(std::strstr(hip.data, c.hip_form) != NULL);
+        CHECK(std::strstr(hip.data, "(float)") == NULL);
         rocke_strbuf_free(&hip);
 
         char* llvm_text = NULL;
         CHECK(rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text)
-              == ROCKE_ERR_NOTIMPL);
+              == ROCKE_OK);
+        CHECK(std::strstr(llvm_text, c.decl) != NULL);
+        const char* body = std::strstr(llvm_text, "define");
+        CHECK(body != NULL && std::strstr(body, " float ") == NULL);
         std::free(llvm_text);
         rocke_ir_builder_free(&b);
     }
@@ -421,9 +470,9 @@ static int test_lds_allocation_is_8_byte_aligned()
 
 int main()
 {
-    if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
-       || test_fabs_stays_in_double() || test_vector_binops_use_float_ops()
-       || test_conversions_lower_to_one_instruction_each()
+    if(test_unsupported_ops_rejected() || test_f64_ops_lower_in_double()
+       || test_rcp_divides_in_double() || test_fabs_stays_in_double()
+       || test_vector_binops_use_float_ops() || test_conversions_lower_to_one_instruction_each()
        || test_conversions_reject_the_wrong_source_type()
        || test_zero_vec_and_lds_load_admit_f64_and_i16()
        || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n()

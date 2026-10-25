@@ -601,15 +601,54 @@ rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a)
     {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "tanh NULL operand");
     }
-    if(!a->type || !a->type->name || strcmp(a->type->name, "f32") != 0)
+    if(!a->type || !a->type->name
+       || (strcmp(a->type->name, "f32") != 0 && strcmp(a->type->name, "f64") != 0))
     {
         return (rocke_value_t*)rocke_i_set_err(b,
                                                ROCKE_ERR_VALUE,
-                                               "math.tanh requires f32 operand, got %s",
+                                               "math.tanh requires f32 or f64 operand, got %s",
                                                (a->type && a->type->name) ? a->type->name
                                                                           : "(null)");
     }
     return rocke_i_unop(b, ROCKE_OP_MATH_TANH, a, "tanh");
+}
+
+/* Shared f32/f64 gate of math.exp / math.log (Python IRBuilder.exp / .log). */
+static rocke_value_t* rocke_i_f32_f64_unop(rocke_ir_builder_t* b,
+                                           rocke_opcode_t opcode,
+                                           rocke_value_t* a,
+                                           const char* label,
+                                           const char* hint)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!a)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", label);
+    }
+    if(!a->type || !a->type->name
+       || (strcmp(a->type->name, "f32") != 0 && strcmp(a->type->name, "f64") != 0))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "%s requires f32 or f64 operand, got %s",
+                                               label,
+                                               (a->type && a->type->name) ? a->type->name
+                                                                          : "(null)");
+    }
+    return rocke_i_unop(b, opcode, a, hint);
+}
+
+rocke_value_t* rocke_b_exp(rocke_ir_builder_t* b, rocke_value_t* a)
+{
+    return rocke_i_f32_f64_unop(b, ROCKE_OP_MATH_EXP, a, "math.exp", "exp");
+}
+
+rocke_value_t* rocke_b_log(rocke_ir_builder_t* b, rocke_value_t* a)
+{
+    return rocke_i_f32_f64_unop(b, ROCKE_OP_MATH_LOG, a, "math.log", "log");
 }
 
 /* -------------------------------------------------------- casts / conversions */

@@ -54,6 +54,24 @@ def _spec(idx: int) -> ElementwiseSpec:
     if idx == 13:
         # f64 abs lowers through ``llvm.fabs.f64``.
         return ElementwiseSpec(op="abs", dtype="f64", block_size=256, vec=2)
+    # f64 transcendental ops (rocke.core.f64_math expansions) and the new
+    # natural exp / log on 16-bit I/O.
+    if idx == 14:
+        return ElementwiseSpec(op="exp", dtype="f64", block_size=256, vec=2)
+    if idx == 15:
+        return ElementwiseSpec(op="log", dtype="f64", block_size=256, vec=2)
+    if idx == 16:
+        return ElementwiseSpec(op="tanh", dtype="f64", block_size=256, vec=2)
+    if idx == 17:
+        return ElementwiseSpec(op="sigmoid", dtype="f64", block_size=256, vec=2)
+    if idx == 18:
+        return ElementwiseSpec(op="sqrt", dtype="f64", block_size=256, vec=2)
+    if idx == 19:
+        return ElementwiseSpec(op="rcp", dtype="f64", block_size=256, vec=2)
+    if idx == 20:
+        return ElementwiseSpec(op="exp", dtype="f16", block_size=256, vec=8)
+    if idx == 21:
+        return ElementwiseSpec(op="log", dtype="bf16", block_size=256, vec=8)
     raise SystemExit(f"unknown config index {idx}")
 
 

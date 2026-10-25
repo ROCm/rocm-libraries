@@ -34,6 +34,9 @@ ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_impl_test.cpp
 set (ReductionConfig ${CMAKE_CURRENT_SOURCE_DIR}/configs/reduction_params.yaml)
 add_hiptensor_test(reduction_cpu_impl_test ${ReductionConfig} ${ReductionTestSources})
 
+add_hiptensor_unit_test(reduction_semantics_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_semantics_test.cpp)
 add_hiptensor_unit_test(reduction_scalar_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction_scalar_test.cpp)

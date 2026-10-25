@@ -209,6 +209,32 @@ The attribute assumes `smem_ptr_add` offsets stay inside the base allocation.
 On llvm23, `buffer_load_lds_async` with `asyncmark` / `wait_asyncmark` is the
 other way out: async DMA is synchronised only by the explicit marks.
 
+#### Recipe: an alias-scoped DTL ring in a GEMM K-loop
+
+The universal GEMM's `TraitSpec.dtl_stages` (see the case study next to the
+gfx950 square-GEMM example) is the reference implementation:
+
+* **One allocation per stage and operand**, `lds_alias_scopes` on, and the K loop
+  unrolled by the stage count so every stage index is a Python constant. A
+  runtime parity into one allocation defeats the scopes: the backend cannot tell
+  the halves apart and still waits `vmcnt(0)` before the first `ds_read`.
+* **Watch the register budget.** Static stages multiply loop-invariant LDS
+  addresses. Keep wave-uniform address parts in SGPRs (`to_sgpr_u32` of warp row
+  offsets, the per-wave DMA slice for M0, the tile origin as the buffer
+  `soffset`) and key an XOR swizzle on the lane's in-atom row when the warp / atom
+  origins are multiples of the swizzle span.
+* **16-bit `ds_read` offsets.** An allocation placed at 64 KiB or more makes the
+  backend merge its base with per-atom row constants into an unencodable
+  constant (one VGPR per read). Fold the 64 KiB multiple into an opaque per-lane
+  row (`optimization_barrier(row0 + shift) - shift`).
+* **Static wait counts.** Issue the same number of DMAs every tile; tiles past the
+  K range use a zero-size buffer resource with a zero `soffset` (zeros land in a
+  dead stage, no memory traffic). With three or more stages the per-tile wait is
+  `vmcnt((stages - 2) * loads_per_tile)`; it relies on the DMAs completing in
+  order, so gate it with a full-output check at every K-tile residue.
+* **Re-sweep the schedule levers afterwards.** Once the alias wait is gone, a
+  lever that lost before (the MFMA-cluster `s_setprio` bookends) can win.
+
 ## Register Budget
 
 Prefetch stages consume **arch_vgpr** (architectural VGPRs) for buffering:

@@ -12,7 +12,22 @@
 int main(int argc, char** argv)
 {
     int idx = argc > 1 ? atoi(argv[1]) : -1;
-    const int configs[][2] = {{16, 4}, {16, 8}, {16, 64}, {4, 4}, {4, 8}, {4, 64}};
+    /* (m, k, arch): the gfx942 rows first, then the same atoms on gfx90a / gfx950. */
+    const struct
+    {
+        int m;
+        int k;
+        const char* arch;
+    } configs[] = {{16, 4, "gfx942"},
+                   {16, 8, "gfx942"},
+                   {16, 64, "gfx942"},
+                   {4, 4, "gfx942"},
+                   {4, 8, "gfx942"},
+                   {4, 64, "gfx942"},
+                   {16, 8, "gfx90a"},
+                   {4, 8, "gfx90a"},
+                   {16, 8, "gfx950"},
+                   {4, 8, "gfx950"}};
     if(idx < 0 || idx >= (int)(sizeof(configs) / sizeof(configs[0])))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -20,7 +35,8 @@ int main(int argc, char** argv)
     }
     const char* mode = argc > 2 ? argv[2] : "ll";
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, configs[idx][0], configs[idx][1]);
+    rocke_kernel_def_t* kernel
+        = rocke_build_f64_mma_probe_arch(&b, configs[idx].m, configs[idx].k, configs[idx].arch);
     if(!kernel)
     {
         fprintf(stderr, "%s\n", b.err);
@@ -30,7 +46,8 @@ int main(int argc, char** argv)
     char* text = NULL;
     rocke_status_t status = ROCKE_OK;
     if(strcmp(mode, "ll") == 0)
-        status = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx942", &text);
+        status
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, configs[idx].arch, &text);
     else if(strcmp(mode, "ir") == 0)
         status = rocke_ir_serialize(kernel, &text);
     else if(strcmp(mode, "hip") == 0)
@@ -38,7 +55,7 @@ int main(int argc, char** argv)
         rocke_strbuf_t buf;
         rocke_strbuf_init(&buf, 0);
         rocke_lower_hip_opts_t opts = {0};
-        opts.arch = "gfx942";
+        opts.arch = configs[idx].arch;
         status = rocke_lower_kernel_to_hip(&b, kernel, &opts, &buf);
         if(status == ROCKE_OK)
             fputs(buf.data, stdout);

@@ -143,6 +143,28 @@ static hiptensorStatus_t checkElementwiseBinaryOperator(char const*         apiF
     return HIPTENSOR_STATUS_INVALID_VALUE;
 }
 
+// The operator applied to one operand must be one of the unary operators. Other values used to be
+// applied as the identity without notice.
+static hiptensorStatus_t checkUnaryOperator(char const*         apiFuncName,
+                                            hiptensorOperator_t op,
+                                            char const*         opName)
+{
+    if(hiptensor::isUnaryOperator(op))
+    {
+        return HIPTENSOR_STATUS_SUCCESS;
+    }
+
+    char msg[256];
+    snprintf(msg,
+             sizeof(msg),
+             "%s (%s, %d) is not a unary operator",
+             opName,
+             hiptensor::opTypeToString(op).c_str(),
+             static_cast<int>(op));
+    hiptensor::Logger::instance()->logError(apiFuncName, msg);
+    return HIPTENSOR_STATUS_INVALID_VALUE;
+}
+
 // The scaling factors take the type the compute descriptor maps to. HIPTENSOR_COMPUTE_DESC_NONE,
 // the integer descriptors and unknown values map to none, so they are rejected up front.
 static hiptensorStatus_t checkComputeDescriptor(char const*                  apiFuncName,
@@ -414,6 +436,44 @@ hiptensorStatus_t hiptensorCreateTensorDescriptor(const hiptensorHandle_t      h
         }
         logger->logError("hiptensorCreateTensorDescriptor", msg);
         return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    if(desc == nullptr)
+    {
+        logger->logError("hiptensorCreateTensorDescriptor", "desc = nullptr");
+        return HIPTENSOR_STATUS_NOT_INITIALIZED;
+    }
+
+    // Every mode needs an extent. Extents are positive, and strides, which the kernels add to
+    // unsigned offsets, cannot be negative.
+    if(numModes > 0 && lens == nullptr)
+    {
+        snprintf(msg, sizeof(msg), "numModes = %u but lens = nullptr", (unsigned int)numModes);
+        logger->logError("hiptensorCreateTensorDescriptor", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+    for(uint32_t i = 0; i < numModes; i++)
+    {
+        if(lens[i] <= 0)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "lens[%u] = %lld: extents must be positive",
+                     (unsigned int)i,
+                     (long long)lens[i]);
+            logger->logError("hiptensorCreateTensorDescriptor", msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+        if(strides != nullptr && strides[i] < 0)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "strides[%u] = %lld: negative strides are not supported",
+                     (unsigned int)i,
+                     (long long)strides[i]);
+            logger->logError("hiptensorCreateTensorDescriptor", msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
     }
 
     if(dataType == HIPTENSOR_R_64F && !handle->getDevice().supportsF64())
@@ -709,6 +769,12 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
         return status;
     }
 
+    if(auto status = checkUnaryOperator("hiptensorCreatePermutation", opA, "opA");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     if(auto status = checkComputeDescriptor("hiptensorCreatePermutation", descCompute);
        status != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -806,6 +872,15 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
        status != HIPTENSOR_STATUS_SUCCESS)
     {
         return status;
+    }
+
+    for(auto const& [op, opName] : {std::pair{opA, "opA"}, std::pair{opC, "opC"}})
+    {
+        if(auto status = checkUnaryOperator("hiptensorCreateElementwiseBinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
     }
 
     if(auto status = checkComputeDescriptor("hiptensorCreateElementwiseBinary", descCompute);
@@ -917,6 +992,16 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
         }
     }
 
+    for(auto const& [op, opName] :
+        {std::pair{opA, "opA"}, std::pair{opB, "opB"}, std::pair{opC, "opC"}})
+    {
+        if(auto status = checkUnaryOperator("hiptensorCreateElementwiseTrinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     if(auto status = checkComputeDescriptor("hiptensorCreateElementwiseTrinary", descCompute);
        status != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -986,6 +1071,22 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
+    }
+
+    for(auto const& [op, opName] : {std::pair{opA, "opA"}, std::pair{opC, "opC"}})
+    {
+        if(auto status = checkUnaryOperator("hiptensorCreateReduction", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    if(auto status
+       = checkElementwiseBinaryOperator("hiptensorCreateReduction", opReduce, "opReduce");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     if(auto status = checkComputeDescriptor("hiptensorCreateReduction", descCompute);
@@ -1101,10 +1202,33 @@ hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                             void*                    buf,
                                             size_t                   sizeInBytes)
 {
+    auto& logger = *hiptensor::Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, logger, HIPTENSOR_STATUS_NOT_INITIALIZED, plan);
+    CheckApiParams(checkResult, logger, HIPTENSOR_STATUS_INVALID_VALUE, buf);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
     switch(attr)
     {
     case HIPTENSOR_PLAN_REQUIRED_WORKSPACE:
+        // The workspace the plan's kernel needs, in bytes (uint64_t): at most the limit the plan
+        // was created with.
+        if(sizeInBytes != sizeof(plan->mRequiredWorkspace))
+        {
+            char msg[256];
+            snprintf(msg,
+                     sizeof(msg),
+                     "HIPTENSOR_PLAN_REQUIRED_WORKSPACE: sizeInBytes is %zu but must be %zu",
+                     sizeInBytes,
+                     sizeof(plan->mRequiredWorkspace));
+            logger.logError("hiptensorPlanGetAttribute", msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
         std::memcpy(buf, &plan->mRequiredWorkspace, sizeInBytes);
         break;
     default:
@@ -1133,6 +1257,19 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
                                                  uint64_t* workspaceSizeEstimate)
 try
 {
+    auto& logger = *hiptensor::Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, logger, HIPTENSOR_STATUS_INVALID_VALUE, workspaceSizeEstimate);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    // The contraction kernels may need scratch; the trinary contraction also needs room for its
+    // intermediate tensor. Elementwise operations and reductions need no workspace.
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
         return contractionGetWorkspaceSize(
@@ -1151,6 +1288,11 @@ catch(...)
     return hiptensor::exceptionToStatus("hiptensorEstimateWorkspaceSize");
 }
 
+namespace hiptensor
+{
+    hiptensorStatus_t elementwiseCheckPlan(hiptensorOperationDescriptor const& desc);
+    hiptensorStatus_t reductionCheckPlan(hiptensorOperationDescriptor const& desc);
+}
 hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t                      plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -1192,10 +1334,31 @@ try
         return status;
     }
 
+    // Problems the elementwise and reduction kernels cannot run are reported here, rather than
+    // as HIPTENSOR_STATUS_INTERNAL_ERROR when the plan is executed.
+    if(desc->mOperationType == HIPTENSOR_PERMUTATION
+       || desc->mOperationType == HIPTENSOR_ELEMENTWISE_BINARY
+       || desc->mOperationType == HIPTENSOR_ELEMENTWISE_TRINARY)
+    {
+        if(auto status = hiptensor::elementwiseCheckPlan(*desc); status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+    else if(desc->mOperationType == HIPTENSOR_REDUCTION)
+    {
+        if(auto status = hiptensor::reductionCheckPlan(*desc); status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     // Owned here until it is returned, so that a failed or throwing initialization frees it.
+    // Elementwise operations and reductions need no workspace; contraction plans record the
+    // workspace of their kernel.
     auto ownedPlan              = std::make_unique<hiptensorPlan>();
     hiptensorPlan_t newPlan     = ownedPlan.get();
-    newPlan->mRequiredWorkspace = workspaceSizeLimit;
+    newPlan->mRequiredWorkspace = 0;
 
     // Deep-copy the tensor descriptors referenced by the operation descriptor
     if(desc->mDescA)

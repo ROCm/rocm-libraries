@@ -321,19 +321,65 @@ def build_default_dispatcher_set(
     parallel: Optional[int] = None,
     pipelines: Sequence[str] = ("compv3", "compv4"),
     epilogues: Sequence[str] = ("default", "cshuffle"),
+    levers: Sequence[str] = ("none",),
 ) -> List[BuildRecord]:
     """Sweep the dispatcher's `default_config.json` cartesian product.
 
     Returns one BuildRecord per spec, with `ok=True` for the ones that
     compiled (some configs may legitimately fail LDS budget; those are
-    skipped by `is_valid_spec` upstream).
+    skipped by `is_valid_spec` upstream). The configs are validated for the
+    arch of ``isa`` (``amdgcn-amd-amdhsa--<gfx>[:features]``), not a fixed
+    default. ``levers`` selects the lever bundles crossed with every point
+    (see ``all_dispatcher_configs``; default: the plain body only).
     """
     from .instances import all_dispatcher_configs
 
+    arch = isa.rsplit("--", 1)[-1].split(":", 1)[0]
     specs = list(
         all_dispatcher_configs(
             pipeline=pipelines,  # type: ignore[arg-type]
             epilogue=epilogues,  # type: ignore[arg-type]
+            levers=levers,
+            arch=arch,
         )
     )
     return build_all_instances(specs, cache_dir=cache_dir, isa=isa, parallel=parallel)
+
+
+# ---------------------------------------------------------------------
+# Search instead of sweep
+# ---------------------------------------------------------------------
+
+
+def search_instances(
+    specs: Sequence[UniversalGemmSpec],
+    *,
+    measure,
+    check,
+    strategy: str = "portfolio",
+    budget: int = 64,
+    seed: int = 0,
+    **search_options,
+):
+    """Measure at most ``budget`` of ``specs``, chosen by a search strategy,
+    instead of building and timing all of them.
+
+    ``measure(spec, fidelity) -> ms or per-rep ms`` builds (cached), checks
+    nothing and times one spec; ``check(spec) -> bool | (bool, why)`` is the
+    mandatory numeric check (run once per spec before its first timing).
+    Returns ``(best_spec or None, SearchResult)``; the result's trace lists
+    every measured spec. The search engine is
+    :mod:`rocke.dispatch.tuning.search` (``search_configs``).
+    """
+    from .dispatch.tuning.search import Budget, search_configs
+
+    index, result = search_configs(
+        list(specs),
+        measure=measure,
+        check=check,
+        strategy=strategy,
+        budget=Budget(evaluations=int(budget)),
+        seed=seed,
+        **search_options,
+    )
+    return (None if index is None else specs[index]), result
