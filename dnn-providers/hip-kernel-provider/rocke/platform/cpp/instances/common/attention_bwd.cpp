@@ -1209,8 +1209,7 @@ std::string sha1_hex(const std::string& msg)
 
 /* non_default_fields(spec, skip=("head_size", "name")): (name, repr(value))
  * of every field that differs from its declared default, in field order. */
-static std::vector<std::pair<std::string, std::string>>
-    non_default_fields(const rocke_attn_bwd_spec_t& s)
+std::vector<std::pair<std::string, std::string>> non_default_fields(const rocke_attn_bwd_spec_t& s)
 {
     const rocke_attn_bwd_spec_t d = rocke_attn_bwd_spec_default();
     std::vector<std::pair<std::string, std::string>> out;
