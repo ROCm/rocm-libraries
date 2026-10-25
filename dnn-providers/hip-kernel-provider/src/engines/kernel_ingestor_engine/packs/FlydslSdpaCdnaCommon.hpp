@@ -521,7 +521,10 @@ inline std::optional<BiasStrides> servableStridedBias(const data_objects::Tensor
  * alignment, every stride is a multiple of 8 elements, and one (batch, head) slice is one
  * buffer view of (Sq - 1) * stride_q + Skv elements within 32-bit addressing. A row stride
  * below Skv would overlap rows; the kernels read keys in runs of 4, and a run straddling
- * the view's end could read as zero, so the key length is a multiple of 4.
+ * the view's end could read as zero, so the key length is a multiple of 4. Under padding
+ * the generic objects keep the last real row's view at this key length, not the batch's
+ * (vendored-kernel modification 37): the bias is dense over it, so a batch's own key
+ * length may be any.
  */
 inline bool servableVectorBias(const data_objects::TensorAttributes& bias,
                                const SdpaProblem& problem)
@@ -918,12 +921,6 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // Dropout with a bias under padding: the bias must be read one key at a time there (see
-    // the bias below), and no dropout object reads it so.
-    if(dropout->active() && varlen->padded() && attributes.attn_mask_tensor_uid().has_value())
-    {
-        return std::nullopt;
-    }
     // The RNG dump: the keep mask a dropping launch applied, written by the mask writer at
     // every element, padded rows and keys past a batch's length included.
     const auto rngDump = servableRngDump(context,
@@ -972,11 +969,10 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
             return std::nullopt;
         }
         biasUid = attributes.attn_mask_tensor_uid().value();
-        // Under padding a batch's key length need not be a multiple of the vectorized
-        // objects' 4-key runs: the last real row's final run would straddle the batch's bias
-        // view and read as zero. So a padded graph's bias runs on the strided objects, which
-        // read one key at a time.
-        biasVectorized = biasStrides->vectorized && !varlen->padded();
+        // Under padding too: the vectorized objects' last real row reads the bias up to the
+        // launch's key length (vendored-kernel modification 37), so a batch's key length
+        // need not be a multiple of their 4-key runs.
+        biasVectorized = biasStrides->vectorized;
     }
     int64_t statsUid = NO_STATS;
     bool statsPacked = true;
