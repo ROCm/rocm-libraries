@@ -33,6 +33,7 @@
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
+
 #endif
 
 using miopen::solver::CKSolverType;
