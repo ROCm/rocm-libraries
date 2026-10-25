@@ -563,4 +563,72 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16SkinnyOutputSignedSplitTails)
 #endif
 }
 
+TEST(TestGroupedConvndBwdWeightWmmaOverwrite, TwoStageAutoSplitFillsDeviceCapacity)
+{
+    if(!ck::is_gfx125_supported())
+        GTEST_SKIP() << "gfx1250 grouped WRW occupancy regression";
+#ifdef CK_ENABLE_FP16
+    using OrdinaryTwoStage = std::tuple_element_t<
+        0,
+        ck::tensor_operation::device::instance::
+            device_grouped_conv_bwd_weight_two_stage_nhwgc_wmma_c_shuffle_instances<
+                2, NHWGC, GKYXC, NHWGK, ck::half_t,
+                ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default,
+                ck::BlockGemmPipelineScheduler::Intrawave,
+                ck::BlockGemmPipelineVersion::v1>>;
+    // The confirmed long-reduction RGB regression has a small output-tile grid.
+    // Only descriptors are needed: planning must not read or allocate tensor payloads.
+    const ck::utils::conv::ConvParam param{
+        2, 1, 128, 24, 3, {3, 3}, {480, 480}, {2, 2}, {1, 1}, {1, 1}, {1, 1}};
+    const auto in_desc =
+        ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<NHWGC>(param);
+    const auto wei_desc =
+        ck::utils::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<GKYXC>(param);
+    const auto out_desc =
+        ck::utils::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<NHWGK>(param);
+    std::array<ck::index_t, 5> in_lengths{}, in_strides{}, wei_lengths{}, wei_strides{};
+    std::array<ck::index_t, 5> out_lengths{}, out_strides{};
+    std::array<ck::index_t, 2> strides{}, dilations{}, left{}, right{};
+    auto copy = [](const auto& src, auto& dst) { ck::ranges::copy(src, dst.begin()); };
+    copy(in_desc.GetLengths(), in_lengths);
+    copy(in_desc.GetStrides(), in_strides);
+    copy(wei_desc.GetLengths(), wei_lengths);
+    copy(wei_desc.GetStrides(), wei_strides);
+    copy(out_desc.GetLengths(), out_lengths);
+    copy(out_desc.GetStrides(), out_strides);
+    copy(param.conv_filter_strides_, strides);
+    copy(param.conv_filter_dilations_, dilations);
+    copy(param.input_left_pads_, left);
+    copy(param.input_right_pads_, right);
+    OrdinaryTwoStage op;
+    auto arg = op.MakeArgumentPointer(nullptr, nullptr, nullptr,
+                                     in_lengths, in_strides, wei_lengths, wei_strides,
+                                     out_lengths, out_strides, strides, dilations, left, right,
+                                     PassThrough{}, PassThrough{}, PassThrough{}, -1);
+    const auto* planned = dynamic_cast<const OrdinaryTwoStage::Argument*>(arg.get());
+    ASSERT_NE(planned, nullptr);
+    const OrdinaryTwoStage::ActiveWorkgroupsPerCU occupancy;
+    const ck::tensor_operation::device::DeviceProperties device;
+    const ck::long_index_t capacity =
+        ck::long_index_t{occupancy.max_occupancy_} * device.num_cu_;
+    const auto& tiles = planned->c_grid_desc_mblock_mperblock_nblock_nperblock_;
+    const ck::long_index_t grid =
+        ck::long_index_t{tiles.GetLength(ck::Number<0>{})} *
+        tiles.GetLength(ck::Number<2>{});
+    ASSERT_GT(grid, 0);
+    // Each requested split can contain a complete reduction tile, even when
+    // filling all resident block slots. Thus reduction length cannot justify
+    // discarding occupancy here. Permit the unavoidable partial final grid.
+    const ck::long_index_t reduction =
+        ck::long_index_t{param.N_} * param.output_spatial_lengths_[0] *
+        param.output_spatial_lengths_[1];
+    ASSERT_GE(reduction, capacity * 32);
+    const ck::long_index_t planned_blocks = grid * planned->k_batch_;
+    EXPECT_LE(planned_blocks, capacity);
+    EXPECT_LT(capacity - planned_blocks, grid);
+#else
+    GTEST_SKIP() << "FP16 instances disabled";
+#endif
+}
+
 } // namespace
