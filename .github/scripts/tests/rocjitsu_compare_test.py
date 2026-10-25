@@ -300,6 +300,10 @@ class CompareTest(unittest.TestCase):
         self.assertTrue(any("CpuThreads=1" in value for value in candidate))
         self.assertIn("--capture=fd", reference)
         self.assertIn("--capture=fd", candidate)
+        for command in (reference, candidate):
+            self.assertEqual(
+                command[command.index("-c") + 1], "/artifact/tensilelite/pytest.ini"
+            )
         self.assertTrue(any("DataInitSeed=261025" in value for value in reference))
         with self.assertRaises(ValueError):
             commands(

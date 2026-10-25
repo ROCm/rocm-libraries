@@ -105,6 +105,8 @@ def commands(strategy, root, plan, env, workers, seconds, suite):
             "-m",
             "pytest",
             str(original),
+            "-c",
+            str(tensile / "pytest.ini"),
             "-p",
             "rocjitsu_pytest",
             "-p",
