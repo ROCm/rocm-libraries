@@ -40,6 +40,11 @@ _DENSE_TILE = "default"
 # gfx950 CU count and the shipped occupancy hint.
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
+# Sliding-window default geometry. A band of width W visits about block_m + W
+# keys per query row, so the 128-row tile wastes fewer masked keys per row than
+# the 256-row one, and its smaller CTA lets two persistent CTAs share a CU.
+_WINDOW_TILE = "bm128"
+_WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _FEATURES = frozenset(
     {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
 )
@@ -174,7 +179,8 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
+    window = int(req.sliding_window)
+    geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
@@ -229,10 +235,10 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         waves_per_eu=_DEFAULT_WAVES_PER_EU,
         lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=variant.persistent,
-        num_persistent=_DEFAULT_NUM_PERSISTENT,
+        num_persistent=_WINDOW_NUM_PERSISTENT if window else _DEFAULT_NUM_PERSISTENT,
         persist_decode="auto",
         ragged=ragged,
-        sliding_window=int(req.sliding_window),
+        sliding_window=window,
         use_sinks=bool(req.use_sinks),
         wide_lds_dma=variant.wide_lds_dma,
         nonpersist_decode=variant.nonpersist_decode,
