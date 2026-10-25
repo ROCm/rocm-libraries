@@ -469,7 +469,7 @@ static bool latin1_isalnum(unsigned c)
 
 /* `name and name.replace("_", "").isalnum()`. A code point beyond U+00FF
  * needs the Unicode tables: refused (NotImplError) unless another character
- * already decides False. */
+ * already decides False. Shared with the unified spec. */
 bool name_ok(const char* name)
 {
     if(name == NULL || !*name)
@@ -1320,9 +1320,16 @@ std::string kernel_name(const rocke_attn_bwd_spec_t& s, const std::string& stage
                        + std::to_string(s.head_size) + "_" + s_(s.seq_mode) + "_" + s_(s.dkv_mode)
                        + "_" + s_(s.mask_class) + "_sv" + std::to_string(s.stage_vec);
     static const Strs in_base = {"dtype", "seq_mode", "dkv_mode", "stage_vec", "mask_class"};
+    return salted_kernel_name(base, s, in_base);
+}
+
+std::string salted_kernel_name(const std::string& base,
+                               const rocke_attn_bwd_spec_t& s,
+                               const std::vector<std::string>& skip)
+{
     std::vector<std::pair<std::string, std::string>> items;
     for(const auto& kv : non_default_fields(s))
-        if(std::find(in_base.begin(), in_base.end(), kv.first) == in_base.end())
+        if(std::find(skip.begin(), skip.end(), kv.first) == skip.end())
             items.push_back(kv);
     std::stable_sort(
         items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
