@@ -125,12 +125,19 @@ struct ThreadGroupTensorSliceTransfer_TDM
         const auto src_base_offset = src_desc.CalculateOffset(zero_idx);
 
         static_for<0, nDim, 1>{}([&](auto i) {
-            Index unit_idx{};
-            constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
-            static_for<0, nDim, 1>{}([&](auto j) { unit_idx(j) = j == Number<ck_i>{} ? 1 : 0; });
-            const auto dim_stride = src_desc.CalculateOffset(unit_idx) - src_base_offset;
-            global_strides_[i] =
-                static_cast<uint64_t>(dim_stride) * static_cast<uint64_t>(tensor_dims_[i]);
+            if constexpr(i + 1 < nDim)
+            {
+                Index unit_idx{};
+                constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 2 - i>{});
+                static_for<0, nDim, 1>{}(
+                    [&](auto j) { unit_idx(j) = j == Number<ck_i>{} ? 1 : 0; });
+                global_strides_[i] =
+                    static_cast<uint64_t>(src_desc.CalculateOffset(unit_idx) - src_base_offset);
+            }
+            else
+            {
+                global_strides_[i] = 0;
+            }
         });
     }
 
