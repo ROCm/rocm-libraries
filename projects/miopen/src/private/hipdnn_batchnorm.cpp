@@ -207,6 +207,26 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
     return miopenStatusSuccess;
 }
 
+// The provider runs MIOpen on a handle of its own, so a tuning policy set on the
+// caller's handle never reaches it. The spatial training and backward solvers
+// read that policy (Search tunes, DbClean drops the perf-db entry), so the
+// forwarded call could pick a different perf config than MIOpen would. The
+// inference solver is not tunable, so inference skips this check.
+// MIOPEN_FIND_ENFORCE needs no check: it is process-wide, so the provider's
+// handle sees it too.
+miopenStatus_t CheckTuningPolicy(miopenHandle_t handle)
+{
+    miopenTuningPolicy_t policy = miopenTuningPolicyNone;
+    if(const miopenStatus_t status = miopenGetTuningPolicy_impl(handle, &policy);
+       status != miopenStatusSuccess)
+        return RecordFailure(status, "could not read the handle's tuning policy");
+    if(policy != miopenTuningPolicyNone)
+        return RecordFailure(miopenStatusUnsupportedOp,
+                             "hipDNN batchnorm cannot apply the handle's tuning policy; "
+                             "only miopenTuningPolicyNone is forwarded");
+    return miopenStatusSuccess;
+}
+
 // What the MIOpen provider can run, whatever the kind.
 const char* CheckSupported(const BnProblem& problem)
 {
@@ -503,6 +523,8 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
 
     if(const char* reason = CheckSupported(problem))
         return RecordFailure(miopenStatusUnsupportedOp, reason);
+    if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
+        return status;
     if(saveMean == nullptr || saveInvVariance == nullptr)
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm training always produces the saved mean and "
@@ -658,6 +680,8 @@ miopenStatus_t Backward(miopenHandle_t handle,
 
     if(const char* reason = CheckSupported(problem))
         return RecordFailure(miopenStatusUnsupportedOp, reason);
+    if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
+        return status;
     if(!problem.hasSavedStats && epsilon != kDefaultEpsilon)
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm backward without saved statistics always uses "

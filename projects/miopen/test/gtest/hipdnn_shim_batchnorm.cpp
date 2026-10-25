@@ -769,6 +769,58 @@ TEST(GPU_HipdnnShimBNGaps_FP32, BackwardWithoutSavedStats)
     }
 }
 
+// Restores the shared handle's tuning policy even when an ASSERT returns early, so
+// the tests after this one keep running under None.
+struct ScopedHandleTuningPolicy
+{
+    ScopedHandleTuningPolicy(miopen::Handle& h, miopenTuningPolicy_t policy) : handle(h)
+    {
+        EXPECT_EQ(miopenGetTuningPolicy(&handle, &saved), miopenStatusSuccess);
+        EXPECT_EQ(miopenSetTuningPolicy(&handle, policy), miopenStatusSuccess);
+    }
+    ~ScopedHandleTuningPolicy() { miopenSetTuningPolicy(&handle, saved); }
+
+    miopen::Handle& handle;
+    miopenTuningPolicy_t saved = miopenTuningPolicyNone;
+};
+
+// MIOpen tunes the spatial training and backward solvers when the handle asks for
+// Search; the provider runs on a handle of its own and never sees that policy, so
+// the shim declines rather than run a perf config MIOpen would not have picked.
+// Inference is not tunable and stays served. The shape is used by no other test,
+// because a Search caches its tuned invoker on the handle under the shape's network
+// config, and in the disabled run alone that would change what later tests run.
+// Training passes no running stats, since a Search re-runs the kernel and would
+// apply the running-stat update more than once.
+TEST(GPU_HipdnnShimBNGaps_FP32, HandleTuningPolicy)
+{
+    auto&& handle = get_handle();
+    const BN2DTestCase tuning_case{
+        3, 5, 7, 9, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
+    const char* reason = "tuning policy";
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+        const auto result =
+            hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
+        if(RecordOutcome("tuning_policy_train", result, reason))
+            CheckTrain(handle, d, true, false);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
+        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+        if(RecordOutcome("tuning_policy_bwd", result, reason))
+            CheckBwd(handle, d);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // alpha/beta other than 1/0
 
