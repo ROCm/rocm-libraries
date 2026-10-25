@@ -22,11 +22,13 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 
@@ -155,14 +157,17 @@ inline Window windowFor(const bwd::SdpaBwdProblem& problem)
 /// The strides a kernel is given for a tensor of @p rows sequence rows. The matcher records 0
 /// on a unit axis. A unit sequence axis keeps a row pitch instead: the kernels drop padding
 /// rows through the buffer bound rows * stride_seq, which a zero stride collapses onto row 0.
-/// The pitch is the head dim rounded to 8 elements, which keeps the 8-element alignment of
-/// every other stride. The matcher declines a zero sequence stride on a multi-row axis, so the
+/// The pitch is the head dim rounded to @p vector elements (8 for 16-bit, 4 for fp32), which
+/// keeps the vector alignment of every other stride. The matcher declines a zero sequence stride on a multi-row axis, so the
 /// substitution keys on the extent.
-inline bwd::Strides rowPitchStrides(bwd::Strides strides, int64_t rows, int64_t headDim)
+inline bwd::Strides rowPitchStrides(bwd::Strides strides,
+                                    int64_t rows,
+                                    int64_t headDim,
+                                    int64_t vector = bwd::detail::VECTOR_ELEMENTS)
 {
     if(rows == 1)
     {
-        strides.seq = bwd::detail::ceilToVector(headDim);
+        strides.seq = bwd::detail::ceilToVector(headDim, vector);
     }
     return strides;
 }
@@ -189,6 +194,8 @@ struct WorkspaceRequest
     /// Delta and LSE' (fp32 `[B, Hq, Sq]` each), written by a prep launch and read by the
     /// dK/dV and dQ launches.
     bool rowStatistics = false;
+    /// Bytes of one element of the broadcast dBias region: its dtype's, 2 for f16 and bf16.
+    int64_t dbiasElementBytes = WORKSPACE_ELEMENT_BYTES;
 };
 
 /// Where the workspace's regions are: the one place its size and its offsets are decided,
@@ -268,8 +275,9 @@ inline WorkspaceLayout workspaceLayout(const bwd::SdpaBwdProblem& problem,
                             : std::optional<int64_t>{};
     const auto elements
         = head ? bwd::detail::checkedProduct({problem.batch, *head}) : std::optional<int64_t>{};
-    const auto bytes = elements ? bwd::detail::checkedProduct({*elements, WORKSPACE_ELEMENT_BYTES})
-                                : std::optional<int64_t>{};
+    const auto bytes = elements
+                           ? bwd::detail::checkedProduct({*elements, request.dbiasElementBytes})
+                           : std::optional<int64_t>{};
     if(!bytes)
     {
         failBadParam("the broadcast dBias workspace overflows int64");
@@ -478,10 +486,11 @@ struct ReduceGrid
     unsigned int y = 0;
 };
 
-/// The grid of the reduce over the batch and head axes @p problem's dBias is broadcast over.
-inline ReduceGrid reduceGridOf(const bwd::SdpaBwdProblem& problem)
+/// The grid of the reduce over the batch and head axes @p problem's dBias is broadcast over,
+/// for a reduce kernel whose threads each own @p vector consecutive columns.
+inline ReduceGrid reduceGridOf(const bwd::SdpaBwdProblem& problem, int64_t vector = REDUCE_VECTOR)
 {
-    const int64_t vectors = (problem.seqLenKv + REDUCE_VECTOR - 1) / REDUCE_VECTOR;
+    const int64_t vectors = (problem.seqLenKv + vector - 1) / vector;
     const auto items = bwd::detail::checkedProduct({problem.seqLenQ, vectors});
     const auto planes
         = bwd::detail::checkedProduct({problem.biasBroadcastBatch ? int64_t{1} : problem.batch,
@@ -552,6 +561,117 @@ inline ReduceKernargs reduceKernargsOf(const bwd::SdpaBwdProblem& problem,
     reduce.strideWorkspace = layout.dbiasStrides;
     reduce.strideOut = problem.dbiasStrides;
     return reduce;
+}
+
+// ---------------------------------------------------------------------------
+// Graph predicates
+// ---------------------------------------------------------------------------
+
+/// Whether any node of the graph is an SDPA-backward node. Only such a graph hears why it was
+/// declined: graph_match sees every graph the catalog misses on, and a line for each
+/// convolution or normalization graph would bury the attention ones.
+inline bool hasSdpaBackwardNode(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    for(const auto& node : context.graph.nodeWrappers())
+    {
+        if(node->attributesType()
+           == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The bias's LDS staging rule: every non-unit stride a multiple of one 16-byte vector of
+/// elements (the matcher records 0 on a broadcast or unit axis), a row stride of at least the
+/// key length rounded up to a vector (the kernel's bias chunk contract), and a 16-byte
+/// aligned base.
+inline bool stagesBias(const bwd::SdpaBwdProblem& problem)
+{
+    constexpr int64_t ALIGNMENT_BYTES = 16;
+    const int64_t vector = ALIGNMENT_BYTES / static_cast<int64_t>(problem.elementBytes);
+    return problem.biasStrides.batch % vector == 0 && problem.biasStrides.head % vector == 0
+           && problem.biasStrides.seq % vector == 0
+           && (problem.biasStrides.seq == 0
+               || problem.biasStrides.seq >= bwd::detail::ceilToVector(problem.seqLenKv, vector))
+           && problem.biasAlignmentBytes % ALIGNMENT_BYTES == 0;
+}
+
+/// Whether every span a gqa_pack dK/dV object binds, from head 0 of the group over its G
+/// heads, fits the 32-bit buffer descriptor: Q, dO and O, the statistics and, when present,
+/// the bias; and whether the kernel's pack_split multiply-high is exact for every packed row
+/// it can address: (Sq * G + 2 * block_q) * Sq < 2^31, the rows Sq * G plus the pad to an
+/// even tile count, at the largest query tile @p maxBlockQ of the packed objects. A graph
+/// that is not grouped has no packed span.
+inline bool packedSpansFit(const bwd::SdpaBwdProblem& problem, int64_t maxBlockQ)
+{
+    if(problem.numHeads <= problem.numKvHeads)
+    {
+        return false;
+    }
+    const int64_t group = problem.numHeads / problem.numKvHeads;
+    const auto packedRows = bwd::detail::checkedProduct({problem.seqLenQ, group});
+    if(!packedRows || *packedRows > INT32_LIMIT)
+    {
+        return false;
+    }
+    const auto splitBound
+        = bwd::detail::checkedProduct({*packedRows + 2 * maxBlockQ, problem.seqLenQ});
+    if(!splitBound || *splitBound >= (int64_t{1} << 31))
+    {
+        return false;
+    }
+    const int64_t elementBytes = problem.elementBytes;
+    const int64_t vector = bwd::detail::REQUIRED_ALIGNMENT_BYTES / elementBytes;
+    const auto spanFits = [&](int64_t rows, int64_t seqStride, int64_t width, int64_t headStride) {
+        const auto slab = bwd::detail::slabElements(rows, seqStride, width);
+        const auto heads = bwd::detail::checkedProduct({group - 1, headStride});
+        if(!slab || !heads || *heads > INT32_LIMIT)
+        {
+            return false;
+        }
+        const auto bytes = bwd::detail::checkedProduct({*slab + *heads, elementBytes});
+        return bytes.has_value() && *bytes <= INT32_LIMIT;
+    };
+    const int64_t rowsQ = problem.seqLenQ - 1;
+    if(!spanFits(rowsQ,
+                 problem.q.seq,
+                 bwd::detail::ceilToVector(problem.headDimQk, vector),
+                 problem.q.head)
+       || !spanFits(rowsQ,
+                    problem.dO.seq,
+                    bwd::detail::ceilToVector(problem.headDimV, vector),
+                    problem.dO.head)
+       || !spanFits(rowsQ,
+                    problem.o.seq,
+                    bwd::detail::ceilToVector(problem.headDimV, vector),
+                    problem.o.head))
+    {
+        return false;
+    }
+    // The statistics: HT packs the group's heads contiguously, TH interleaves them one
+    // element apart.
+    const auto statsElements
+        = problem.statsLayout == bwd::StatsLayout::HT
+              ? bwd::detail::checkedProduct({group, problem.seqLenQ})
+              : bwd::detail::checkedProduct({problem.seqLenQ, problem.numHeads});
+    if(!statsElements)
+    {
+        return false;
+    }
+    const int64_t statsExtra = problem.statsLayout == bwd::StatsLayout::HT ? 0 : group - 1;
+    const auto statsBytes
+        = bwd::detail::checkedProduct({*statsElements + statsExtra, ROW_STATISTIC_BYTES});
+    if(!statsBytes || *statsBytes > INT32_LIMIT)
+    {
+        return false;
+    }
+    if(problem.biasUid == bwd::NO_UID)
+    {
+        return true;
+    }
+    return spanFits(rowsQ, problem.biasStrides.seq, problem.seqLenKv, problem.biasStrides.head);
 }
 
 // ---------------------------------------------------------------------------

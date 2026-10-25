@@ -43,6 +43,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaBwdMerged",
          &registerFlydslSdpaBwdMergedSymbols,
          &resetFlydslSdpaBwdMergedModuleCache},
+        {"hipkernel:FlydslSdpaBwdSplit",
+         &registerFlydslSdpaBwdSplitSymbols,
+         &resetFlydslSdpaBwdSplitModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
