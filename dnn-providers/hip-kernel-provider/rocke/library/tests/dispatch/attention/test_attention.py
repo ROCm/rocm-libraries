@@ -56,6 +56,8 @@ _RDNA_WMMA_FEATURES = {
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
         "strided_kv",
+        "layout_dense",
+        "layout_bhsd",
         "causal",
         "causal_bottom_right",
         "sliding_window",

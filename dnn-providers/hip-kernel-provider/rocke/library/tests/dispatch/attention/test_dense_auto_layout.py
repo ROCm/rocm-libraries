@@ -4,8 +4,8 @@
 """Auto dispatch of contiguous-layout (``layout='dense'``) requests (host only).
 
 An unpinned request that declares contiguous tensors and has more than one
-query row gets the dense kernel's default body; paged / unspecified layouts and
-single-row requests keep the unified route.
+query row gets the dense kernel's default body; paged / unspecified layouts keep
+the unified route, and single-row requests take the strided decode kernel.
 """
 
 import dataclasses
@@ -81,9 +81,9 @@ def test_unspecified_layout_keeps_unified(arch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_single_query_row_is_not_routed_to_dense(arch):
-    with pytest.raises(ValueError):
-        dispatch_attention(_request(arch, seqlen_q=1, mask_type=0))
+def test_single_query_row_is_routed_to_strided_decode(arch):
+    result = dispatch_attention(_request(arch, seqlen_q=1, mask_type=0))
+    assert result.candidate.name == "attention_strided_decode"
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
