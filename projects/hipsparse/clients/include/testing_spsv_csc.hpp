@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -55,8 +56,7 @@ void testing_spsv_csc_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpSVAlg_t   alg       = HIPSPARSE_SPSV_ALG_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto drow_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -175,8 +175,7 @@ void testing_spsv_csc(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures. A CSC matrix stores A^T in CSR layout, i.e.
     //   csc_col_ptr == csr_row_ptr(A^T), csc_row_ind == csr_col_ind(A^T).
