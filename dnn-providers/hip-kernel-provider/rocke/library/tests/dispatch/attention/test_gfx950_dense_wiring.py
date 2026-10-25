@@ -1142,11 +1142,46 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         self.assertGreater(len(orders[_GRID_NAME]), 1)
 
     def test_tile_knob_recomputes_ragged(self):
+        # 128 heads: enough 256-row work items that the default keeps 256 rows.
         req = _gfx950_dense_req(
-            hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=384, seqlen_k=384
+            hdim_q=128, hdim_v=128, nhead_q=128, nhead_k=8, seqlen_q=384, seqlen_k=384
         )
         self.assertTrue(_spec(req, _GRID).ragged)
         self.assertFalse(_spec(req, _GRID, block_m=128).ragged)
+
+    def test_default_tile_halves_when_under_filled(self):
+        """D128 top-left causal: 128 rows while the 256-row work count is at most
+        the persistent CTA count (below it, for the grid body); 256 above it and
+        for every other problem."""
+        d128 = {"hdim_q": 128, "hdim_v": 128, "nhead_k": 4, "batch": 1}
+        cases = (
+            # (seqlen, nhead_q, extra, grid block_m, persistent block_m)
+            (512, 32, {}, 128, 128),  # 64 items
+            (2048, 28, {}, 128, 128),  # 224 items
+            (2048, 32, {}, 256, 128),  # 256 items: persistent only
+            (2048, 40, {}, 256, 256),  # 320 items
+            (512, 32, {"sliding_window": 128}, 256, 256),
+            (512, 32, {"use_sinks": True}, 256, 256),
+            (512, 32, {"mask_type": 0}, 256, 256),
+        )
+        for seqlen, nhead_q, extra, grid_bm, persist_bm in cases:
+            req = _gfx950_dense_req(
+                **d128, nhead_q=nhead_q, seqlen_q=seqlen, seqlen_k=seqlen, **extra
+            )
+            for spec_id, bm in (
+                (_GRID, grid_bm),
+                (_QBMINOR, grid_bm),
+                (_PERSIST, persist_bm),
+                (_WIDE, persist_bm),
+            ):
+                if extra and spec_id == _WIDE:
+                    continue  # wide DMA admits plain causal only
+                with self.subTest(
+                    seqlen=seqlen, nhead_q=nhead_q, extra=extra, spec=spec_id
+                ):
+                    self.assertEqual(_spec(req, spec_id).block_m, bm)
+        d64 = _gfx950_dense_req(batch=1, nhead_q=8, seqlen_q=512, seqlen_k=512)
+        self.assertEqual(_spec(d64, _PERSIST).block_m, 256)
 
     def test_wide_dma_starts_at_a_non_ragged_tile(self):
         """Wide DMA has no ragged path: where 256x64 is ragged its default is
