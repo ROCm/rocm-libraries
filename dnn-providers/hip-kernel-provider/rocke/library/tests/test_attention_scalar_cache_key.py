@@ -67,6 +67,9 @@ _STATIC_VARIANTS = (
     dict(sliding_window=128),
     dict(use_sinks=True),
     dict(softcap=30.0),
+    dict(use_fp8=True),
+    dict(causal_top_left=True),
+    dict(right_bound=8),
 )
 
 

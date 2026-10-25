@@ -209,9 +209,8 @@ typedef struct rocke_attn_unified_build_ctx
  * ============================================================ */
 
 /* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, sel_p,
- * dtype, num_segments) + derive num_queries_per_kv / max_blocks. On a non-
- * divisible head ratio or unsupported dtype, sets b's sticky error and returns
- * false. */
+ * dtype, num_segments) + derive num_queries_per_kv. On a non-divisible head
+ * ratio or unsupported dtype, sets b's sticky error and returns false. */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
                                  rocke_attn_unified_kind_t kind,

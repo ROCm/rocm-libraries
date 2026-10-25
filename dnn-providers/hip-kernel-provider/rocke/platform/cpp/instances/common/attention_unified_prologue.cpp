@@ -40,8 +40,7 @@
  *      if p.dtype not in ("fp16", "bf16"): raise ValueError(...)   (2D only)
  *      dtype = spec.dtype_ir
  *  plus deriving num_queries_per_kv (= p.num_query_heads // num_kv_heads, which
- *  raises on a non-divisible ratio) and max_blocks
- *  (= ceil(max_seqlen_k / block_size)).
+ *  raises on a non-divisible ratio).
  *
  *  Zero-inits the ctx, copies the problem/spec slice into it, mirrors `p` into
  *  the selector-helper problem shape (ctx->sel_p) so the ported emit/descriptor
