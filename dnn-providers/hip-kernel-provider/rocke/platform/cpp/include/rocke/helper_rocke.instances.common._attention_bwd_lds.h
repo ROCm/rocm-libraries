@@ -288,14 +288,15 @@ rocke_status_t rocke_attn_bwd_dma_slab_layout_init(rocke_attn_bwd_dma_slab_layou
                                                    int cols,
                                                    int elem_bytes,
                                                    rocke_attn_bwd_err_t* err);
-int rocke_attn_bwd_dma_slab_layout_row_bytes(const rocke_attn_bwd_dma_slab_layout_t* l);
+int64_t rocke_attn_bwd_dma_slab_layout_row_bytes(const rocke_attn_bwd_dma_slab_layout_t* l);
 int rocke_attn_bwd_dma_slab_layout_fold(const rocke_attn_bwd_dma_slab_layout_t* l);
 int rocke_attn_bwd_dma_slab_layout_slabs(const rocke_attn_bwd_dma_slab_layout_t* l);
-int rocke_attn_bwd_dma_slab_layout_size(const rocke_attn_bwd_dma_slab_layout_t* l);
-int rocke_attn_bwd_dma_slab_layout_offset(const rocke_attn_bwd_dma_slab_layout_t* l,
-                                          int row,
-                                          int col,
-                                          rocke_attn_bwd_err_t* err);
+int64_t rocke_attn_bwd_dma_slab_layout_size(const rocke_attn_bwd_dma_slab_layout_t* l);
+/* row_bytes, size and offset are 64-bit: rows * row_bytes can pass 2^31. */
+int64_t rocke_attn_bwd_dma_slab_layout_offset(const rocke_attn_bwd_dma_slab_layout_t* l,
+                                              int row,
+                                              int col,
+                                              rocke_attn_bwd_err_t* err);
 /* .dma_source(slot) -> (row, col). */
 rocke_status_t rocke_attn_bwd_dma_slab_layout_dma_source(const rocke_attn_bwd_dma_slab_layout_t* l,
                                                          int slot,
