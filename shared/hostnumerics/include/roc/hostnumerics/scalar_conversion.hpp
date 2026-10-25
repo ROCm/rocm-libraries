@@ -29,8 +29,6 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
             return Destination(convertScalarValue<Component>(source, options), Component{0});
         }
     } else if constexpr (RuntimeIsComplexV<Value>) {
-        assert(source.imag() == typename Value::value_type{0} &&
-               "Complex-to-real conversion requires a zero imaginary component.");
         return convertScalarValue<Destination>(source.real(), options);
     } else if constexpr (std::is_same_v<Destination, bool>) {
         static_assert(std::is_arithmetic_v<Value> || std::is_enum_v<Value>);
@@ -38,22 +36,11 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
     } else if constexpr (std::is_integral_v<Destination>) {
         if constexpr (std::is_floating_point_v<Value>) {
             if (options.integerOverflow == IntegerOverflow::Reject) {
-                assert(!std::isnan(source) && "Integer conversion requires a non-NaN value.");
-                assert(std::isfinite(source) && "Infinity requires saturating integer conversion.");
                 // A native cast already truncates; only round explicitly for nearest-even.
                 const Value rounded =
                     options.integerRounding == IntegerRounding::TowardZero
                         ? source
                         : roundForIntegerConversion(source, options.integerRounding);
-#ifndef NDEBUG
-                constexpr int rangeExponent = std::numeric_limits<Destination>::digits;
-                const Value upperExclusive = std::ldexp(Value{1}, rangeExponent);
-                const Value lowerInclusive =
-                    std::is_signed_v<Destination> ? -upperExclusive : Value{0};
-                const Value truncated = std::trunc(rounded);
-                assert((truncated >= lowerInclusive && truncated < upperExclusive) &&
-                       "Reject conversion requires a representable rounded value.");
-#endif
                 return static_cast<Destination>(rounded);
             }
         }
@@ -74,8 +61,8 @@ namespace roc::hostnumerics {
 // are omitted. With explicit Reject options, the rounded value must fit.
 // Complex-to-real input must have a zero imaginary component. For non-Boolean
 // integer destinations, input must not be NaN, and infinity requires Saturate.
-// Policies must be valid when used. Preconditions apply even when assertions
-// are disabled; this function does not report conversion failures.
+// Policies must be valid when used. This function does not validate inputs or
+// report conversion failures.
 // For example, convertScalar<int8_t>(128.75) returns -128. NearestEven with
 // Reject maps 2.5 to 2 and 3.5 to 4. Boolean conversion tests for a nonzero value.
 template <typename Target, typename Source>

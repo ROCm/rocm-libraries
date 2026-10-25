@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cassert>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -49,8 +48,6 @@ inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestinatio
 template <typename Floating>
 Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
-    assert((rounding == IntegerRounding::TowardZero || rounding == IntegerRounding::NearestEven) &&
-           "Integer rounding policy must be valid.");
     if (rounding == IntegerRounding::TowardZero) return std::trunc(value);
 
     Floating integral = 0;
@@ -112,20 +109,12 @@ template <typename Integral>
 uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signedDestination,
                                       const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_integral_v<Integral>);
-    assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
-    assert((options.integerOverflow == IntegerOverflow::Reject ||
-            options.integerOverflow == IntegerOverflow::Saturate ||
-            options.integerOverflow == IntegerOverflow::ModuloWrap) &&
-           "Integer overflow policy must be valid.");
     if (options.integerOverflow == IntegerOverflow::Saturate &&
         !integralFitsIntegerDestination(value, bits, signedDestination)) {
         return integralIsBelowIntegerDestination(value, bits, signedDestination)
                    ? (signedDestination ? signedIntegerMinimumRaw(bits) : 0)
                    : integerMaximumRaw(bits, signedDestination);
     }
-    assert((options.integerOverflow != IntegerOverflow::Reject ||
-            integralFitsIntegerDestination(value, bits, signedDestination)) &&
-           "Reject conversion requires a representable value.");
     return static_cast<uint64_t>(value) & integerMask(bits);
 }
 
@@ -136,14 +125,6 @@ template <typename Floating>
 uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signedDestination,
                                       const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
-    assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
-    assert(!std::isnan(value) && "Integer conversion requires a non-NaN value.");
-    assert((options.integerOverflow == IntegerOverflow::Reject ||
-            options.integerOverflow == IntegerOverflow::Saturate ||
-            options.integerOverflow == IntegerOverflow::ModuloWrap) &&
-           "Integer overflow policy must be valid.");
-    assert((std::isfinite(value) || options.integerOverflow == IntegerOverflow::Saturate) &&
-           "Infinity requires saturating integer conversion.");
     const Floating rounded = roundForIntegerConversion(value, options.integerRounding);
     const int rangeExponent =
         signedDestination ? static_cast<int>(bits) - 1 : static_cast<int>(bits);
@@ -160,8 +141,6 @@ uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signed
         if (std::signbit(rounded)) raw = uint64_t{0} - raw;
         return raw & integerMask(bits);
     }
-    assert((rounded >= lowerInclusive && rounded < upperExclusive) &&
-           "Reject conversion requires a representable rounded value.");
     if (signedDestination)
         return static_cast<uint64_t>(static_cast<int64_t>(rounded)) & integerMask(bits);
     return static_cast<uint64_t>(rounded) & integerMask(bits);
@@ -174,8 +153,6 @@ uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestinati
                               const ScalarConversionOptions& options) noexcept {
     using Value = std::remove_cvref_t<Source>;
     if constexpr (RuntimeIsComplexV<Value>) {
-        assert(source.imag() == typename Value::value_type{0} &&
-               "Complex-to-real conversion requires a zero imaginary component.");
         return convertToIntegerBits(source.real(), bits, signedDestination, options);
     } else if constexpr (std::is_same_v<Value, bool>) {
         return convertIntegralToIntegerBits(static_cast<uint8_t>(source), bits, signedDestination,

@@ -171,21 +171,4 @@ TYPED_TEST(IntegerConversion, PoliciesMatchIndependentIntegerExpectations) {
     }
 }
 
-TEST(ScalarConversion, PreconditionsAreAssertedRatherThanReportedByDefault) {
-#ifdef NDEBUG
-    GTEST_SKIP() << "Assertions are disabled; precondition violations are not exercised.";
-#else
-    EXPECT_DEATH((void)convertScalar<int8_t>(128, reject), "representable value");
-    EXPECT_DEATH((void)convertScalar<int8_t>(128.0, reject), "representable rounded value");
-    EXPECT_DEATH((void)convertScalar<int8_t>(std::numeric_limits<double>::quiet_NaN()), "non-NaN");
-    EXPECT_DEATH((void)convertScalar<int8_t>(std::numeric_limits<double>::infinity()), "Infinity");
-    EXPECT_DEATH((void)convertScalar<double>(std::complex<double>(2.0, 1.0)), "zero imaginary");
-    EXPECT_DEATH(
-        (void)convertScalar<int8_t>(2.0, {IntegerRounding::Count, IntegerOverflow::Reject}),
-        "rounding policy");
-    EXPECT_DEATH(
-        (void)convertScalar<int8_t>(2, {IntegerRounding::TowardZero, IntegerOverflow::Count}),
-        "overflow policy");
-#endif
-}
 }  // namespace

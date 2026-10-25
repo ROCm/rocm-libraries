@@ -9,7 +9,6 @@ namespace roc::hostnumerics {
 enum class IntegerRounding : uint8_t {
     TowardZero,
     NearestEven,
-    Count,
 };
 
 enum class IntegerOverflow : uint8_t {
@@ -18,7 +17,6 @@ enum class IntegerOverflow : uint8_t {
     Saturate,
     // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.
     ModuloWrap,
-    Count,
 };
 
 struct ScalarConversionOptions {
