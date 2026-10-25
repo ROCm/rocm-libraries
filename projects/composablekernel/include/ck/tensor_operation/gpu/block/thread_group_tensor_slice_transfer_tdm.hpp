@@ -7,6 +7,7 @@
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
 #include "ck/tensor_description/cluster_descriptor.hpp"
+#include "ck/utility/math.hpp"
 
 namespace ck {
 
@@ -112,11 +113,7 @@ struct ThreadGroupTensorSliceTransfer_TDM
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + wave_data_idx_begin);
 
         // Store tensor dims in TDM order (reversed from arrange order).
-        static_for<0, nDim, 1>{}([&](auto i) {
-            constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
-            tensor_dims_[i]        = static_cast<uint32_t>(src_desc.GetLength(Number<ck_i>{}) -
-                                                    src_slice_origin_[Number<ck_i>{}]);
-        });
+        PrecomputeIdx(src_desc);
 
         // Store tensor global strides in TDM order (reversed from arrange order).
         const auto zero_idx = []() {
@@ -132,7 +129,8 @@ struct ThreadGroupTensorSliceTransfer_TDM
             constexpr index_t ck_i = ThreadClusterArrangeOrder{}.At(Number<nDim - 1 - i>{});
             static_for<0, nDim, 1>{}([&](auto j) { unit_idx(j) = j == Number<ck_i>{} ? 1 : 0; });
             const auto dim_stride = src_desc.CalculateOffset(unit_idx) - src_base_offset;
-            global_strides_[i]    = static_cast<uint64_t>(dim_stride * tensor_dims_[i]);
+            global_strides_[i] =
+                static_cast<uint64_t>(dim_stride) * static_cast<uint64_t>(tensor_dims_[i]);
         });
     }
 
@@ -187,6 +185,16 @@ struct ThreadGroupTensorSliceTransfer_TDM
         // Pad encoding based on ISA document
         if constexpr(PadEnabled)
         {
+            // ISA based restrictions
+            static_assert(PadAmount % 4 == 0, "PadAmount must be in dword unit");
+            static_assert(PadAmount >= 4 && PadAmount <= 512,
+                          "PadAmount must be between 1 and 128 dwords");
+            static_assert(PadInterval % 4 == 0, "PadInterval must be in dword unit");
+            static_assert(PadInterval >= 8 && PadInterval <= 1024,
+                          "PadInterval must be between 2 and 256 dwords");
+            static_assert(math::is_power_of_two_integer(PadInterval / 4),
+                          "PadInterval dwords must be power of two");
+
             tdm_config.pad_enable              = PadEnabled;
             tdm_config.pad_config.pad_interval = math::integer_log2_exact<PadInterval / 4>() - 1;
             tdm_config.pad_config.pad_amount   = PadAmount / 4 - 1;

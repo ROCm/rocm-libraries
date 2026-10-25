@@ -13,10 +13,11 @@ struct TDMLdsPaddingConfig
     uint32_t pad_amount{0};
 };
 
-// context switch is not supported in MI450
+// context switch is not supported on gfx1250
 struct TDMConfig
 {
     // 0 - not a context-restore descriptor. 1 - from a context-restore
+    // never set by CK, always 0
     bool is_restore{false};
     // 0 - don't send an atomic barrier op. 1 - send an atomic barrier op.
     bool atomic_barrier_enable{false};
@@ -33,7 +34,7 @@ union TDM_GROUP0
     __device__ TDM_GROUP0(uintptr_t lds_addr_in, uintptr_t global_addr_in) : bitfield{0, 0, 0, 0}
     {
         count    = 1;
-        lds_addr = lds_addr_in;
+        lds_addr = static_cast<uint32_t>(lds_addr_in);
         globalAddr(global_addr_in);
         type              = 2; // set to 2 for spg
         gather_index_size = 0;
@@ -176,8 +177,8 @@ union TDM_GROUP1
     }
     __device__ void tensorDim1Stride(uint64_t value)
     {
-        tensor_dim1_stride_lo = value & 0xFFFFFFFF;
-        tensor_dim1_stride_hi = (value >> 32);
+        tensor_dim1_stride_lo = value & 0xFFFF;
+        tensor_dim1_stride_hi = (value >> 16);
     }
     __device__ void tensorDim(uint32_t index, uint32_t value)
     {

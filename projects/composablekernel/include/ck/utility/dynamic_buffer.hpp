@@ -307,13 +307,13 @@ struct DynamicBuffer
               typename GlobalStrides,
               typename BoxDims,
               typename TDMConfig>
-    __host__ __device__ void TdmCopyToLds(DstBuffer& dst_buf,
-                                          IndexType src_offset,
-                                          IndexType dst_offset,
-                                          const TensorDims& tensor_dims,
-                                          const GlobalStrides& global_strides,
-                                          const BoxDims& box_dims,
-                                          const TDMConfig& tdm_config) const
+    __device__ void TdmCopyToLds(DstBuffer& dst_buf,
+                                 IndexType src_offset,
+                                 IndexType dst_offset,
+                                 const TensorDims& tensor_dims,
+                                 const GlobalStrides& global_strides,
+                                 const BoxDims& box_dims,
+                                 const TDMConfig& tdm_config) const
     {
         auto tdm_desc =
             detail::MakeTDMDescriptorPack<remove_cvref_t<typename DstBuffer::type>, nDim>(
