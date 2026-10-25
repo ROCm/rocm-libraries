@@ -5,7 +5,7 @@
 
 Only the compile runs in the pool. Each worker is a fresh process (``spawn``: no
 MLIR state is forked) prepared by ``_flydsl_env.prepare(arch)``, as the generator's
-own process is, and inherits the environment the generator pinned before the pool
+own process is (one compile per worker), and inherits the environment the generator pinned before the pool
 starts. The objects come back in table order, so checking them, writing them and
 the manifest stay serial, and the bytes are what a serial build produces.
 
@@ -66,6 +66,10 @@ def compile_all(
         mp_context=multiprocessing.get_context("spawn"),
         initializer=_prepare_worker,
         initargs=(arch,),
+        # One compile per process: FlyDSL restores a scoped LLVM option to its default
+        # value, which LLVM reads as an explicit setting, so a reused worker would carry
+        # the previous compile's options into the next object.
+        max_tasks_per_child=1,
     ) as pool:
         futures = {
             pool.submit(compile_one, task): index for index, task in enumerate(tasks)

@@ -13,7 +13,7 @@ one backward op (``run_op``): it builds the op's rows of ``_instances`` and writ
 ``<content-root>/<op>/gfx950/`` with the objects, ``manifest.json`` and ``SOURCE.md``,
 the layout of the other generators. Each spec is compiled once, in its own process slot
 (``_parallel``: ``FLYDSL_GEN_JOBS`` sets the worker count), and the object is recovered
-from the IR dump. A compile prints the SGPR greedy-allocation MIR (``print-after=greedy``)
+from the compile's cache artifact (cache mode, not FlyDSL's IR-dump mode). A compile prints the SGPR greedy-allocation MIR (``print-after=greedy``)
 into a file of its own, and ``tools/sdpa_bwd_gate.py`` gates the delivered object and
 that dump in a subprocess: the resource row, the #1087 detectors and the R-MIR scan.
 Per spec the outcome is:
@@ -26,14 +26,18 @@ Per spec the outcome is:
 Rebuilding from identical sources can yield a different object, or a dump holding two
 different objects: LLVM's AMDGPU backend is not deterministic for some kernels
 (the dq-causal family and five known bimodal specs, ``tests/data/sdpa_bwd_known_flaky.csv``). Those outcomes are
-reported, never retried; one build per spec. Comparing an object against a pin, and
+reported, never retried (one build per spec), except for a combined row (below), whose unstable build is rebuilt
+in a fresh process, at most three builds in all. Comparing an object against a pin, and
 deciding which outcomes are red, is the caller's job (``tools/sdpa_bwd_compare.py``).
 
-The dB-storing ``bias`` rows of ``sdpa_bwd_merged`` (``store_db`` unset) build one object with two kernels:
-the merged kernel and the dBias reduce kernel (``reduce_symbol``); a ``store_db=0`` object never writes dB,
-so it never launches the reduce and holds the merged kernel alone. A combined object's per-kernel gate
-(``tools/sdpa_bwd_gate.py``) holds the merged kernel's function bytes and resource row to the standalone
-merged pin and the reduce kernel's resource row to the reduce pin. ``generate`` for that op ships pins
+The dB-storing ``bias`` rows of ``sdpa_bwd_merged`` and ``sdpa_bwd_dq`` (``store_db`` unset; every fp32 bias dQ row)
+build one object with two kernels: the merged or dQ kernel and the dBias reduce kernel (``reduce_symbol``); a
+``store_db=0`` object never writes dB, so it never launches the reduce and holds its kernel alone. A combined
+object's per-kernel gate (``tools/sdpa_bwd_gate.py``) holds the main kernel's function bytes and resource row to its
+standalone pin and the reduce kernel's resource row to the reduce pin; the reduce is compiled under the main
+module's LLVM options, so its bytes are not compared. For an fp32 dQ object those options differ from the
+standalone fp32 reduce's, so its reduce is gated against a standalone fp32 reduce built under the dQ module's
+options (``_fp32_reduce_reference``). ``generate`` for the merged, prep, dK/dV and dQ ops ships pins
 (``--reference-dir``): every other row ships its pin's bytes and its rebuild only verifies it; a combined
 row ships the combined rebuild. A row that does not build
 (``error``; for a combined row also ``dual_object``) or a red per-kernel gate stops the run, and nothing
@@ -42,7 +46,7 @@ is shipped.
 The kernels are the ones under ``kernels_src/kernels/attention_bwd_cdna/``. Each is
 traced with no tensors: the launchers take raw pointers and integers, so the arguments
 are synthesised from the launcher's own signature. Every build constructs a fresh
-launcher (a reused JitFunction is a cache hit) and compiles into a fresh dump directory.
+launcher (a reused JitFunction is a cache hit) and compiles into a fresh cache directory, in a worker process of its own (``_parallel``).
 
 The exit status is 0 when every spec is ``ok`` or ``dual_object`` (a spill finding is
 recorded in the manifest and judged by the compare tool), and 1 when any is ``error``,
@@ -72,17 +76,19 @@ from ._codeobject import (
     kernel_names,
     verify_arch,
 )
-from ._extract_hsaco import HsacoExtractionError, hsaco_from_dump
-from ._instances import SDPA_BWD_MERGED_REDUCE_SYMBOL, instances_for
+from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
+from ._instances import SDPA_BWD_REDUCE_SYMBOL, instances_for
 from ._manifest import FLYDSL_DIR, refresh_source_md, sha256, write_op_manifest
 from ._parallel import compile_all
-from ._sdpa_bwd_spec import (
+from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's surface)
+    FP32,
     KERNELS,
     LADDER,
     Spec,
+    dbias_reduce_spec,
     rung_below,
     to_spec,
-)  # noqa: F401  (LADDER is part of this module's surface)
+)
 
 # The arches each op is built for. One entry per op, by `sdpa_bwd_<kernel>`.
 _OP_ARCHES = {f"sdpa_bwd_{kernel}": ("gfx950",) for kernel in KERNELS}
@@ -103,6 +109,8 @@ _RESULT_COLUMNS = (
 # The gates of one delivered object (resources, #1087, R-MIR), run as a subprocess
 # so that editing them restamps no object.
 _GATE_TOOL = FLYDSL_DIR / "tools" / "sdpa_bwd_gate.py"
+
+_REFERENCE_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_reference.csv"
 
 # One kernel argument is its pointer (8 bytes, `global_buffer`) or a by-value scalar.
 _ARG_KINDS = {
@@ -404,36 +412,53 @@ def op_of(spec: Spec) -> str:
 
 
 def reduce_symbol_of(spec: Spec) -> str:
-    """The dBias reduce kernel the object of @p spec carries beside its own: the dB-storing merged ``bias`` objects only."""
+    """The dBias reduce kernel the object of @p spec carries beside its own: the dB-storing ``bias`` objects of the merged and dQ kernels.
+
+    An fp32 bias dQ object always stores dB (``store_db`` is not an fp32 knob), so it always carries the fp32 reduce.
+    """
     return (
-        SDPA_BWD_MERGED_REDUCE_SYMBOL
-        if spec.kernel == "merged" and spec.cls == "bias" and spec.store_db != 0
+        SDPA_BWD_REDUCE_SYMBOL[spec.dtype]
+        if spec.kernel in ("merged", "dq") and spec.cls == "bias" and spec.store_db != 0
         else ""
     )
 
 
 def geometry_of(built: Built) -> dict:
-    """The launch geometry the engine reads from a merged record (``block_threads``, ``block_kv``, ``block_m``)."""
-    if built.traits is None:
+    """The launch geometry the engine reads from a row: ``block_threads`` and ``block_kv`` (dK/dV), ``block_m`` (dQ), all three (merged).
+
+    The resolved values: the fields replace the rows' ``-1`` knobs. The prep and reduce kernels have a fixed block; the engine derives it.
+    """
+    spec = built.spec
+    if built.traits is not None:
+        kt, qt = built.traits
+        return {
+            "block_threads": kt.BLOCK_SIZE,
+            "block_kv": kt.BLOCK_KV,
+            "block_m": qt.BLOCK_M,
+        }
+    if spec.kernel not in ("dkdv", "dq"):
         return {}
-    kt, qt = built.traits
-    return {
-        "block_threads": kt.BLOCK_SIZE,
-        "block_kv": kt.BLOCK_KV,
-        "block_m": qt.BLOCK_M,
-    }
+    if spec.dtype == FP32:
+        family = built.knobs.family()
+        if spec.kernel == "dkdv":
+            return {"block_threads": family.block, "block_kv": built.knobs.block_kv}
+        return {"block_threads": family.block, "block_m": family.bq}
+    traits = built.knobs.build_traits(built.meta)
+    if spec.kernel == "dkdv":
+        return {"block_threads": traits.BLOCK_SIZE, "block_kv": traits.BLOCK_KV}
+    return {"block_threads": traits.BLOCK_SIZE, "block_m": traits.BLOCK_M}
 
 
-def hdv_of(kernel: str, tile: int) -> int:
-    """dQ meta carries head_dim_v = the rung below the tile; dK/dV ignores it."""
-    return rung_below(tile) if (kernel == "dq" and tile >= 64) else 0
+def hdv_of(kernel: str, tile: int, dtype: str | None = None) -> int:
+    """dQ meta carries head_dim_v = the rung below the tile on the dtype's ladder; dK/dV ignores it."""
+    return rung_below(tile, dtype) if (kernel == "dq" and tile >= 64) else 0
 
 
 def floor_value(spec: Spec):
     if spec.floor == "g1":
         return None
     if spec.floor == "tail":
-        return rung_below(spec.tile)
+        return rung_below(spec.tile, spec.dtype)
     return int(spec.floor)
 
 
@@ -484,6 +509,11 @@ def _pin_dkdv(spec, mk, meta):
             else {}
         ),
     }
+    if spec.dtype == FP32:
+        # The fp32 table fixes schedule, waves and the derived set per (tile, geometry): the only pin is the geometry (`block_q`).
+        return mk(
+            **plain, **({"block_q": kn["block_q"]} if "block_q" in kn else {})
+        ).resolve(meta)
     knobs = mk(**plain).resolve(meta)
     if "num_waves" not in kn and "block_q" not in kn:
         return knobs
@@ -513,6 +543,11 @@ def _pin_dq(spec, mk, meta):
         for k, v in kn.items()
         if k not in ("num_waves", "block_m", "block_n", "store_db", "bias_stage")
     }
+    if spec.dtype == FP32:
+        # The fp32 table fixes waves and the derived set per (tile, geometry): the only pin is the geometry (`block_m`).
+        return mk(
+            **plain, **({"block_m": kn["block_m"]} if "block_m" in kn else {})
+        ).resolve(meta)
     knobs = mk(**plain).resolve(meta)
     if not any(k in kn for k in ("num_waves", "block_m", "block_n")):
         return knobs
@@ -530,14 +565,82 @@ def _pin_dq(spec, mk, meta):
     ).resolve(meta)
 
 
+def _family(spec: Spec, kernel: str):
+    """(module, builder) of @p kernel's family for the spec's dtype: ``fmha_bwd_<kernel>_gfx950`` for 16-bit, ``fmha_bwd_<kernel>_f32_gfx950`` for fp32.
+
+    Static imports only: the inputs digest follows import statements.
+    """
+    if spec.dtype == FP32:
+        if kernel == "prep":
+            from kernels.attention_bwd_cdna import fmha_bwd_prep_f32_gfx950 as mod
+
+            return mod, mod.build_fmha_bwd_prep_f32_gfx950_module_primary
+        if kernel == "dkdv":
+            from kernels.attention_bwd_cdna import fmha_bwd_dkdv_f32_gfx950 as mod
+
+            return mod, mod.build_fmha_bwd_dkdv_f32_gfx950_module_primary
+        if kernel == "dq":
+            from kernels.attention_bwd_cdna import fmha_bwd_dq_f32_gfx950 as mod
+
+            return mod, mod.build_fmha_bwd_dq_f32_gfx950_module_primary
+        from kernels.attention_bwd_cdna import fmha_bwd_dbias_reduce_f32_gfx950 as mod
+
+        return mod, mod.build_fmha_bwd_dbias_reduce_f32_gfx950_module_primary
+    if kernel == "prep":
+        from kernels.attention_bwd_cdna import fmha_bwd_prep_gfx950 as mod
+
+        return mod, mod.build_fmha_bwd_prep_gfx950_module_primary
+    if kernel == "dkdv":
+        from kernels.attention_bwd_cdna import fmha_bwd_dkdv_gfx950 as mod
+
+        return mod, mod.build_fmha_bwd_dkdv_gfx950_module_primary
+    if kernel == "dq":
+        from kernels.attention_bwd_cdna import fmha_bwd_dq_gfx950 as mod
+
+        return mod, mod.build_fmha_bwd_dq_gfx950_module_primary
+    from kernels.attention_bwd_cdna import fmha_bwd_dbias_reduce_gfx950 as mod
+
+    return mod, mod.build_fmha_bwd_dbias_reduce_gfx950_module_primary
+
+
+def _tuning(spec: Spec, kernel: str):
+    """(tuning module, input-metadata class) of the dK/dV or dQ family (the same exported names for both dtypes)."""
+    if spec.dtype == FP32:
+        if kernel == "dkdv":
+            from kernels.attention_bwd_cdna import (
+                fmha_tuning_bwd_dkdv_f32_gfx950 as tuning,
+            )
+
+            return tuning, tuning.BwdDkDvInputMetadata
+        from kernels.attention_bwd_cdna import fmha_tuning_bwd_dq_f32_gfx950 as tuning
+
+        return tuning, tuning.FmhaInputMetadata
+    if kernel == "dkdv":
+        from kernels.attention_bwd_cdna import fmha_tuning_bwd_dkdv_gfx950 as tuning
+
+        return tuning, tuning.BwdDkDvInputMetadata
+    from kernels.attention_bwd_cdna import fmha_tuning_bwd_dq_gfx950 as tuning
+    from kernels.attention_bwd_cdna.fmha_tuning_gfx950 import FmhaInputMetadata
+
+    return tuning, FmhaInputMetadata
+
+
+# fp32 stage-1 dQ objects that are not built: SGPR spill to scratch after 5 repair rounds; the block_m=32 twin serves them.
+FP32_DQ_REFUSED = frozenset(
+    f"dq,fp32,128,bias,bk,0,1,{floor},96,1;block_m=16;block_n=16"
+    for floor in ("tail", "g1")
+)
+
+
 def build(spec: Spec) -> Built:
     """A fresh launcher for @p spec; nothing is compiled yet."""
+    if spec.key() in FP32_DQ_REFUSED:
+        raise NotImplementedError(
+            f"{spec.key()} is not built: SGPR spill to scratch after 5 repair rounds; served by the block_m=32 twin"
+        )
     if spec.kernel == "prep":
-        from kernels.attention_bwd_cdna import (
-            fmha_bwd_prep_gfx950 as mod,
-        )  # noqa: PLC0415
-
-        launch = mod.build_fmha_bwd_prep_gfx950_module_primary(
+        mod, builder = _family(spec, "prep")
+        launch = builder(
             spec.dtype,
             spec.tile,
             bool(spec.padded),
@@ -545,11 +648,8 @@ def build(spec: Spec) -> Built:
         )
         return Built(spec, _single_jit(launch), mod, None, None, _hints_of(mod, spec))
     if spec.kernel == "dbias_reduce":
-        from kernels.attention_bwd_cdna import (
-            fmha_bwd_dbias_reduce_gfx950 as mod,
-        )  # noqa: PLC0415
-
-        launch = mod.build_fmha_bwd_dbias_reduce_gfx950_module_primary(spec.dtype)
+        mod, builder = _family(spec, "dbias_reduce")
+        launch = builder(spec.dtype)
         return Built(
             spec, _single_jit(launch), mod, None, None, dict(mod._COMPILE_HINTS)
         )
@@ -568,16 +668,11 @@ def build(spec: Spec) -> Built:
     bias = spec.cls == "bias"
     hdv = spec.hdv or spec.tile
     fl = floor_value(spec)
+    extra = {}
     if spec.kernel == "dkdv":
-        from kernels.attention_bwd_cdna import (
-            fmha_bwd_dkdv_gfx950 as mod,
-        )  # noqa: PLC0415
-        from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_gfx950 import (  # noqa: PLC0415
-            BwdDkDvInputMetadata,
-            bwd_dkdv_knobs,
-        )
-
-        meta = BwdDkDvInputMetadata(
+        mod, builder = _family(spec, "dkdv")
+        tuning, metadata = _tuning(spec, "dkdv")
+        meta = metadata(
             num_heads=1,
             head_dim=spec.tile,
             head_dim_v=hdv,
@@ -595,20 +690,13 @@ def build(spec: Spec) -> Built:
         )
         if fl is not None:
             kw["hdim_qk_floor"] = fl
-        knobs = _pin_dkdv(spec, lambda **o: bwd_dkdv_knobs("gfx950", **kw, **o), meta)
-        builder = mod.build_fmha_bwd_dkdv_gfx950_module_primary
+        knobs = _pin_dkdv(
+            spec, lambda **o: tuning.bwd_dkdv_knobs("gfx950", **kw, **o), meta
+        )
     else:
-        from kernels.attention_bwd_cdna import (
-            fmha_bwd_dq_gfx950 as mod,
-        )  # noqa: PLC0415
-        from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_gfx950 import (
-            bwd_dq_knobs,
-        )  # noqa: PLC0415
-        from kernels.attention_bwd_cdna.fmha_tuning_gfx950 import (
-            FmhaInputMetadata,
-        )  # noqa: PLC0415
-
-        meta = FmhaInputMetadata(
+        mod, builder = _family(spec, "dq")
+        tuning, metadata = _tuning(spec, "dq")
+        meta = metadata(
             num_heads=1,
             head_dim=spec.tile,
             head_dim_v=hdv,
@@ -629,16 +717,21 @@ def build(spec: Spec) -> Built:
             kw["bias_stage"] = spec.bias_stage
         if fl is not None:
             kw["hdim_qk_floor"] = fl
-        knobs = _pin_dq(spec, lambda **o: bwd_dq_knobs("gfx950", **kw, **o), meta)
-        builder = mod.build_fmha_bwd_dq_gfx950_module_primary
+        knobs = _pin_dq(
+            spec, lambda **o: tuning.bwd_dq_knobs("gfx950", **kw, **o), meta
+        )
+        extra = {"dbias_reduce": bool(reduce_symbol_of(spec))}
     rt = ("dropout",) if spec.dform == "rt" else ()
-    launch = builder(meta, knobs, runtime_axes=rt)
+    launch = builder(meta, knobs, runtime_axes=rt, **extra)
     return Built(spec, _single_jit(launch), mod, meta, knobs, _hints_of(mod, spec))
 
 
 def _build_merged(spec: Spec) -> Built:
-    """The merged object: the dK/dV and dQ roles each resolved as their standalone Spec would be (policy defaults), except that the dQ
-    role takes the dK/dV role's wave count (one workgroup size): BLOCK_M = 32 * num_waves, BLOCK_N and the rest from the dQ policy.
+    """The merged object: the dK/dV and dQ roles each resolved as their standalone Spec would be (policy defaults, plus the merged Spec's
+    ``num_waves`` / ``mfma_rows`` / ``dkv_shards`` on the dK/dV role), except that the dQ role takes the dK/dV role's wave count (one
+    workgroup size): BLOCK_M = 32 * num_waves, BLOCK_N and the rest from the dQ policy.
+    Per-tile role pins are defaults that apply only when the merged Spec does not set the knob: tile 224 dK/dV ``mfma_rows=16`` (the stock
+    role spills); tile 256 dQ ``mfma_rows=32, block_n=64`` (the stock geometry is not addressable). An explicit Spec knob wins over the pin.
     A dB-storing ``bias`` object (``reduce_symbol_of``) also launches the dBias reduce kernel; a ``store_db=0`` bias row builds the dQ role without the dB store and no reduce.
     """
     from kernels.attention_bwd_cdna import (
@@ -655,18 +748,36 @@ def _build_merged(spec: Spec) -> Built:
         floor=spec.floor,
         hints=spec.hints,
     )
+    grid = {
+        k: v
+        for k, v in spec.knobs.items()
+        if k in ("num_waves", "mfma_rows", "dkv_shards")
+    }
+    if spec.tile == 224:
+        grid.setdefault("mfma_rows", 16)
     bd = build(
-        Spec("dkdv", hdv=0, **({"gqa_pack": 1} if spec.gqa_pack else {}), **common)
+        Spec(
+            "dkdv",
+            hdv=0,
+            **grid,
+            **({"gqa_pack": 1} if spec.gqa_pack else {}),
+            **common,
+        )
     )
     nw = bd.knobs.num_waves
     bq0 = build(Spec("dq", hdv=hdv_of("dq", spec.tile), **common))
+    dq_pin = (
+        {"mfma_rows": 32, "block_n": 64}
+        if spec.tile == 256
+        else {"block_n": bq0.knobs.block_n}
+    )
     bq = build(
         Spec(
             "dq",
             hdv=hdv_of("dq", spec.tile),
             num_waves=nw,
             block_m=32 * nw,
-            block_n=bq0.knobs.block_n,
+            **dq_pin,
             **({"store_db": 0} if spec.store_db == 0 else {}),
             **common,
         )
@@ -760,6 +871,9 @@ class Outcome:
     geometry: dict | None = (
         None  # the merged launch geometry, known once the launcher is built
     )
+    attempts: int = (
+        1  # builds made: a combined row whose gate is red is rebuilt in a fresh process
+    )
 
 
 @contextlib.contextmanager
@@ -797,8 +911,12 @@ def _run_gate(
     spec: Spec,
     reduce_symbol: str = "",
     reference_dir: Path | None = None,
+    reference_csv: Path = _REFERENCE_CSV,
 ) -> dict:
-    """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: R-MIR is not scanned)."""
+    """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: R-MIR is not scanned).
+
+    With a @p reduce_symbol and a @p reference_dir, the pins are the objects there, checked against the rows of @p reference_csv.
+    """
     command = [
         sys.executable,
         str(_GATE_TOOL),
@@ -812,7 +930,12 @@ def _run_gate(
     if reduce_symbol:
         command += ["--reduce-symbol", reduce_symbol]
         if reference_dir is not None:
-            command += ["--reference-dir", str(reference_dir)]
+            command += [
+                "--reference-dir",
+                str(reference_dir),
+                "--reference-csv",
+                str(reference_csv),
+            ]
     done = subprocess.run(command, capture_output=True, text=True, check=False)
     if done.returncode:
         raise GeneratorError(f"gate: {done.stderr.strip()}")
@@ -822,31 +945,114 @@ def _run_gate(
     return gate
 
 
-def _gate(blob: bytes, greedy: Path, spec: Spec, reference_dir: Path | None) -> dict:
+def _gate_reference(
+    spec: Spec,
+    reference_dir: Path,
+    reference_csv: Path,
+    fp32_reduce_dir: Path | None,
+    work: Path,
+) -> tuple[Path, Path]:
+    """The (directory, CSV) the per-kernel gate of a combined @p spec reads its pins from.
+
+    An fp32 combined object's reduce kernel is compiled under the dQ module's LLVM options, so it is gated against a standalone fp32 reduce
+    built under the same options (``_fp32_reduce_reference``) in place of the standalone fp32 reduce pin: a directory under @p work that
+    holds the dQ pin and that reduce object, and a CSV with their two rows. Every other combined object is gated against @p reference_dir.
+    """
+    if spec.dtype != FP32:
+        return reference_dir, reference_csv
+    if fp32_reduce_dir is None:
+        raise GeneratorError(f"{spec.key()}: no fp32 reduce reference was built")
+    reduce_spec = dbias_reduce_spec(FP32)
+    overlay = work / "gate-reference"
+    overlay.mkdir()
+    (overlay / f"{spec.hash()}.hsaco").symlink_to(
+        reference_dir / f"{spec.hash()}.hsaco"
+    )
+    blob = (fp32_reduce_dir / "reduce.hsaco").read_bytes()
+    (overlay / f"{reduce_spec.hash()}.hsaco").write_bytes(blob)
+    resources = json.loads((fp32_reduce_dir / "reduce.json").read_text())
+    with reference_csv.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        columns = list(reader.fieldnames or ())
+        rows = [row for row in reader if row["hash"] == spec.hash()]
+    rows.append(
+        {
+            **dict.fromkeys(columns, ""),
+            **resources,
+            "hash": reduce_spec.hash(),
+            "spec": reduce_spec.key(),
+            "sha256": sha256(blob),
+        }
+    )
+    path = overlay / "reference.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    return overlay, path
+
+
+def _gate(
+    blob: bytes,
+    greedy: Path,
+    spec: Spec,
+    reference_dir: Path | None,
+    reference_csv: Path,
+    fp32_reduce_dir: Path | None,
+) -> dict:
     """The gates of @p blob, scanned with the dump of the compile that produced it."""
     obj = greedy.with_name("obj.hsaco")
     obj.write_bytes(blob)
-    return _run_gate(obj, greedy, spec, reduce_symbol_of(spec), reference_dir)
+    reduce_symbol = reduce_symbol_of(spec)
+    if reduce_symbol and reference_dir is not None:
+        reference_dir, reference_csv = _gate_reference(
+            spec, reference_dir, reference_csv, fp32_reduce_dir, greedy.parent
+        )
+    return _run_gate(obj, greedy, spec, reduce_symbol, reference_dir, reference_csv)
 
 
-def _compile_one(task: tuple[str, str, str]) -> Outcome:
+# A compile task: (spec key, spec hash, reference dir, reference CSV, fp32 reduce reference dir, hints kernel). The empty string is none.
+# A non-empty hints kernel names the module of the spec's dtype whose compile hints replace the spec's own: the one object of
+# ``_fp32_reduce_reference``, a standalone fp32 reduce built under the dQ module's options.
+_Task = tuple[str, str, str, str, str, str]
+
+
+def _compile_one(task: _Task) -> Outcome:
     """Compile and gate one spec. Never raises for a build failure."""
-    spec_s, _, reference = task
+    spec_s, _, reference, reference_csv, fp32_reduce, hints_kernel = task
     geometry = None
     try:
         spec = Spec.parse(spec_s)
         built = build(spec)
+        if hints_kernel:
+            built.hints = _hints_of(_family(spec, hints_kernel)[0], spec)
         geometry = geometry_of(built) or None
         dump_dir = Path(tempfile.mkdtemp(prefix=f"sdpa_bwd_{spec.hash()}_"))
         try:
-            env.set_dump_dir(dump_dir / "ir")
+            # Cache mode, as the sweep built the pins: FlyDSL's IR-dump mode runs the pass pipeline stage by stage and
+            # changes the code generated for some fp32 dQ objects. The object is read back from the one artifact this
+            # compile wrote to a fresh cache directory.
+            os.environ.pop("FLYDSL_DUMP_IR", None)
+            os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = str(dump_dir / "cache")
             greedy = dump_dir / "greedy.txt"
             with _stderr_to(greedy):
                 _print_after_greedy()
                 with hints_ctx(built):
                     built.jf(*synth_compile_args(built.jf))
-            blob, _ = hsaco_from_dump(dump_dir / "ir")
-            gate = _gate(blob, greedy, spec, Path(reference) if reference else None)
+            ((_, artifact),) = built.jf._mem_cache.items()
+            blob = extract_bin_attr(artifact._ir_text, f"{spec.key()} cache artifact")
+            if blob[:4] != b"\x7fELF":
+                raise GeneratorError(
+                    f"{spec.key()}: the extracted object is not an ELF"
+                )
+            gate = _gate(
+                blob,
+                greedy,
+                spec,
+                Path(reference) if reference else None,
+                Path(reference_csv) if reference_csv else _REFERENCE_CSV,
+                Path(fp32_reduce) if fp32_reduce else None,
+            )
         finally:
             shutil.rmtree(dump_dir, ignore_errors=True)
     except HsacoExtractionError as exc:
@@ -863,20 +1069,91 @@ def _compile_one(task: tuple[str, str, str]) -> Outcome:
     return Outcome("ok", blob, gate=gate, geometry=geometry)
 
 
+def _fp32_reduce_reference(arch: str, out: Path) -> Path:
+    """Build the standalone fp32 dBias reduce under the fp32 dQ module's compile options into @p out (``reduce.hsaco``, ``reduce.json``: its resource row).
+
+    The reduce kernel of a combined fp32 dQ object is compiled under the dQ module's LLVM options (one set per gpu module), so its bytes and
+    resource row are those of this object, not of the standalone fp32 reduce pin.
+    """
+    reduce_spec = dbias_reduce_spec(FP32)
+    (outcome,) = compile_all(
+        _compile_one,
+        [(reduce_spec.key(), reduce_spec.hash(), "", "", "", "dq")],
+        arch,
+        lambda task: f"{task[1]} (fp32 reduce under the dQ options)",
+    )
+    if outcome.status != "ok":
+        raise GeneratorError(
+            f"the fp32 reduce reference did not build: {outcome.status}: {outcome.detail}"
+        )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "reduce.hsaco").write_bytes(outcome.blob)
+    (out / "reduce.json").write_text(json.dumps(outcome.gate["resources"]))
+    return out
+
+
+# Builds a combined row may take: the first, then fresh-process rebuilds while its per-kernel gate is red (LLVM backend nondeterminism).
+_COMBINED_ATTEMPTS = 3
+
+
+def _combined_unstable(outcome: Outcome) -> bool:
+    """A combined row's build that a rebuild may change: its dump held two objects, or its per-kernel gate is red."""
+    if outcome.status == "dual_object":
+        return True
+    return (
+        outcome.status == "ok"
+        and (outcome.gate or {}).get("pin_gate", {}).get("verdict") == "red"
+    )
+
+
 def compile_specs(
-    entries: list[Spec], arch: str, reference_dir: Path | None = None
+    entries: list[Spec],
+    arch: str,
+    reference_dir: Path | None = None,
+    reference_csv: Path = _REFERENCE_CSV,
 ) -> list[Outcome]:
     """One build per spec, in order (``FLYDSL_GEN_JOBS`` workers); a dead worker raises ``GeneratorError``.
 
-    With @p reference_dir, a combined object is gated against the pins there.
+    With @p reference_dir, a combined object is gated against the pins there (rows of @p reference_csv). A combined row whose build is
+    unstable (``_combined_unstable``) is rebuilt in a fresh worker process, up to ``_COMBINED_ATTEMPTS`` builds in all; its outcome is the last.
     """
     reference = str(reference_dir) if reference_dir else ""
-    return compile_all(
-        _compile_one,
-        [(spec.key(), spec.hash(), reference) for spec in entries],
-        arch,
-        lambda task: task[1],
-    )
+    csv_path = str(reference_csv) if reference_dir else ""
+    with tempfile.TemporaryDirectory(prefix="sdpa_bwd_fp32_reduce_") as scratch:
+        fp32_reduce = ""
+        if reference_dir and any(
+            spec.dtype == FP32 and reduce_symbol_of(spec) for spec in entries
+        ):
+            fp32_reduce = str(_fp32_reduce_reference(arch, Path(scratch)))
+
+        def tasks(specs: list[Spec]) -> list[_Task]:
+            return [
+                (spec.key(), spec.hash(), reference, csv_path, fp32_reduce, "")
+                for spec in specs
+            ]
+
+        outcomes = compile_all(_compile_one, tasks(entries), arch, lambda t: t[1])
+        for attempt in range(2, _COMBINED_ATTEMPTS + 1):
+            again = [
+                i
+                for i, (spec, outcome) in enumerate(zip(entries, outcomes))
+                if reference_dir
+                and reduce_symbol_of(spec)
+                and _combined_unstable(outcome)
+            ]
+            if not again:
+                break
+            print(f"attempt {attempt}: rebuilding {len(again)} combined row(s)")
+            rebuilt = compile_all(
+                _compile_one,
+                tasks([entries[i] for i in again]),
+                arch,
+                lambda t: t[1],
+            )
+            for i, outcome in zip(again, rebuilt):
+                outcome.attempts = attempt
+                outcomes[i] = outcome
+    return outcomes
 
 
 def _max_flat_workgroup_size(blob: bytes, where: str, symbol: str) -> int:
@@ -1086,10 +1363,14 @@ def run(argv: list[str] | None = None) -> int:
     return 1 if failed else 0
 
 
-# The ops that ship the sweep's pinned objects, not their rebuilds.
-_SHIP_PINS_OPS = ("sdpa_bwd_merged",)
-
-_REFERENCE_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_reference.csv"
+# The ops that ship the sweep's pinned objects, not their rebuilds. The combined rows (a dB-storing ``bias`` row of the merged or dQ op) are
+# the exception: they ship their rebuild, gated per kernel.
+_SHIP_PINS_OPS = (
+    "sdpa_bwd_prep",
+    "sdpa_bwd_dkdv",
+    "sdpa_bwd_dq",
+    "sdpa_bwd_merged",
+)
 
 
 @dataclass(frozen=True)
@@ -1260,6 +1541,7 @@ def generate(
     out_root: Path,
     only: set[str] | None = None,
     reference_dir: Path | None = None,
+    reference_csv: Path = _REFERENCE_CSV,
 ) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
 
@@ -1267,7 +1549,7 @@ def generate(
     directory must not hold files already.
 
     An op in ``_SHIP_PINS_OPS`` needs @p reference_dir (the sweep's pinned objects, checked
-    against ``tests/data/sdpa_bwd_reference.csv``) and ships pins (``_record``). It raises
+    against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``) and ships pins (``_record``). It raises
     ``GeneratorError``, with nothing left in the op directory, when a row has to stop the run
     (``_stop_reasons``).
     """
@@ -1293,14 +1575,14 @@ def generate(
     specs = [to_spec(instance) for instance in instances]
     pins: list[Pin | None] = [None] * len(specs)
     if ship_pins:
-        reference = read_reference()
+        reference = read_reference(reference_csv)
         pins = [
             load_pin(spec, reference_dir, reference, ships=not reduce_symbol_of(spec))
             for spec in specs
         ]
     env.assert_flydsl_version()
     env.prepare(arch)
-    outcomes = compile_specs(specs, arch, reference_dir)
+    outcomes = compile_specs(specs, arch, reference_dir, reference_csv)
 
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
@@ -1337,6 +1619,9 @@ def generate(
         1 for r in records if r.get("gates", {}).get("rmir", {}).get("verdict") == "red"
     )
     print(f"{op}: {status}, {red} with an R-MIR spill finding; wrote {op_dir}")
+    for spec, outcome in zip(specs, outcomes):
+        if outcome.attempts > 1:
+            print(f"{spec.hash()}: built in {outcome.attempts} attempts")
     if ship_pins:
         shipped = {
             kind: sum(r["ship"] == kind for r in records if "ship" in r)

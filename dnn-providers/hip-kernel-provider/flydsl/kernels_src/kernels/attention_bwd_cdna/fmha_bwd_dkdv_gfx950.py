@@ -158,7 +158,7 @@ from kernels.attention_bwd_cdna.philox import Philox, keep_mask
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.compiler.kernel_function import CompilationContext
-from flydsl.expr import const_expr, range_constexpr
+from flydsl.expr import const_expr, range_constexpr, rocdl
 from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 from flydsl.expr.utils.arith import _to_raw as as_mlir_value
@@ -266,6 +266,51 @@ def _masked_ks_steps(traits, hdim_floor):
     ]
 
 
+# DPP `quad_perm` controls: lane `i` of every group of four reads lane `i ^ 1`
+# (`[1,0,3,2]`) or `i ^ 2` (`[2,3,0,1]`).
+_DPP_QUAD_XOR1 = 0xB1
+_DPP_QUAD_XOR2 = 0x4E
+
+
+def _quad_xor(x, ctrl):
+    """`x` of the lane at `lane ^ k` within each quad, one `v_mov_b32_dpp` (`ctrl` names `k`)."""
+    v = fx.Int32(x)
+    return fx.Int32(
+        rocdl.update_dpp(T.i32, v.ir_value(), v.ir_value(), ctrl, 0xF, 0xF, False)
+    )
+
+
+def _pred_select(pred, a, b):
+    return fx.Int32(pred.select(a, b))
+
+
+def quad_transpose(words, upper, odd, xor, select):
+    """Transpose the 4x4 matrix whose row `s` is `words` on lane `s` of each quad.
+
+    Afterwards lane `t` holds, in position `e`, what lane `e` held in position
+    `t`. It is two block-swap stages (lane bit 1 against word bit 1, then lane
+    bit 0 against word bit 0); a stage sends one word pair across a quad XOR
+    and keeps the other, which is a select before the move and two after.
+
+    `upper` / `odd` are the lane's bits 1 / 0 within its quad. `xor(x, ctrl)`
+    reads `x` from lane `lane ^ k` of the quad (`ctrl` is `_DPP_QUAD_XOR2` for
+    `k = 2` then `_DPP_QUAD_XOR1` for `k = 1`) and `select(pred, a, b)` is `a`
+    where `pred` holds, `b` elsewhere; both are injected so the host-level
+    oracle (`tools/philox_keep_check.py`) runs this same function.
+    """
+
+    def swap(lo, hi, pred, ctrl):
+        moved = xor(select(pred, lo, hi), ctrl)
+        return select(pred, moved, lo), select(pred, hi, moved)
+
+    w0, w1, w2, w3 = words
+    w0, w2 = swap(w0, w2, upper, _DPP_QUAD_XOR2)
+    w1, w3 = swap(w1, w3, upper, _DPP_QUAD_XOR2)
+    w0, w1 = swap(w0, w1, odd, _DPP_QUAD_XOR1)
+    w2, w3 = swap(w2, w3, odd, _DPP_QUAD_XOR1)
+    return [w0, w1, w2, w3]
+
+
 def philox_keep(ctx, q_rows):
     """`keep` per accumulator element, given each element's absolute q row.
 
@@ -277,33 +322,48 @@ def philox_keep(ctx, q_rows):
 
     A dK/dV lane owns **one KV column and many q rows**, the transpose of the
     forward, so the elements are `row_stride` apart in the stream and there is
-    no run to draw as a span: it is one `philox_4x` per element, of which one
-    of the `randoms_per_offset` results is wanted. The forward gets four
-    elements per call. That 4x is inherent to the accumulator's orientation,
-    not a missed optimisation -- lanes 0..3 of a group compute the same call
-    and keep different slots, and recovering it would need a cross-lane
-    exchange on the hot path.
+    no run to draw as a span. A `philox_4x` call yields the four columns
+    `4c .. 4c+3` of one row, and those are four adjacent lanes -- a quad --
+    that all hold the same q rows. So the quad splits the work instead of
+    repeating it: **lane `s` of the quad draws the call for the `s`-th row of
+    each run of four** (`q_rows` is runs of four consecutive rows in both
+    families), and `quad_transpose` hands every lane the word of that call
+    that is its own column. One call per four elements, as in the forward,
+    for a transpose of 12 selects and 4 DPP moves per four elements. Offsets
+    and slots are unchanged, so the mask is the forward's bit for bit.
 
-    Which slot is loop-invariant (`philox_slot`), because the lane's KV column
-    is.
+    The exchange reads the neighbouring lanes of the quad, so this runs with
+    EXEC all 1s -- the same requirement the transpose reads carry. A lane's
+    quad position is its KV column mod 4 (`philox_slot`): the wave's KV rows
+    start at a multiple of four and lane `l` holds row `l % rows`.
     """
     rng = ctx.philox_rng
+    if rng.randoms_per_offset != 4 or len(q_rows) % 4:
+        raise ValueError(
+            "philox_keep exchanges runs of four rows over a four-wide philox call"
+        )
     kv = fx.Int64(ctx.kv_row)
-    slot = ctx.philox_slot
     out = []
-    for q in q_rows:
-        vals = rng.u32(
+    for g in range_constexpr(len(q_rows) // 4):
+        row = q_rows[4 * g] + ctx.philox_slot
+        words = rng.u32(
             ctx.philox_seed,
             rng.grid_offset(
-                ctx.philox_plane_base, ctx.philox_row_stride, fx.Int64(q), kv
+                ctx.philox_plane_base, ctx.philox_row_stride, fx.Int64(row), kv
             ),
         )
-        picked = fx.Int32(vals[0])
-        for j in range_constexpr(len(vals) - 1):
-            picked = fx.Int32(
-                (slot == fx.Index(j + 1)).select(fx.Int32(vals[j + 1]), picked)
+        out.extend(
+            keep_mask(
+                quad_transpose(
+                    words,
+                    ctx.philox_quad_upper,
+                    ctx.philox_quad_odd,
+                    _quad_xor,
+                    _pred_select,
+                ),
+                ctx.idropout_p,
             )
-        out.append(keep_mask([picked], ctx.idropout_p)[0])
+        )
     return out
 
 
@@ -621,13 +681,17 @@ class BwdDkDvKernelContext(ParityKernelContext):
         self.philox_offset_base_v = fmha.philox_offset_base(
             self.philox_offset1, self.philox_offset2
         )
-        # A lane owns one KV column for the whole kernel, so which of the
-        # `randoms_per_offset` slots of a philox call it wants is loop-invariant
-        # -- and it stays so across a GQA group, since the group moves the
-        # *query* head and the slot is a function of the KV column alone.
+        # A lane owns one KV column for the whole kernel, so its position in
+        # the quad of lanes that share a philox call (the column mod
+        # `randoms_per_offset`) is loop-invariant -- and it stays so across a
+        # GQA group, since the group moves the *query* head and the slot is a
+        # function of the KV column alone. `philox_keep` reads it as the row
+        # offset it draws and as the two predicates of its quad transpose.
         self.philox_slot = fx.Index(self.kv_row) % fx.Index(
             self.philox_rng.randoms_per_offset
         )
+        self.philox_quad_upper = self.philox_slot >= fx.Index(2)
+        self.philox_quad_odd = (self.philox_slot & fx.Index(1)) == fx.Index(1)
         # The plane is `(batch, q head)` and therefore moves with the group, so
         # it is bound alongside the other query-side state. This call gives the
         # prologue a plane for the group's first head; the loop rebinds it.

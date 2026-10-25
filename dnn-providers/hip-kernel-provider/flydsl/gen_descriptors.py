@@ -153,7 +153,9 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # autotune compares the objects they distinguish as separate catalog entries. For the
 # SDPA backward, `dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
 # head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
-# dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only).
+# dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
+# `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
+# the bias layout (an LDS-staged bias needs the 16-byte row contract).
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -181,6 +183,8 @@ GRAPH_DETERMINED_FIELDS = {
     "dform",
     "store_db",
     "gqa_pack",
+    "sink",
+    "bias_stage",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -208,6 +212,12 @@ TUNING_FIELDS = {
     "block_kv",
     "role_order",
     "hints",
+    "num_waves",
+    "mfma_rows",
+    "dkv_shards",
+    "block_q",
+    "tight_registers",
+    "num_stream_buffers",
 }
 
 # uuid5 from a name, so ids are stable across regenerations and adding a

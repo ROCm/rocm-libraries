@@ -29,7 +29,9 @@ descriptor and predicates the tail.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import csv
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 # Ranking is `score desc -> priority desc -> kernelId asc`, and with no
 # heuristic model every score ties, so priority is what orders the catalog.
@@ -1510,9 +1512,18 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
 # their sweep names. ``_sdpa_bwd_spec.to_spec`` maps a row back to its Spec.
 SDPA_BWD_KINDS = ("prep", "dkdv", "dq", "merged", "dbias_reduce", "dsink_reduce")
 SDPA_BWD_TARGET = "gfx950"
-# The dBias reduce kernel of a `bias` merged object: the second kernel `fmha_bwd_merged_gfx950`'s
-# launcher emits (FlyDSL suffixes it `_1`, as the split-KV merge kernel's).
-SDPA_BWD_MERGED_REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
+# The dBias reduce kernel of a dB-storing `bias` object of the merged or dQ kernel, by dtype: the
+# second kernel their launchers emit (FlyDSL suffixes it `_1`, as the split-KV merge kernel's).
+SDPA_BWD_REDUCE_SYMBOL = {
+    "bf16": "fmha_bwd_dbias_reduce_gfx950_kernel_1",
+    "f16": "fmha_bwd_dbias_reduce_gfx950_kernel_1",
+    "fp32": "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
+}
+# The kernels whose rows carry a `reduce_symbol` knob.
+SDPA_BWD_REDUCE_KINDS = ("merged", "dq")
+# The split kinds whose policy-default rows (no explicit perf knob) outrank the rest, so that the
+# runtime reference is a policy-default row whenever one applies.
+SDPA_BWD_POLICY_KINDS = ("prep", "dkdv", "dq")
 SDPA_BWD_KNOBS = {
     "prep": ("sink",),
     "dkdv": (
@@ -1534,10 +1545,27 @@ SDPA_BWD_KNOBS = {
         "store_db",
         "bias_stage",
     ),
-    "merged": ("role_order", "store_db", "gqa_pack"),
+    "merged": (
+        "num_waves",
+        "mfma_rows",
+        "dkv_shards",
+        "role_order",
+        "store_db",
+        "gqa_pack",
+    ),
     "dbias_reduce": (),
     "dsink_reduce": (),
 }
+_SDPA_BWD_KNOWN_FLAKY_CSV = (
+    Path(__file__).resolve().parents[1] / "tests" / "data" / "sdpa_bwd_known_flaky.csv"
+)
+
+
+def _sdpa_bwd_known_flaky() -> frozenset[str]:
+    """The Spec hashes whose rebuild is known to be nondeterministic (``tests/data/sdpa_bwd_known_flaky.csv``)."""
+    with _SDPA_BWD_KNOWN_FLAKY_CSV.open(newline="", encoding="utf-8") as handle:
+        return frozenset(row["hash"] for row in csv.DictReader(handle))
+
 
 # BEGIN GENERATED sdpa_bwd tables
 # Source: the sweep's pinned objects (tools/sdpa_bwd_tables_from_sweep.py).
@@ -3572,11 +3600,18 @@ SDPA_BWD_TABLES = {
 
 
 def _sdpa_bwd_instances(kind: str, arch: str) -> list[Instance]:
-    """The ``sdpa_bwd_<kind>`` table: every row on gfx950, none elsewhere."""
+    """The ``sdpa_bwd_<kind>`` table: every row on gfx950, none elsewhere.
+
+    A row of a split kind (``SDPA_BWD_POLICY_KINDS``) that is not known-flaky and sets no perf knob gets
+    ``PRIORITY_SPECIALIZED + 1``.
+    """
     if arch != SDPA_BWD_TARGET:
         return []
+    from ._sdpa_bwd_spec import to_spec  # noqa: PLC0415
+
     op = f"sdpa_bwd_{kind}"
     names = SDPA_BWD_KNOBS[kind]
+    flaky = _sdpa_bwd_known_flaky() if kind in SDPA_BWD_POLICY_KINDS else frozenset()
     instances = []
     for (
         dtype,
@@ -3590,37 +3625,42 @@ def _sdpa_bwd_instances(kind: str, arch: str) -> list[Instance]:
         hints,
         *perf,
     ) in SDPA_BWD_TABLES[kind]:
-        instances.append(
-            Instance(
-                op=op,
-                dtype=dtype,
-                priority=PRIORITY_SPECIALIZED,
-                knobs={
-                    "head_dim": tile,
-                    "head_dim_v": hdv or tile,
-                    "causal": int(cls == "causal"),
-                    "has_bias": int(cls == "bias"),
-                    "dropout": dropout,
-                    "padded": padded,
-                    "hints": hints,
-                    "floor": floor,
-                    "dform": dform,
-                    **dict(zip(names, perf, strict=True)),
-                    **(
-                        {
-                            "reduce_symbol": (
-                                SDPA_BWD_MERGED_REDUCE_SYMBOL
-                                if cls == "bias"
-                                and dict(zip(names, perf, strict=True))["store_db"] != 0
-                                else ""
-                            )
-                        }
-                        if kind == "merged"
-                        else {}
-                    ),
-                },
-            )
+        perf_knobs = dict(zip(names, perf, strict=True))
+        instance = Instance(
+            op=op,
+            dtype=dtype,
+            priority=PRIORITY_SPECIALIZED,
+            knobs={
+                "head_dim": tile,
+                "head_dim_v": hdv or tile,
+                "causal": int(cls == "causal"),
+                "has_bias": int(cls == "bias"),
+                "dropout": dropout,
+                "padded": padded,
+                "hints": hints,
+                "floor": floor,
+                "dform": dform,
+                **perf_knobs,
+                **(
+                    {
+                        "reduce_symbol": (
+                            SDPA_BWD_REDUCE_SYMBOL[dtype]
+                            if cls == "bias" and perf_knobs.get("store_db") != 0
+                            else ""
+                        )
+                    }
+                    if kind in SDPA_BWD_REDUCE_KINDS
+                    else {}
+                ),
+            },
         )
+        if (
+            kind in SDPA_BWD_POLICY_KINDS
+            and all(v in (-1, "auto") for v in perf_knobs.values())
+            and to_spec(instance).hash() not in flaky
+        ):
+            instance = replace(instance, priority=PRIORITY_SPECIALIZED + 1)
+        instances.append(instance)
     _assert_unique(instances)
     return instances
 
