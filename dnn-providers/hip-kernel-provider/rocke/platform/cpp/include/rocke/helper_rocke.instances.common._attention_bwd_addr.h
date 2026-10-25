@@ -34,12 +34,15 @@
  * raises ckc::Error, so call these helpers under ckc::guard_builder (the
  * kernel builders do). The bool returns never answer false to a caller.
  *
- * Not ported yet (later units): sgpr_ptr,
- * RowSlab.sgpr_ptr, StridedTensorAddr.offset_bytes / stride_bytes / slab_at,
- * StridedBatchedAddr, ThdOffsetAddr, WsSlab.sgpr_ptr / load / load_raw /
- * neutral / atomic_add_row / atomic_add_row_select / store_row /
- * store_vec_in_row. The slab structs already carry the
- * (base, offset) parts sgpr_ptr needs.
+ * Not ported yet (later units): StridedTensorAddr.offset_bytes /
+ * stride_bytes / slab_at, StridedBatchedAddr, ThdOffsetAddr,
+ * WsSlab.atomic_add_row / atomic_add_row_select / store_row /
+ * store_vec_in_row.
+ *
+ * Ported by the body unit (_attention_bwd_body's StatsView and the DMA ring
+ * of _attention_bwd_ring read them): WsSlab.load / load_raw / neutral, and
+ * sgpr_ptr as RowSlab.sgpr_ptr / WsSlab.sgpr_ptr (has_parts false is Python's
+ * parts None, or a pointer not formed from its parts).
  *
  * Ported by unit P5 (small emitters), in the block at the end of this file:
  * deal_chunks / chunk_coords, PackedRows (+ locate), WsSlab.atomic_add, and
@@ -364,6 +367,27 @@ void rocke_attn_bwd_ws_slab_atomic_add(const rocke_attn_bwd_ws_slab_t* s,
                                        rocke_value_t* r,
                                        rocke_attn_bwd_iv_t x,
                                        rocke_value_t* v);
+
+/* RowSlab.sgpr_ptr / WsSlab.sgpr_ptr: the slab pointer formed again as
+ * parts_base + readfirstlane(parts_off) (parts_base itself when parts_off is
+ * NULL); a slab without parts is the Python ValueError. */
+rocke_value_t* rocke_attn_bwd_row_slab_sgpr_ptr(const rocke_attn_bwd_row_slab_t* s);
+rocke_value_t* rocke_attn_bwd_ws_slab_sgpr_ptr(const rocke_attn_bwd_ws_slab_t* s);
+
+/* WsSlab.load(r, x, neutral): the f32 at (r, x), or `neutral` for a row
+ * outside the workspace. load_raw: the load at the clamped address without the
+ * neutral select; neutral(r, v, neutral): that select (load in two parts). */
+rocke_value_t* rocke_attn_bwd_ws_slab_load(const rocke_attn_bwd_ws_slab_t* s,
+                                           rocke_value_t* r,
+                                           rocke_attn_bwd_iv_t x,
+                                           double neutral);
+rocke_value_t* rocke_attn_bwd_ws_slab_load_raw(const rocke_attn_bwd_ws_slab_t* s,
+                                               rocke_value_t* r,
+                                               rocke_attn_bwd_iv_t x);
+rocke_value_t* rocke_attn_bwd_ws_slab_neutral(const rocke_attn_bwd_ws_slab_t* s,
+                                              rocke_value_t* r,
+                                              rocke_value_t* v,
+                                              double neutral);
 
 /* PackedRows: (head, row, ok) of each M row of a q step that packs query
  * heads. Every value is i32. */
