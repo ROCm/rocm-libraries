@@ -54,6 +54,17 @@ def _skip_reason() -> str:
 
 
 _SKIP_REASON = _skip_reason()
+# The depthwise forward kernels are scalar FMA with one lane per channel (or
+# per channel and column), so they also run on the wave32 gfx1250.
+_IS_WAVE32_DW = GPU_ARCH == "gfx1250"
+
+
+def _wave_size(arch: str) -> int:
+    """The target's wave size: what a direct depthwise spec must be built with."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size
+
 
 _TOL = 5e-2
 _TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
@@ -644,6 +655,7 @@ def _run_depthwise_one(
     dtype: str = "fp16",
     spatial: bool = False,
     tiled: "dict | None" = None,
+    wave_size: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one depthwise forward kernel.
 
@@ -651,6 +663,7 @@ def _run_depthwise_one(
     ``DirectDepthwiseSpatialSpec`` (lanes split over channels and output
     columns, groups <= wave_size) with ``spatial``, and the output-stationary
     ``DirectDepthwiseTiledSpec`` with the knobs ``tiled``. cpg = kpg = 1.
+    ``wave_size`` defaults to the target's.
 
     Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when a
     spatial shape is architecturally unsupported.
@@ -678,6 +691,8 @@ def _run_depthwise_one(
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     assert shape.cpg == 1, "depthwise path requires cpg=1"
+    if wave_size is None:
+        wave_size = _wave_size(arch)
 
     p = DirectConvProblem(
         N=shape.N,
@@ -695,7 +710,10 @@ def _run_depthwise_one(
 
     if tiled is not None:
         spec = DirectDepthwiseTiledSpec(
-            problem=p, name=f"test_direct_dwt_{shape.id}", **tiled
+            problem=p,
+            name=f"test_direct_dwt_{shape.id}",
+            wave_size=wave_size,
+            **tiled,
         )
         ok, reason = is_valid_depthwise_tiled_spec(spec, arch=arch)
         if not ok:
@@ -703,14 +721,16 @@ def _run_depthwise_one(
         build = build_direct_depthwise_tiled
     elif spatial:
         spec = DirectDepthwiseSpatialSpec(
-            problem=p, name=f"test_direct_sp_dw_{shape.id}"
+            problem=p, name=f"test_direct_sp_dw_{shape.id}", wave_size=wave_size
         )
         ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
         if not ok:
             return False, f"skip {reason}"
         build = build_direct_depthwise_spatial
     else:
-        spec = DirectDepthwiseSpec(problem=p, name=f"test_direct_dw_{shape.id}")
+        spec = DirectDepthwiseSpec(
+            problem=p, name=f"test_direct_dw_{shape.id}", wave_size=wave_size
+        )
         ok, reason = is_valid_depthwise_spec(spec, arch=arch)
         if not ok:
             return False, f"invalid spec (shapes should be pre-validated): {reason}"
@@ -937,6 +957,7 @@ def _run_depthwise_col_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         block_w=shape.block_w,
         block_waves=shape.block_waves,
         dtype=shape.dtype,
+        wave_size=_wave_size(arch),
     )
 
     ok, reason = is_valid_depthwise_col_spec(spec, arch=arch)
@@ -997,6 +1018,7 @@ def _run_depthwise_col_aot(
         name="test_direct_dw_col_aot",
         block_h=4,
         block_w=2,
+        wave_size=_wave_size(arch),
     )
     artifact = compile_kernel(build_direct_depthwise_col(spec, arch=arch), arch=arch)
     out = []
@@ -1161,6 +1183,59 @@ class TestDirectConvCorrectness(unittest.TestCase):
                     self.assertTrue(passed, f"FAIL {label} on {GPU_ARCH}: {reason}")
                     ran += 1
         self._assert_ran(ran, "test_depthwise_col_aot_reuse")
+
+
+@unittest.skipUnless(
+    _HAS_TORCH and _IS_WAVE32_DW, "needs torch and a wave32 (gfx1250) GPU"
+)
+class TestDirectDepthwiseFwdWave32(unittest.TestCase):
+    """The depthwise forward sweeps above, at wave_size 32 on gfx1250.
+
+    The runners build every spec at the target's wave size, so these are the
+    same cases: one lane per channel (preloading, tiled, column-streamed) or a
+    lane split over channels and columns (spatial, groups below the wave).
+    """
+
+    _run_depthwise = TestDirectConvCorrectness._run_depthwise
+    _run_depthwise_spatial = TestDirectConvCorrectness._run_depthwise_spatial
+    _run_depthwise_col = TestDirectConvCorrectness._run_depthwise_col
+    _assert_ran = TestDirectConvCorrectness._assert_ran
+
+    test_depthwise = TestDirectConvCorrectness.test_depthwise
+    test_depthwise_spatial = TestDirectConvCorrectness.test_depthwise_spatial
+    test_depthwise_tiled = TestDirectConvCorrectness.test_depthwise_tiled
+    test_depthwise_col = TestDirectConvCorrectness.test_depthwise_col
+    test_depthwise_col_dtypes = TestDirectConvCorrectness.test_depthwise_col_dtypes
+    test_depthwise_col_aot_reuse = (
+        TestDirectConvCorrectness.test_depthwise_col_aot_reuse
+    )
+
+    def test_depthwise_bf16(self):
+        for s in _SHAPES:
+            if s.cpg == 1:
+                with self.subTest(shape=s.id):
+                    passed, reason = _run_depthwise_one(GPU_ARCH, s, dtype="bf16")
+                    self.assertTrue(passed, f"FAIL {s.id} bf16 on {GPU_ARCH}: {reason}")
+
+    def test_logical_wave64(self):
+        # The preloading and spatial kernels use no cross-lane operation, so a
+        # wave_size-64 spec is a logical wave the wave32 target runs as two
+        # hardware waves. groups=48 is spatial-only at wave64 (it needs
+        # groups < wave_size).
+        shapes = [s for s in _SHAPES if s.cpg == 1] + [
+            _Shape("sp_g48", N=2, H=14, W=14, groups=48, cpg=1),
+            _Shape("sp_g48_s2", N=2, H=15, W=17, groups=48, cpg=1, stride=2),
+        ]
+        ran = 0
+        for s in shapes:
+            for spatial in (False, True) if s.groups < 64 else (False,):
+                with self.subTest(shape=s.id, spatial=spatial):
+                    passed, reason = _run_depthwise_one(
+                        GPU_ARCH, s, spatial=spatial, wave_size=64
+                    )
+                    self.assertTrue(passed, f"FAIL {s.id} wave64: {reason}")
+                    ran += 1
+        self.assertGreater(ran, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -2425,17 +2500,30 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
 class TestDirectConvValidation(unittest.TestCase):
     """Validation-only tests that do not require a GPU."""
 
-    def test_cpg4_bf16_rejected(self):
-        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+    def test_cpg4_bf16_accepted(self):
+        """cpg=4 + bf16 validates: the 4c kernel takes mfma_f32_4x4x4_bf16 (the
+        CDNA2+ ``_1k`` atom), and the kernel name carries the dtype. Any other
+        dtype is still refused."""
         from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
+            is_valid_spec_4c,
         )
 
         p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
         spec = DirectConv4cSpec(problem=p)
+        spec.validate()
+        for arch in ("gfx942", "gfx950"):
+            self.assertTrue(is_valid_spec_4c(spec, arch=arch)[0])
+        self.assertTrue(spec.kernel_name().endswith("_bf16"))
+        bad = DirectConv4cSpec(
+            problem=DirectConvProblem(
+                N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="fp32"
+            )
+        )
         with self.assertRaises(ValueError):
-            spec.validate()
+            bad.validate()
+        self.assertFalse(is_valid_spec_4c(bad)[0])
 
     def test_depthwise_filter_limit(self):
         """Both depthwise forward variants accept filters up to 32x32 and reject
@@ -2930,8 +3018,10 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     }
     rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
     rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
-    rt.memset(bufs["dx"], 0, dX.nbytes)
-    # Garbage in the workspaces: a correct pipeline overwrites what it reads.
+    # NaN in dX (0xFFFF is a NaN in fp16 and bf16): every output must be
+    # written. Garbage in the workspaces: a correct pipeline overwrites what
+    # it reads.
+    rt.memset(bufs["dx"], 0xFF, dX.nbytes)
     rt.memset(bufs["ws_t"], 0x7F, ws_t_bytes)
     rt.memset(bufs["ws_coa"], 0x7F, ws_coa_bytes)
 
@@ -3063,13 +3153,13 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
                 self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
 
     def test_mfma_dgrad_baked(self):
-        for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
-            # One baked binary per shape: the first of each case. Each case
-            # opens with a shape the baked reorganize pass serves: one group
-            # (it offsets the W_T column by the group) and, where the weights
-            # are reorganized, whole K-atoms (it leaves the workspace tail of
-            # a partial one unwritten).
-            self._check(label, knobs, fold_k32, shapes[:1], "fp16", False)
+        # One baked binary per shape, on every shape of every case: grouped
+        # problems and partial K-atoms included. The coalesced cases
+        # (waves_k > 1, runtime_k_loop) run the baked reorganize pass, which
+        # must read W_T's per-group column and zero-fill out-of-range lanes.
+        for dtype in ("fp16", "bf16"):
+            for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+                self._check(label, knobs, fold_k32, shapes, dtype, False)
 
     def test_mfma_dgrad_runtime_channels(self):
         for dtype in ("fp16", "bf16"):

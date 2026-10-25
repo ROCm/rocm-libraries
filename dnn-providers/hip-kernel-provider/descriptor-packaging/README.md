@@ -17,7 +17,7 @@ identical across member folders and separate per-arch builds, and the loader col
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
 Kernels sharing a metadata tuple are ranked per device by arch tier; see
-[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate).
+[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine).
 
 Authoring rules. Each violation fails the packer, raises a generator ConfigError, and makes the
 loader log an ERROR and drop the pack:
@@ -70,8 +70,9 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires six roots: production, plus five over the four authored test sets
-(`shared` packs twice, once into each test binary's discovery root).
+The provider wires seven roots: production, plus six over the four authored test sets.
+`shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
+twice, once for each test binary, so each binary reads its own archive.
 
 | Root | Source | Ships |
 |---|---|---|
