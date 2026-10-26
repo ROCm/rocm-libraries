@@ -948,8 +948,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void decidePromote();
     void promote(PromotePhase phase, DAGNode* node, int kind = -1);
     bool promoteDueBarrier();
-    bool promoteDuePrefetchProducer();
-    bool promoteDuePrefetch();
+    bool promotePrefetchAddressValu();
+    bool promotePrefetchAtWindow();
     bool issuableNow(DAGNode* node) const;
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
@@ -1770,8 +1770,8 @@ void CDNA5ReadyQueue::decidePromote() {
     using Rule = bool (CDNA5ReadyQueue::*)();
     static constexpr std::pair<PlacementLevel, Rule> kRules[] = {
         {PlacementLevel::Barrier, &CDNA5ReadyQueue::promoteDueBarrier},
-        {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promoteDuePrefetchProducer},
-        {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promoteDuePrefetch},
+        {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAddressValu},
+        {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAtWindow},
     };
     static_assert(std::is_sorted(std::begin(kRules), std::end(kRules),
                                  [](const auto& a, const auto& b) { return a.first < b.first; }),
@@ -1819,7 +1819,7 @@ bool CDNA5ReadyQueue::promoteDueBarrier() {
 
 // A prefetch at its pinned window (prefetchEarliestWmma_), once its source data is ready. The
 // Prefetch level places it, so it issues here rather than wherever the lower levels leave it.
-bool CDNA5ReadyQueue::promoteDuePrefetch() {
+bool CDNA5ReadyQueue::promotePrefetchAtWindow() {
     DAGNode* best = nullptr;
     for (DAGNode* n : prefetchQueue) {
         auto it = prefetchEarliestWmma_.find(n->inst);
@@ -1840,7 +1840,7 @@ bool CDNA5ReadyQueue::promoteDuePrefetch() {
 // A filler feeding a prefetch whose need-by window has come: the prefetch's planned window less
 // the WMMAs the scoreboard needs between them. The prefetch is placed (Prefetch level, above the
 // ds pacer), so its producer goes now rather than lose its slot to a ds; the earliest need-by wins.
-bool CDNA5ReadyQueue::promoteDuePrefetchProducer() {
+bool CDNA5ReadyQueue::promotePrefetchAddressValu() {
     DAGNode* best = nullptr;
     int bestKind = -1;
     for (int kind : {kValu, kOther}) {

@@ -113,7 +113,7 @@ It replaces the fill quota, `needWindow_` / critical fillers, and the strict-cou
 - Done: the cycle hazard model. The `hazardGates_` lanes, `getHazardWait`, `DAGNode::hazardFlags`
   and `hazardDeadline`, the deadline pre-scan in `StinkyDAGSchedulerPass.cpp` and the
   `promoteDuePrefetchHoist` / `promoteDueFillerHoist` rules are gone. In their place:
-  - `promoteDuePrefetchProducer` (Prefetch level): a filler feeding a prefetch issues once its
+  - `promotePrefetchAddressValu` (Prefetch level): a filler feeding a prefetch issues once its
     need-by window (`needByWindow_`: the prefetch's planned window less `requiredGap` WMMAs)
     comes, so it does not lose its slot to a ds (the ds pacer is a lower level).
   - `unplacedMemWaitsOut`: a prefetch or VMEM load no level placed (no prefetch lead) waits while
@@ -161,7 +161,7 @@ memory-address pairs under 8 cycles.
 3c. Prefetch placement (PR #14366, below this stack). The cycle hazard model was also what placed
    each prefetch: develop fired it at its hazard deadline, about 5 windows after its planned slot.
    With the model gone the prefetch issues at the slot (`window - lead`), where it ran 1% behind
-   develop on f8 k128k and 1.3% on mxfp8 medium. The pin (`promoteDuePrefetch`, after the
+   develop on f8 k128k and 1.3% on mxfp8 medium. The pin (`promotePrefetchAtWindow`, after the
    window's fills) keeps prefetches where develop put them without the model.
 3d. A negative need-by does not promote. A producer whose window is below 0 can no longer meet it;
    promoting it only took the slot of a ds the pacer had released. MAB kernels plan the whole
