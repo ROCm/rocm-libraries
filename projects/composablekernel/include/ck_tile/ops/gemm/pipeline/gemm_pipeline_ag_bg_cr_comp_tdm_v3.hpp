@@ -36,6 +36,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
     static_assert(Problem::BlockGemmShape::NumWarps == 4 || Problem::BlockGemmShape::NumWarps == 16,
                   "comp_tdm_v3 supports 4 or 16 waves per workgroup");
 
+#if defined(__gfx125__)
+    // Accumulators plus one k-atom of A and B must fit the per-wave VGPR budget (1024 / waves
+    // per SIMD); a tile that does not fit would spill in the main loop. Checked in the gfx1250
+    // device pass only: the host pass has no real VGPR file or wave size.
+    static_assert(Policy::template GetEstimatedFootprintVgpr<Problem>() <=
+                      Policy::template GetVgprBudget<Problem>(),
+                  "comp_tdm_v3: accumulators + one K sub-tile of A and B exceed the VGPR budget");
+#endif
+
     // TENSORcnt allowed to stay outstanding when an issuer waits for LDS stage p: with
     // alternating issuers each wave fills one stage only (0); with fixed issuers waves 0/1 fill
     // both stages, and the other stage's newer fill may stay in flight (1).
@@ -84,13 +93,6 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         static constexpr index_t MPerBlock     = OuterClass::MPerBlock;
         static constexpr index_t NPerBlock     = OuterClass::NPerBlock;
         static constexpr index_t KPerBlock     = OuterClass::KPerBlock;
-
-        // Reuse HotLoopScheduler from V1's PipelineImpl
-        CK_TILE_DEVICE static constexpr auto HotLoopScheduler()
-        {
-            return GemmPipelineAgBgCrCompTDMV1<Problem, Policy>::template PipelineImpl<
-                GemmPipelineScheduler::Intrawave>::HotLoopScheduler();
-        }
 
         template <bool HasHotLoop,
                   TailNumber TailNum,
@@ -288,10 +290,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             auto c_block_tile = block_gemm.MakeCBlockTile();
             clear_tile(c_block_tile);
 
-            // register tiles; double buffering -> a register tile corresponds to a LDS tile window
-            ALdsTile a_block_tile[2];
-
-            BLdsTile b_block_tile[2];
+            // register tiles: one A and one B tile, each holding one K sub-tile (k-atom); every
+            // sub-tile is read from LDS right before its WMMAs (no register double buffering, so
+            // the 16-wave 256x256x256 tile fits the per-wave VGPR budget)
+            ALdsTile a_block_tile;
+            BLdsTile b_block_tile;
 
             static_assert(!(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I0{}])>) &&
                               !(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I1{}])>) &&
@@ -333,15 +336,25 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             __builtin_amdgcn_s_barrier_signal(-1);
             __builtin_amdgcn_s_barrier_wait(-1);
-            // read A(0), B(0) from LDS window(0) to pipeline registers(0)
-            block_gemm.template LocalPrefetch<sub_tile_num == 1 ? WindowSlideMode::Stay
-                                                                : WindowSlideMode::Move>(
-                a_block_tile[0],
-                b_block_tile[0],
-                a_lds_gemm_windows[I0{}],
-                b_lds_gemm_windows[I0{}],
-                is_a_load_tr_v,
-                is_b_load_tr_v);
+
+            // Runs LDS stage s: for each K sub-tile (k-atom), read it into the registers and run
+            // its WMMAs. Nothing but the accumulators stays live across the stage barrier.
+            auto stage_gemm = [&](auto s) {
+                static_for<0, sub_tile_num, 1>{}([&](auto i) {
+                    constexpr auto mode = sub_tile_num == 1               ? WindowSlideMode::Stay
+                                          : (i.value == sub_tile_num - 1) ? WindowSlideMode::Reset
+                                                                          : WindowSlideMode::Move;
+                    block_gemm.template LocalPrefetch<mode>(a_block_tile,
+                                                            b_block_tile,
+                                                            a_lds_gemm_windows[s],
+                                                            b_lds_gemm_windows[s],
+                                                            is_a_load_tr_v,
+                                                            is_b_load_tr_v);
+                    // no sched_group_barrier hints: they pull the k-atom's LDS reads ahead of its
+                    // WMMAs and raise register pressure
+                    block_gemm(c_block_tile, a_block_tile, b_block_tile);
+                });
+            };
 
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(HasHotLoop)
@@ -392,24 +405,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 }
                             }
                         }
-                        static_for<0, sub_tile_num - 1, 1>{}([&](auto i) {
-                            // current compute tile index
-                            constexpr index_t compute_idx = i.value % 2;
-                            // prefetch target tile index
-                            constexpr index_t prefetch_idx = (i.value + 1) % 2;
-                            block_gemm.template LocalPrefetch<((i.value + 1) == sub_tile_num - 1)
-                                                                  ? WindowSlideMode::Reset
-                                                                  : WindowSlideMode::Move>(
-                                a_block_tile[prefetch_idx],
-                                b_block_tile[prefetch_idx],
-                                a_lds_gemm_windows[I0{}],
-                                b_lds_gemm_windows[I0{}],
-                                is_a_load_tr_v,
-                                is_b_load_tr_v);
-                            block_gemm(
-                                c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
-                            HotLoopScheduler();
-                        });
+                        stage_gemm(I0{});
 
                         block_sync_lds();
 
@@ -466,44 +462,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 }
                             }
                         }
-                        constexpr index_t final_prefetch_idx = sub_tile_num % 2;
-                        constexpr index_t final_compute_idx  = (sub_tile_num - 1) % 2;
-                        block_gemm.template LocalPrefetch<
-                            sub_tile_num == 1 ? WindowSlideMode::Stay : WindowSlideMode::Move>(
-                            a_block_tile[final_prefetch_idx],
-                            b_block_tile[final_prefetch_idx],
-                            a_lds_gemm_windows[I1{}],
-                            b_lds_gemm_windows[I1{}],
-                            is_a_load_tr_v,
-                            is_b_load_tr_v);
-
-                        block_gemm(c_block_tile,
-                                   a_block_tile[final_compute_idx],
-                                   b_block_tile[final_compute_idx]);
-                        HotLoopScheduler();
                     }
                     // pong
                     {
-                        static_for<sub_tile_num, 1, -1>{}([&](auto i) {
-                            // current compute tile index
-                            constexpr index_t compute_idx = i.value % 2;
-                            // prefetch target tile index
-                            constexpr index_t prefetch_idx = (i.value - 1) % 2;
-
-                            block_gemm.template LocalPrefetch<((i.value - 1) == 1)
-                                                                  ? WindowSlideMode::Reset
-                                                                  : WindowSlideMode::Move>(
-                                a_block_tile[prefetch_idx],
-                                b_block_tile[prefetch_idx],
-                                a_lds_gemm_windows[I1{}],
-                                b_lds_gemm_windows[I1{}],
-                                is_a_load_tr_v,
-                                is_b_load_tr_v);
-
-                            block_gemm(
-                                c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
-                            HotLoopScheduler();
-                        });
+                        stage_gemm(I1{});
 
                         block_sync_lds();
 
@@ -528,22 +490,6 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         __builtin_amdgcn_s_barrier_signal(-1);
                         __builtin_amdgcn_s_barrier_wait(-1);
                         __builtin_amdgcn_sched_barrier(0);
-                        constexpr index_t final_prefetch_idx = 0;
-                        constexpr index_t final_compute_idx  = 1;
-
-                        block_gemm.template LocalPrefetch<
-                            sub_tile_num == 1 ? WindowSlideMode::Stay : WindowSlideMode::Move>(
-                            a_block_tile[final_prefetch_idx],
-                            b_block_tile[final_prefetch_idx],
-                            a_lds_gemm_windows[I0{}],
-                            b_lds_gemm_windows[I0{}],
-                            is_a_load_tr_v,
-                            is_b_load_tr_v);
-
-                        block_gemm(c_block_tile,
-                                   a_block_tile[final_compute_idx],
-                                   b_block_tile[final_compute_idx]);
-                        HotLoopScheduler();
                     }
                     i_global_read += 2;
                 } while(i_global_read < num_loop);
@@ -551,94 +497,20 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             if constexpr(TailNum == TailNumber::Two)
             {
-                // Process window I0
+                stage_gemm(I0{});
+                if(is_a_issuer1 || is_b_issuer1)
                 {
-                    static_for<0, sub_tile_num - 1, 1>{}([&](auto i) {
-                        constexpr index_t compute_idx  = i.value % 2;
-                        constexpr index_t prefetch_idx = (i.value + 1) % 2;
-
-                        block_gemm.template LocalPrefetch<WindowSlideMode::Move>(
-                            a_block_tile[prefetch_idx],
-                            b_block_tile[prefetch_idx],
-                            a_lds_gemm_windows[I0{}],
-                            b_lds_gemm_windows[I0{}],
-                            is_a_load_tr_v,
-                            is_b_load_tr_v);
-
-                        block_gemm(
-                            c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
-                        HotLoopScheduler();
-                    });
-                    if(is_a_issuer1 || is_b_issuer1)
-                    {
-                        s_wait_tensorcnt();
-                    }
-
-                    __builtin_amdgcn_s_barrier_signal(-1);
-                    __builtin_amdgcn_s_barrier_wait(-1);
-                    __builtin_amdgcn_sched_barrier(0);
-                    constexpr index_t final_prefetch_idx = sub_tile_num % 2;
-                    constexpr index_t final_compute_idx  = (sub_tile_num - 1) % 2;
-                    block_gemm.template LocalPrefetch<sub_tile_num == 1 ? WindowSlideMode::Stay
-                                                                        : WindowSlideMode::Move>(
-                        a_block_tile[final_prefetch_idx],
-                        b_block_tile[final_prefetch_idx],
-                        a_lds_gemm_windows[I1{}],
-                        b_lds_gemm_windows[I1{}],
-                        is_a_load_tr_v,
-                        is_b_load_tr_v);
-                    block_gemm(c_block_tile,
-                               a_block_tile[final_compute_idx],
-                               b_block_tile[final_compute_idx]);
-                    HotLoopScheduler();
+                    s_wait_tensorcnt();
                 }
-                // Process window I1
-                {
-                    static_for<sub_tile_num, 1, -1>{}([&](auto i) {
-                        constexpr index_t compute_idx  = i.value % 2;
-                        constexpr index_t prefetch_idx = (i.value - 1) % 2;
 
-                        block_gemm.template LocalPrefetch<WindowSlideMode::Move>(
-                            a_block_tile[prefetch_idx],
-                            b_block_tile[prefetch_idx],
-                            a_lds_gemm_windows[I1{}],
-                            b_lds_gemm_windows[I1{}],
-                            is_a_load_tr_v,
-                            is_b_load_tr_v);
-
-                        block_gemm(
-                            c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
-                        HotLoopScheduler();
-                    });
-
-                    constexpr index_t final_compute_idx = 1;
-                    block_gemm(c_block_tile,
-                               a_block_tile[final_compute_idx],
-                               b_block_tile[final_compute_idx]);
-                }
+                __builtin_amdgcn_s_barrier_signal(-1);
+                __builtin_amdgcn_s_barrier_wait(-1);
+                __builtin_amdgcn_sched_barrier(0);
+                stage_gemm(I1{});
             }
             else if constexpr(TailNum == TailNumber::One)
             {
-                // Process window I0 only
-                static_for<0, sub_tile_num - 1, 1>{}([&](auto i) {
-                    constexpr index_t compute_idx  = i.value % 2;
-                    constexpr index_t prefetch_idx = (i.value + 1) % 2;
-
-                    block_gemm.template LocalPrefetch<WindowSlideMode::Move>(
-                        a_block_tile[prefetch_idx],
-                        b_block_tile[prefetch_idx],
-                        a_lds_gemm_windows[I0{}],
-                        b_lds_gemm_windows[I0{}],
-                        is_a_load_tr_v,
-                        is_b_load_tr_v);
-
-                    block_gemm(c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
-                    HotLoopScheduler();
-                });
-
-                constexpr index_t final_compute_idx = (sub_tile_num - 1) % 2;
-                block_gemm(
-                    c_block_tile, a_block_tile[final_compute_idx], b_block_tile[final_compute_idx]);
+                stage_gemm(I0{});
             }
             return c_block_tile;
         }
