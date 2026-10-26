@@ -972,6 +972,9 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
                 )
             ),
             interleave=interleave,
+            # One query tile for every config: the default picks a 128-row tile
+            # for under-filled shapes, which is a different binary.
+            block_m=256,
         )
         for b, s, hq, hkv in configs
     ]
