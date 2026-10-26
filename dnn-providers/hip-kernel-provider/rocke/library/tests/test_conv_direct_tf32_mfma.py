@@ -265,6 +265,23 @@ class TestDirectTf32Plan(unittest.TestCase):
                 op, n, p = _f32_mma_plan(arch, dt, 16, frag)
                 self.assertEqual((op.op_id, n, p), (op_id, chunks, pad))
 
+    def test_zero_padding_is_symmetric(self):
+        # A padded K slot must be zero in A *and* B, or 0 * Inf / 0 * NaN
+        # leaks into the sum: the helper pads both operands at the same K and
+        # refuses fragments of different widths.
+        from rocke.core.ir import F32, IRBuilder
+
+        from kernels.common.conv_direct_grouped import _zero_pad_operands
+
+        b = IRBuilder("pad_probe")
+        a4 = b.vec_pack([b.const_f32(1.0)] * 4, F32)
+        b4 = b.vec_pack([b.const_f32(2.0)] * 4, F32)
+        pa, pb = _zero_pad_operands(b, a4, b4, 4)
+        self.assertEqual((pa.type.count, pb.type.count), (8, 8))
+        b2 = b.vec_pack([b.const_f32(2.0)] * 2, F32)
+        with self.assertRaisesRegex(ValueError, "differ in width"):
+            _zero_pad_operands(b, a4, b2, 4)
+
 
 class TestDirectTf32Build(unittest.TestCase):
     """Every variant builds and lowers for fp32 and tf32 on both arches."""
