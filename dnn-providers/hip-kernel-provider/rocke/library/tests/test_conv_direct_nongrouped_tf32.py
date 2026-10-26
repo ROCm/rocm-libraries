@@ -15,7 +15,9 @@ and -- for fp16 / bf16 -- that the Python IR still matches the C++ engine
 byte for byte. One comgr compile per (arch, dtype, atom) checks the ISA.
 
 On silicon (gfx942 / gfx950 + torch): output against an IEEE fp32
-``conv2d`` reference computed on the CPU, relative to the output peak.
+``conv2d`` reference computed on the CPU, relative to the output peak. On
+gfx942 the TF32 reference reads the inputs masked to what the native XF32 MFMA
+consumes (``_tf32_reference_inputs``).
 
 Run GPU tests as a script if pytest reports "No HIP GPUs are available"::
 
@@ -487,17 +489,30 @@ _GPU_SKIP = _gpu_skip_reason()
 
 # Max |error| relative to the output peak, against an IEEE fp32 reference.
 # BF16x3 tracks the full fp32 payload (gfx950); native XF32 drops 13 mantissa
-# bits of every operand (gfx942).
+# bits of every operand (gfx942), so its reference is computed from inputs
+# masked the same way and held to 1e-3, as in test_conv_fwd_correctness.
 _TOL = {
     ("fp32", "gfx950"): 1e-5,
     ("fp32", "gfx942"): 1e-5,
     ("tf32", "gfx950"): 1e-4,
-    ("tf32", "gfx942"): 5e-3,
+    ("tf32", "gfx942"): 1e-3,
 }
 
 
 def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+
+
+def _tf32_reference_inputs(t, dtype: str, arch: str):
+    """``t`` as the MFMA on ``arch`` consumes it for a ``dtype`` problem.
+
+    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); gfx950's BF16x3 emulation and the fp32 atoms use the
+    full payload.
+    """
+    if dtype != "tf32" or arch != "gfx942":
+        return t
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
 
 
 def _reference(A_t, B_t, p):
@@ -543,7 +558,11 @@ def run_f32_spec(arch: str, spec, artifact=None):
     A_t = torch.empty(p.N, p.H, p.W, p.cpg).uniform_(-1.0, 1.0, generator=g)
     B_t = torch.empty(p.kpg, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0, generator=g)
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.kpg)
-    ref = _reference(A_t, B_t, p)
+    ref = _reference(
+        _tf32_reference_inputs(A_t, p.dtype, arch),
+        _tf32_reference_inputs(B_t, p.dtype, arch),
+        p,
+    )
 
     rt = Runtime()
     bufs = [rt.alloc(t.nbytes) for t in (A_t, B_t, D_t)]
@@ -635,6 +654,16 @@ def _case_spec(case, dtype: str, arch: str):
         and (spec.tile_h // 2) % spec.waves_n == 0
     ):
         spec = replace(spec, tile_h=spec.tile_h // 2)
+    # gfx942's 64 KiB (gfx950 fits by here): narrow the channel tile, and for
+    # a 5x5 filter or a double-buffered wide halo drop to the 16x16 atom.
+    while not target.fits_lds(spec.lds_bytes) and spec.m_tiles_total > 1:
+        spec = replace(spec, tile_k=spec.tile_k // 2, waves_m=1)
+    if not target.fits_lds(spec.lds_bytes) and spec.atom_tile == 32:
+        spec = replace(spec, atom="16x16x16")
+        while not target.fits_lds(spec.lds_bytes) and spec.tile_k > 16:
+            spec = replace(spec, tile_k=spec.tile_k // 2)
+        while not target.fits_lds(spec.lds_bytes) and spec.tile_w > 16:
+            spec = replace(spec, tile_w=spec.tile_w // 2)
     return spec
 
 
