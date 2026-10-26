@@ -7,8 +7,7 @@
 
 #pragma once
 
-// See kernel_type.hpp for why this is a compile definition and not
-// __has_include.
+// See kernel_type.hpp. Defined: rocRoller's headers. Otherwise rocroller_enums.hpp.
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #else
