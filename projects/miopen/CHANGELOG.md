@@ -5,12 +5,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
-### Changed
-* [Conv] Borrowed identity NCHW CK operands and omitted old-output staging only for selected full-output kernel families, retaining descriptor, scalar, alignment, workspace and alias guards.
-
 ### Resolved Issues
-* [Conv] Validated ranked grouped CK backward-weight defaults against exact kernel IDs at split one while preserving fallback selection.
-* [Conv] Preserved invocation argument ownership and synchronized per-target gfx1250 CK definitions between MIOpen and its plugins.
+* [Conv] Fixed unsupported default CK weight-gradient kernel selections while retaining supported
+  fallback kernels.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
