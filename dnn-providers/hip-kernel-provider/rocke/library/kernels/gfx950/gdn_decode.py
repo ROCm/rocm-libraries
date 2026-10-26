@@ -76,8 +76,10 @@ an XOR butterfly (``quad_perm`` at offsets 1-2, ``ds_swizzle`` wider; with
 unfused kernel allocates no LDS (``fuse_out_norm`` adds a ``num_warps``-float
 LDS reduction when ``num_warps > 1``, ALGORITHM.md section 4.9; the
 ``conv_once`` and ``out_lds`` knobs add LDS blocks of their own, section
-4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto`
-uses a deterministic static priority, while an explicit `spec_id` pins a tile.
+4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto` prefers
+one tile per request (``dispatch.gdn.gfx950.auto_tile``: GDN's static default,
+KDA's work-keyed table, or the shared fused default for a fused request), while
+an explicit `spec_id` pins a tile.
 
 ``simple=True`` is the v1 reference: one workgroup per ``(sequence, value_head)``,
 ``head_v_dim`` threads, thread ``t`` owning state row ``t`` (the full
@@ -134,6 +136,7 @@ __all__ = [
     "gdn_decode_signature",
     "GDN_DTYPES",
     "STATE_DTYPES",
+    "fuse_conv_heads_error",
     "CONV_WIDTH",
     "OUT_GATE_ACTIVATION",
     "gdn_decode_pointer_alignment",
@@ -157,6 +160,22 @@ GDN_DTYPES = get_args(DType)
 # stores.
 StateDType = Literal["f16", "bf16", "f32"]
 STATE_DTYPES = get_args(StateDType)
+
+
+def fuse_conv_heads_error(num_k_heads: int, num_v_heads: int) -> str | None:
+    """Why ``fuse_conv`` cannot run with these head counts, or ``None``.
+
+    One rule for ``is_valid_spec`` and dispatch's ``request_errors``, which
+    re-exports it so the two cannot drift when the emitter learns grouped heads.
+    """
+    if num_k_heads == num_v_heads:
+        return None
+    return (
+        "NOT_YET_IMPLEMENTED: fuse_conv requires num_k_heads == num_v_heads "
+        "(the in-place shift of shared q/k conv channels would race), got "
+        f"{num_k_heads}/{num_v_heads}"
+    )
+
 
 # Eps of the q/k L2 normalisation (compile-time). The fused output norm's eps
 # is the separate runtime ``norm_eps`` argument.
@@ -886,12 +905,10 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
                 "blocks_per_v_dim == 1 (one workgroup per head), got "
                 f"{spec.blocks_per_v_dim}"
             )
-    if spec.fuse_conv and spec.num_k_heads != spec.num_v_heads:
-        return False, (
-            "NOT_YET_IMPLEMENTED: fuse_conv requires num_k_heads == num_v_heads "
-            "(the in-place shift of shared q/k conv channels would race), got "
-            f"{spec.num_k_heads}/{spec.num_v_heads}"
-        )
+    if spec.fuse_conv:
+        why = fuse_conv_heads_error(spec.num_k_heads, spec.num_v_heads)
+        if why is not None:
+            return False, why
     if (
         spec.gate_kind == "kda"
         and spec.fuse_gate

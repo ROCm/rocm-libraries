@@ -469,6 +469,9 @@ typedef enum rocke_opcode
      * operand; it emits no instruction. Appended so no existing index shifts. */
     ROCKE_OP_ARITH_ASSUME_RANGE,
 
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -832,6 +835,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -898,6 +904,9 @@ rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
@@ -906,6 +915,10 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* scale);
 /* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
 rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1237,6 +1250,10 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
                                               rocke_value_t* a,
                                               rocke_value_t* bb,

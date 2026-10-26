@@ -3446,11 +3446,8 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
             continue;
         }
 
-        // Best-effort; a throw here is logged and ignored. Registration only improves
-        // plugin-side diagnostics (the registry is process-local, hidden visibility, so
-        // hipdnn_list_engines still renders these as hex -- AICK-1901); real name
-        // collisions are already rejected above, so a throw here just means an earlier
-        // call already registered this name.
+        // Best-effort: the checks above reject real name collisions, so a throw here means an
+        // earlier call already registered this name.
         auto& registeredNames = detail::registeredEngineNames();
         try
         {

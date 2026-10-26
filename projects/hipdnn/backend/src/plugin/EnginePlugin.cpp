@@ -17,6 +17,7 @@ EnginePlugin::EnginePlugin(SharedLibrary&& lib)
     : PluginBase(std::move(lib))
 {
     resolveSymbols();
+    _parsedApiVersion = parseApiVersion(apiVersion(), cachedName());
 }
 
 EnginePlugin::EnginePlugin()
@@ -25,6 +26,28 @@ EnginePlugin::EnginePlugin()
 #ifndef NDEBUG
     _initialized = true;
 #endif
+}
+
+std::optional<hipdnn_data_sdk::utilities::Version> EnginePlugin::parsedApiVersion() const
+{
+    return _parsedApiVersion;
+}
+
+std::optional<hipdnn_data_sdk::utilities::Version>
+    EnginePlugin::parseApiVersion(std::string_view rawVersion, const std::string& pluginName)
+{
+    try
+    {
+        return hipdnn_data_sdk::utilities::Version{rawVersion};
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
+                                pluginName,
+                                std::string(rawVersion),
+                                e.what());
+        return std::nullopt;
+    }
 }
 
 void EnginePlugin::resolveSymbols()

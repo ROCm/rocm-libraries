@@ -168,13 +168,12 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
  *
  * Written with designated initializers so a row reads as the set of Python
  * ISABackend overrides it stands for -- the defaults (legacy s_waitcnt, no
- * async counter, type-agnostic tr16) are what the Python base class supplies. */
+ * async counter, no wide tr16 read) are what the Python base class supplies. */
 #define LL_BACKEND_CDNA_DEFAULTS                                                              \
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_CDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx9_10, .kind = ROCKE_LL_ISA_CDNA,             \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
 /* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
@@ -184,10 +183,10 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_RDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx11, .kind = ROCKE_LL_ISA_RDNA,               \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
-static const rocke_isa_backend_t LL_BACKEND_GFX950 = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX950
+    = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS, .has_fp8_scale_conversion = true};
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
@@ -225,10 +224,6 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
 
 #undef LL_BACKEND_CDNA_DEFAULTS
 #undef LL_BACKEND_RDNA_DEFAULTS
-
-/* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
- * be patched in. backend_for fills them from ROCKE_LL_DATALAYOUT/TRIPLE. */
-static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
@@ -288,14 +283,11 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
         }
         return NULL;
     }
-    LL_BACKEND_RESOLVED = *base;
-    LL_BACKEND_RESOLVED.datalayout = ROCKE_LL_DATALAYOUT;
-    LL_BACKEND_RESOLVED.triple = ROCKE_LL_TRIPLE;
     if(st)
     {
         *st = ROCKE_OK;
     }
-    return &LL_BACKEND_RESOLVED;
+    return base;
 }
 
 /* ====================================================================== */
@@ -2310,8 +2302,8 @@ static void ll_lower_into(rocke_lower_t* L,
 
     /* Resolve ISA backend. */
     rocke_status_t bst = ROCKE_OK;
-    L->backend = rocke_ll_backend_for(arch, &bst);
-    if(L->backend == NULL || bst != ROCKE_OK)
+    const rocke_isa_backend_t* row = rocke_ll_backend_for(arch, &bst);
+    if(row == NULL || bst != ROCKE_OK)
     {
         if(arch == NULL)
         {
@@ -2322,13 +2314,16 @@ static void ll_lower_into(rocke_lower_t* L,
         }
         rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
-    /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
-     * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
-     * LLVM22. backend_for installs the LLVM20 form by default; rebind the
-     * resolved backend's datalayout to the form for the resolved flavor.
-     * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
-     * does not mutate the canonical per-arch descriptors. */
-    LL_BACKEND_RESOLVED.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
+    /* This lowering's own copy of the target's row, with the triple and the
+     * AMDGPU datalayout filled in. The datalayout is FLAVOR-KEYED (Python
+     * backend.datalayout(flavor) via _datalayout_for_flavor): the p8 field
+     * drifts between LLVM20 and LLVM22. Copying keeps the shared per-arch rows
+     * read-only, so lowerings for different targets or flavors never see each
+     * other's fill-in. */
+    L->backend_resolved = *row;
+    L->backend_resolved.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
+    L->backend_resolved.triple = ROCKE_LL_TRIPLE;
+    L->backend = &L->backend_resolved;
 
     /* Debug metadata is opt-in: the kernel carries `debug_info` only when it was
      * built with location capture on, and an op's @loc rides the same

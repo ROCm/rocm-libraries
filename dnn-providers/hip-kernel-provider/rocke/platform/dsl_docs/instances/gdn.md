@@ -109,11 +109,9 @@ Every kernel tensor must share the device of `query` (`mixed_qkv` under
 `fuse_conv`). The full validator rules and reasons live once in
 [`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
-Dispatch does not see `state_dtype="f32"` or the fusion flags. The request and
-dispatch fields for them are not in the PR that added these spec fields; they
-come in a follow-up PR. Until then a request with an f32 state is rejected
-(`unsupported state_dtype`), the request has no fusion fields, and no
-dispatched spec sets them. Specs that use them are built directly.
+The request carries `state_dtype` (including `f32`) and both fusion flags to
+the spec; see [Dispatch](#dispatch). The performance knobs are not request
+fields: specs that use them are built directly.
 
 `kernel_name()` encodes every field that changes emitted code. Default GDN
 fields add no suffix, so its existing names remain stable while KDA gets a
@@ -160,6 +158,11 @@ key as an equivalent amount of batch work. Re-measure KDA with
 `library/builders/gfx950/gdn/tune.py`; exact measurements live outside the
 public source tree.
 
+Fused requests (`fuse_conv` and/or `fuse_out_norm`) need `blocks_per_v_dim ==
+1`, so `auto` prefers an interim static fused tile for both gate kinds; its
+choice, provenance and fallback live once in
+[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
+
 ## Dispatch
 
 `dispatch_gdn_decode(GdnDecodeRequest(...))` returns the selected candidate,
@@ -174,11 +177,14 @@ An explicit `spec_id` selects one legal candidate of the requested gate kind.
 Candidate admission ends in `is_valid_spec()`, so dispatch cannot offer a tile
 that the kernel rejects.
 
-gfx950 only. Through dispatch, `bf16` and `f16` activation/state dtypes are
-supported and need not match; the kernel also accepts an `f32` state, which
-dispatch does not route yet. Head geometry is constrained by the validator.
-KDA's production fused mode and benchmark-only precomputed-log-decay mode are
-both numerically covered.
+gfx950 only. Through dispatch, `bf16` and `f16` activation dtypes and `bf16`,
+`f16` and `f32` state dtypes are supported and need not match, for both gate
+kinds; an `f32` state does not change the tile `auto` picks. `fuse_conv` and
+`fuse_out_norm` are request fields (real bools; `fuse_conv` also needs
+`num_k_heads == num_v_heads`), and the result's signature is the fused ABI, so
+the launch packs the fused tensors from `prepare()`. Head geometry is
+constrained by the validator. KDA's production fused-gate mode and
+benchmark-only precomputed-log-decay mode are both numerically covered.
 
 Run from `dnn-providers/hip-kernel-provider/rocke`:
 

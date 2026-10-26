@@ -161,6 +161,15 @@ class ISABackend:
         return True
 
     @property
+    def has_fp8_scale_conversion(self) -> bool:
+        """Whether the target has the fused scale-and-convert fp8/bf8
+        instructions (``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``). Only gfx950
+        overrides this to ``True``. Elsewhere LLVM may still select the
+        intrinsic and write an encoding the GPU does not have, so the lowerer
+        refuses the ops rather than emitting them."""
+        return False
+
+    @property
     def has_async_lds_counter(self) -> bool:
         """Whether the target has the gfx1250 dedicated async-DMA counter
         (``s_wait_asynccnt`` + ``global_load_async_to_lds``). Only gfx1250
@@ -173,19 +182,15 @@ class ISABackend:
         transpose-LDS read (logical element ``elem_type``) used to feed the
         MFMA/WMMA B operand.
 
-        Default is the gfx950 ``ds_read_b128_tr_b16`` whose intrinsic returns a
-        type-agnostic ``<8 x i16>``; the lowerer bitcasts those raw 16-bit lanes
-        to the requested ``half`` / ``bfloat`` element, so a single spec serves
-        both f16 and bf16. gfx1250 (gfx1250) overrides with an
-        element-type-specific ``ds_load_tr16_b128`` intrinsic (its wave32
-        per-lane data distribution also differs — kernels must use the layout
-        appropriate to the target). Fail fast for any unsupported element."""
-        if elem_type not in ("f16", "fp16", "bf16"):
-            raise NotImplementedError(
-                f"ds_read_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
-                f"got elem_type={elem_type!r}"
-            )
-        return ("ds.read.tr16.b128", "llvm.amdgcn.ds.read.tr16.b128", "<8 x i16>")
+        Only gfx1250 overrides this, with an element-type-specific
+        ``ds_load_tr16_b128`` intrinsic. No other target has a wide transpose
+        read, and LLVM has no ``llvm.amdgcn.ds.read.tr16.b128``, so the default
+        raises instead of declaring an intrinsic that cannot link. Use two
+        ``ds_read_tr16_b64`` reads on gfx950."""
+        raise NotImplementedError(
+            f"ds_read_tr16_b128 is not available on {self.arch.gfx}: LLVM has no "
+            "ds.read.tr16.b128 intrinsic; use ds_read_tr16_b64"
+        )
 
     def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
         """Emit the memory wait that must precede an LDS workgroup barrier.
@@ -261,6 +266,11 @@ class Gfx950Backend(ISABackend):
     """CDNA4 / MI350-MI355. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
     160 KB LDS. This is the historical default; its output is the byte-identical
     baseline."""
+
+    @property
+    def has_fp8_scale_conversion(self) -> bool:
+        # gfx950 added ``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``.
+        return True
 
 
 class Gfx9MfmaBackend(ISABackend):

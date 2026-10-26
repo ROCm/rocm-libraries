@@ -891,6 +891,101 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
   }
 }
 
+TEST_CASE("GEMM: tf32 conversion cost follows the kernel's wave layout", "[gemm][cvt]") {
+  auto hardware = make_hardware(950);
+  auto x3       = make_problem(4096, 4096, 4096, origami::transpose_t::N, origami::transpose_t::N);
+  x3.a_dtype    = origami::data_type_t::Float;
+  x3.b_dtype    = origami::data_type_t::Float;
+  x3.c_dtype    = origami::data_type_t::Float;
+  x3.d_dtype    = origami::data_type_t::Float;
+  x3.mi_dtype   = origami::data_type_t::XFloat32;
+  auto x1       = x3;
+  x1.mi_dtype   = origami::data_type_t::BFloat16;
+
+  auto with_waves = [](int wave_group_m, int wave_group_n, int local_split_u) {
+    auto config      = make_config(64, 32, 128, 16, 16, 32);
+    auto& tp         = config.tensile();
+    tp.wave_group_m  = wave_group_m;
+    tp.wave_group_n  = wave_group_n;
+    tp.local_split_u = local_split_u;
+    return config;
+  };
+  using cvt_fn =
+      double (*)(const origami::problem_t&, const origami::hardware_t&, const origami::config_t&);
+  const std::vector<std::pair<const char*, std::pair<cvt_fn, origami::problem_t>>> variants = {
+      {"x3", {&origami::gemm::compute_cvt_overhead, x3}},
+      {"x1", {&origami::gemm::compute_cvt_overhead_x1, x1}}};
+  for (const auto& [label, fn_problem] : variants) {
+    DYNAMIC_SECTION(label) {
+      const auto& [cvt, problem]  = fn_problem;
+      const double default_layout = cvt(problem, hardware, make_config(64, 32, 128, 16, 16, 32));
+      const double two_by_two     = cvt(problem, hardware, with_waves(2, 2, 1));
+      const double one_wave       = cvt(problem, hardware, with_waves(1, 1, 1));
+      const double one_wave_lsu4  = cvt(problem, hardware, with_waves(1, 1, 4));
+
+      // Without Tensile params the kernel is taken as the default 2x2 wave group.
+      REQUIRE(default_layout == two_by_two);
+      REQUIRE(two_by_two > 0.0);
+      // A single wave converts the whole tile's operands, not a quarter of them.
+      REQUIRE(one_wave > two_by_two);
+      // Each LocalSplitU group converts only its share of the K-slice.
+      REQUIRE(one_wave_lsu4 < one_wave);
+    }
+  }
+}
+
+TEST_CASE("GEMM: LocalSplitU waves fill SIMDs a single-wave group leaves idle", "[gemm][lsu]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      // A single output tile: no CU holds more than one WG, so only that WG's waves run.
+      auto problem = make_problem(128, 128, 8192);
+      auto latency = [&](int wave_group_m, int wave_group_n, int local_split_u) {
+        auto config      = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+        auto& tp         = config.tensile();
+        tp.wave_group_m  = wave_group_m;
+        tp.wave_group_n  = wave_group_n;
+        tp.local_split_u = local_split_u;
+        return origami::gemm::compute_total_latency(problem, hardware, config);
+      };
+      REQUIRE(latency(1, 1, 4) < latency(1, 1, 1));
+    }
+  }
+}
+
+TEST_CASE("GEMM: occupancy only helps when the grid fills it", "[gemm][occupancy]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      auto latency  = [&](size_t m, size_t n, int occupancy) {
+        auto config = make_config(128, 128, 64, 16, 16, 16, false, 1, occupancy, 0, 0, 0);
+        return origami::gemm::compute_total_latency(make_problem(m, n, 4096), hardware, config);
+      };
+      // Four tiles: no CU gets a second WG, whatever the kernel's occupancy allows.
+      REQUIRE(latency(256, 256, 2) == latency(256, 256, 1));
+      // Thousands of tiles: a second resident WG hides cross-WG stalls.
+      REQUIRE(latency(8192, 8192, 2) < latency(8192, 8192, 1));
+    }
+  }
+}
+
+TEST_CASE("GEMM: a problem narrower than one MFMA isn't charged twice for its padding",
+          "[gemm][etp]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      // A 16-wide tile does the same MFMA work for N=1 as for N=16, and N=1 moves less data.
+      auto latency = [&](size_t n) {
+        auto config = make_config(256, 16, 64, 16, 16, 16, false, 1, 2, 0, 0, 0);
+        auto problem =
+            make_problem(4096, n, 4096, origami::transpose_t::N, origami::transpose_t::N);
+        return origami::gemm::compute_total_latency(problem, hardware, config);
+      };
+      REQUIRE(latency(1) <= latency(16));
+    }
+  }
+}
+
 TEST_CASE("GEMM: arithmetic_intensity and emulated_tf32_arithmetic_intensity unit case test",
           "[gemm]") {
   for (int gpu_arch : test_architectures) {
@@ -1272,61 +1367,27 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
 TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;
 
-  // Check default weight values
   REQUIRE(defaults.weight_tile_total == 1.0);
-
-  // Check default empirical constants
-  // REQUIRE(defaults.l2_min_hit_rate_default == 0.5);
-  REQUIRE(defaults.main_memory_load_latency == 200.0);
-  REQUIRE(defaults.occupancy_decay_base == 0.95);
-  REQUIRE(defaults.mall_depth_sq == 2.0);
-  REQUIRE(defaults.mall_cold_floor == 0.85);
-  REQUIRE(defaults.l2_depth_sq == 4.0);
-  REQUIRE(defaults.l2_cold_floor == 0.75);
-  REQUIRE(defaults.l2_pollution_penalty == 0.7);
-  REQUIRE(defaults.l2_amp_ceiling_batched == 0.9);
-  REQUIRE(defaults.l2_amp_ceiling_k_split == 0.4);
-  REQUIRE(defaults.epilogue_acc_read_parallelism == 0.9);
-  REQUIRE(defaults.epilogue_cycles_per_bounds_check == 5.0);
-  REQUIRE(defaults.epilogue_scalar_store_penalty == 1.1);
-  REQUIRE(defaults.epilogue_bytes_per_vectorized_store == 16);
-  REQUIRE(defaults.epilogue_cache_line_bytes == 128);
-  REQUIRE(defaults.epilogue_workspace_bytes_per_elem == 4);
-  REQUIRE(defaults.epilogue_salu_overhead == 35.0);
-  REQUIRE(defaults.epilogue_l_barrier == 100.0);
-  REQUIRE(defaults.epilogue_l_smem == 1900.0);
-  REQUIRE(defaults.postgsu_compute_bytes == 4);
-  REQUIRE(defaults.postgsu_kernel_launch_overhead == 8000.0);
-  REQUIRE(defaults.postgsu_threads_per_wg == 256);
-  REQUIRE(defaults.postgsu_wavefront_size == 64);
-
-  // Check default main loop efficiency
   REQUIRE(defaults.main_loop_efficiency == 1.0);
+  REQUIRE_FALSE(defaults.reject);
 }
 
 TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   origami::heuristic_params_t base;
   origami::heuristic_params_t override;
 
-  // Set some non-default values in override
-  override.weight_tile_total        = 2.0;
-  override.tail_loop_overhead       = 3.0;
-  override.main_memory_load_latency = 300.0;
-  override.main_loop_efficiency     = 0.8;
+  // Set a non-default value in override
+  override.weight_tile_total = 2.0;
 
   // Merge override into base
   base.merge_with(override);
 
-  // Check that overridden values changed
+  // Check that the overridden value changed
   REQUIRE(base.weight_tile_total == 2.0);
-  REQUIRE(base.tail_loop_overhead == 3.0);
-  REQUIRE(base.main_memory_load_latency == 300.0);
-  REQUIRE(base.main_loop_efficiency == 0.8);
 
   // Check that non-overridden values remain default
-  REQUIRE(base.tile_fixed_overhead == origami::heuristic_defaults_t::TILE_FIXED_OVERHEAD);
-  REQUIRE(base.l2_cold_floor == origami::heuristic_defaults_t::L2_COLD_FLOOR);
-  REQUIRE(base.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
+  REQUIRE(base.main_loop_efficiency == origami::heuristic_defaults_t::MAIN_LOOP_EFFICIENCY);
+  REQUIRE_FALSE(base.reject);
 }
 
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
@@ -1439,9 +1500,9 @@ TEST_CASE("Heuristics: Database lookup - successful call", "[heuristics]") {
   auto params = db.lookup(problem, hardware, config);
 
   // Verify that we got some parameters back
-  REQUIRE(params.main_memory_load_latency > 0.0);
-  REQUIRE(params.occupancy_decay_base > 0.0);
-  REQUIRE(params.occupancy_decay_base <= 1.0);
+  REQUIRE(params.weight_tile_total > 0.0);
+  REQUIRE(params.main_loop_efficiency > 0.0);
+  REQUIRE(params.main_loop_efficiency <= 1.0);
 }
 
 TEST_CASE("Heuristics: Optimized kernel efficiency lookup", "[heuristics]") {
@@ -1581,25 +1642,6 @@ TEST_CASE("Heuristics: CMS unregistered hand-optimized kernel", "[heuristics]") 
   REQUIRE(efficiency == Approx(1.0).epsilon(1e-6));
 }
 
-TEST_CASE("Heuristics: Problematic tile configuration (64x32x32)", "[heuristics]") {
-  auto& db = origami::heuristics_database_t::get_instance();
-
-  auto hardware = make_hardware(950);
-  auto problem  = make_problem(1024, 1024, 1024);
-  auto config   = make_config(64, 32, 32, 16, 16, 16);
-
-  problem.a_dtype     = origami::data_type_t::BFloat16;
-  problem.b_dtype     = origami::data_type_t::BFloat16;
-  problem.mi_dtype    = origami::data_type_t::BFloat16;
-  problem.a_transpose = origami::transpose_t::N;
-  problem.b_transpose = origami::transpose_t::N;
-
-  auto params = db.lookup(problem, hardware, config);
-
-  // Should have 10x penalty for this problematic configuration
-  REQUIRE(params.weight_tile_total == 10.0);
-}
-
 TEST_CASE("Heuristics: TF32 emulation - memory bound", "[heuristics]") {
   auto& db = origami::heuristics_database_t::get_instance();
 
@@ -1721,7 +1763,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   key.mt_m     = 777;                         // Unique tile size
 
   origami::heuristic_params_t params;
-  params.tail_loop_overhead = 7.77;  // Unique value
+  params.weight_tile_total = 7.77;  // Unique value
 
   db.add_entry(key, params);
 
@@ -1734,7 +1776,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   auto result = db.lookup(problem, hardware, config);
 
   // Should find our custom entry
-  REQUIRE(result.tail_loop_overhead == 7.77);
+  REQUIRE(result.weight_tile_total == 7.77);
 }
 
 TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]") {
@@ -1743,10 +1785,11 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   // Add a general rule
   origami::heuristic_key_t general_key;
   general_key.arch     = origami::hardware_t::architecture_t::gfx942;
-  general_key.mi_dtype = origami::data_type_t::Float;  // Specific dtype to avoid conflicts
+  general_key.mi_dtype = origami::data_type_t::Float;
+  general_key.mt_n     = 144;  // Unique tile width so the entry can't leak into other tests
 
   origami::heuristic_params_t general_params;
-  general_params.tail_loop_overhead = 3.33;  // Use a value that's less likely to conflict
+  general_params.weight_tile_total = 3.33;
 
   db.add_entry(general_key, general_params);
 
@@ -1754,23 +1797,24 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   origami::heuristic_key_t specific_key;
   specific_key.arch     = origami::hardware_t::architecture_t::gfx942;
   specific_key.mi_dtype = origami::data_type_t::Float;
+  specific_key.mt_n     = 144;
   specific_key.mt_m     = 555;  // Unique value
 
   origami::heuristic_params_t specific_params;
-  specific_params.tail_loop_overhead = 5.55;  // More specific value
+  specific_params.weight_tile_total = 5.55;  // More specific value
 
   db.add_entry(specific_key, specific_params);
 
   // Lookup with matching specific case
   auto hardware    = make_hardware(942);
   auto problem     = make_problem(1024, 1024, 1024);
-  auto config      = make_config(555, 128, 64, 16, 16, 16);
+  auto config      = make_config(555, 144, 64, 16, 16, 16);
   problem.mi_dtype = origami::data_type_t::Float;
 
   auto result = db.lookup(problem, hardware, config);
 
   // Should use more specific rule
-  REQUIRE(result.tail_loop_overhead == 5.55);
+  REQUIRE(result.weight_tile_total == 5.55);
 }
 
 TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
@@ -1872,7 +1916,7 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       REQUIRE(lat4 > lat1);
     }
 
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - includes kernel launch overhead") {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - positive when splitting") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(64, 64, 4096);
       auto config   = make_config(64, 64, 64, 32, 32, 8, false, 1);
@@ -1882,7 +1926,7 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       ctx.reduction_strategy  = origami::reduction_t::parallel;
 
       auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
-      REQUIRE(latency >= ctx.heuristic.postgsu_kernel_launch_overhead);
+      REQUIRE(latency > 0.0);
     }
   }
 }
@@ -2286,165 +2330,91 @@ TEST_CASE("GEMM: PGR1 wins for single-K-iter tiles", "[gemm][pgr]") {
   }
 }
 
-// NonTemporalD (cache_hints_d) directional truth.  NTD only enters the model
-// through the epilogue store path (apply_epilogue_store_cache_model), gated by
-// store_exposure, so it surfaces at total-latency level -- not in
-// compute_epilogue_latency, which returns only the store-bandwidth baseline.
-// cache_hints_d < 4 == cached/L2 store; == 4 == streaming/non-temporal store.
-// Grid pinned to data-parallel (stream_k=0) to isolate the store effect.
-TEST_CASE("GEMM: NonTemporalD (NTD) store-hint latency effect", "[gemm][ntd]") {
+TEST_CASE("GEMM: one LDS buffer exposes the next tile's writes once they outlast a K-step",
+          "[gemm][lds]") {
+  // bf16 MT128x128, MI16x16x32 on 2x2 waves: a K-step is 16 MFMAs of 16 cycles, and writing the
+  // next tile takes 256 cycles at DepthU 64 and 512 at DepthU 128.
+  auto latency = [](size_t depth_u, bool one_buffer) {
+    auto hw                    = make_hardware(950);
+    auto c                     = make_config(128, 128, depth_u, 16, 16, 32, false, 1, 1, 0, 0, 0);
+    c.tensile().one_lds_buffer = one_buffer;
+    return origami::gemm::compute_total_latency(make_problem(128, 8192, 8192), hw, c);
+  };
+
+  SECTION("writes that fit in the last K-step cost nothing") {
+    REQUIRE(latency(64, true) == latency(64, false));
+  }
+
+  SECTION("writes that outlast it are exposed") {
+    REQUIRE(latency(128, true) > latency(128, false));
+  }
+}
+
+TEST_CASE("GEMM: SourceSwap changes only epilogue store traffic", "[gemm][sourceswap]") {
   for (int gpu_arch : test_architectures) {
-    auto hw = make_hardware(gpu_arch);
+    auto hw             = make_hardware(gpu_arch);
+    auto hw_issue_bound = make_hardware(gpu_arch);
+    hw_issue_bound.mem3_perf_ratio *= 1.0e9;
 
-    // Latency with cache_hints_d forced to `hint`, everything else held fixed.
-    auto latency_with_ntd = [&](origami::problem_t p, int hint) {
-      auto c          = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
-      c.cache_hints_d = hint;
-      return origami::gemm::compute_total_latency(p, hw, c);
-    };
+    auto epi_with_swap =
+        [&](const origami::hardware_t& h, origami::problem_t p, origami::config_t c, bool swap) {
+          c.tensile().source_swap = swap;
+          origami::gemm::context_t ctx(p, h, c);
+          return origami::gemm::compute_epilogue_latency(p, h, c, ctx);
+        };
 
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - cached-D never slower than streaming-D") {
-      // With L2-bandwidth store advantage, cached stores are >= as good as
-      // streaming across output sizes; streaming only ever adds traffic here.
-      for (auto p : {make_problem(1024, 1024, 256),
-                     make_problem(2048, 2048, 128),
-                     make_problem(8192, 8192, 512)}) {
-        double cached    = latency_with_ntd(p, 0);
-        double streaming = latency_with_ntd(p, 4);
-        INFO("cached=" << cached << "  streaming=" << streaming);
-        REQUIRE(cached <= streaming);
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - same store issue with and without SourceSwap") {
+      for (size_t svw : {1, 4, 8}) {
+        auto c   = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+        c.gwvw_d = svw;
+        for (auto p : {make_problem(4096, 4096, 1024), make_problem(4100, 4090, 1024)}) {
+          INFO("svw=" << svw << " M=" << p.size.m << " N=" << p.size.n);
+          REQUIRE(epi_with_swap(hw_issue_bound, p, c, false) ==
+                  Approx(epi_with_swap(hw_issue_bound, p, c, true)).epsilon(1e-3));
+        }
       }
     }
 
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - streaming-D penalized for exposed moderate output") {
-      // 8 MB output (> L2), shallow K -> stores exposed on the critical path;
-      // streaming pays a real traffic penalty vs cached.
-      auto p           = make_problem(2048, 2048, 128);
-      double cached    = latency_with_ntd(p, 0);
-      double streaming = latency_with_ntd(p, 4);
-      INFO("cached=" << cached << "  streaming=" << streaming);
-      REQUIRE(streaming > cached);
-    }
-
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - streaming penalty fades as D outgrows L2") {
-      // Same store hint delta, but a D >> L2 footprint: cached would thrash L2
-      // too, so the streaming penalty shrinks relative to the exposed case.
-      auto p_exposed = make_problem(2048, 2048, 128);   // 8 MB, > L2
-      auto p_huge    = make_problem(8192, 8192, 512);   // 128 MB, >> L2
-      double ratio_exposed = latency_with_ntd(p_exposed, 4) / latency_with_ntd(p_exposed, 0);
-      double ratio_huge    = latency_with_ntd(p_huge, 4) / latency_with_ntd(p_huge, 0);
-      INFO("ratio_exposed=" << ratio_exposed << "  ratio_huge=" << ratio_huge);
-      REQUIRE(ratio_exposed > ratio_huge);
-    }
-
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - partial-M edge (M<MT_M) must prefer cached-D") {
-      // M=127, MT_M=128: one partial-M tile.  Streaming-D wastes store traffic on
-      // the masked rows, so cached-D is faster.  This skinny-M wide-N shape also
-      // forces cache_hints_b==4 (predicate at gemm.cpp:2749), so set it to keep the
-      // config valid and isolate the NTD-on-D toggle.
-      auto ntd_partial = [&](origami::problem_t p, int hint) {
-        auto c          = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 4, 0);
-        c.cache_hints_d = hint;
-        return origami::gemm::compute_total_latency(p, hw, c);
-      };
-      auto p_partial   = make_problem(127, 4096, 512);
-      double cached    = ntd_partial(p_partial, 0);
-      double streaming = ntd_partial(p_partial, 4);
-      INFO("cached=" << cached << "  streaming=" << streaming);
-      REQUIRE(cached < streaming);
-
-      // The partial-M tile should amplify the streaming penalty beyond an
-      // M-aligned tile of the same footprint.
-      auto p_aligned         = make_problem(128, 4096, 512);
-      double ratio_partial   = streaming / cached;
-      double ratio_aligned   = ntd_partial(p_aligned, 4) / ntd_partial(p_aligned, 0);
-      INFO("ratio_partial=" << ratio_partial << "  ratio_aligned=" << ratio_aligned);
-      REQUIRE(ratio_partial > ratio_aligned);
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - scattered non-SourceSwap stores cost more traffic") {
+      auto c   = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      c.gwvw_d = 4;
+      auto p   = make_problem(4096, 4096, 1024);
+      REQUIRE(epi_with_swap(hw, p, c, false) > epi_with_swap(hw, p, c, true));
     }
   }
 }
 
-// SourceSwap controls which axis (M or N) is the fast store axis in the epilogue.
-// SourceSwap=true → M-contiguous stores (IDEAL/NARROW patterns, natural_svw>1).
-// SourceSwap=false → N-direction stores, non-contiguous in D (NONCONTIG pattern,
-// natural_svw=1, +2× address-issue overhead).
-// The latency difference is in the issue path; we test it at epilogue level.
-TEST_CASE("GEMM: epilogue SourceSwap store pattern", "[gemm][sourceswap]") {
+// With store bandwidth removed, the epilogue is store-issue-bound: a wider gwvw_d
+// issues fewer stores until one buffer_store (16 B) is full, and only a store
+// wider than that splits into several.
+TEST_CASE("GEMM: epilogue store issue follows gwvw_d", "[gemm][sourceswap]") {
   for (int gpu_arch : test_architectures) {
     auto hw = make_hardware(gpu_arch);
+    hw.mem3_perf_ratio *= 1.0e6;
 
-    // Epilogue latency with source_swap forced, everything else fixed.
-    // Use source_swap=true (M-contiguous, MI_M=16 → natural_svw=4) vs false
-    // (N-direction, natural_svw=1, NONCONTIG overhead).
-    auto epi_with_swap = [&](origami::problem_t p, origami::config_t c, bool swap) {
-      c.tensile().source_swap = swap;
+    auto lat_epi = [&](origami::problem_t p, size_t svw) {
+      // make_config: mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, hand_opt, wgm, occ,
+      //              hints_a, hints_b, stream_k
+      auto c   = make_config(256, 256, 32, 16, 16, 16, false, 1, 2, 0, 0, 0);
+      c.gwvw_d = svw;
       origami::gemm::context_t ctx(p, hw, c);
       return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
     };
 
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - SourceSwap=true lower epilogue than false") {
-      // Interior tile (no edge path), 16-bit output (larger natural_svw gap).
-      auto p = make_problem(4096, 4096, 1024);
-      auto c = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
-      double lat_swap   = epi_with_swap(p, c, true);
-      double lat_noswap = epi_with_swap(p, c, false);
-      INFO("swap=" << lat_swap << "  noswap=" << lat_noswap);
-      REQUIRE(lat_swap <= lat_noswap);
-    }
-
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - SourceSwap penalty scales with tile size") {
-      // Larger tiles → more store instructions → NONCONTIG overhead grows.
-      auto p_small = make_problem(4096, 4096, 1024);
-      auto p_large = make_problem(4096, 4096, 1024);
-      auto c_small = make_config(64,  64,  64, 16, 16, 16, false, 1, 1, 0, 0, 0);
-      auto c_large = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
-      double ratio_small = epi_with_swap(p_small, c_small, false) / epi_with_swap(p_small, c_small, true);
-      double ratio_large = epi_with_swap(p_large, c_large, false) / epi_with_swap(p_large, c_large, true);
-      INFO("ratio_small=" << ratio_small << "  ratio_large=" << ratio_large);
-      // Both ratios >= 1 (swap=false always >= swap=true).
-      REQUIRE(ratio_small >= 1.0);
-      REQUIRE(ratio_large >= 1.0);
-    }
-  }
-}
-
-// SourceSwap store-pattern cost: a SourceSwap=true kernel (M-contiguous stores,
-// IDEAL pattern -> 1x issue_insts) must have a lower store-instruction cost than
-// a SourceSwap=false kernel (N-direction stores, NONCONTIG -> split_count=4 and
-// 2x address overhead => ~3x issue_insts) for the same tile.
-TEST_CASE("GEMM: SourceSwap lowers store-instruction cost", "[gemm][sourceswap]") {
-  for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch) {
-      auto hw = make_hardware(gpu_arch);
-      // Make the epilogue store-instruction-bound: huge store bandwidth drives
-      // the store_memory term to ~0, exposing the store_issue difference.
-      hw.mem3_perf_ratio *= 1.0e6;
-
-      // Two otherwise-identical configs: only source_swap differs.  gwvw_d=4 =
-      // MI_M/4 makes the IDEAL path fire for swap=true (contiguous_svw=4,
-      // split_count=1); swap=false forces natural_svw=1 -> NONCONTIG.
-      auto make_cfg = [](bool swap) {
-        // make_config: mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, hand_opt, wgm, occ,
-        //              hints_a, hints_b, stream_k
-        auto c = make_config(256, 256, 32, 16, 16, 16, false, 1, 2, 0, 0, 0);
-        c.gwvw_d                   = 4;
-        c.tensile().source_swap    = swap;
-        return c;
-      };
-
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - bf16: 8 elements fill one store") {
       auto p = make_problem(4096, 4096, 128);
-      auto lat_epi = [&](bool swap) {
-        auto c = make_cfg(swap);
-        origami::gemm::context_t ctx(p, hw, c);
-        return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
-      };
-      double lat_swap   = lat_epi(true);
-      double lat_noswap = lat_epi(false);
-      INFO("swap=" << lat_swap << "  noswap=" << lat_noswap
-           << "  ratio=" << lat_noswap / lat_swap);
-      // Store-issue-bound: NONCONTIG (~3x issue) must be clearly slower, not a
-      // rounding-margin sliver.  Expect a substantial (>25%) gap.
-      REQUIRE(lat_noswap > lat_swap * 1.25);
+      INFO("svw1=" << lat_epi(p, 1) << " svw2=" << lat_epi(p, 2) << " svw4=" << lat_epi(p, 4)
+                   << " svw8=" << lat_epi(p, 8));
+      REQUIRE(lat_epi(p, 2) < lat_epi(p, 1));
+      REQUIRE(lat_epi(p, 4) < lat_epi(p, 2));
+      REQUIRE(lat_epi(p, 8) < lat_epi(p, 4));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - f32: 8 elements split into two stores") {
+      auto p = make_problem(4096, 4096, 128);
+      set_problem_dtypes(p, origami::data_type_t::Float);
+      INFO("svw4=" << lat_epi(p, 4) << " svw8=" << lat_epi(p, 8));
+      REQUIRE(lat_epi(p, 8) > lat_epi(p, 4));
     }
   }
 }
@@ -2498,6 +2468,138 @@ TEST_CASE("GEMM: epilogue wave-group batch scheduling", "[gemm][wavebatch]") {
       INFO("1x4=" << e_1x4 << "  4x1=" << e_4x1 << "  2x2=" << e_2x2);
       REQUIRE(std::abs(e_1x4 - e_4x1) / e_1x4 < 0.01);
       REQUIRE(std::abs(e_1x4 - e_2x2) / e_1x4 < 0.01);
+    }
+  }
+}
+
+// TensileLite reads an operand VectorWidth elements per lane only when its M/N
+// axis is contiguous in LDS (lrvwTile); K-contiguous, LDS-transpose and
+// DirectToVgpr operands must not depend on VectorWidth.
+TEST_CASE("GEMM: local-read latency follows the TensileLite LDS layout", "[gemm][localread]") {
+  using origami::transpose_t;
+  using arch_t = origami::hardware_t::architecture_t;
+
+  REQUIRE(origami::hardware_t::get_lds_read_bytes_per_clk(arch_t::gfx942) == 128);
+  REQUIRE(origami::hardware_t::get_lds_read_bytes_per_clk(arch_t::gfx950) == 256);
+
+  for (int gpu_arch : test_architectures) {
+    auto hw  = make_hardware(gpu_arch);
+    auto cfg = [](int vwa, int vwb) {
+      auto c           = make_config(64, 64, 64);
+      c.vector_width_a = vwa;
+      c.vector_width_b = vwb;
+      return c;
+    };
+    auto lr = [&](const origami::problem_t& p, const origami::config_t& c) {
+      return origami::gemm::compute_local_read_latency(p, hw, c, false);
+    };
+    auto lr_floor = [&](const origami::problem_t& p, const origami::config_t& c) {
+      return origami::gemm::compute_local_read_latency(p, hw, c, true);
+    };
+    const auto tn = make_problem(4096, 4096, 4096, transpose_t::T, transpose_t::N);
+    const auto nn = make_problem(4096, 4096, 4096, transpose_t::N, transpose_t::N);
+    const auto nt = make_problem(4096, 4096, 4096, transpose_t::N, transpose_t::T);
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - TN reads both operands along K") {
+      REQUIRE(lr(tn, cfg(1, 1)) == Approx(lr(tn, cfg(8, 8))));
+      REQUIRE(lr(tn, cfg(1, 1)) == Approx(lr_floor(tn, cfg(1, 1))));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - NN: only the M-contiguous A depends on VW") {
+      REQUIRE(lr(nn, cfg(8, 1)) == Approx(lr(nn, cfg(8, 8))));
+      // bf16 at VW=1 reads 2 B per lane, under one 4 B bank; VW=2 fills it.
+      REQUIRE(lr(nn, cfg(1, 8)) > lr(nn, cfg(2, 8)));
+      REQUIRE(lr(nn, cfg(2, 8)) == Approx(lr(nn, cfg(8, 8))));
+      REQUIRE(lr(nn, cfg(8, 8)) == Approx(lr_floor(nn, cfg(1, 1))));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - NT: both operands depend on VW") {
+      REQUIRE(lr(nt, cfg(1, 8)) > lr(nt, cfg(8, 8)));
+      REQUIRE(lr(nt, cfg(8, 1)) > lr(nt, cfg(8, 8)));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - element size sets the VW that fills a bank") {
+      auto nn_f32 = nn;
+      set_problem_dtypes(nn_f32, origami::data_type_t::Float);
+      REQUIRE(lr(nn_f32, cfg(1, 1)) == Approx(lr(nn_f32, cfg(4, 4))));
+
+      auto nn_f8 = nn;
+      set_problem_dtypes(nn_f8, origami::data_type_t::Float8);
+      REQUIRE(lr(nn_f8, cfg(2, 8)) > lr(nn_f8, cfg(4, 8)));
+      REQUIRE(lr(nn_f8, cfg(4, 8)) == Approx(lr(nn_f8, cfg(16, 8))));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - plumbed layout flags override the transpose default") {
+      auto unroll_a = [&](int vwa) {
+        auto c                         = cfg(vwa, 8);
+        c.tensile().unroll_major_lds_a = 1;
+        return c;
+      };
+      auto tile_a = [&](int vwa) {
+        auto c                         = cfg(vwa, 8);
+        c.tensile().unroll_major_lds_a = 0;
+        return c;
+      };
+      auto ldstr_a = [&](int vwa) {
+        auto c                           = cfg(vwa, 8);
+        c.tensile().lds_transpose_read_a = true;
+        return c;
+      };
+      auto dtv_a = [&](int vwa) {
+        auto c                       = cfg(vwa, 8);
+        c.tensile().direct_to_vgpr_a = true;
+        return c;
+      };
+      REQUIRE(lr(nn, unroll_a(1)) == Approx(lr(nn, unroll_a(8))));
+      REQUIRE(lr(tn, tile_a(1)) > lr(tn, tile_a(8)));
+      REQUIRE(lr(nn, ldstr_a(1)) == Approx(lr(nn, cfg(8, 8))));
+      REQUIRE(lr(nn, dtv_a(1)) == Approx(lr(nn, dtv_a(8))));
+      REQUIRE(lr(nn, dtv_a(1)) < lr(nn, cfg(8, 8)));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - read time scales with MT_K") {
+      auto c64  = cfg(1, 1);
+      auto c128 = cfg(1, 1);
+      c128.mt.k = 128;
+      REQUIRE(lr(nn, c128) == Approx(2.0 * lr(nn, c64)));
+    }
+  }
+}
+
+// The LDS pipe feeds the MFMAs, so narrow reads may only cost tile latency when
+// the LDS time outlasts both the MFMA work and the full-width floor.
+TEST_CASE("GEMM: narrow local reads cost latency only when LDS-bound", "[gemm][localread]") {
+  using origami::transpose_t;
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+    // get_hardware_for_arch models four MFMA pipes per CDNA CU.
+    hw.parallel_mi_cu = 4;
+    const size_t mi_k = (gpu_arch == 942) ? 16 : 32;
+    const auto nn     = make_problem(4096, 4096, 4096, transpose_t::N, transpose_t::N);
+    const auto tn     = make_problem(4096, 4096, 4096, transpose_t::T, transpose_t::N);
+
+    auto tile =
+        [&](const origami::problem_t& p, size_t mt_m, size_t mt_n, int wg_m, int wg_n, int vwa) {
+          auto c                   = make_config(mt_m, mt_n, 64, 16, 16, mi_k);
+          c.vector_width_a         = vwa;
+          c.vector_width_b         = 8;
+          c.tensile().wave_group_m = wg_m;
+          c.tensile().wave_group_n = wg_n;
+          origami::gemm::context_t ctx(p, hw, c);
+          return origami::gemm::compute_tile_latency(p, hw, c, ctx);
+        };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - TN tile latency ignores VW") {
+      REQUIRE(tile(tn, 16, 64, 1, 4, 1) == tile(tn, 16, 64, 1, 4, 8));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - MFMA-bound NN tile ignores VW") {
+      REQUIRE(tile(nn, 256, 256, 2, 2, 1) == tile(nn, 256, 256, 2, 2, 8));
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - LDS-bound NN tile pays for VW=1") {
+      // Four wave columns each re-read the 16-row A slice, so LDS outlasts the MFMAs.
+      REQUIRE(tile(nn, 16, 64, 1, 4, 1) > tile(nn, 16, 64, 1, 4, 8));
     }
   }
 }

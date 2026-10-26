@@ -32,6 +32,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
+from kernels.conv.direct_variants import DIRECT_WAVE_PARAMETRIC
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -226,6 +227,7 @@ def test_an_instance_builds_only_for_its_own_arch():
     "kw, match",
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
+        (dict(arch="gfx942"), "arch 'gfx942'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
@@ -382,11 +384,16 @@ class _HelperCache:
 
 def _direct_plan(spec, req):
     cache = _HelperCache()
+    # The meta a fresh --compile-all entry carries: a wave-parametric build
+    # records the wave size it was built at, the identity's.
+    meta = {"kernel_name": "k"}
+    if spec.algorithm in DIRECT_WAVE_PARAMETRIC:
+        meta["spec_wave_size"] = spec.identity.wave_size
     plan, why = dks.plan_for(
         cache,
         spec.identity,
         Path("unused.hsaco"),
-        {"kernel_name": "k"},
+        meta,
         _direct_problem(req),
         req.arch,
     )
@@ -429,8 +436,7 @@ def test_admission_matches_the_aot_run_path(arch, direction, shape):
         if _cache_side_admits(s, req)
     ]
     assert admitted == expected
-    if arch == _ARCH:
-        assert admitted, f"{shape}: no registered instance runs it"
+    assert admitted, f"{arch} {shape}: no registered instance runs it"
 
 
 @pytest.mark.parametrize("direction", ["fwd", "dgrad"])

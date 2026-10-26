@@ -2816,31 +2816,38 @@ TEST(TestPluginBase, MockPluginCachedNameUsesDeterministicFallback)
     EXPECT_EQ(plugin.cachedName(), "mock_plugin");
 }
 
-TEST(TestPluginBase, ParsedApiVersionReturnsNulloptForMalformedString)
+// =============================================================================
+// `EnginePlugin` API version parsing. These cover the parse helper; the value
+// cached at load is covered by `ParsedApiVersionIsCapturedOnceAtLoad` below.
+// =============================================================================
+TEST(TestEnginePlugin, ParseApiVersionReturnsNulloptAndWarnsForMalformedString)
 {
-    const MockEnginePlugin plugin;
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
 
-    EXPECT_CALL(plugin, apiVersion())
-        .Times(1)
-        .WillOnce(::testing::Return(std::string_view{"not.a.version"}));
+    const auto parsed = MockEnginePlugin::parseApiVersion("not.a.version", "malformed_plugin");
 
-    const auto parsed = plugin.parsedApiVersion();
     EXPECT_FALSE(parsed.has_value()) << "Malformed version string must yield nullopt.";
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+    EXPECT_NE(recorder.getRecordedLogsAsString().find("malformed_plugin"), std::string::npos)
+        << "The warning must name the plugin: " << recorder.getRecordedLogsAsString();
 }
 
-TEST(TestPluginBase, ParsedApiVersionReturnsParsedValueForWellFormedString)
+TEST(TestEnginePlugin, ParseApiVersionReturnsParsedValueForWellFormedString)
 {
-    const MockEnginePlugin plugin;
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
 
-    EXPECT_CALL(plugin, apiVersion())
-        .Times(1)
-        .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+    const auto parsed = MockEnginePlugin::parseApiVersion(
+        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION, "well_formed_plugin");
 
-    const auto parsed = plugin.parsedApiVersion();
     ASSERT_TRUE(parsed.has_value()) << "Well-formed version string must parse successfully.";
     EXPECT_EQ(parsed->major, 1);
     EXPECT_EQ(parsed->minor, 1);
     EXPECT_EQ(parsed->patch, 0);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 // Ragged tensor version gating: a plugin at the baseline version is excluded
@@ -4337,6 +4344,83 @@ TEST(TestEnginePluginResourceManager, CodegenFixtureResolvesToHexThroughResource
         EXPECT_EQ(infos[0].engineName, "0x000000000000C0DE");
         EXPECT_EQ(infos[0].pluginName, "codegen_fixture_plugin");
     }
+}
+
+namespace
+{
+
+/// Loads a real engine plugin through the production constructor, then answers
+/// every later apiVersion() call with a malformed string and counts the calls.
+/// The constructor still reads the library's own version, because virtual calls
+/// made while EnginePlugin is being constructed do not reach this override.
+class ApiVersionCountingEnginePlugin : public EnginePlugin
+{
+public:
+    explicit ApiVersionCountingEnginePlugin(SharedLibrary&& lib)
+        : EnginePlugin(std::move(lib))
+    {
+    }
+
+    std::string_view apiVersion() const override
+    {
+        ++_apiVersionCalls;
+        return "not.a.version";
+    }
+
+    size_t apiVersionCalls() const
+    {
+        return _apiVersionCalls;
+    }
+
+private:
+    mutable size_t _apiVersionCalls = 0;
+};
+
+} // namespace
+
+TEST(TestEnginePlugin, ParsedApiVersionIsCapturedOnceAtLoad)
+{
+    const ApiVersionCountingEnginePlugin plugin(SharedLibrary{CODEGEN_FIXTURE_PATH});
+
+    const hipdnn_data_sdk::utilities::Version expected{
+        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+
+    // Re-reading apiVersion() here would see the malformed override and yield nullopt.
+    for(int call = 0; call < 2; ++call)
+    {
+        const auto parsed = plugin.parsedApiVersion();
+        ASSERT_TRUE(parsed.has_value()) << "call " << call;
+        EXPECT_EQ(*parsed, expected) << "call " << call;
+    }
+    EXPECT_EQ(plugin.apiVersionCalls(), 0U);
+}
+
+namespace
+{
+
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
+const auto MALFORMED_VERSION_PLUGIN_PATH
+    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
+      / plugin_constants::getTestPluginDefaultDir() / "custom"
+      / hipdnn_data_sdk::utilities::getLibraryName(TEST_MALFORMED_VERSION_PLUGIN_NAME);
+// NOLINTEND(bugprone-throwing-static-initialization)
+
+} // namespace
+
+// A library whose version string cannot be parsed still loads; it is recorded as an empty
+// parsed version, which is what the plugin manager's load-time check then rejects. The
+// counting subclass proves later reads are served from that record, not re-read.
+TEST(TestEnginePlugin, MalformedApiVersionLoadsAsNulloptThroughRealConstructor)
+{
+    ASSERT_TRUE(std::filesystem::exists(MALFORMED_VERSION_PLUGIN_PATH))
+        << "Test precondition: malformed-version plugin missing at "
+        << MALFORMED_VERSION_PLUGIN_PATH;
+
+    const ApiVersionCountingEnginePlugin plugin(SharedLibrary{MALFORMED_VERSION_PLUGIN_PATH});
+
+    EXPECT_FALSE(plugin.parsedApiVersion().has_value());
+    EXPECT_FALSE(plugin.parsedApiVersion().has_value());
+    EXPECT_EQ(plugin.apiVersionCalls(), 0U);
 }
 
 // ---------------------------------------------------------------------------

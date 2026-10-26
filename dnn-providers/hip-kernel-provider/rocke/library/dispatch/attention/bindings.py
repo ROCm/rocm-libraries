@@ -83,6 +83,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         problem.fp8_fnuz
     ):
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if bool(request.emit_lse) != problem.emit_lse:
+        raise ValueError(
+            f"request.emit_lse={bool(request.emit_lse)} disagrees with "
+            f"problem.emit_lse={problem.emit_lse}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -385,6 +390,14 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
+    # The caller-owned LSE buffer must be bound exactly when the problem asks
+    # for it, so misuse fails here and not at the first launch. Its shape,
+    # dtype, device and overlap are validated by the runner, which needs torch.
+    has_lse = tensors.get("lse") is not None
+    if problem.emit_lse and not has_lse:
+        raise ValueError("emit_lse=True requires tensors['lse']")
+    if has_lse and not problem.emit_lse:
+        raise ValueError("tensors['lse'] was given but emit_lse is off")
     # Explicit specs are built without additive bias (the spec makers reject
     # it), so refuse a bias-on problem or bias inputs here instead of launching
     # a kernel that would silently ignore them.
@@ -426,6 +439,7 @@ def bind_tuning_attention_torch(
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
+            lse=_kw.get("lse", tensors.get("lse")),
         )
 
     return TorchBinding(

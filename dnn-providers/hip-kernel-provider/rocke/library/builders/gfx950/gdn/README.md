@@ -37,7 +37,7 @@ retune either decode mode or the GDN prefill path.
 | [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, and the command that regenerates them |
 | [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
 | [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
-| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
+| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default, KDA work-keyed table, and the interim fused default tile |
 | [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
@@ -145,6 +145,23 @@ spec = GdnDecodeSpec(num_k_heads=16, num_v_heads=16, gate_kind="kda",
                      blocks_per_v_dim=1, fuse_conv=True, fuse_out_norm=True)
 out_err, state_err = check(spec, batch=8)
 assert max(out_err, state_err) < TOL
+```
+
+The same modes are reachable through dispatch. `GdnDecodeRequest` takes
+`state_dtype="f32"` and the `fuse_conv` / `fuse_out_norm` flags; a fused
+request's `auto` tile is an interim static default
+([`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
+Launch the result with the builder's inputs, as for any dispatched spec:
+
+```python
+from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, run_values
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+result = dispatch_gdn_decode(GdnDecodeRequest(
+    batch=8, arch="gfx950", gate_kind="kda", num_k_heads=16, num_v_heads=16,
+    state_dtype="f32", fuse_conv=True, fuse_out_norm=True))
+inp = make_inputs(result.spec, 8)
+values = run_values(result.spec, inp, launcher_for(result.spec), 8)
 ```
 
 ### Performance knobs

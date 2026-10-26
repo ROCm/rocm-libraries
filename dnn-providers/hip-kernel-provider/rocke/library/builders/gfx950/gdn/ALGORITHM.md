@@ -522,6 +522,22 @@ live in the protected performance record. Both this table and the GDN default
 were measured on the interleaved load order, before §4.3's loads-first order,
 so they are a snapshot until the sweep is re-run.
 
+The request also carries the state width and the fused modes (§4.9). An `f32` state
+(`state_dtype` `f32`, for either gate kind) reaches the spec and the kernel name but not the tile
+choice: `auto` picks what it picks for the same request with a 16-bit state. Fused requests
+(`fuse_conv` and/or `fuse_out_norm`) admit only `BPV = 1` tiles. Without a fused default, `auto`
+would serve a fused GDN request with the first legal tile in product order, `(1, 1, 1)`, because
+GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with its largest band,
+`(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both gate
+kinds and every state width. It is the tile the fused numeric suite is built around, not a
+measured winner; per-mode fused defaults are a separate measurement. It needs `DK` a multiple of
+`WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4 deployments meet. If it is illegal,
+`auto` falls back to the first legal candidate; for example, fused GDN at `DK = 64` falls back to
+`(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA registers the tile as
+one extra candidate (`kda_nw4_wtk16_bpv1`) outside its work table, at the lowest priority. The
+fused flags must be real bools and the dims real ints in the request, and `fuse_conv` with
+`num_k_heads ≠ num_v_heads` is a request error (§4.9).
+
 ### 4.7 The reference path
 
 A second, simpler emitter exists in which one thread owns an entire state row, making every dot
@@ -614,7 +630,7 @@ the `(4, 16, 1)` tile). A V channel's conv, and (without `out_lds` or `norm_gate
 gate activation, are computed by all `WTK` k-lanes of the row and stored by one: `WTK`-fold. This
 trades occupancy and redundant loads for fewer launches. With `conv_once` a channel is computed
 once per workgroup (one thread instead of `NW × WTV`); `norm_gate_once` does the same for the gate
-product. Tile selection for the fused modes is not part of this emitter.
+product. Tile selection for the fused modes is dispatch's (§4.6), not this emitter's.
 
 ### 4.10 Performance knobs
 
