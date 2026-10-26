@@ -462,9 +462,8 @@ class TestRealCompile:
     def test_multi_launch_stub_compiles(
         self, compile_env, generator, multi_launch_config, tmp_path
     ):
-        """The only config reaching the `{% if config.launch_names %}` arms: the `<set>`
-        include and the `launchNames() const override` signature must match
-        IKernelDispatchHandler."""
+        """The `{% if config.launch_names %}` arms: the `<set>` include and the
+        `launchNames() const override` signature must match IKernelDispatchHandler."""
         config = multi_launch_config
         assert config.launch_names, "fixture is no longer a multi-launch one"
         rendered = generator._render_template(
