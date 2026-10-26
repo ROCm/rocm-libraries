@@ -191,6 +191,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_dense_transpose*.cpp compiled in (appended to
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
   unit_test_internal_common_large_grids.cpp
+  unit_test_internal_common_bsr_ind.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_precond_direct.cpp
@@ -200,7 +201,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_extra_csrgemm.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
-  unit_test_internal_hostblocks_bsr_ind.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_bsrgemm.cpp
   # --- csrgemm / bsrgemm calc grid.x clamps [AISPARSE-677] -----------------
