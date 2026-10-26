@@ -336,6 +336,17 @@ Selection pins a spec the same way for dense and unified:
   The caller passes the buffer to `bind_torch` as `tensors["lse"]`; the runner
   validates its shape, dtype, device and overlap. The unified layout is
   `[total_q, Hq, 1]`.
+- `use_attn_bias=True` (fp32 `attn_bias_dtype` only) is served on gfx950 dense by
+  the grid candidates alone (`gfx950_dense_grid` and `gfx950_dense_qbminor`, the
+  one the hipDNN ingestor pins); the persistent ones do not
+  declare `attn_bias`. It is a problem field (`DENSE_ARCH_PROBLEM_FIELDS`), so
+  sweeps never vary it. The caller passes the `[B|1, Hq|1, Sq|1, Skv]` bias to
+  `bind_torch` as `tensors["attn_bias"]`; the dense runner derives its strides
+  (0 on a broadcast axis) and refuses a malformed one. One concept, one name per
+  layer: hipDNN's `attn_mask` tensor is the request's `use_attn_bias` /
+  `attn_bias_dtype` and the binding's `tensors["attn_bias"]` (also the candidate
+  feature `attn_bias`), the runner's `additive_bias` argument and kernel params
+  `additive_bias_*`, and the spec field `use_additive_bias`.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.

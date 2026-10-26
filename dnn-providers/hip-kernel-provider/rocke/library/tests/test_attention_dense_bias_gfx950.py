@@ -1,0 +1,478 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Host-side contract of the gfx950 dense kernel's additive bias: the spec field and
+its refusals, the kernel name and cache identity, the kernel-param / launcher ABI, the
+runner's bias validation and the dispatcher wiring. No GPU; the numerics are
+``test_attention_dense_bias_gfx950_numeric.py``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from types import SimpleNamespace
+
+import pytest
+
+from kernels.common._attention_additive_bias import additive_bias_strides
+from kernels.common.attention_dense_spec import attention_dense_cache_key
+from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
+    attention_dense_signature,
+    build_attention_dense,
+    run_attention_dense_torch,
+)
+
+_BIAS_PARAMS = [
+    "additive_bias_ptr",
+    "additive_bias_batch_stride",
+    "additive_bias_head_stride",
+    "additive_bias_sq_stride",
+]
+
+_BASE = Gfx950AttentionDenseSpec(
+    batch=2,
+    seqlen_q=512,
+    seqlen_kv=512,
+    num_query_heads=8,
+    num_kv_heads=2,
+    head_size=128,
+    causal=True,
+    dtype="bf16",
+)
+
+# The grid-body modes the bias composes with.
+_MODES = {
+    "default": {},
+    "noncausal": {"causal": False},
+    "d64_fp16": {"head_size": 64, "dtype": "fp16"},
+    "window": {"sliding_window": 128},
+    "bottom_right": {"seqlen_kv": 1024, "causal_bottom_right": True},
+    "ragged": {"seqlen_q": 500, "seqlen_kv": 700, "ragged": True},
+    "varlen": {"varlen": True},
+    "sinks": {"use_sinks": True},
+    "lse": {"emit_lse": True},
+    "lookahead": {"right_bound": 16},
+}
+
+
+def _bias(spec_kw):
+    return replace(_BASE, **spec_kw, use_additive_bias=True)
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_kernel_params_match_the_launcher_signature(mode):
+    """KernelLauncher packs kernargs by position, so the builder's params and
+    attention_dense_signature must name the same list, the four bias params last."""
+    spec = _bias(_MODES[mode])
+    params = [p.name for p in build_attention_dense(spec).params]
+    assert params == [a["name"] for a in attention_dense_signature(spec)]
+    assert params[-4:] == _BIAS_PARAMS
+    plain = replace(spec, use_additive_bias=False)
+    plain_params = [p.name for p in build_attention_dense(plain).params]
+    assert plain_params == params[:-4]
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_bias_is_in_the_name_and_the_cache_key(mode):
+    spec = _bias(_MODES[mode])
+    plain = replace(spec, use_additive_bias=False)
+    assert "_addb" in spec.kernel_name()
+    assert "addb" not in plain.kernel_name()
+    assert attention_dense_cache_key(spec, arch="gfx950") != attention_dense_cache_key(
+        plain, arch="gfx950"
+    )
+
+
+def test_bias_keeps_the_runtime_shape_cohort():
+    """The bias strides are kernargs, so an aligned bias kernel still serves every
+    batch and length from one binary."""
+    spec = _bias({})
+    assert spec.runtime_shape
+    other = replace(spec, batch=5, seqlen_q=1024, seqlen_kv=2048)
+    assert attention_dense_cache_key(spec, arch="gfx950") == attention_dense_cache_key(
+        other, arch="gfx950"
+    )
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None])
+def test_use_additive_bias_must_be_a_bool(value):
+    with pytest.raises(ValueError, match="must be a bool"):
+        replace(_BASE, use_additive_bias=value)
+
+
+def test_bias_is_refused_on_the_persistent_body():
+    replace(_BASE, persistent=True, num_persistent=256)  # the persistent spec is valid
+    with pytest.raises(
+        ValueError, match=r"use_additive_bias is implemented on the grid body only"
+    ):
+        replace(_BASE, persistent=True, num_persistent=256, use_additive_bias=True)
+
+
+def test_bias_is_refused_with_paged_kv():
+    paged = dict(
+        batch=1,
+        paged=True,
+        block_size=64,
+        num_kv_blocks=8,
+        seqlen_q=512,
+        seqlen_kv=512,
+        sliding_window=128,
+    )
+    replace(_BASE, **paged)  # the paged spec itself is valid
+    with pytest.raises(
+        ValueError, match=r"use_additive_bias is not supported with paged K/V"
+    ):
+        replace(_BASE, **paged, use_additive_bias=True)
+
+
+# --------------------------------------------------------------------------- #
+# Runner validation (raised before any compile or launch). The bias checks run on
+# duck-typed tensors, so they need no torch; the varlen offset checks read int32
+# torch tensors and import torch per test.
+# --------------------------------------------------------------------------- #
+
+_B, _H, _SQ, _SKV = 2, 8, 512, 512
+
+
+def _fake_bias(
+    shape, strides, *, storage_elems, offset=0, device="cpu", dtype="torch.float32"
+):
+    """A duck-typed tensor: lets a case state strides no real allocation could back
+    (past the i32 limit) without allocating, and runs without torch."""
+    return SimpleNamespace(
+        dtype=dtype,
+        device=device,
+        shape=shape,
+        stride=lambda axis=None: strides if axis is None else strides[axis],
+        untyped_storage=lambda: SimpleNamespace(nbytes=lambda: 4 * storage_elems),
+        element_size=lambda: 4,
+        storage_offset=lambda: offset,
+    )
+
+
+def _packed(shape):
+    """Contiguous element strides of ``shape``."""
+    strides, step = [], 1
+    for extent in reversed(shape):
+        strides.insert(0, step)
+        step *= extent
+    return tuple(strides), step
+
+
+def _fake_packed(shape, **kw):
+    strides, elems = _packed(shape)
+    return _fake_bias(shape, strides, storage_elems=elems, **kw)
+
+
+def _fake_operands():
+    """Stand-ins for q/k/v/out: the runner reads only ``q.device`` (and the packed
+    extents under varlen) before the bias checks raise."""
+    q = SimpleNamespace(device="cpu")
+    return dict(q=q, k=q, v=q, out=q, scale=0.125)
+
+
+# id -> (bias or None, error, message regex)
+_MALFORMED = {
+    "missing": (
+        None,
+        ValueError,
+        r"spec\.use_additive_bias=True requires additive_bias",
+    ),
+    "fp16": (
+        _fake_packed((_B, _H, _SQ, _SKV), dtype="torch.float16"),
+        ValueError,
+        r"additive_bias must be float32, got torch\.float16",
+    ),
+    "rank3": (_fake_packed((_H, _SQ, _SKV)), ValueError, r"must be rank-4"),
+    "key-extent": (
+        _fake_packed((_B, _H, _SQ, _SKV // 2)),
+        ValueError,
+        r"key dim must equal seqlen_kv=512, got 256",
+    ),
+    "head-extent": (
+        _fake_packed((_B, 2, _SQ, _SKV)),
+        ValueError,
+        r"dim 1 \(query head\) must be 1 or 8, got 2",
+    ),
+    "batch-extent": (
+        _fake_packed((3, _H, _SQ, _SKV)),
+        ValueError,
+        r"dim 0 \(batch\) must be 1 or 2, got 3",
+    ),
+    "query-extent": (
+        _fake_packed((_B, _H, 7, _SKV)),
+        ValueError,
+        r"dim 2 \(query\) must be 1 or 512, got 7",
+    ),
+    # A [B, H, Skv, Sq] tensor transposed to [B, H, Sq, Skv].
+    "key-stride": (
+        _fake_bias(
+            (_B, _H, _SQ, _SKV),
+            (_H * _SQ * _SKV, _SQ * _SKV, 1, _SQ),
+            storage_elems=_B * _H * _SQ * _SKV,
+        ),
+        ValueError,
+        r"contiguous along Skv",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_MALFORMED))
+def test_runner_refuses_a_malformed_bias(case):
+    bias, error, match = _MALFORMED[case]
+    with pytest.raises(error, match=match):
+        run_attention_dense_torch(
+            spec=_bias({}), additive_bias=bias, **_fake_operands()
+        )
+
+
+def test_runner_refuses_a_bias_for_a_plain_spec():
+    with pytest.raises(
+        ValueError, match=r"additive_bias provided but spec\.use_additive_bias is False"
+    ):
+        run_attention_dense_torch(
+            spec=_BASE,
+            additive_bias=_fake_packed((_B, _H, _SQ, _SKV)),
+            **_fake_operands(),
+        )
+
+
+# id -> (cu_seqlens_q, cu_seqlens_kv, message regex). Spec maxima Sq = Skv = 512,
+# block_m 256, block_n 64; 1024 packed query and 1280 packed key tokens.
+_BAD_OFFSETS = {
+    "kv-past-the-maximum": (
+        [0, 512, 1024],
+        [0, 256, 1280],
+        r"cu_seqlens_kv lengths must be monotone, tile-aligned, and within spec",
+    ),
+    "q-past-the-maximum": (
+        [0, 256, 1024],
+        [0, 640, 1280],
+        r"cu_seqlens_q lengths must be monotone, tile-aligned, and within spec",
+    ),
+    "q-not-tile-aligned": (
+        [0, 500, 1024],
+        [0, 640, 1280],
+        r"cu_seqlens_q lengths must be monotone, tile-aligned, and within spec",
+    ),
+    "q-wrong-entry-count": (
+        [0, 512, 768, 1024],
+        [0, 640, 1280],
+        r"cu_seqlens_q must be int32 \[batch\+1\]",
+    ),
+    "kv-short-of-the-packed-tensor": (
+        [0, 512, 1024],
+        [0, 256, 512],
+        r"cu_seqlens_kv endpoints must span its packed tensor",
+    ),
+    # The prologue always scores KV tile 0: for an empty sequence that is the next
+    # sequence's keys, or K/V past the packed tensor for the last one.
+    "kv-empty-sequence": (
+        [0, 512, 1024],
+        [0, 0, 1280],
+        r"cu_seqlens_kv sequences must be nonempty",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_BAD_OFFSETS))
+def test_runner_refuses_varlen_offsets_the_bias_cannot_serve(case):
+    """The varlen body loads the bias unmasked by in-sequence position, so the
+    offsets are checked as for LSE (here with LSE off) before any compile."""
+    torch = pytest.importorskip("torch", reason="the offsets are torch tensors")
+    cu_q, cu_kv, match = _BAD_OFFSETS[case]
+    spec = _bias({"varlen": True})
+    q = SimpleNamespace(device="cpu", shape=(1024, _H, 128))
+    kv = SimpleNamespace(device="cpu", shape=(1280, 2, 128))
+    with pytest.raises(ValueError, match=match):
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=kv,
+            v=kv,
+            out=q,
+            scale=0.125,
+            additive_bias=_fake_packed((_B, _H, _SQ, _SKV)),
+            cu_seqlens_q=torch.tensor(cu_q, dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(cu_kv, dtype=torch.int32),
+        )
+
+
+_DIMS = dict(batch=_B, num_query_heads=_H, seqlen_q=_SQ, seqlen_kv=_SKV, device=None)
+_PACKED = (_H * _SQ * _SKV, _SQ * _SKV, _SKV, 1)
+_PACKED_ELEMS = _B * _H * _SQ * _SKV
+
+
+def test_strides_broadcast_and_pass_through():
+    full = _fake_bias((_B, _H, _SQ, _SKV), _PACKED, storage_elems=_PACKED_ELEMS)
+    assert additive_bias_strides(full, **_DIMS) == _PACKED[:3]
+    # Broadcast axes give 0 whatever stride the tensor writes there.
+    row = _fake_bias((1, 1, 1, _SKV), (99, 99, 99, 1), storage_elems=_SKV)
+    assert additive_bias_strides(row, **_DIMS) == (0, 0, 0)
+
+
+def test_a_single_key_bias_needs_no_unit_key_stride():
+    fake = _fake_bias(
+        (_B, _H, _SQ, 1), (_H * _SQ * 7, _SQ * 7, 7, 7), storage_elems=_B * _H * _SQ * 7
+    )
+    dims = {**_DIMS, "seqlen_kv": 1}
+    assert additive_bias_strides(fake, **dims) == (_H * _SQ * 7, _SQ * 7, 7)
+
+
+def test_strides_refuse_a_bias_on_another_device():
+    fake = _fake_bias((1, 1, 1, _SKV), (0, 0, 0, 1), storage_elems=_SKV, device="cpu")
+    with pytest.raises(ValueError, match="same device as q"):
+        additive_bias_strides(fake, **{**_DIMS, "device": "cuda:0"})
+
+
+def test_strides_past_the_i32_limit_are_not_implemented():
+    fake = _fake_bias((_B, _H, _SQ, _SKV), (2**30, 2**28, _SKV, 1), storage_elems=2**40)
+    with pytest.raises(NotImplementedError, match=r"exceeds the kernels' i32"):
+        additive_bias_strides(fake, **_DIMS)
+
+
+@pytest.mark.parametrize(
+    "reach, ok", [(2**31 - 1, True), (2**31, False)], ids=["at-limit", "past-limit"]
+)
+def test_the_i32_limit_is_on_the_largest_element_index(reach, ok):
+    """The bound is on the largest index the kernel reads (here seqlen_kv - 1)."""
+    dims = dict(
+        batch=1, num_query_heads=1, seqlen_q=1, seqlen_kv=reach + 1, device=None
+    )
+    fake = _fake_bias((1, 1, 1, reach + 1), (0, 0, 0, 1), storage_elems=reach + 1)
+    if ok:
+        assert additive_bias_strides(fake, **dims) == (0, 0, 0)
+    else:
+        with pytest.raises(NotImplementedError, match=r"max element index 2147483648"):
+            additive_bias_strides(fake, **dims)
+
+
+def test_strides_beyond_the_storage_are_refused():
+    fake = _fake_bias((_B, _H, _SQ, _SKV), _PACKED, storage_elems=1024)
+    with pytest.raises(ValueError, match="only backs"):
+        additive_bias_strides(fake, **_DIMS)
+
+
+def test_the_storage_offset_counts_against_the_backing():
+    exact = _fake_bias((_B, _H, _SQ, _SKV), _PACKED, storage_elems=_PACKED_ELEMS)
+    assert additive_bias_strides(exact, **_DIMS) == _PACKED[:3]
+    shifted = _fake_bias(
+        (_B, _H, _SQ, _SKV), _PACKED, storage_elems=_PACKED_ELEMS, offset=1
+    )
+    with pytest.raises(ValueError, match="only backs"):
+        additive_bias_strides(shifted, **_DIMS)
+
+
+# --------------------------------------------------------------------------- #
+# Dispatcher wiring
+# --------------------------------------------------------------------------- #
+
+
+def _request(**kw):
+    from dispatch.attention import AttentionRequest
+
+    fields = dict(
+        batch=2,
+        nhead_q=8,
+        nhead_k=2,
+        seqlen_q=512,
+        seqlen_k=512,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx950",
+        mask_type=1,
+        dtype="bf16",
+        use_attn_bias=True,
+    )
+    fields.update(kw)
+    return AttentionRequest(**fields)
+
+
+def test_the_grid_candidate_builds_a_bias_spec():
+    from dispatch.attention import attention_tuning_spec
+
+    spec = attention_tuning_spec(_request(), "gfx950_dense_grid").kernel_spec
+    assert spec.use_additive_bias and not spec.persistent
+    plain = attention_tuning_spec(_request(use_attn_bias=False), "gfx950_dense_grid")
+    assert not plain.kernel_spec.use_additive_bias
+
+
+def test_a_bias_request_sweeps_bias_specs_only():
+    from dispatch.attention import attention_candidates
+    from rocke.dispatch.tuning import walk
+
+    (grid,) = [c for c in attention_candidates() if c.spec_id == "gfx950_dense_grid"]
+    for use_bias in (True, False):
+        req = _request(
+            algorithm=grid.algorithm, spec_id=grid.spec_id, use_attn_bias=use_bias
+        )
+        with walk.sweep_level("production"):
+            specs = [s.kernel_spec for s in grid.sweep_space(req)]
+        assert specs and all(s.use_additive_bias is use_bias for s in specs), use_bias
+
+
+def test_only_the_grid_dense_candidates_declare_bias():
+    from dispatch.attention import attention_candidates
+
+    refused = {
+        c.spec_id: c.admits(_request())
+        for c in attention_candidates()
+        if c.spec_id.startswith("gfx950_dense")
+        and c.spec_id not in ("gfx950_dense_grid", "gfx950_dense_qbminor")
+    }
+    assert set(refused) == {"gfx950_dense_persist", "gfx950_dense_persist_widedma"}
+    for spec_id, (ok, why) in refused.items():
+        assert not ok and "cannot serve features ['attn_bias']" in why, spec_id
+
+
+def test_a_q_dtype_bias_is_refused():
+    from dispatch.attention import attention_tuning_spec
+    from rocke.dispatch.core import PinRefused
+
+    with pytest.raises(
+        PinRefused, match=r"additive bias must be fp32, got attn_bias_dtype='q'"
+    ):
+        attention_tuning_spec(_request(attn_bias_dtype="q"), "gfx950_dense_grid")
+
+
+def test_the_binding_hands_attn_bias_to_the_runner(monkeypatch):
+    import kernels.gfx950.attention_dense as dense
+    from dispatch.attention import attention_tuning_spec
+    from dispatch.attention.bindings import bind_dense_attention_torch
+
+    calls = []
+    monkeypatch.setattr(
+        dense, "run_attention_dense_torch", lambda **kw: calls.append(kw)
+    )
+    req = _request()
+    ts = attention_tuning_spec(req, "gfx950_dense_grid")
+    bias, override = object(), object()
+    tensors = {"q": "q", "k": "k", "v": "v", "out": "o", "attn_bias": bias}
+    binding = bind_dense_attention_torch(req, ts, tensors)
+    binding.launch()
+    binding.launch(additive_bias=override)
+    no_bias = {k: v for k, v in tensors.items() if k != "attn_bias"}
+    bind_dense_attention_torch(req, ts, no_bias).launch()
+    assert calls[0]["additive_bias"] is bias and calls[0]["spec"].use_additive_bias
+    assert calls[1]["additive_bias"] is override
+    assert "additive_bias" not in calls[2]
+
+
+def test_the_gfx942_binding_refuses_attn_bias():
+    from dispatch.attention.bindings import bind_dense_attention_torch
+
+    req = _request(arch="gfx942", use_attn_bias=False)
+    ts = SimpleNamespace(
+        kernel_spec=SimpleNamespace(head_size=128),
+        launch_grid=lambda: (1, 1, 1),
+        launch_block=lambda: (256, 1, 1),
+    )
+    binding = bind_dense_attention_torch(
+        req, ts, {"q": 0, "k": 0, "v": 0, "out": 0, "attn_bias": object()}
+    )
+    with pytest.raises(
+        NotImplementedError,
+        match=r"gfx942 dense runner does not accept tensors\['attn_bias'\]",
+    ):
+        binding.launch()

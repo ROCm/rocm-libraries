@@ -60,7 +60,12 @@ from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
-from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_additive_bias import (
+    ADDITIVE_BIAS_INDEX_LIMIT as _I32_LIMIT,
+    append_additive_bias_signature,
+    check_additive_bias_reach,
+    check_additive_bias_tensor,
+)
 from ._lse_store import validate_unified_lse
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -5938,9 +5943,6 @@ def _require_additive_bias(problem: UnifiedAttentionProblem, additive_bias) -> N
         )
 
 
-_I32_LIMIT = 2**31
-
-
 def _validate_additive_bias(
     problem: UnifiedAttentionProblem,
     additive_bias,
@@ -5974,13 +5976,7 @@ def _validate_additive_bias(
             )
         return 0
     _require_additive_bias(problem, additive_bias)
-    if str(additive_bias.dtype) != "torch.float32":
-        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
-    if q_device is not None and additive_bias.device != q_device:
-        raise ValueError(
-            f"additive_bias must be on the same device as q, got "
-            f"{additive_bias.device} vs {q_device}"
-        )
+    check_additive_bias_tensor(additive_bias, q_device)
     if additive_bias.stride(-1) != 1:
         raise ValueError(
             "additive_bias must be contiguous along Sk (stride(-1) == 1), "
@@ -6011,23 +6007,9 @@ def _validate_additive_bias(
         + (problem.max_seqlen_q - 1) * sq_stride
         + (problem.max_seqlen_k - 1)
     )
-    if max_idx >= _I32_LIMIT:
-        raise NotImplementedError(
-            f"additive_bias max element index {max_idx} exceeds the kernels' "
-            "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
-            "dimension (stride 0) or split the launch"
-        )
     # Strides are passed separately from the tensor, so a mismatch would read
-    # past its storage; check the reach against the elements actually backed.
-    avail = (
-        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
-        - additive_bias.storage_offset()
-    )
-    if max_idx >= avail:
-        raise ValueError(
-            f"additive_bias strides reach element {max_idx} but the tensor "
-            f"only backs {avail} elements from its storage offset"
-        )
+    # past its storage; the reach check catches that too.
+    check_additive_bias_reach(additive_bias, max_idx)
     return sq_stride
 
 

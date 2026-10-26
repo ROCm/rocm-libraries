@@ -1,24 +1,42 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Additive attention bias for the gfx950 tiled 2D and 3D split-KV kernels.
+"""Additive attention bias for the gfx950 tiled 2D, 3D split-KV and dense kernels.
 
 The fp32 bias is read at element
 ``seq*batch_stride + q_head*head_stride + q_row*sq_stride + col`` (Sk stride 1;
 a stride of 0 broadcasts that dimension), where ``q_head`` is the query head.
-It is added to the log2-domain score after any softcap, so the score is
-``softcap(QK * scale) + bias``. Python engine only for now.
+It is added to the log2-domain score: after any softcap in the tiled kernels
+(``softcap(QK * scale) + bias``), before the mask in the dense kernel. The
+builders are Python only; the C++ lowerer lowers the IR they emit.
+
+Device side: :func:`declare_additive_bias_params` adds the four kernel params,
+:func:`additive_bias_row` computes a query row's base index once, and
+:func:`add_additive_bias_at` adds one element (:func:`add_additive_bias` does
+both). Host side: :func:`append_additive_bias_signature` adds the launcher
+entries; :func:`additive_bias_strides` (strides derived from a tensor) or the
+unified kernels' ``_validate_additive_bias`` (strides passed by the caller)
+validates a launch, both through :func:`check_additive_bias_tensor` and
+:func:`check_additive_bias_reach`; :func:`validate_dense_additive_bias` is the
+dense runners' entry point (presence and strides; a varlen runner also bounds
+its offsets by the spec maxima); :func:`additive_bias_launch_values` packs it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from rocke.core.ir import F32, I32, IRBuilder, PtrType, Value
-
 
 # Stride params in ABI order, after the pointer. Shared by the kernel params and
 # the host launcher signature, which packs kernargs by position.
 _STRIDES = ("batch", "head", "sq")
+
+# additive_bias_row / add_additive_bias_at index the bias in i32; every host
+# validator of a bias launch bounds the largest element index by this (through
+# check_additive_bias_reach). The gfx1151 dispatch binding and the hipDNN dense
+# pack (Gfx950AttentionDenseNative.cpp) keep their own copies of the bound.
+ADDITIVE_BIAS_INDEX_LIMIT = 2**31
 
 
 @dataclass(frozen=True)
@@ -44,6 +62,62 @@ def append_additive_bias_signature(sb) -> None:
         sb.scalar(f"additive_bias_{s}_stride", "i32")
 
 
+def additive_bias_launch_values(
+    bias: Any, strides: tuple[int, int, int]
+) -> dict[str, Any]:
+    """Launcher values for the four entries :func:`append_additive_bias_signature`
+    declares, from the bias tensor and its :func:`additive_bias_strides`."""
+    vals = {"additive_bias_ptr": bias}
+    for s, stride in zip(_STRIDES, strides):
+        vals[f"additive_bias_{s}_stride"] = int(stride)
+    return vals
+
+
+def additive_bias_row(
+    b: IRBuilder, p: AdditiveBiasParams, *, seq_idx: Value, q_head: Value, q_row: Value
+) -> Value:
+    """Element index of key 0 in the bias row of ``(seq_idx, q_head, q_row)``.
+    Loop-invariant for a query row, so a kernel can hoist it out of its KV loop."""
+    b_off = b.mul(p.batch_stride, seq_idx)
+    h_off = b.mul(p.head_stride, q_head)
+    base = b.add(b_off, h_off)
+    q_off = b.mul(p.sq_stride, q_row)
+    return b.add(base, q_off)
+
+
+def add_additive_bias_at(
+    b: IRBuilder,
+    score: Value,
+    p: AdditiveBiasParams,
+    *,
+    row: Value,
+    col: Value,
+    mask: Value | None,
+    rcp_ln2: Value,
+    floor: Value | None = None,
+) -> Value:
+    """Return ``score + bias[row + col] * rcp_ln2`` for a ``row`` from
+    :func:`additive_bias_row` with the same params. ``score`` is in log2 units
+    (already scaled) and ``rcp_ln2`` is the constant 1/ln2 (= log2 e), which
+    converts the natural-log bias to log2 units.
+
+    Where ``mask`` is false the lane loads element 0 and adds 0. ``mask=None``
+    emits a plain, unchecked load: only for callers whose every ``(row, col)``
+    is in range, which the host validation of the launch has to guarantee.
+    ``floor`` (natural-log units) clamps the bias from below, -inf and NaN
+    included, for kernels whose mask is a finite sentinel. There is no upper
+    clamp: a bias whose log2 value overflows fp32 (above about 2.3e38) makes
+    the row NaN."""
+    idx = b.add(row, col)
+    if mask is None:
+        v = b.global_load(p.ptr, idx, F32, align=4)
+    else:
+        v = b.masked_global_load(p.ptr, idx, mask, b.const_f32(0.0), dtype=F32, align=4)
+    if floor is not None:
+        v = b.fmax(v, floor)
+    return b.fadd(score, b.fmul(v, rcp_ln2))
+
+
 def add_additive_bias(
     b: IRBuilder,
     score: Value,
@@ -59,8 +133,128 @@ def add_additive_bias(
     """Return ``score + bias[idx] / ln2``. Where ``mask`` is false (padding rows,
     tail columns) the lane loads element 0 instead of an out-of-range index and
     adds 0."""
-    base = b.add(b.mul(p.batch_stride, seq_idx), b.mul(p.head_stride, q_head))
-    row = b.add(base, b.mul(p.sq_stride, q_row))
-    idx = b.add(row, col)
-    v = b.masked_global_load(p.ptr, idx, mask, b.const_f32(0.0), dtype=F32, align=4)
-    return b.fadd(score, b.fmul(v, rcp_ln2))
+    row = additive_bias_row(b, p, seq_idx=seq_idx, q_head=q_head, q_row=q_row)
+    return add_additive_bias_at(
+        b, score, p, row=row, col=col, mask=mask, rcp_ln2=rcp_ln2
+    )
+
+
+def check_additive_bias_tensor(bias: Any, device: Any | None) -> None:
+    """Raise ``ValueError`` unless ``bias`` is fp32 and on ``device``, the launch's
+    Q device (``None`` skips the device check: host-only tests have no Q)."""
+    if str(bias.dtype) != "torch.float32":
+        raise ValueError(f"additive_bias must be float32, got {bias.dtype}")
+    if device is not None and bias.device != device:
+        raise ValueError(
+            f"additive_bias must be on the same device as q, got "
+            f"{bias.device} vs {device}"
+        )
+
+
+def check_additive_bias_reach(bias: Any, max_idx: int) -> None:
+    """Check ``max_idx``, the largest element index a launch reads, against the
+    kernels' i32 addressing (``NotImplementedError``: a too-big bias, not a
+    malformed one) and against the elements ``bias``'s storage backs from its
+    offset (``ValueError``: strides that do not fit the tensor)."""
+    if max_idx >= ADDITIVE_BIAS_INDEX_LIMIT:
+        raise NotImplementedError(
+            f"additive_bias max element index {max_idx} exceeds the kernels' i32 "
+            "bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a dimension "
+            "(stride 0) or split the launch"
+        )
+    avail = bias.untyped_storage().nbytes() // bias.element_size() - int(
+        bias.storage_offset()
+    )
+    if max_idx >= avail:
+        raise ValueError(
+            f"additive_bias strides reach element {max_idx} but the tensor only "
+            f"backs {avail} elements from its storage offset"
+        )
+
+
+def additive_bias_strides(
+    bias: Any,
+    *,
+    batch: int,
+    num_query_heads: int,
+    seqlen_q: int,
+    seqlen_kv: int,
+    device: Any | None,
+) -> tuple[int, int, int]:
+    """Validate a rank-4 ``[B|1, Hq|1, Sq|1, Skv]`` fp32 bias tensor and return
+    its ``(batch, head, sq)`` element strides, 0 on each broadcast (size-1) axis.
+
+    ``device`` is the launch's Q device (``None`` skips the check). The largest
+    element index the kernel can read must be below 2**31 (i32 addressing) and
+    inside the tensor's storage. Raises ``ValueError`` for a malformed bias and
+    ``NotImplementedError`` past the i32 limit (a too-big bias, not a malformed
+    one). The key axis cannot broadcast: the kernels read ``col`` at unit stride.
+    The unified kernels take caller-supplied strides and validate them with
+    ``attention_unified._validate_additive_bias`` instead, through the same two
+    checks.
+    """
+    check_additive_bias_tensor(bias, device)
+    shape = tuple(int(n) for n in bias.shape)
+    if len(shape) != 4:
+        raise ValueError(
+            f"additive_bias must be rank-4 [B|1, Hq|1, Sq|1, Skv], got {shape}"
+        )
+    for axis, (extent, full, label) in enumerate(
+        (
+            (shape[0], batch, "batch"),
+            (shape[1], num_query_heads, "query head"),
+            (shape[2], seqlen_q, "query"),
+        )
+    ):
+        if extent not in (1, full):
+            raise ValueError(
+                f"additive_bias dim {axis} ({label}) must be 1 or {full}, got {extent}"
+            )
+    if shape[3] != seqlen_kv:
+        raise ValueError(
+            f"additive_bias key dim must equal seqlen_kv={seqlen_kv}, got {shape[3]}"
+        )
+    # A single-key axis is never stepped along, so its torch stride is meaningless.
+    if seqlen_kv > 1 and int(bias.stride(3)) != 1:
+        raise ValueError(
+            "additive_bias must be contiguous along Skv (stride(3) == 1), "
+            f"got strides {tuple(bias.stride())}"
+        )
+    strides = tuple(0 if shape[a] == 1 else int(bias.stride(a)) for a in range(3))
+    # Each stride is an i32 kernarg; on a full axis max_idx >= stride (torch strides
+    # are never negative), so the reach check also bounds every stride.
+    max_idx = (
+        (batch - 1) * strides[0]
+        + (num_query_heads - 1) * strides[1]
+        + (seqlen_q - 1) * strides[2]
+        + (seqlen_kv - 1)
+    )
+    check_additive_bias_reach(bias, max_idx)
+    return strides
+
+
+def validate_dense_additive_bias(
+    spec: Any, bias: Any, *, device: Any | None
+) -> tuple[int, int, int] | None:
+    """The dense runners' bias checks; returns the strides to launch with, or
+    ``None`` when ``spec.use_additive_bias`` is off (a bias is then refused).
+
+    The bias is sized by the spec (the maxima under varlen) and loaded unmasked,
+    so a varlen runner must also bound its offsets by the spec maxima; that check
+    is the runner's, which already owns the LSE path's identical one."""
+    if not spec.use_additive_bias:
+        if bias is not None:
+            raise ValueError(
+                "additive_bias provided but spec.use_additive_bias is False"
+            )
+        return None
+    if bias is None:
+        raise ValueError("spec.use_additive_bias=True requires additive_bias")
+    return additive_bias_strides(
+        bias,
+        batch=int(spec.batch),
+        num_query_heads=int(spec.num_query_heads),
+        seqlen_q=int(spec.seqlen_q),
+        seqlen_kv=int(spec.seqlen_kv),
+        device=device,
+    )

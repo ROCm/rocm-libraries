@@ -3982,6 +3982,36 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- additive bias (grid body only): the aligned runtime-shape body with
+        # plain loads, the ragged body whose loads are masked at the tails, and the
+        # windowed bodies that clamp the start tile because the bias load is plain
+        # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
+        # cannot observe that clamp (the window mask overwrites the read), so these
+        # hashes are its only CI pin.
+        ("bias_sq512", {"use_additive_bias": True}),
+        (
+            "bias_ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+                "use_additive_bias": True,
+            },
+        ),
+        (
+            "bias_lse_window_past_keys_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "seqlen_kv": 128,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "bias_varlen_window_sq512",
+            {"use_additive_bias": True, "varlen": True, "sliding_window": 64},
+        ),
     ):
         add(
             "attention_dense",

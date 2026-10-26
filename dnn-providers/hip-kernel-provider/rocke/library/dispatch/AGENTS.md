@@ -148,10 +148,11 @@ configuration a sweep would not.
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
 (`gfx950_dense_grid`) and `attention_dense_persist` (`gfx950_dense_persist`
 and `gfx950_dense_persist_widedma`). The grid and persistent bodies serve
-different requests (only the grid body runs a moving bottom-right diagonal),
-and wide DMA needs the persistent body, so those three are the only frozen
-choices. The tile is a knob. The gate is the kernel's own
-`supports_attention_dense`: dispatch adds no eligibility rule of its own, so
+different requests (only the grid body runs a moving bottom-right diagonal or
+takes the additive bias), and wide DMA needs the persistent body, so those three
+are the only frozen choices. The tile is a knob. The gate is the kernel's own
+`supports_attention_dense`: dispatch adds no eligibility rule of its own (except
+refusing a non-fp32 `attn_bias_dtype`, which the spec cannot express), so
 wide DMA is offered on every shape the kernel accepts, including non-causal,
 sinks and sliding-window masks; `TestWideDmaFeatures` in
 `test_attention_dense_gfx950_numeric.py` checks those numerically. Wide DMA
