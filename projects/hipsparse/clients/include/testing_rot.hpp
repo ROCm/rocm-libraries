@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_spvec.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -65,10 +66,8 @@ void testing_rot_bad_arg(const Arguments& argus)
     float* dy     = (float*)dy_managed.get();
 
     // Structures
-    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, dataType);
-    hipsparseDnVecDescr_t y;
-
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, dataType), "Success");
+    hipsparseLocalSpVec x(size, nnz, dx_ind, dx_val, idxType, idxBase, dataType);
+    hipsparseLocalDnVec y(size, dy, dataType);
 
     // Rot
     verify_hipsparse_status_invalid_handle(hipsparseRot(nullptr, &c_coeff, &s_coeff, x, y));
@@ -80,9 +79,6 @@ void testing_rot_bad_arg(const Arguments& argus)
                                             "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(hipsparseRot(handle, &c_coeff, &s_coeff, x, nullptr),
                                             "Error: y is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 #endif
 }
 
@@ -152,12 +148,10 @@ void testing_rot(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(ds_coeff, &hs_coeff, sizeof(T), hipMemcpyHostToDevice));
 
     // Create structures
-    hipsparseLocalSpVec   x1(size, nnz, dx_ind, dx_val_1, idxType, idxBase, dataType);
-    hipsparseLocalSpVec   x2(size, nnz, dx_ind, dx_val_2, idxType, idxBase, dataType);
-    hipsparseDnVecDescr_t y1, y2;
-
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, size, dy_1, dataType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, size, dy_2, dataType));
+    hipsparseLocalSpVec x1(size, nnz, dx_ind, dx_val_1, idxType, idxBase, dataType);
+    hipsparseLocalSpVec x2(size, nnz, dx_ind, dx_val_2, idxType, idxBase, dataType);
+    hipsparseLocalDnVec y1(size, dy_1, dataType);
+    hipsparseLocalDnVec y2(size, dy_2, dataType);
 
     if(argus.unit_check)
     {
@@ -226,9 +220,6 @@ void testing_rot(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 

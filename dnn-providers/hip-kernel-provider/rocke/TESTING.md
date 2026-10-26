@@ -421,6 +421,18 @@ skip; a partial or internally inconsistent LLVM installation fails. Flavor
 auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
+The reproduction scheduler preserves exhaustive coverage while avoiding
+redundant compiler startup. It batches declaration discovery, preflights each
+target once, and combines expected-positive calls per architecture. The
+committed artifact schedules those batches but cannot make them pass: every call
+must survive compile, link, and target assembly, and a failed batch is bisected
+to individual verdicts. Expected-negative cells remain individual and use
+explicit operand witnesses. Independent work shares a quota-aware bounded
+worker pool, with `--jobs` available for an explicit site override.
+Expected crashes and timeouts whose normalized evidence still matches are not
+retried; changed evidence, unexpected verdicts, and unclassified outcomes still
+receive a contention-free retry.
+
 The fast structure and generator units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
