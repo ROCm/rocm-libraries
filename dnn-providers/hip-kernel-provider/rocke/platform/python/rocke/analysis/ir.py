@@ -102,7 +102,9 @@ def analyze_llvm_ir(llvm_ir: str) -> LlvmIrStats:
     mfma_16x16x32 = _count_calls(llvm_ir, "@llvm.amdgcn.mfma.f32.16x16x32.f16")
     mfma_32x32x8 = _count_calls(llvm_ir, "@llvm.amdgcn.mfma.f32.32x32x8f16")
     mfma_32x32x16 = _count_calls(llvm_ir, "@llvm.amdgcn.mfma.f32.32x32x16.f16")
-    mfma_4x4x4 = _count_calls(llvm_ir, "@llvm.amdgcn.mfma.f32.4x4x4f16")
+    mfma_4x4x4 = _count_calls(llvm_ir, "@llvm.amdgcn.mfma.f32.4x4x4f16") + _count_calls(
+        llvm_ir, "@llvm.amdgcn.mfma.f32.4x4x4bf16.1k"
+    )
 
     async_calls = _count_calls(llvm_ir, "@llvm.amdgcn.raw.ptr.buffer.load.lds")
     raw_load_calls = _count_calls(llvm_ir, "@llvm.amdgcn.raw.ptr.buffer.load")

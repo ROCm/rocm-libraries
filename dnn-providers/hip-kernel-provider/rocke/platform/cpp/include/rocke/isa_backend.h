@@ -83,7 +83,7 @@ typedef struct rocke_isa_backend
 {
     rocke_isa_kind_t kind;
     const char* gfx; /* "gfx942", "gfx1151", ...             */
-    int vmcnt_bits; /* arch.vmcnt_bits fact (4 or 6)        */
+    int vmcnt_bits; /* arch.vmcnt_bits (VMCNT field width)  */
     uint32_t buffer_rsrc_word3;
     rocke_waitcnt_layout_t waitcnt_layout;
     int wave_size; /* 64 (CDNA) / 32 (RDNA)                */

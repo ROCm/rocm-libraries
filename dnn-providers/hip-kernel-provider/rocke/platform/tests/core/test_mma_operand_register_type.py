@@ -11,9 +11,10 @@ fails while lowering, naming the operand and the instruction, with the same text
 in the LLVM and HIP lowerings.
 
 Every LLVM case lowers with both engines and requires the same IR, or the same
-error. The HIP cases do the same for the f32 MFMAs; the C++ HIP lowerer has no
-integer or gfx1250 fp8 WMMA lowering, so those cases run the Python HIP lowering
-and require the LLVM lowering's error text.
+error. The HIP cases do the same for the f32 MFMAs and the batched 4x4x4
+f16/bf16 MFMAs; the C++ HIP lowerer has no integer or gfx1250 fp8 WMMA lowering,
+so those cases run the Python HIP lowering and require the LLVM lowering's error
+text.
 """
 
 import re
@@ -24,6 +25,7 @@ import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import (
     BF8E5M2,
+    BF16,
     F16,
     F32,
     FP8E4M3,
@@ -383,6 +385,34 @@ def test_hip_f32_mfma_reinterprets_only_the_one_element_vector(
     call = _mma_builtin_call(source)
     assert re.search(r"\(\w+, __builtin_bit_cast\(float, \w+\), \w+, 0, 0, 0\);", call)
     assert call.count("__builtin_bit_cast") == 1
+    _assert_hipcc_accepts(source, arch, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("op_id", "elem", "builtin"),
+    [
+        ("mfma_f32_4x4x4_f16", F16, "mfma_f32_4x4x4f16"),
+        ("mfma_f32_4x4x4_bf16", BF16, "mfma_f32_4x4x4bf16_1k"),
+    ],
+)
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
+    arch, op_id, elem, builtin, tmp_path
+):
+    # Not in the arch MMA catalog (the kernels emit them by op_id), so the op_id
+    # goes to b.mma as it is.
+    b = IRBuilder(f"mma_operand_{op_id}")
+    out = b.param("D", PtrType(F32, "global"))
+    a_value, b_value, c_value = (
+        make(b) for make in (_loaded(elem, 4), _loaded(elem, 4), _loaded(F32, 4))
+    )
+    result = b.mma(op_id, a_value, b_value, c_value)
+    b.global_store(out, b.thread_id_x(), b.vec_extract(result, 0))
+    source = lower_hip_with_both_engines(b.kernel, arch)
+    assert re.search(
+        rf"= __builtin_amdgcn_{builtin}\(\w+, \w+, \w+, 0, 0, 0\);",
+        _mma_builtin_call(source),
+    )
     _assert_hipcc_accepts(source, arch, tmp_path)
 
 

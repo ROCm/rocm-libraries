@@ -3,6 +3,20 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.3 for ROCm 10.3.0
+
+### Resolved Issues
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
+  `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
+  the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
+  applicable CK instance was never tuned.
+* [Conv] Fixed deterministic-mode tuning of the 3D grouped backward-weights CK xdlops solver, which
+  used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
+  first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
+  one applicable CK instance the enumeration never terminated.
+* [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
+  one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
@@ -58,6 +72,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
+* [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
+  stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
+  including a 3x3 112x112 tile.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors

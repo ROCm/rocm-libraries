@@ -1086,26 +1086,6 @@ static void ll_check_u16(rocke_lower_t* L, const char* op, const char* field, in
     }
 }
 
-static void ll_require_gfx1250_llvm23(rocke_lower_t* L, const char* op)
-{
-    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires gfx1250, got %s",
-                      op,
-                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
-    }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires LLVM flavor llvm23, got %s",
-                      op,
-                      rocke_llvm_flavor_name(L->flavor));
-    }
-}
-
 static const char*
     ll_named_barrier_ptr(rocke_lower_t* L, const char* op, const rocke_value_t* value)
 {
@@ -1143,7 +1123,7 @@ static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
 static void _op_tile_s_wait_tensorcnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t n = 0;
-    ll_require_gfx1250_llvm23(L, "s_wait_tensorcnt");
+    rocke_ll_require_llvm23_target_fact(L, "s_wait_tensorcnt", ROCKE_LL_FACT_TDM);
     rocke_attr_get_int(&op->attrs, "n", &n);
     ll_check_u16(L, "s_wait_tensorcnt", "n", n);
     rocke_ll_need(L, "s.wait.tensorcnt");
@@ -1153,7 +1133,7 @@ static void _op_tile_s_wait_tensorcnt(rocke_lower_t* L, const rocke_op_t* op)
 static void _op_tile_s_barrier_signal(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t barrier_type = 0;
-    ll_require_gfx1250_llvm23(L, "s_barrier_signal");
+    rocke_ll_require_llvm23_target_fact(L, "s_barrier_signal", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
     if(barrier_type < 0 || (uint64_t)barrier_type > UINT32_MAX)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "s_barrier_signal barrier_type must fit unsigned i32");
@@ -1166,7 +1146,7 @@ static void _op_tile_s_barrier_signal(rocke_lower_t* L, const rocke_op_t* op)
 static void _op_tile_s_barrier_wait(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t barrier_type = 0;
-    ll_require_gfx1250_llvm23(L, "s_barrier_wait");
+    rocke_ll_require_llvm23_target_fact(L, "s_barrier_wait", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
     ll_check_u16(L, "s_barrier_wait", "barrier_type", barrier_type);
     rocke_ll_need(L, "s.barrier.wait");
@@ -1185,7 +1165,7 @@ static void ll_named_barrier_count(rocke_lower_t* L,
     if(!count->type || count->type->kind != ROCKE_TYPE_SCALAR
        || count->type->scalar != ROCKE_SCALAR_I32)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s member_count must be i32", short_name);
-    ll_require_gfx1250_llvm23(L, short_name);
+    rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     const char* ptr = ll_named_barrier_ptr(L, short_name, barrier);
     rocke_ll_need(L, intrinsic);
     rocke_ll_emitf(L,
@@ -1212,7 +1192,7 @@ static void ll_named_barrier_one(rocke_lower_t* L,
 {
     if(op->num_operands != 1)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects one barrier pointer", short_name);
-    ll_require_gfx1250_llvm23(L, short_name);
+    rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     const char* ptr = ll_named_barrier_ptr(L, short_name, op->operands[0]);
     rocke_ll_need(L, intrinsic);
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s)", intrinsic, ptr);
@@ -1231,7 +1211,7 @@ static void _op_tile_s_wakeup_barrier(rocke_lower_t* L, const rocke_op_t* op)
 static void _op_tile_s_barrier_leave(rocke_lower_t* L, const rocke_op_t* op)
 {
     int64_t barrier_type = 0;
-    ll_require_gfx1250_llvm23(L, "s_barrier_leave");
+    rocke_ll_require_llvm23_target_fact(L, "s_barrier_leave", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     rocke_attr_get_int(&op->attrs, "barrier_type", &barrier_type);
     ll_check_u16(L, "s_barrier_leave", "barrier_type", barrier_type);
     rocke_ll_need(L, "s.barrier.leave");
@@ -1316,7 +1296,7 @@ static void _op_tile_s_setreg(rocke_lower_t* L, const rocke_op_t* op)
     int64_t simm16 = 0;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "s_setreg");
+    rocke_ll_require_llvm23_target_fact(L, "s_setreg", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     ll_expect_operands(L, op, "s_setreg", 1);
     rocke_attr_get_int(&op->attrs, "simm16", &simm16);
     ll_check_u16(L, "s_setreg", "simm16", simm16);
@@ -1333,7 +1313,7 @@ static void _op_tile_s_prefetch_data(rocke_lower_t* L, const rocke_op_t* op)
     int space;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "s_prefetch_data");
+    rocke_ll_require_llvm23_target_fact(L, "s_prefetch_data", ROCKE_LL_FACT_SCALAR_DATA_PREFETCH);
     ll_expect_operands(L, op, "s_prefetch_data", 2);
     space = rocke_ll_anyptr_space(L,
                                   "s_prefetch_data",
@@ -1355,7 +1335,8 @@ static void _op_tile_s_buffer_prefetch_data(rocke_lower_t* L, const rocke_op_t* 
     int64_t offset = 0;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "s_buffer_prefetch_data");
+    rocke_ll_require_llvm23_target_fact(
+        L, "s_buffer_prefetch_data", ROCKE_LL_FACT_SCALAR_DATA_PREFETCH);
     ll_expect_operands(L, op, "s_buffer_prefetch_data", 2);
     rocke_attr_get_int(&op->attrs, "offset", &offset);
     if(offset < INT32_MIN || offset > INT32_MAX)
@@ -1378,7 +1359,7 @@ static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "global_prefetch");
+    rocke_ll_require_llvm23_target_fact(L, "global_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "global_prefetch", 1);
     ty = rocke_ll_value_ptr_type(L, op->operands[0]);
     if(strcmp(ty, "ptr addrspace(1)") != 0)
@@ -1398,7 +1379,7 @@ static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "flat_prefetch");
+    rocke_ll_require_llvm23_target_fact(L, "flat_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "flat_prefetch", 1);
     ty = rocke_ll_value_ptr_type(L, op->operands[0]);
     if(strcmp(ty, "ptr") != 0)
@@ -1425,7 +1406,7 @@ static void ll_lower_cluster_read(rocke_lower_t* L,
     char key[64];
     if(!rocke_ll_live(L) || !res)
         return;
-    ll_require_gfx1250_llvm23(L, short_name);
+    rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_CLUSTER_LAUNCH);
     if(op->num_operands != 0)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s takes no operands", short_name);
     if(with_axis)
@@ -1483,7 +1464,7 @@ static void _op_tile_cluster_barrier(rocke_lower_t* L, const rocke_op_t* op)
     (void)op;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "cluster_barrier");
+    rocke_ll_require_llvm23_target_fact(L, "cluster_barrier", ROCKE_LL_FACT_CLUSTER_LAUNCH);
     rocke_ll_need(L, "s.cluster.barrier");
     rocke_ll_emit(L, "  fence syncscope(\"cluster\") release");
     rocke_ll_emit(L, "  call void @llvm.amdgcn.s.cluster.barrier()");

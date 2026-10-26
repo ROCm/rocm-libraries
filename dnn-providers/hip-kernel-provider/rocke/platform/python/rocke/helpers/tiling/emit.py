@@ -18,6 +18,7 @@ about *where each element lives* comes from our encodings; the pure value object
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
 from .descriptors import TensorDesc, TensorWindow
@@ -414,8 +415,12 @@ def _contiguous_run(
 ) -> int:
     """Width of the innermost stride-1 register run -> a single WIDE load; else 1 (scalar).
 
-    The innermost register bucket varies fastest in the register index; if it maps to the tensor's
-    stride-1 axis then those registers are memory-contiguous and can be one `global_load_vN` /
+    The innermost register bucket varies fastest in the register index. Its registers are
+    consecutive positions on their axis only when the bucket is that axis's INNERMOST hierarchical
+    level (levels of length 1 inside it do not count). A bucket on an outer level steps the position
+    by the product of the levels inside it -- an interleaved layout holds positions 0, 4, 8, 12 in
+    four consecutive registers -- so it gives no run. When the bucket is the innermost level of the
+    tensor's stride-1 axis, its registers are memory-contiguous and can be one `global_load_vN` /
     `smem_load_vN`. Width is the largest supported vector size for the dtype (8/4/2) dividing the run.
 
     A wide GLOBAL load is UNMASKED, so it is emitted only for a tile that is FULLY IN BOUNDS on the
@@ -443,6 +448,9 @@ def _contiguous_run(
     run_axis = lead + tile_axis
     if tile_axis < 0 or strides[run_axis] != 1:
         return 1
+    inner_levels = layout.hierarchical_lengths[tile_axis][minors[-1] + 1 :]
+    if math.prod(inner_levels) != 1:
+        return 1  # an outer level of its axis: consecutive registers are not consecutive positions
     other_strides = [stride for axis, stride in enumerate(strides) if axis != run_axis]
     if not is_lds:
         # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile

@@ -160,6 +160,14 @@ void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const c
  * core/ir.py::_refuse_unsigned_operands. */
 void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead);
 
+/* Throw ckc::TypeError unless the source of `op`, a u8 -> float conversion, is
+ * a u8 scalar. rocke_b_uitofp_f32 checks its input when the op is built; the
+ * lowerings call this for IR that did not come through it (hand-assembled or
+ * deserialized), because they would read any other source differently: LLVM's
+ * uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0. The twin
+ * of core/ir.py::_refuse_non_u8_source, with the same message. */
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
+
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
@@ -205,6 +213,22 @@ rocke_attr_map_t rocke_i_attrs(rocke_ir_builder_t* b);
 /* Deep-copy an attr map into the arena (for rocke_b_op which takes a borrowed
  * attrs pointer; Op.attrs is dict(attrs or {}) in Python). */
 void rocke_i_attrs_copy(rocke_ir_builder_t* b, rocke_attr_map_t* dst, const rocke_attr_map_t* src);
+
+/* Mirrors ir._int_add_wrap_error: the error for arith.add's "wrap" attr on
+ * operands of type `operand_type`, or NULL when it is absent (meaning nsw) or
+ * valid; "nuw" takes i32 or i64 operands. A formatted message is written into
+ * `buf`, which the result then points to. */
+const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._int_cmp_pred_error: the same for arith.cmp's "pred" attr
+ * (absent means lt; "ult" takes i32 or i64 operands). */
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
 
 /* ------------------------------------------------------------- DPP helpers */
 

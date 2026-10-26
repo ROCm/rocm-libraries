@@ -519,7 +519,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     sdpaAttrs.set_dropout(0.1f, seed, offset);
     sdpaAttrs.set_dropout_mask(dropoutMask);
     sdpaAttrs.set_generate_stats(true);
-    sdpaAttrs.set_causal_mask(true);
+    sdpaAttrs.causal_mask = true;
     sdpaAttrs.set_attn_scale(0.125f);
     sdpaAttrs.set_diagonal_band_left_bound(0);
     sdpaAttrs.set_diagonal_band_right_bound(128);

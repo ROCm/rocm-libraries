@@ -32,8 +32,8 @@ from kernels.common.conv_abi import (
     conv_direct_arg_names,
 )
 from rocke.helpers.spec import ceil_div
+from rocke.helpers.magic_division import calculate_magic_numbers
 from rocke.helpers.streamk import StreamKIterPartition, streamk_iter_partition
-from rocke.helpers.transforms import calculate_magic_numbers
 
 __all__ = [
     "ConvArgs",

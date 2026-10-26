@@ -17,9 +17,9 @@ rejects) is reported separately and does NOT count toward a family being
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
 Freshness / stale-build guard:
-  The .so and the standalone emitters MUST come from the same engine source
-  snapshot. When the emit dir was built it records the engine build-id it was
-  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  The .so and the standalone emitters MUST come from the same portable-IR native
+  bundle snapshot. When the emit dir was built it records the bundle build-id it
+  was linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
   asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
@@ -54,7 +54,7 @@ def _assert_build_id_match():
     if not os.path.exists(bid_path):
         print(
             f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
-            f"were built from the same engine source. .so build-id={so_id}. "
+            f"were built from the same native bundle. .so build-id={so_id}. "
             "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
             "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
             file=sys.stderr,
@@ -1428,6 +1428,17 @@ def cfgs_sparse_attention():
             max_blocks_per_q=24,
             use_wave_ballot_scatter=False,
         ),
+        dict(
+            kind="jenga",
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            dtype="f16",
+            seqlen_q=48,
+            seqlen_k=144,
+            block_q=3,
+            block_k=48,
+        ),
     ]
 
 
@@ -1535,6 +1546,20 @@ def cfgs_sage_attention():
             seqlen_q=32,
             seqlen_k=128,
         ),
+        dict(
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            block_size_q=16,
+            block_size_k=64,
+            dtype="f16",
+            mask_mode="none",
+            quant_mode="fp16_bf16",
+            q_scale=pb(48, 128, 8, 1),
+            k_scale=pb(48, 128, 8, 1),
+            seqlen_q=96,
+            seqlen_k=144,
+        ),
     ]
 
 
@@ -1633,7 +1658,7 @@ def cfgs_fmha_varlen():
 
 
 def cfgs_fmha_splitkv_decode():
-    # mirrors fmha_splitkv_decode_emit.c make_spec (0..5); harness compares the
+    # mirrors fmha_splitkv_decode_emit.c make_spec (0..6); harness compares the
     # segment phase (the emitter's `<idx> ll` => mode=ll/phase=seg). The binding
     # defaults to "seg" so no explicit phase key is needed.
     rows = [
@@ -1643,6 +1668,7 @@ def cfgs_fmha_splitkv_decode():
         (256, 32, 4, "f16", "sliding_window", 2048, 1, 32, True),
         (64, 12, 3, "bf16", "none", 0, 8, 64, True),
         (128, 16, 8, "f16", "causal", 0, 2, 128, True),
+        (128, 40, 8, "f16", "none", 0, 2, 8, True),
     ]
     out = []
     for h, q, kv, dt, m, sw, b, segs, mfma in rows:

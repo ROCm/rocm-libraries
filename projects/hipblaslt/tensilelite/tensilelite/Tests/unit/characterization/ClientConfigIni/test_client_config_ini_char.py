@@ -45,11 +45,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import Tensile.ClientWriter as CW
-from Tensile.Contractions import ProblemType as ContractionsProblemType, FreeIndex, BatchIndex
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
-from Tensile.SolutionStructs import FactorDimArgs
+import tensilelite.ClientWriter as CW
+from tensilelite.Contractions import ProblemType as ContractionsProblemType, FreeIndex, BatchIndex
+from tensilelite.Common.GlobalParameters import globalParameters
+from tensilelite.SolutionStructs.Problem import ProblemSizesMockDummy
+from tensilelite.SolutionStructs import FactorDimArgs
 
 pytestmark = pytest.mark.unit
 
@@ -195,6 +195,7 @@ def _set_all_gp(monkeypatch):
         "DataInitTypeMXSA": 0,
         "DataInitTypeMXSB": 0,
         "DataInitTypeAB": 3,
+        "MXDataGenerator": None,
     }
     for k, v in keys.items():
         monkeypatch.setitem(globalParameters, k, v)
@@ -574,6 +575,20 @@ class TestWriteClientConfigIniPlain:
         assert "print-tensor-amaxd=1" in content
         assert "dump-tensors=1" in content
 
+    @pytest.mark.parametrize("enabled, expected", [(True, 1), (False, 0)])
+    def test_mx_data_generator_written_when_set(self, tmp_path, monkeypatch, enabled, expected):
+        """MXDataGenerator reaches the client in both explicit states."""
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
+                             extra_gp={"MXDataGenerator": enabled})
+        assert f"mx-data-generator={expected}" in content
+
+    def test_mx_data_generator_omitted_when_unset(self, tmp_path, monkeypatch):
+        """Keep default INI files unchanged when MXDataGenerator is unset."""
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT)
+        assert "mx-data-generator" not in content
+
     def test_rocprof_counter_written_when_set(self, tmp_path, monkeypatch):
         """Lines 729-731: rocprof-counter written for each counter."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
@@ -932,7 +947,7 @@ class TestProblemSizeParamsUseE:
     def test_e_strides_added_when_use_e(self):
         """Lines 491-492: useE=True adds 'e-strides' equal to dstrides."""
         pt = _make_problem_type(_USE_E_PT_DICT)
-        from Tensile.SolutionStructs.Problem import Problem
+        from tensilelite.SolutionStructs.Problem import Problem
 
         # sizes=[M, N, batch, K] = 4 indices matching TotalIndices
         problem = Problem([128, 64, 1, 512])
@@ -942,7 +957,7 @@ class TestProblemSizeParamsUseE:
     def test_no_e_strides_without_use_e(self):
         """No e-strides when useE is False."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
-        from Tensile.SolutionStructs.Problem import Problem
+        from tensilelite.SolutionStructs.Problem import Problem
 
         problem = Problem([128, 64, 1, 512])
         result = dict(CW.problemSizeParams(pt, problem, [0]))

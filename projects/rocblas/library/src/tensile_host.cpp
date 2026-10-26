@@ -59,7 +59,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -923,27 +922,28 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
+                        rocblas_internal_ostream msg;
+                        msg << "\nrocBLAS error: Cannot read " << tensileLibraryPath << ": "
+                            << strerror(errno);
 #if ROCBLAS_TENSILE_SEPARATE_ARCH
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << " for GPU arch : " << processor
-                                     << std::endl;
+                        msg << " for GPU arch : " << processor;
+                        msg << "\n List of available TensileLibrary Files :";
 #if ROCBLAS_TENSILE_LAZY_LOAD
-                        std::regex fileMatcher(path + "/TensileLibrary_lazy.*");
+                        constexpr bool lazy_load = true;
 #else
-                        std::regex fileMatcher(path + "/TensileLibrary_gfx\\d+.dat");
+                        constexpr bool lazy_load = false;
 #endif
-                        rocblas_cerr << " List of available TensileLibrary Files : " << std::endl;
-                        for(auto& file_name : fs::directory_iterator(path))
+                        // Best-effort directory listing
+                        std::error_code list_ec;
+                        for(auto& file_name : fs::directory_iterator(path, list_ec))
                         {
-                            if(std::regex_match(file_name.path().string(), fileMatcher))
-                            {
-                                rocblas_cerr << file_name << std::endl;
-                            }
+                            // Match by filename prefix.
+                            if(rocblas_tensile_is_library_filename(
+                                   file_name.path().filename().string(), lazy_load))
+                                msg << "\n  " << file_name.path().string();
                         }
-#else
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << std::endl;
 #endif
+                        rocblas_cerr << msg.str() << std::endl;
                         rocblas_abort();
                     }
                 }
@@ -1185,13 +1185,18 @@ namespace
             adapter = a.adapter.load(std::memory_order_relaxed);
             if(!adapter)
             {
-                // Allocate a new adapter using the current HIP device
-                adapter = new Tensile::hip::SolutionAdapter;
+                // Hold the new adapter in a unique_ptr so that if initialize()
+                // throws (e.g. a HIP error or code-object load failure) the
+                // adapter is freed during unwinding rather than leaked.
+                // Ownership transfers to a.adapter only after initialize()
+                // succeeds.
+                auto new_adapter = std::make_unique<Tensile::hip::SolutionAdapter>();
 
                 // Initialize the adapter and get the library (all of the same gfx use the same library)
-                a.library = host.initialize(*adapter, device);
+                a.library = host.initialize(*new_adapter, device);
 
                 // Atomically change the adapter stored for this device ID
+                adapter = new_adapter.release();
                 a.adapter.store(adapter, std::memory_order_release);
             }
         }
