@@ -1277,6 +1277,34 @@ rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
 
 static int rocke_i_check_cachepolicy(rocke_ir_builder_t* b, const char* op, int cachepolicy);
 
+/* Python IRBuilder.buffer_load: one f16 / bf16 / f32 / i32 element. */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    const char* name;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset || !dtype)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load: NULL operand");
+    name = dtype->name;
+    if(dtype->kind != ROCKE_TYPE_SCALAR
+       || (strcmp(name, "f16") != 0 && strcmp(name, "bf16") != 0 && strcmp(name, "f32") != 0
+           && strcmp(name, "i32") != 0))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load: unsupported dtype '%s'", name);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "elem_type", name);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD, ops, 3, dtype, &attrs, "bl1");
+}
+
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,

@@ -501,6 +501,30 @@ def build_buffer_store_cachepolicy(b: IRBuilder) -> None:
 CONFIGS.append((build_buffer_store_cachepolicy, "gfx1250"))
 
 
+def build_buffer_load_scalar(b: IRBuilder) -> None:
+    """The dtype-generic scalar buffer load for every element type (the
+    16-bit ones through the i16 intrinsic, the 32-bit ones through i32)."""
+    src = b.param("src", PtrType(I32, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(I32, "global"), align=16)
+    nbytes = b.param("nbytes", I32)
+    rs = b.buffer_rsrc(src, nbytes)
+    rd = b.buffer_rsrc(dst, nbytes)
+    c0 = b.const_i32(0)
+    off = b.mul(b.thread_id_x(), b.const_i32(4))
+    h = b.buffer_load(rs, off, c0, F16)
+    g = b.buffer_load(rs, off, c0, BF16)
+    f = b.buffer_load(rs, off, c0, F32)
+    i = b.buffer_load(rs, off, c0, I32)
+    b.buffer_store_f16(rd, off, c0, h)
+    b.buffer_store_bf16(rd, off, c0, g)
+    b.buffer_store_f32(rd, off, c0, f)
+    b.buffer_store_f32(rd, off, c0, b.bitcast(i, F32))
+    b.ret()
+
+
+CONFIGS.append((build_buffer_load_scalar, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):
