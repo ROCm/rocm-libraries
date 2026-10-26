@@ -105,9 +105,6 @@ template <class Derived, class InputIt, class Size, class Predicate>
 InputIt THRUST_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-  using result_type = _THRUST_STD::tuple<bool, Size>;
-
-  // empty sequence
   if (num_items == 0)
   {
     return first;
@@ -130,8 +127,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 
   for (auto interval_begin = begin; interval_begin < end; interval_begin += interval_size)
   {
-    auto interval_end = interval_begin + interval_size;
-    if (end < interval_end)
+    THRUST_HOST static Size par(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
     {
       interval_end = end;
     } // end if
@@ -142,7 +138,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
     // see if we found something
     if (thrust::get<0>(result))
     {
-      return first + thrust::get<1>(result);
+      return thrust::find_if(cvt_to_seq(derived_cast(policy)), first, first + num_items, predicate) - first;
     }
   }
 
