@@ -19,9 +19,15 @@ from hkp_pack.errors import HkpPackError
 from hkp_pack.hsaco_source import hsaco_variant_key
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
 from hkp_pack.pipeline import compile_intermediate
-from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
+from pack_helpers import (
+    ARCH,
+    GENERIC_TARGETS,
+    _load_kpack,
+    _read,
+    read_shipped,
+    run_pipeline,
+)
 
-ARCH = "gfx942"
 CO_NAME = "HsacoFixture.co"
 NO_HIPCC = "hipcc-not-invoked"
 KDP = "solo.kdp.json"
@@ -58,19 +64,8 @@ extern "C" __global__ void KernelOther(float* x)
 BUILD = {"defines": {"HKP_TEST": 1}}
 
 
-def _read(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def _write(path, doc):
     path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-
-
-def _load_kpack(rocm_kpack_dir):
-    from hkp_pack.kpack_resolver import load_kpack
-
-    kpack, _comp = load_kpack(rocm_kpack_dir)
-    return kpack
 
 
 def _hip(source="Pair.cpp", entry="KernelAdd", build=BUILD):
