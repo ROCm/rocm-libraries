@@ -1199,8 +1199,13 @@ Every candidate a shape admits runs against one set of inputs and one f64 refere
 once per case. The sweeps and large shapes are `Full/TestGpuFlydslSdpaCdnaFullTier`, full tier
 only (§4's tier note): every width inside the non-power-of-two buckets, DeepSeek-V4's head dim
 512 at prefill lengths, the lowest-finite bias rows in every combination, the combinations no
-other case reaches, and the 1024-long sequence. The quick tier keeps one configuration of each
-behavior, so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
+other case reaches, and the 1024-long sequence; and, of the parity cases, the strided-bias
+shapes at every head dim, a bias with a sink (both bias dtypes) in every combination, the
+diagonals that pass the keys at every head dim, the bucket bias head dims, the f32 lowest-finite
+bias rows, the FLOAT sink's other cases, the VAE mid-block at head dim 512, dropout with a bias
+at every head dim, and the padded bias at every key length, head dim and edge row. The quick
+tier keeps one configuration of each behavior (each moved case keeps a quick case of the same
+name), so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -1504,8 +1509,9 @@ modification 32): 0 new objects.
   beforehand. A bias at key lengths of every residue mod 4 and mod 8, NaN past each batch's keys,
   rows at the lowest finite value, −inf and NaN, on every vectorized and strided object the
   matcher admits, against hipDNN's CPU reference too
-  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`); with the objects before modification 37
-  it fails on the last real row of the 63-key batch. Every gate:
+  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`: the quick tier runs the length set with
+  the 63-key batch, `Full/TestGpuFlydslSdpaCdnaFullTier` all of it); with the objects before
+  modification 37 it fails on the last real row of the 63-key batch. Every gate:
   `Padding/TestFlydslSdpaCdnaFieldDeclines`,
   `TestFlydslSdpaCdnaKernelMatch.RunsPaddingOnlyOnObjectsThatReadEachBatchsLengths`,
   `RanksAPaddedGraphOnTheMaskedDefaultTier`, `RunsAPaddedGraphsBiasOnTheVectorizedObjects`.

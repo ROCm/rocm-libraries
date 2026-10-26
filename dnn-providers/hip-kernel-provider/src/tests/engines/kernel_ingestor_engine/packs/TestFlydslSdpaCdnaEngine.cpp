@@ -4092,6 +4092,20 @@ TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesTheCombinationsNoOtherCaseReaches)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAVaeMidBlockAtHeadDim512)
 {
+    // The generic prefill engine's exact 512/512 objects at a ragged tail; the VAE mid-block's
+    // own shapes are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.headDim = 512;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 261;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesAVaeMidBlockAtHeadDim512)
+{
     // The Stable Diffusion / Flux VAE mid-block attention: one head x 512 channels, non-causal,
     // on the generic prefill engine's exact 512/512 objects (O split four ways across
     // workgroups; K chunked on gfx942 and gfx90a). A ragged tail, and causal with GQA.
@@ -4174,6 +4188,32 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesDiagonalsThatPassTheKeys)
+{
+    // Rows whose diagonal passes the last key see every key (modification 30): top-left with
+    // more queries than keys, and a band wider than Skv - Sq under a window. Every head dim,
+    // f16, a bias, a sink and decode-sized queries are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    {
+        SCOPED_TRACE("top-left, Sq 700 > Skv 333");
+        auto topLeft = spec;
+        topLeft.seqLenQ = 700;
+        topLeft.seqLenKv = 333;
+        expectCdnaMatchesReference(topLeft, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("top-left band 100 with a window of 64, Sq = Skv = 300");
+        auto band = spec;
+        band.seqLenQ = 300;
+        band.seqLenKv = 300;
+        band.rightBound = 100;
+        band.leftBound = 64;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesDiagonalsThatPassTheKeys)
 {
     // Rows whose diagonal passes the last key see every key, and the last KV tile's padding
     // stays out (modification 30): top-left with more queries than keys, and bands wider
@@ -4992,6 +5032,36 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAt
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasTheVectorizedObjectsCannotRead)
 {
+    // The strided bias objects (vendored-kernel modification 31) at one head dim, causal: an
+    // f32 bias, and 334 keys at a pitch of 336. Every head dim and every bias shape are in
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 128;
+    spec.withBias = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    {
+        SCOPED_TRACE("f32 per head");
+        auto f32 = spec;
+        f32.biasDataType = DataType::FLOAT;
+        f32.biasDims = {1, 32, 200, 264};
+        expectCdnaMatchesReference(f32, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("334 keys at a pitch of 336");
+        auto padded = spec;
+        padded.biasDataType = DataType::BFLOAT16;
+        padded.seqLenKv = 334;
+        padded.biasDims = {1, 1, 200, 334};
+        padded.biasStrides = {67200, 67200, 336, 1};
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasTheVectorizedObjectsCannotRead)
+{
     // The strided bias objects (vendored-kernel modification 31): an f32 bias, a bias
     // broadcast along the keys, rows that are not 16-byte aligned, a key length that is not a
     // multiple of 4 under a padded pitch, rows that overlap, and a bias expanded with stride
@@ -5060,6 +5130,25 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasTheVectorizedObjectsCannotRead)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAnF32BiasThatMasksWholeRowsAtItsLowestFiniteValue)
 {
+    // Every third row's f32 bias at -FLT_MAX and the first 128 keys -inf, causal, at one head
+    // dim; every head dim, with and without the -inf keys, in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 128;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    spec.seqLenQ = 256;
+    spec.seqLenKv = 264;
+    spec.stats = SdpaStats::LSE;
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = 1.0F / std::sqrt(128.0F);
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsAnF32BiasThatMasksWholeRowsAtItsLowestFiniteValue)
+{
     // An f32 padding mask: every third row's bias is f32's lowest finite value (-FLT_MAX) on
     // every key, and the first 128 keys of every row -inf (every third row then reaches no key
     // in the causal case). Its scores sit at -FLT_MAX, the masked-score sentinel's value; the
@@ -5093,6 +5182,23 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAnF32BiasThatMasksWholeRowsAtItsLowestFi
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAtTheBucketHeadDims)
 {
+    // One bucket head dim (its own bucket on gfx90a, 128's elsewhere), causal, -inf rows; every
+    // bucket head dim and f16 are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 96;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.biasDims = {1, 32, 200, 264};
+    spec.stats = SdpaStats::LSE;
+    spec.biasNegativeInfinityRows = true;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasAtTheBucketHeadDims)
+{
     // Head dims no exact object serves, on the bucket bias objects: on gfx90a 96 and 160 have
     // buckets of their own, elsewhere they take the next power of two's.
     for(const int64_t headDim : {int64_t{72}, int64_t{96}, int64_t{160}, int64_t{200}})
@@ -5124,6 +5230,26 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAtTheBucketHeadDims)
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAndASink)
+{
+    // A bias and a sink together (the sink objects' bias builds), causal, at one head dim:
+    // rows at the lowest finite value and -inf leading keys that leave rows keyless (O 0, LSE
+    // the sink). Every head dim and the other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.withSink = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.biasDims = {1, 32, 200, 264};
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasAndASink)
 {
     // A bias and a sink together (the sink objects' bias builds): a per-head bias, a padding
     // mask whose rows are at the lowest finite value, -inf leading keys that leave causal
@@ -5159,6 +5285,26 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAndASink)
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasTheVectorizedObjectsCannotReadWithASink)
+{
+    // An f32 bias with a sink on the strided sink-and-bias objects, causal, at one head dim:
+    // rows at f32's lowest finite value and -inf leading keys that leave rows keyless. Every
+    // head dim and the other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    spec.withSink = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 261;
+    spec.biasDims = {1, 32, 200, 261};
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasTheVectorizedObjectsCannotReadWithASink)
 {
     // f32 and key-broadcast biases with a sink, on the strided sink-and-bias objects
     // (COVERAGE.md section 7.5 item 16): rows at f32's lowest finite value average V over
@@ -5270,6 +5416,26 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsEveryMaskAtEachBatchsOwnDiagonal)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
 {
+    // A padded row's LSE is -inf even beside a sink, and a batch with no keys is keyless (LSE
+    // the sink); then a bias the vectorized objects read over key lengths no multiple of 4,
+    // with a sink. The other biases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = paddedGpuSpec();
+    spec.seqLensKv = {300, 0, 200};
+    spec.seqLensQ = {300, 129, 100};
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenKv = 296;
+    spec.seqLensQ = {300, 129, 7};
+    spec.seqLensKv = {63, 61, 296};
+    spec.headDim = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, PadsWithABiasAndASink)
+{
     // A padded row's LSE is -inf even beside a sink; a row of a batch with no keys is keyless,
     // so its LSE is the sink.
     auto spec = paddedGpuSpec();
@@ -5301,6 +5467,29 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns)
+{
+    // Under padding the vectorized bias objects read the last real row's bias up to the
+    // launch's key length (vendored-kernel modification 37): one batch per key length mod 4,
+    // bottom-right, a bias that is NaN past each batch's keys. Every length set, head dim,
+    // mask and edge row is in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.batch = 4;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.headDim = 128;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 296;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.biasDims = {4, 4, 160, 296};
+    spec.biasNanPastKeys = true;
+    setPadding(spec, {129, 70, 160, 3}, {61, 62, 63, 64});
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns)
 {
     // Under padding the vectorized bias objects read the last real row's bias up to the
     // launch's key length (vendored-kernel modification 37). Before it that row's final 4-key
@@ -5393,6 +5582,34 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAtEveryKeyLengthModuloTheVector
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAFloatSink)
+{
+    // A FLOAT sink (vendored-kernel modification 36), rank 1, and rank 4 over rows no key
+    // reaches (LSE = the sink's f32 bits), against the harness's reference and hipDNN's CPU
+    // reference. The other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    {
+        SCOPED_TRACE("rank 1");
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("rank 4, rows no key reaches");
+        auto rank4 = spec;
+        rank4.sinkRank4 = true;
+        rank4.seqLenKv = 64;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsAFloatSink)
 {
     // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (vendored-kernel modification 36),
     // against the harness's reference and hipDNN's CPU reference: rank 1 and rank 4, rows no
@@ -5579,6 +5796,37 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DropsTheOraclesMaskBitForBit)
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithABias)
+{
+    // The dropout objects' bias builds: the mask bit for bit through O (Q zero, V the
+    // identity), then under padding with a bias that is NaN past each batch's keys, through O
+    // and the RNG dump. Every head dim, the full output and the edge rows are in
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto mask = cdnaSpec();
+    mask.heads = 8;
+    mask.kvHeads = 2;
+    mask.seqLenQ = 64;
+    mask.seqLenKv = 128;
+    mask.withBias = true;
+    mask.biasDataType = DataType::BFLOAT16;
+    mask.biasDims = {1, 1, 64, 128};
+    mask.exposeDropoutMask = true;
+    setDropout(mask, 0.3F, 99U, 7U);
+    {
+        SCOPED_TRACE("the mask through O");
+        expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+    mask.batch = 3;
+    mask.biasDims = {3, 8, 64, 128};
+    mask.biasNanPastKeys = true;
+    mask.withRngDump = true;
+    setPadding(mask, {64, 33, 0}, {127, 61, 128});
+    {
+        SCOPED_TRACE("under padding, the mask through O and the RNG dump");
+        expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, DropsWithABias)
 {
     // The dropout objects' bias builds: the bias added to the scores, the mask drawn after the
     // softmax's sum (the LSE undropped, the bias in it). A per-head bias, a padding mask whose
