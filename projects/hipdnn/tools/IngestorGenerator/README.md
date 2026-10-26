@@ -112,11 +112,12 @@ a request to run the class. See the
     --new-ids
 ```
 
-Every KDP a real run writes carries `provenance.generated_from`: the `--config` (and
-`--manifest`, when given) path, plus `generator_commit` and `rocke_commit`, each the last
-commit touching that tree (`-dirty` when it has local edits). It is informational:
-`catalog_diff` compares only `provenance.specialization_contract`, so a regeneration at a
-later commit still diffs clean. A config kernel may carry `provenance.rocke_spec_id` /
+With `--stamp-provenance`, every KDP the run writes carries `provenance.generated_from`:
+the `--config` (and `--manifest`, when given) path, plus `generator_commit` and
+`rocke_commit`, each the last commit touching that tree (`-dirty` when it has local edits).
+It is informational: `catalog_diff` compares only `provenance.specialization_contract`, so
+a regeneration at a later commit still diffs clean. It is off by default because the
+commits change with every checkout, so a stamped KDP never regenerates byte-identical. A config kernel may carry `provenance.rocke_spec_id` /
 `rocke_tuning_id`, which `registry_enumerator.py` fills from the pin and the registry.
 
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
