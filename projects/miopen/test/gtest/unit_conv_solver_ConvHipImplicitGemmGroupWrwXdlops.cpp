@@ -210,7 +210,7 @@ TEST(GPU_GroupWrwRankedSelection_FP16, ValidatesSplitOneAndPreservesFallback)
 
     // Deterministic problems also validate split one without adopting a ranked tuning hint.
     conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
-    problem = make_problem();
+    problem          = make_problem();
     config.split_k   = 1;
     config.kernel_id = default_id;
     config.DefaultKernelFromList(ctx, problem);
