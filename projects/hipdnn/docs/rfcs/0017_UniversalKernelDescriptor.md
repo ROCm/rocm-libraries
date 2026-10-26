@@ -1601,9 +1601,10 @@ that has no solver for a configuration it can only learn about while building th
 `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` from `hipdnnEnginePluginCreateExecutionContext` (the SDK
 engine throws it from `initializeExecutionContext`). hipDNN's backend reports it as
 `HIPDNN_STATUS_NOT_SUPPORTED` from the execution plan's finalize, and the frontend's default
-`build_plans` then moves to the next ranked engine. This does not relax the invariant: an engine
-that can tell at applicability that it has no kernel declines there by returning false, and
-`NOT_APPLICABLE` at plan creation is reserved for what the engine can learn only when building.
+`build_plans` then tries the other ranked engines, scanning from the top of the list. This does
+not relax the invariant: an engine that can tell at applicability that it has no kernel declines
+there by returning false, and `NOT_APPLICABLE` at plan creation is reserved for what the engine
+can learn only when building.
 Every other failure status stays a failed plan build.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.

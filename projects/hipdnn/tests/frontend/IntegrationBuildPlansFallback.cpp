@@ -5,7 +5,7 @@
 // accepts a graph (it is returned by GetApplicableEngineIds) but cannot build an execution
 // plan for it.
 //
-// Only the "no solver" outcome falls back to the next ranked engine: the plugin answers
+// Only the "no solver" outcome falls back to another ranked engine: the plugin answers
 // plan creation with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. Any other plan-creation failure
 // (here an out-of-memory status) stops and is returned, even when the failing engine is
 // the user's soft preferred engine. BuildPlanPolicy::ALL skips every failing plan.

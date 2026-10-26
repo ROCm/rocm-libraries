@@ -61,8 +61,9 @@ public:
      *
      * Return false to decline a graph; that is the supported way to opt out. A std::exception
      * thrown from here is skipped with a warning for this engine; any other exception type is not
-     * caught by the SDK, ends this plugin's applicability query, and the host then skips the
-     * plugin. Accepting a graph means the engine can build a plan for it; an engine that learns
+     * caught by the SDK and ends this plugin's applicability query. The host skips the plugin in
+     * that case, except for an explicitly pinned engine, where the owning plugin's error is
+     * reported. Accepting a graph means the engine can build a plan for it; an engine that learns
      * only while building that it has no solver throws NOT_APPLICABLE from
      * initializeExecutionContext instead.
      *
