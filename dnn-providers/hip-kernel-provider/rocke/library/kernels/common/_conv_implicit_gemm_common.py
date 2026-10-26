@@ -709,9 +709,7 @@ def _tf32_register_reason(spec, op) -> Optional[str]:
     return None
 
 
-def _tf32_lds_stride_reason(
-    row_stride: int, frag: int, arch: Optional[str] = None
-) -> Optional[str]:
+def _tf32_lds_stride_reason(row_stride: int, frag: int) -> Optional[str]:
     """Reject an LDS row stride that would misalign a TF32 fragment read.
 
     A TF32 fragment is ``frag`` fp32 values read from one LDS row (2 on gfx942
@@ -726,11 +724,10 @@ def _tf32_lds_stride_reason(
     """
     _need = min(frag, _TF32_LDS_LOAD_MAX)
     if row_stride % _need:
-        _where = f" on {arch}" if arch else ""
         return (
             f"mma_dtype='tf32': LDS row stride {row_stride} fp32 elements is not "
             f"a multiple of {_need}, so the {frag}-wide fragment read would be "
-            f"misaligned{_where}; use an lds_k_pad that keeps tile_k + pad a "
+            f"misaligned; use an lds_k_pad that keeps tile_k + pad a "
             f"multiple of {_need}"
         )
     return None

@@ -2958,6 +2958,14 @@ def main() -> int:
             print(f"{'#'*72}", flush=True)
 
         cpg = problem.cpg
+        if dtype == "tf32" and cpg == 1 and direction in ("fwd", "dgrad"):
+            # Depthwise has no channel reduction for an MMA: these kernels run
+            # exact fp32 (kernel names carry "f32", not "tf32"), so a tf32
+            # result here is an fp32 result -- no TF32 rounding, no TF32 speedup.
+            print(
+                "[info] depthwise tf32 runs the scalar-FMA kernels in exact fp32",
+                flush=True,
+            )
         if direction == "dgrad":
             rc, _ = _run_dgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif direction == "wgrad":

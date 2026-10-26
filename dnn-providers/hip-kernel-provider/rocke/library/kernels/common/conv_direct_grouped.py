@@ -543,6 +543,39 @@ def _f32_mma_plan(arch: str, dtype: str, m: int, frag: int):
     return None
 
 
+def _frag_width(v: Value) -> int:
+    """Elements per lane of an operand fragment (a scalar counts as one)."""
+    return v.type.count if isinstance(v.type, VectorType) else 1
+
+
+def _zero_pad_operands(
+    b: IRBuilder, a: Value, b_val: Value, pad: int
+) -> Tuple[Value, Value]:
+    """Both MMA operands as ``<frag + pad x float>``, zero-filled at the same K.
+
+    The one place an fp32-storage fragment is widened to an atom. Padding is
+    only correct when it is symmetric: the padded K slots must be zero in A
+    *and* B, so each padded product is ``0 * 0``. Pad one operand alone and its
+    zeros meet the other's real values, and ``0 * Inf`` / ``0 * NaN`` turns the
+    sum into NaN. Taking both operands here, and refusing fragments of different
+    widths, keeps a caller from padding only one side.
+    """
+    frag = _frag_width(a)
+    if _frag_width(b_val) != frag:
+        raise ValueError(
+            f"MMA operand fragments differ in width: A {frag}, "
+            f"B {_frag_width(b_val)}"
+        )
+    if frag == 1:
+        a = b.vec_pack([a], F32)
+        b_val = b.vec_pack([b_val], F32)
+    if pad:
+        zeros = [b.const_f32(0.0)] * pad
+        a = b.vec_pack([b.vec_extract(a, i) for i in range(frag)] + zeros, F32)
+        b_val = b.vec_pack([b.vec_extract(b_val, i) for i in range(frag)] + zeros, F32)
+    return a, b_val
+
+
 def _mma_f32_logical(
     b: IRBuilder,
     arch: str,
@@ -559,21 +592,15 @@ def _mma_f32_logical(
     to) the catalog atom's fragment -- see :func:`_f32_mma_plan` -- and, for
     ``"tf32"``, each piece is reinterpreted as ``vec<tf32xN>`` (a free bitcast:
     gfx942 hardware drops the low 13 mantissa bits, gfx950 splits the full
-    payload into BF16x3). Both operands are padded with zeros, so ``0 * x``
-    never meets a NaN or Inf from the other side.
+    payload into BF16x3). Padding goes through :func:`_zero_pad_operands`,
+    which pads A and B together.
     """
-    frag = a.type.count if isinstance(a.type, VectorType) else 1
+    frag = _frag_width(a)
     plan = _f32_mma_plan(arch, dtype, m, frag)
     if plan is None:
         raise ValueError(f"no {m}x{m} {dtype} MMA atom on {arch}")
     op, chunks, pad = plan
-    if frag == 1:
-        a = b.vec_pack([a], F32)
-        b_val = b.vec_pack([b_val], F32)
-    if pad:
-        zeros = [b.const_f32(0.0)] * pad
-        a = b.vec_pack([b.vec_extract(a, i) for i in range(frag)] + zeros, F32)
-        b_val = b.vec_pack([b.vec_extract(b_val, i) for i in range(frag)] + zeros, F32)
+    a, b_val = _zero_pad_operands(b, a, b_val, pad)
     n = op.a_frag_len
 
     def _piece(v: Value, i: int) -> Value:
@@ -613,8 +640,7 @@ def _mma_f32_chain(
     """
     if not operands:
         return acc
-    a0 = operands[0][0]
-    frag = a0.type.count if isinstance(a0.type, VectorType) else 1
+    frag = _frag_width(operands[0][0])
     plan = _f32_mma_plan(arch, dtype, m, frag)
     wide = _f32_mma_plan(arch, dtype, m, 2 * frag)
     fuse = plan is not None and plan[2] > 0 and wide is not None and wide[2] == 0
@@ -632,11 +658,13 @@ def _mma_f32_chain(
 
 
 def _f32_mma_reason(arch: str, dtype: str, m: int, frag: int) -> Optional[str]:
-    """Why no ``m x m`` MMA serves fp32-storage ``dtype`` on ``arch``, or None."""
-    try:
-        plan = _f32_mma_plan(arch, dtype, m, frag)
-    except KeyError as e:
-        return str(e)
+    """Why no ``m x m`` MMA serves fp32-storage ``dtype`` on ``arch``, or None.
+
+    ``arch`` must be a known target: every caller is a spec validator that
+    resolves it through ``ArchTarget.from_gfx`` first and reports an unknown
+    arch itself.
+    """
+    plan = _f32_mma_plan(arch, dtype, m, frag)
     if plan is None:
         mma = "TF32" if dtype == "tf32" else "fp32"
         return f"no {m}x{m} {mma} MFMA atom on {arch}"

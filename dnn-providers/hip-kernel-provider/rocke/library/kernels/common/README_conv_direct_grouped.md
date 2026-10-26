@@ -580,6 +580,12 @@ take: each output reduces over its own KH x KW taps, or over `kpg` for the
 scalar dgrad. So fp32 and tf32 problems build the same IR under the same name,
 tagged `_f32` (the column kernel spells its tag `f32`). One binary serves both.
 
+For anyone reading `--dtype tf32` results: on these kernels a tf32 problem is
+an fp32 problem. It gets neither TF32 rounding nor a TF32 speedup, and its
+timing equals the fp32 one. Tell them apart by kernel name: MMA kernels serving
+tf32 end in `_tf32`, these end in `_f32`. `benchmark_direct_conv.py` prints a
+note when a tf32 depthwise case runs.
+
 The cache identity still records the problem's dtype, so an AOT cache stores
 two entries with identical code. The sweep could map `tf32` to `fp32` for these
 variants to keep one.

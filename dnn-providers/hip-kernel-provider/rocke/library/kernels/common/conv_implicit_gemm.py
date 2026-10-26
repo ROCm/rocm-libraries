@@ -794,7 +794,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     ):
         return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
     if spec.data.is_tf32:
-        _tf32_why = _fwd_tf32_lds_stride_reason(spec, target, arch)
+        _tf32_why = _fwd_tf32_lds_stride_reason(spec, target)
         if _tf32_why is not None:
             return False, _tf32_why
 
@@ -921,8 +921,8 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     return True, "ok"
 
 
-def _fwd_tf32_lds_stride_reason(spec: ImplicitGemmConvSpec, target, arch: str):
-    """The shared TF32 row-stride rule for this spec's TF32 atom on ``arch``."""
+def _fwd_tf32_lds_stride_reason(spec: ImplicitGemmConvSpec, target):
+    """The shared TF32 row-stride rule for this spec's TF32 atom on ``target``."""
     op = target.mma.op_for_shape(
         family="mma",
         a_dtype="tf32",
@@ -935,7 +935,7 @@ def _fwd_tf32_lds_stride_reason(spec: ImplicitGemmConvSpec, target, arch: str):
     if op is None:
         return None
     _row = spec.effective_lds_layout().storage_shape(spec.tile_m)[1]
-    return _tf32_lds_stride_reason(_row, op.a_frag_len, arch)
+    return _tf32_lds_stride_reason(_row, op.a_frag_len)
 
 
 def _conv_mma_family(arch: str) -> str:
