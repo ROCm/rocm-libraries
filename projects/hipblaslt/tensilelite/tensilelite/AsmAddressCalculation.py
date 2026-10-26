@@ -801,13 +801,16 @@ class AddrCalculation:
         module = Module("emitLdChange")
         isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(kernel)
         if kernel["BufferStore"]:
-            module.add(self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim))
+            scaleToBpe = self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim)
+            module.add(scaleToBpe)
             if edge and (not kernel["StoreRemapVectorWidth"] or (kernel["StoreRemapVectorWidth"] and (beta or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))) and \
                 (tc != 'ScaleAlphaVec' and (not (tc == 'Bias' and self.kernelWriter.states.useBias == DataDirection.READ)) and tc != 'ScaleAVec' and tc != 'ScaleBVec'):
                 module.add(VCndMaskB32(dst=vgpr(addrVgpr), src0=vgpr(bufferOOB), src1=vgpr(addrVgpr), \
                                src2=sgpr(mask,laneSGPRCount), comment="LD%s clip if OOB. offset" % tc ))
             # dot2: for every NumWaveSplitK contiguous threads, only the rightmost (with the largest threadIdx) one need to write value to D matrix.
-            if kernel["NumWaveSplitK"] > 1 and (tc == 'D' or tc == 'TD'):
+            # Clip only where the address was (re)computed; a shared address keeps its clip.
+            if kernel["NumWaveSplitK"] > 1 and (tc == 'D' or tc == 'TD') \
+               and (scaleToBpe.items() or not self.kernelWriter.shortWave(kernel)):
                 kidx = bufferOOB-1
                 module.add(VAndB32(dst=vgpr(kidx), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr("Serial"), comment="kidx = Serial % NumWaveSplitK"))
                 module.add(VCmpXNeU32(dst=EXEC(), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr(kidx), comment="kidx == NumWaveSplitK-1" ))

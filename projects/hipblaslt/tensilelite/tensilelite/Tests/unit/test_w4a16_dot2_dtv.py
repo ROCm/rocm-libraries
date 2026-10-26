@@ -258,3 +258,56 @@ def test_dtvb_sets_up_no_lds_addresses(toolchain):
     # A alone bypassing LDS still needs B's addresses.
     src = _emit_solution(toolchain, _solution(toolchain, pgr=0, glvwA=8, ThreadTile=[1, 1]))[1]
     assert "local read addresses: final offsets b" in src
+
+
+def _prologue(src):
+    return src[src.index("label_ASM_Start:"):src.index("label_openLoopL:")]
+
+
+def _epilogue(src):
+    return src[src.index("label_LoopEndL"):src.index("label_KernelEnd:")]
+
+
+def test_short_wave_rare_paths_out_of_line(toolchain, tmp_path):
+    """gfx11 WaveSplitK waves run the common case (ArgType 0, WGM 1, first tile row,
+    alpha != 0) as straight-line code; the rare paths sit after s_endpgm and still
+    assemble there."""
+    from Tensile.Toolchain.Component import Assembler
+
+    _isa, _iim, _assembler, cxx = toolchain
+    src = _emit_solution(toolchain, _solution(toolchain, **_dtvb(WorkGroupMapping=1)))[1]
+    assert not re.search(r"^s_branch |s_cbranch_vccz", _prologue(src), re.M)
+    # Only the stores jump, to their common end.
+    assert set(re.findall(r"^s_branch (\w+)", _epilogue(src), re.M)) == {"label_GW_End"}
+    cold = src[src.index("label_KernelEnd:"):]
+    for label in ("HBMArgs", "WGMXCC", "MultiGemm", "RemapWG", "WGMRemap",
+                  "GeneralBatchedGemmLoadA", "GeneralBatchedGemmLoadB",
+                  "GeneralBatchedGemmLoadC", "GeneralBatchedGemmLoadD"):
+        assert re.search(r"^label_%s:" % label, cold, re.M), label
+    # Cold blocks restate the SGPR names that the loop's UNDEFs dropped.
+    assert re.search(r"^\.set sgprAddressA, \d+", cold, re.M)
+    srcPath = tmp_path / "k.s"
+    srcPath.write_text(src)
+    Assembler(cxx, "5")("gfx1151", 32, str(srcPath), str(tmp_path / "k.o"))
+    assert (tmp_path / "k.o").exists()
+
+
+def test_short_wave_static_gsu(toolchain):
+    """Block scales disable user GSU, so GSU is 1 and its runtime checks go."""
+    src = _emit_solution(toolchain, _solution(toolchain, **_dtvb()))[1]
+    body = src[:src.index("label_KernelEnd:")]
+    assert not re.search(r",\s*s\[sgprGSU\]", body)  # never read
+    assert "label_GW_B0_MB" not in src  # no GSU > 1 store
+
+
+@pytest.mark.parametrize("tile0", [1, 2, 4])
+def test_single_wave_rows_are_constant(toolchain, tile0):
+    """One wave covers K, so its tile rows are compile-time constants: no per-row
+    v_mul_lo_u32 in the global-read or store offsets."""
+    sol = _solution(toolchain, **_dtvb(glvwA=16, depthU=512, ThreadTile=[tile0, 1], WorkGroupMapping=1))
+    src = _emit_solution(toolchain, sol)[1]
+    assert "v_mul_lo_u32" not in _prologue(src)
+    assert "v_mul_lo_u32" not in _epilogue(src)
+    assert re.search(r"v_add_nc_u32 v\[vgprGlobalReadOffsetA\+0\], 0x10, v\d+\s+// gROA_0: unroll \+ prepad", src)
+    for row in range(1, tile0):
+        assert "gROA_%u: + unroll" % row in src
