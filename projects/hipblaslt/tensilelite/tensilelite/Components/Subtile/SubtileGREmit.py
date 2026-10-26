@@ -899,7 +899,7 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
     # needs, and it does not vary by load.  A pad lane is rejected for a
     # compile-time reason and an edge lane for a runtime one, so fold the two
     # masks together and let one select cover both.
-    edge = _TluFreeEdge(writer, kernel, module, tileInfo)
+    edge = padStack.enter_context(_TluFreeEdge(writer, kernel, module, tileInfo))
     edge.compare(module, mc)
     if padMaskSgpr is not None:
       edge.andInto(module, padMaskSgpr)
@@ -927,8 +927,6 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
                    comment="%s: + per-wave free-dim (M/N) global offset" % tc))
       edge.select(module, out, keepSgpr=padMaskSgpr,
                   why="pad or past-M/N" if padMaskSgpr is not None else "past-M/N")
-
-    edge.close()
 
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
@@ -1005,7 +1003,9 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   # that is the only shape here whose edge lanes can be dropped individually.
   # With one chunk per K row the free dim sits inside the load width and the
   # whole strip would have to go.
-  edge = _TluFreeEdge(writer, kernel, module, tileInfo) if chunksPerK > 1 else None
+  edgeStack = contextlib.ExitStack()
+  edge = edgeStack.enter_context(_TluFreeEdge(writer, kernel, module, tileInfo)) \
+         if chunksPerK > 1 else None
 
   for i in range(tileInfo.numGRPerSubtile):
     out = tile.sharedVgprGROffset[i]
@@ -1061,8 +1061,7 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
     # out-of-range value back into a valid address.
     if edge is not None:
       edge.select(module, out)
-  if edge is not None:
-    edge.close()
+  edgeStack.close()
   if swzTmp is not None:
     writer.vgprPool.checkIn(swzTmp)
   if mTileTmp is not None:
@@ -1365,11 +1364,17 @@ class _TluFreeEdge:
                src2=sgpr(self.mask if keepSgpr is None else keepSgpr, self.lanes),
                comment="%s: %s lane -> BufferOOB, dropping its global read" % (self.tc, why)))
 
-  def close(self):
+  def __enter__(self):
+    return self
+
+  def __exit__(self, *exc):
+    """Hand back the scratch. A context manager so that an early return between
+    the compare and the select cannot leak it."""
     for v in (self.pos, self.waveFree, self.oob):
       if v is not None:
         self.writer.vgprPool.checkIn(v)
     self.stack.close()
+    return False
 
 
 def _tluKWaveSlots(tileInfo):
