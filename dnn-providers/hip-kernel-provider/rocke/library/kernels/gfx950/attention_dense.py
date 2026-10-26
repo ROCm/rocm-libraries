@@ -2360,14 +2360,23 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         def read_v(dt, kk_step, vbuf):
             if WIDE_DMA:
+                # Fold the D-block into the flat element offset (index 0 on the
+                # D-block dim) so every read of a buffer is one per-lane base plus
+                # an immediate: a constant D-block index otherwise splits the
+                # address into per-(dt, kk) loop-invariant registers and adds
+                # one v_add per read inside the loop.
                 velem = b.add(
                     velem_lane,
-                    b.const_i32((dt % 2) * 32 + kk_step * 128),
+                    b.const_i32(
+                        (dt // 2) * V_N_RPT * V_LINE_STRIDE
+                        + (dt % 2) * 32
+                        + kk_step * 128
+                    ),
                 )
                 a0 = b.ds_read_tr16_b64(
                     V_lds,
                     vbuf,
-                    b.const_i32(dt // 2),
+                    b.const_i32(0),
                     vline,
                     velem,
                     dtype=dtype,
@@ -2375,7 +2384,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 a1 = b.ds_read_tr16_b64(
                     V_lds,
                     vbuf,
-                    b.const_i32(dt // 2),
+                    b.const_i32(0),
                     vline,
                     b.add(velem, b.const_i32(64)),
                     dtype=dtype,
