@@ -41,7 +41,7 @@ cd hipBLASLt; cd build/release
 --batch_count <value>      Number of matrices. Only applicable to batched and strided_batched routines          (Default value is: 1)
 --HMM                      Parameter requesting the use of HipManagedMemory
 --verify |-v               Validate GPU results with CPU?
---verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify.
+--verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify. Computes a CPU reference per problem and copies and compares D on the host for each solution.
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
 --adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
@@ -135,6 +135,8 @@ the failed checks above are for solution 3 of 12 (library index 8805, kernel <ke
 If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
 
 By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
+Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of `--algo_method all` sweeps.
 
 Show the frequency with environment variable
 ```
