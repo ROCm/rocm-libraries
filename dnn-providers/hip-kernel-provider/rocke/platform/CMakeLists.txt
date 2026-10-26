@@ -374,10 +374,9 @@ if(ROCKE_INSTALL_TESTS)
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_docs
-    # source tree),
-    # and the arch-domain artifact gate (imports tools/gen_arch_domain.py, which
-    # is not installed -- and an unresolvable import is a collection error that
-    # aborts the whole installed pytest session, not one skipped test).
+    # source tree), and the arch-domain artifact unit tests. The latter remain
+    # source-only units, while the full regeneration sweep is installed below as
+    # its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -405,6 +404,30 @@ if(ROCKE_INSTALL_TESTS)
 
     endblock()
 
+    # The top-level developer runner is not part of the standalone platform
+    # component, but its command-plan regression tests run in the relocated
+    # full-repository pytest suite. Stage a test-only copy when the sibling
+    # exists; a verbatim platform-only copy must still configure and install.
+    set(_ROCKE_RUN_CHECKS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_checks.py")
+    if(EXISTS "${_ROCKE_RUN_CHECKS}")
+      install(FILES "${_ROCKE_RUN_CHECKS}"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    else()
+      message(STATUS
+              "rocKE: top-level run_checks.py not found; skipping its test-only install")
+    endif()
+
+    # Test-only implementation for the installed arch-domain reproduction gate.
+    # Keep it outside the production package: CTest owns the external compiler
+    # sweep, while package resources provide the committed columns being checked.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
+
     # This GPU test lives alongside its benchmark helpers in the Python package.
     # Stage it under tests/ so rocke_pytest collects it in both install layouts.
     install(FILES
@@ -423,6 +446,17 @@ if(ROCKE_INSTALL_TESTS)
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
+    # Provider artifacts co-locate the package with their CTest manifest. A
+    # standalone install keeps it in the configured site-packages directory;
+    # derive that relative path so the installed tree remains relocatable.
+    if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+      set(_ROCKE_INSTALLED_PYTHONPATH ".")
+    else()
+      file(RELATIVE_PATH _ROCKE_INSTALLED_PYTHONPATH
+           "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rocke"
+           "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_INSTALL_DIR}")
+    endif()
+
     # Python test entries invoke via "python" (resolved from PATH at test time)
     # rather than executing the .py directly, so they work on Windows where
     # shebangs are not supported. The CI test environment activates a venv with
@@ -436,6 +470,19 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+
+    # Reproduce the committed host-flavor column from the relocated artifact.
+    # This mirrors the build-tree CTest in tests/CMakeLists.txt, but deliberately
+    # uses the installed package data that downstream/provider CI consumes.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_arch_domain_reproducibility PROPERTIES\n"
+           "  LABELS \"ckc;python;host;integration;toolchain;generated-artifact;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  RUN_SERIAL TRUE\n"
+           "  SKIP_RETURN_CODE 77\n"
+           "  TIMEOUT 1800)\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
@@ -461,7 +508,8 @@ if(ROCKE_INSTALL_TESTS)
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
-              "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity")
+              "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
+              "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
         string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")
         list(GET _rocke_native_parity 0 _rocke_parity_var)
         list(GET _rocke_native_parity 1 _rocke_parity_target)
@@ -497,6 +545,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_conv_aot_grid_limits.py"
+        "tests/library/tests/test_direct_dgrad_wmma.py"
+        "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -518,10 +569,12 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # spec-wrapper parity gate, and the 3D decode split rule and K/V cache policy.
+    # dense block-order decodes, spec-wrapper parity gate, and the 3D decode split
+    # rule and K/V cache policy.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
@@ -595,7 +648,8 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
     # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
-    # automatically; the RDNA WMMA spec tests sit outside it and are named beside it.
+    # automatically; the RDNA WMMA spec tests and the unified LSE host contract sit
+    # outside it and are named beside it.
     # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
@@ -605,9 +659,9 @@ if(ROCKE_INSTALL_TESTS)
     # (checked by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")
@@ -720,6 +774,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
@@ -729,12 +784,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
+        "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
         "tests/library/tests/test_mla_prefill_gfx942_numeric.py"
-        "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
         "tests/library/tests/test_wmma_fmha_decode_numeric.py"

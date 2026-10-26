@@ -38,9 +38,11 @@
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
+#include "candidate_preparation.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
+#include "tuning_scratch.hpp"
 
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 
@@ -68,7 +70,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <complex>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <iomanip>
@@ -83,6 +87,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+#include <hipblaslt_benchmark/candidate_search.hpp>
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
 
@@ -3820,6 +3826,1561 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
 }
 
+namespace
+{
+    /**
+     * How much work a single shape's tuning does.
+     *
+     * Deliberately the same measurement hipblaslt-bench performs: a fixed count
+     * of untimed launches followed by a fixed count of timed ones, over rotating
+     * buffers, with every candidate measured the same way. Matching it is the
+     * point, since the two are expected to reach the same winner on the same
+     * shape, and a cheaper or differently-shaped measurement here would show up
+     * as the tuner and the bench client disagreeing.
+     */
+    struct TuningPolicy
+    {
+        // Through the secure accessor like the mode itself, so a process in a
+        // secure execution context runs every knob at its default.
+        static int envInt(const char* name, int fallback)
+        {
+            if(const char* env = rocblaslt_secure_getenv(name))
+            {
+                try
+                {
+                    return std::stoi(env);
+                }
+                catch(...)
+                {
+                }
+            }
+            return fallback;
+        }
+
+        /**
+         * Measure every kernel that can run the problem rather than the ranked
+         * prefix the prediction model returns.
+         *
+         * The prefix is a hard ceiling on quality: on a 1024x512x1024 fp16 case
+         * the fastest kernel sat outside the top 128 entirely, so no amount of
+         * timing care could reach it. Enumerating removes that ceiling and makes
+         * the per-shape budget the only bound.
+         */
+        static bool allKernels()
+        {
+            return envInt("HIPBLASLT_TUNING_ALL_KERNELS", 1) != 0;
+        }
+        /** Ranked-prefix size. Ignored when allKernels() is on. */
+        static int candidateCap()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 128));
+        }
+
+        /**
+         * Invalidate the instruction cache between timed launches, as the bench
+         * client does when tuning.
+         *
+         * On by default because it demonstrably improves agreement with bench:
+         * across three fp16 shapes the tuner reached bench's exact winner on
+         * two of them with the flush on, and repeated runs picked the same
+         * kernel on those two. It is not a cure-all. On a shape whose leading
+         * kernels sit within a couple of percent of each other the choice stays
+         * unstable with the flush on, because at that separation the ordering
+         * is below what either tool can resolve.
+         *
+         * The cost is about 5% of tuning time (135.6s to 142.5s on
+         * 2048x1024x2048), far less than the ~10 us per flush suggests, because
+         * the flush launches pipeline behind the GEMMs rather than serialising
+         * with them.
+         */
+        static bool flushICache()
+        {
+            return envInt("HIPBLASLT_TUNING_FLUSH_ICACHE", 1) != 0;
+        }
+        /**
+         * Untimed launches before measuring, then launches in the timed batch.
+         *
+         * The same fixed counts hipblaslt-bench uses when tuning, so a candidate
+         * is measured over exactly the work bench would measure it over. Counts
+         * rather than durations on purpose: matching bench's numbers is what
+         * makes the two comparable, and the tuner still finishes sooner because
+         * its launches cost about an eighth of what bench's do.
+         */
+        static int coldIterations()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 1000));
+        }
+        static int hotIterations()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 1000));
+        }
+        /**
+         * Wall-clock ceiling for one shape, or zero for no ceiling.
+         *
+         * Five minutes by default, to bound how long a first matmul can block
+         * inside a live application. An exhaustive search at bench's iteration
+         * counts costs minutes and grows with the shape; fp16 shapes up to
+         * 2048x1024x2048 tune in 53 to 146 seconds on MI300X, inside the
+         * default.
+         *
+         * A search the ceiling cuts short keeps its winner, marked incomplete.
+         * Candidates are not enumerated in order of expected performance, so the
+         * best of an arbitrary prefix is usually not the shape's best kernel,
+         * but default selection's own pick is measured first and so is always in
+         * that prefix, which makes the recorded winner no slower than not tuning
+         * at all. The row carries the ceiling it ran under, and only a run whose
+         * ceiling beats it benchmarks the shape again, so a workload rerun at
+         * the same setting pays nothing and appends nothing.
+         *
+         * Zero removes the ceiling, which is how a shape too large to finish
+         * inside it gets a final answer.
+         */
+        static double perShapeBudgetUs()
+        {
+            constexpr int kDefaultBudgetMs = 5 * 60 * 1000;
+            return 1000.0
+                   * std::max(0, envInt("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", kDefaultBudgetMs));
+        }
+        /**
+         * Device memory the rotation may use, so successive launches do not read
+         * and write the same lines.
+         *
+         * Every tensor a candidate touches is rotated, not just the operands:
+         * A, B, C, D, the aux tensor and a gradient bias. Leaving any of them
+         * unrotated leaves that part of the footprint resident and partially
+         * defeats the point. The workspace is one buffer every block shares, as
+         * in hipblaslt-bench.
+         *
+         * Without this the inputs stay resident after the first iteration and
+         * every candidate is measured cache-hot, which is not how a production
+         * GEMM runs and which measurably reorders the field: on MI300X, with
+         * 256 MB of last-level cache to defeat, a hot measurement picked a
+         * different kernel than hipblaslt-bench did on the same shape. 512 MB
+         * matches what the bench client uses when tuning. Zero disables
+         * rotation and restores the cache-hot behaviour.
+         */
+        static int rotatingMegabytes()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_ROTATING_MB", 512));
+        }
+        static size_t rotatingBytes()
+        {
+            return size_t(rotatingMegabytes()) * 1024 * 1024;
+        }
+
+        /**
+         * The search this run would perform for a caller with this workspace,
+         * as recorded on the rows it writes and compared against old rows.
+         */
+        static TensileLite::TuningSearch search(size_t workspaceBytes)
+        {
+            TensileLite::TuningSearch s;
+            s.allKernels     = allKernels();
+            s.maxCandidates  = s.allKernels ? 0 : candidateCap();
+            s.workspaceBytes = workspaceBytes;
+            s.coldIters      = coldIterations();
+            s.hotIters       = hotIterations();
+            s.flushICache    = flushICache();
+            s.rotatingMb     = rotatingMegabytes();
+            return s;
+        }
+    };
+
+    /**
+     * Device memory owned by the tuning path.
+     *
+     * Candidates must never write the caller's buffers, and the library has no
+     * general workspace allocator to borrow, so tuning brings its own. Gating on
+     * the caller's workspace being large enough to cover isolation instead would
+     * mean tuning essentially never runs under a framework.
+     *
+     * One allocation per device, grown on demand, freed at process exit. All
+     * tuning on a device is serialised, so a single buffer is enough.
+     */
+    class TuningScratch
+    {
+    public:
+        static TuningScratch& instance()
+        {
+            static TuningScratch gInstance;
+            return gInstance;
+        }
+
+        size_t cap() const
+        {
+            return m_cap;
+        }
+
+        /** Why acquire() returned null, so the caller can tell policy from failure. */
+        enum class Denial
+        {
+            None = 0,
+            OverCap,
+            Unavailable,
+        };
+
+        /**
+         * Null when the request exceeds the cap or allocation fails.
+         *
+         * Those two are reported apart through denial. Refusing a request over
+         * the cap is the cap working as configured, while a device that will not
+         * give up the memory is a failure, and folding both into one outcome
+         * told a user whose GPU was out of memory to raise a limit that was
+         * never reached.
+         *
+         * One buffer per device, keyed by whichever device is current, because
+         * that is the device hipMalloc will allocate on. A single process-wide
+         * buffer handed the pointer allocated on the first device tuned to every
+         * later device, so a candidate on device 1 read and wrote device 0
+         * memory: on a peer-capable pair that silently measures cross-device
+         * traffic, and otherwise it faults.
+         */
+        void* acquire(size_t bytes, Denial* denial = nullptr)
+        {
+            const auto deny = [&](Denial why) -> void* {
+                if(denial)
+                    *denial = why;
+                return nullptr;
+            };
+
+            if(denial)
+                *denial = Denial::None;
+
+            if(bytes == 0 || bytes > m_cap)
+                return deny(Denial::OverCap);
+
+            int device = 0;
+            if(hipGetDevice(&device) != hipSuccess)
+                return deny(Denial::Unavailable);
+
+            Slot& slot = m_slots[device];
+
+            if(bytes <= slot.size)
+                return slot.ptr;
+
+            if(slot.ptr)
+                static_cast<void>(hipFree(slot.ptr));
+            slot.ptr  = nullptr;
+            slot.size = 0;
+
+            void* fresh = nullptr;
+            if(hipMalloc(&fresh, bytes) != hipSuccess)
+                return deny(Denial::Unavailable);
+
+            slot.ptr  = fresh;
+            slot.size = bytes;
+            return slot.ptr;
+        }
+
+    private:
+        TuningScratch()
+        {
+            if(const char* env = rocblaslt_secure_getenv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES"))
+            {
+                try
+                {
+                    m_cap = static_cast<size_t>(std::stoull(env));
+                }
+                catch(...)
+                {
+                }
+            }
+        }
+
+        struct Slot
+        {
+            void*  ptr  = nullptr;
+            size_t size = 0;
+        };
+
+        // Only ever touched with the tuning lock held.
+        std::map<int, Slot> m_slots;
+        size_t              m_cap = size_t(1) << 30;
+    };
+
+    /**
+     * Byte span each output tensor covers, computed from the strides actually in
+     * the problem rather than assumed to be dense.
+     *
+     * Returns 0 when the span cannot be established, which makes the caller skip
+     * tuning. Guessing here would mean handing a kernel a buffer smaller than it
+     * writes, so every uncertain case declines instead.
+     *
+     * `expanded` reports that a stride was rounded up to keep the result an
+     * upper bound, which happens for broadcast layouts such as a zero batch
+     * stride. Over-allocating scratch to write into is harmless, but the same
+     * span used as a read length against the caller's buffer runs off the end of
+     * an allocation that only ever held one batch, so rotation asks for this
+     * flag on the tensors it copies from.
+     */
+    size_t tensorSpanBytes(size_t elementSize,
+                           size_t rows,
+                           size_t cols,
+                           size_t colStride,
+                           size_t batchCount,
+                           size_t batchStride,
+                           bool*  expanded = nullptr)
+    {
+        if(expanded)
+            *expanded = false;
+
+        if(elementSize == 0 || rows == 0 || cols == 0)
+            return 0;
+
+        const size_t batches = std::max<size_t>(batchCount, 1);
+
+        // A column stride below the row count would overlap columns; treat as
+        // dense rather than under-allocating.
+        const size_t effectiveColStride = std::max(colStride, rows);
+        if(expanded && effectiveColStride != colStride)
+            *expanded = true;
+
+        // Every guard precedes the multiplication it protects. Checking after
+        // the fact reads an already-wrapped value and lets a too-small buffer
+        // through.
+        if(cols > 1 && effectiveColStride > (SIZE_MAX - rows) / (cols - 1))
+            return 0;
+
+        const size_t perBatch = effectiveColStride * (cols - 1) + rows;
+        const size_t effectiveBatchStride
+            = (batches > 1) ? std::max(batchStride, perBatch) : perBatch;
+        if(expanded && batches > 1 && effectiveBatchStride != batchStride)
+            *expanded = true;
+
+        if(batches > 1 && effectiveBatchStride > (SIZE_MAX - perBatch) / (batches - 1))
+            return 0;
+
+        const size_t elements = effectiveBatchStride * (batches - 1) + perBatch;
+        if(elements > (SIZE_MAX / elementSize))
+            return 0;
+
+        return elements * elementSize;
+    }
+
+    size_t elementSizeOf(hipDataType type)
+    {
+        return static_cast<size_t>(
+            TensileLite::DataTypeInfo::Get(hipDataType_to_tensile_type(type)).elementSize);
+    }
+
+    /** Same shape as the Synchronizer the handle allocates. */
+    constexpr size_t kSynchronizerBytes = 16 * 409600 * sizeof(int);
+
+    struct ScratchLayout
+    {
+        bool   usable = false;
+        size_t total  = 0;
+
+        size_t offsetD            = 0;
+        size_t bytesD             = 0;
+        size_t bytesInPlaceC      = 0;
+        size_t offsetE            = 0;
+        size_t bytesE             = 0;
+        size_t offsetBias         = 0;
+        size_t bytesBias          = 0;
+        size_t offsetAmaxD        = 0;
+        size_t bytesAmaxD         = 0;
+        size_t offsetWorkspace    = 0;
+        size_t bytesWorkspace     = 0;
+        size_t offsetSynchronizer = 0;
+
+        // Rotation. Every tensor a candidate touches gets blockCount copies,
+        // strided by its aligned span; block 0 of each input holds a copy of the
+        // caller's data and the rest are broadcast from it. blockCount is always
+        // at least 1, so the unrotated case is just the degenerate one.
+        //
+        // C is rotated whenever it is a distinct buffer, as hipblaslt-bench
+        // rotates it, though at beta zero the kernel never reads the copies.
+        // When C aliases D it is covered by D's rotation instead.
+        size_t blockCount      = 1;
+        size_t offsetA         = 0;
+        size_t bytesA          = 0;
+        size_t strideA         = 0;
+        size_t offsetB         = 0;
+        size_t bytesB          = 0;
+        size_t strideB         = 0;
+        size_t offsetC         = 0;
+        size_t bytesC          = 0;
+        size_t strideC         = 0;
+        size_t strideD         = 0;
+        size_t strideE         = 0;
+        size_t strideBias      = 0;
+
+        // The vectors a candidate only reads rotate with A, B and C, as
+        // hipblaslt-bench's do: a bias the epilogue reads, scalar or vector
+        // scales, and the alpha vector. A read bias's block is sized like a
+        // gradient's, but each block copies only the caller's extent of it,
+        // copyBiasIn.
+        size_t offsetBiasIn        = 0;
+        size_t bytesBiasIn         = 0;
+        size_t copyBiasIn          = 0;
+        size_t strideBiasIn        = 0;
+        size_t offsetScaleA        = 0;
+        size_t bytesScaleA         = 0;
+        size_t strideScaleA        = 0;
+        size_t offsetScaleB        = 0;
+        size_t bytesScaleB         = 0;
+        size_t strideScaleB        = 0;
+        size_t offsetScaleAlphaVec = 0;
+        size_t bytesScaleAlphaVec  = 0;
+        size_t strideScaleAlphaVec = 0;
+    };
+
+    // Saturating, so an overflowing layout ends up obviously too large rather
+    // than wrapping to a plausible-looking small number.
+    size_t addSat(size_t a, size_t b)
+    {
+        return (a > SIZE_MAX - b) ? SIZE_MAX : a + b;
+    }
+
+    size_t mulSat(size_t a, size_t b)
+    {
+        if(a == 0 || b == 0)
+            return 0;
+        return (a > SIZE_MAX / b) ? SIZE_MAX : a * b;
+    }
+
+    int64_t toInt64(size_t v)
+    {
+        return static_cast<int64_t>(std::min<size_t>(v, std::numeric_limits<int64_t>::max()));
+    }
+
+    // Whether a launch reads C. hipBLASLt's beta is a host scalar, decoded here
+    // as updateTensileProblem decodes it, and a zero one leaves C unread.
+    bool readsC(const RocblasltContractionProblem& prob)
+    {
+        if(prob.C == nullptr)
+            return false;
+        if(prob.alpha == nullptr || prob.beta == nullptr)
+            return true;
+        double alpha = 0, beta = 0;
+        assignAlphaBeta(roc2TensileType(prob.compute_type, false),
+                        hipDataType_to_tensile_type(prob.a_type),
+                        prob.alpha,
+                        prob.beta,
+                        &alpha,
+                        &beta);
+        return beta != 0;
+    }
+
+    size_t alignUp(size_t v, size_t a = 256)
+    {
+        if(v > SIZE_MAX - (a - 1))
+            return SIZE_MAX;
+        return (v + a - 1) / a * a;
+    }
+
+    /**
+     * Everything a candidate can write, laid out in one buffer.
+     *
+     * D is the obvious one, but an epilogue can also write the aux tensor, the
+     * bias buffer when it is a gradient, and amaxD; a solution can write its own
+     * workspace; and Stream-K writes the Synchronizer, which is shared across
+     * every matmul on the handle.
+     *
+     * rotatingBytes is the budget the rotation copies aim to fill and cap the
+     * most scratch the layout may take, normally TuningPolicy::rotatingBytes()
+     * and TuningScratch's cap. coldIters and hotIters are the launches each
+     * candidate gets, which bound the block count.
+     */
+    ScratchLayout planScratch(const RocblasltContractionProblem& prob,
+                              size_t                             rotatingBytes,
+                              size_t                             cap,
+                              int32_t                            coldIters,
+                              int32_t                            hotIters)
+    {
+        ScratchLayout layout;
+
+        // Every span below is sized from the extents and strides alone, and the
+        // measurement rebases A, B, C and D onto those spans. A batch offset is
+        // added to the rebased pointer by the kernel and is not part of any of
+        // that arithmetic, so a nonzero one would read or write outside the
+        // block it was given.
+        //
+        // Today this cannot happen: rocblaslt_matmul_valid_args rejects a
+        // nonzero offset unless the batch mode is POINTER_ARRAY, and tuning
+        // already declines that mode. The check is here because that invariant
+        // lives in another file, and if it ever relaxes this code must decline
+        // rather than silently run off the end of a block.
+        if(prob.batch_offset_a != 0 || prob.batch_offset_b != 0 || prob.batch_offset_c != 0
+           || prob.batch_offset_d != 0)
+            return layout;
+
+        layout.bytesD = tensorSpanBytes(elementSizeOf(prob.d_type),
+                                        prob.m,
+                                        prob.n,
+                                        prob.col_stride_d,
+                                        prob.batch_count,
+                                        prob.batch_stride_d);
+        if(layout.bytesD == 0)
+            return layout;
+
+        // An in-place problem reads C through the D block, so that block has to
+        // cover whichever tensor reaches further. C and D share a type but not
+        // necessarily a leading dimension or batch stride, and sizing from D
+        // alone lets a wider C read off the end of its block into whatever the
+        // layout placed next.
+        if(prob.C != nullptr && prob.C == prob.D)
+        {
+            bool expandedInPlaceC = false;
+            layout.bytesInPlaceC  = tensorSpanBytes(elementSizeOf(prob.c_type),
+                                                   prob.m,
+                                                   prob.n,
+                                                   prob.col_stride_c,
+                                                   prob.batch_count,
+                                                   prob.batch_stride_c,
+                                                   &expandedInPlaceC);
+            if(layout.bytesInPlaceC == 0 || expandedInPlaceC)
+                return layout;
+
+            layout.bytesD = std::max(layout.bytesD, layout.bytesInPlaceC);
+        }
+
+        if(is_e_enabled(prob.epilogue))
+        {
+            bool expandedE = false;
+            layout.bytesE  = tensorSpanBytes(elementSizeOf(prob.aux_type),
+                                            prob.m,
+                                            prob.n,
+                                            prob.col_stride_e,
+                                            prob.batch_count,
+                                            prob.batch_stride_e,
+                                            &expandedE);
+            if(layout.bytesE == 0 || (is_grad_enabled(prob.epilogue) && expandedE))
+                return layout;
+        }
+
+        // A gradient epilogue writes the bias buffer instead of reading it. The
+        // length is a full D row or column depending on the source tensor, so
+        // take the larger and stay conservative.
+        if(is_grad_enabled(prob.epilogue) && prob.bias != nullptr)
+        {
+            // Through the same span helper as D and E. Multiplying length by
+            // batch count ignores the stride, so a bias_stride larger than the
+            // vector length under-allocates and the kernel writes past the end.
+            const size_t biasElements = std::max(prob.m, prob.n);
+            layout.bytesBias          = tensorSpanBytes(elementSizeOf(prob.bias_type),
+                                               biasElements,
+                                               1,
+                                               biasElements,
+                                               prob.batch_count,
+                                               static_cast<size_t>(prob.bias_stride));
+            if(layout.bytesBias == 0)
+                return layout;
+        }
+
+        // A bias the epilogue only reads. Its block is sized as conservatively
+        // as a gradient's, but the copy into it is the caller's actual extent:
+        // the source tensor's length once per batch at the bias batch stride,
+        // a single vector when that stride is zero. Left in place when either
+        // cannot be sized.
+        const size_t biasLength
+            = getBiasSrc(prob.epilogue) == TensileLite::ContractionProblemGemm::TENSOR::B ? prob.n
+                                                                                          : prob.m;
+        if(is_bias_enabled(prob.epilogue) && !is_grad_enabled(prob.epilogue)
+           && prob.bias != nullptr)
+        {
+            const size_t elementSize  = elementSizeOf(prob.bias_type);
+            const size_t biasElements = std::max(prob.m, prob.n);
+            const size_t biasStride   = prob.bias_stride > 0 ? size_t(prob.bias_stride) : 0;
+            const size_t span         = tensorSpanBytes(
+                elementSize, biasElements, 1, biasElements, prob.batch_count, biasStride);
+            const size_t batches = std::max<size_t>(prob.batch_count, 1);
+            const size_t extent
+                = mulSat(addSat(mulSat(batches - 1, biasStride), biasLength), elementSize);
+            if(span != 0 && extent <= span)
+            {
+                layout.bytesBiasIn = span;
+                layout.copyBiasIn  = extent;
+            }
+        }
+
+        // Scalar and vector scales and the alpha vector are of the compute
+        // type, f32 for an f16 one. A block-scaled or w4a16 scale is left in
+        // place: its length depends on a layout only the caller knows.
+        const size_t scaleElementSize
+            = TensileLite::DataTypeInfo::Get(roc2TensileType(prob.compute_type)).elementSize;
+        auto scaleBytes = [&](const void*                                scale,
+                              RocblasltContractionProblem::ScalingFormat format,
+                              size_t                                     length) -> size_t {
+            if(scale == nullptr)
+                return 0;
+            switch(format)
+            {
+            case RocblasltContractionProblem::ScalingFormat::Scalar:
+                return scaleElementSize;
+            case RocblasltContractionProblem::ScalingFormat::Vector:
+                return mulSat(length, scaleElementSize);
+            default:
+                return 0;
+            }
+        };
+        layout.bytesScaleA = scaleBytes(prob.scaleA, prob.scaleAType, prob.m);
+        layout.bytesScaleB = scaleBytes(prob.scaleB, prob.scaleBType, prob.n);
+        if(prob.scaleAlphaVec != nullptr)
+            layout.bytesScaleAlphaVec = mulSat(prob.m, scaleElementSize);
+
+        if(prob.amaxD != nullptr)
+            layout.bytesAmaxD = 256;
+
+        layout.bytesWorkspace = prob.workspaceSize;
+
+        // op(A) is m by k and op(B) is k by n, so the stored extents depend on
+        // the transposes; col_stride is the leading dimension.
+        const size_t rowsA = (prob.trans_a == HIPBLAS_OP_N) ? prob.m : prob.k;
+        const size_t colsA = (prob.trans_a == HIPBLAS_OP_N) ? prob.k : prob.m;
+        const size_t rowsB = (prob.trans_b == HIPBLAS_OP_N) ? prob.k : prob.n;
+        const size_t colsB = (prob.trans_b == HIPBLAS_OP_N) ? prob.n : prob.k;
+
+        bool expandedA = false, expandedB = false, expandedC = false;
+
+        layout.bytesA = tensorSpanBytes(elementSizeOf(prob.a_type),
+                                        rowsA,
+                                        colsA,
+                                        prob.col_stride_a,
+                                        prob.batch_count,
+                                        prob.batch_stride_a,
+                                        &expandedA);
+        layout.bytesB = tensorSpanBytes(elementSizeOf(prob.b_type),
+                                        rowsB,
+                                        colsB,
+                                        prob.col_stride_b,
+                                        prob.batch_count,
+                                        prob.batch_stride_b,
+                                        &expandedB);
+
+        // Only when C is its own buffer. An in-place problem reaches C through
+        // D, which rotates already.
+        if(prob.C != nullptr && prob.C != prob.D && prob.batch_C == nullptr)
+        {
+            layout.bytesC = tensorSpanBytes(elementSizeOf(prob.c_type),
+                                            prob.m,
+                                            prob.n,
+                                            prob.col_stride_c,
+                                            prob.batch_count,
+                                            prob.batch_stride_c,
+                                            &expandedC);
+        }
+
+        layout.strideD             = alignUp(layout.bytesD);
+        layout.strideA             = alignUp(layout.bytesA);
+        layout.strideB             = alignUp(layout.bytesB);
+        layout.strideC             = alignUp(layout.bytesC);
+        layout.strideE             = alignUp(layout.bytesE);
+        layout.strideBias          = alignUp(layout.bytesBias);
+        layout.strideBiasIn        = alignUp(layout.bytesBiasIn);
+        layout.strideScaleA        = alignUp(layout.bytesScaleA);
+        layout.strideScaleB        = alignUp(layout.bytesScaleB);
+        layout.strideScaleAlphaVec = alignUp(layout.bytesScaleAlphaVec);
+
+        // Rotation needs a readable source for A and B, and spans it can size.
+        // C is optional: a problem with no separate C still rotates the rest.
+        //
+        // A span that had to be expanded is an upper bound, not the size of the
+        // caller's allocation, so copying it would read past the end of a
+        // broadcast input. Swizzled A and B are declined for the mirror-image
+        // reason: their physical layout is a re-tiled, padded form whose size is
+        // not the logical span at all, so both the copy length and the per-block
+        // stride would be wrong. Neither case is worth guessing at, and
+        // declining only costs a cache-hot measurement.
+        const bool rotatable
+            = layout.bytesA != 0 && layout.bytesB != 0 && prob.A != nullptr && prob.B != nullptr
+              && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
+              && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
+
+        // What one block adds to the layout. The workspace is not rotated:
+        // every block shares one, as hipblaslt-bench's blocks do. It is sized to
+        // the caller's whole limit, often far larger than the tensors, so a copy
+        // per block would leave a small problem only a few blocks and measure
+        // its inputs cache-hot.
+        size_t perBlock = 0;
+        for(size_t stride : {layout.strideA,
+                             layout.strideB,
+                             layout.strideC,
+                             layout.strideD,
+                             layout.strideE,
+                             layout.strideBias,
+                             layout.strideBiasIn,
+                             layout.strideScaleA,
+                             layout.strideScaleB,
+                             layout.strideScaleAlphaVec})
+            perBlock = addSat(perBlock, stride);
+
+        // Size rotation with the shared benchmark formulas and actual tensor
+        // bytes, rather than the allocation spans above. C counts only when
+        // beta reads it; matrices count whole columns and batches. Block-scaled
+        // and w4a16 scales remain caller-owned and do not count here.
+        const auto elements = [&](size_t ld, size_t cols, size_t batchStride) {
+            return hipblaslt_bench::rotating_tensor_elements(
+                toInt64(ld), toInt64(cols), toInt64(prob.batch_count), toInt64(batchStride));
+        };
+        const auto bytesOf = [](int64_t elements, hipDataType type) {
+            return hipblaslt_bench::size_mul(elements, toInt64(elementSizeOf(type)));
+        };
+        hipblaslt_bench::RotatingTensors tensors;
+        tensors.a = bytesOf(elements(prob.col_stride_a, colsA, prob.batch_stride_a), prob.a_type);
+        tensors.b = bytesOf(elements(prob.col_stride_b, colsB, prob.batch_stride_b), prob.b_type);
+        if(prob.C != nullptr)
+            tensors.c
+                = bytesOf(elements(prob.col_stride_c, prob.n, prob.batch_stride_c), prob.c_type);
+        tensors.d = bytesOf(elements(prob.col_stride_d, prob.n, prob.batch_stride_d), prob.d_type);
+        if(is_e_enabled(prob.epilogue))
+            tensors.e
+                = bytesOf(elements(prob.col_stride_e, prob.n, prob.batch_stride_e), prob.aux_type);
+        if(is_bias_enabled(prob.epilogue) && prob.bias != nullptr)
+            tensors.bias
+                = bytesOf(hipblaslt_bench::rotating_bias_elements(
+                              toInt64(biasLength), prob.bias_stride, toInt64(prob.batch_count)),
+                          prob.bias_type);
+        tensors.scale_alpha_vec = toInt64(layout.bytesScaleAlphaVec);
+        tensors.scale_a         = toInt64(layout.bytesScaleA);
+        tensors.scale_b         = toInt64(layout.bytesScaleB);
+        tensors.reads_c         = readsC(prob);
+        const int64_t footprint = hipblaslt_bench::rotating_block_bytes(tensors);
+
+        // Enough blocks to cover the rotating budget, but no more than the
+        // launches that will cycle through them. Each block costs a solve() per
+        // candidate, so the iteration count is also what keeps a tiny problem
+        // from asking for hundreds of thousands.
+        size_t blocks = 1;
+        if(rotatable && perBlock != 0 && perBlock != SIZE_MAX && footprint > 0
+           && footprint != std::numeric_limits<int64_t>::max())
+        {
+            const auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
+                false, 0, coldIters, hotIters, toInt64(rotatingBytes), footprint);
+            blocks = static_cast<size_t>(plan.block_count);
+        }
+
+        // Offsets are a pure function of the block count, so sizing is just
+        // "lay it out, and if it does not fit, lay out fewer blocks".
+        //
+        // Saturating arithmetic throughout: a wrapped cursor would produce a
+        // total small enough to pass the cap check below and offsets pointing
+        // outside the allocation that total then reserves.
+        auto place = [&](size_t n) {
+            layout.blockCount = n;
+
+            // A single block never has an input's pointer redirected into
+            // scratch, so reserving room for them would be dead space that can
+            // push an otherwise fine shape over the cap.
+            const bool rotating = n > 1;
+
+            size_t cursor  = 0;
+            auto   reserve = [&](size_t& offset, size_t span, size_t count) {
+                offset = cursor;
+                cursor = addSat(cursor, mulSat(span, count));
+                cursor = alignUp(cursor);
+            };
+
+            reserve(layout.offsetD, layout.strideD, n);
+            reserve(layout.offsetE, layout.strideE, n);
+            reserve(layout.offsetBias, layout.strideBias, n);
+            reserve(layout.offsetAmaxD, layout.bytesAmaxD, 1);
+            reserve(layout.offsetWorkspace, layout.bytesWorkspace, 1);
+            reserve(layout.offsetSynchronizer, kSynchronizerBytes, 1);
+            reserve(layout.offsetA, layout.strideA, rotating ? n : 0);
+            reserve(layout.offsetB, layout.strideB, rotating ? n : 0);
+            reserve(layout.offsetC, layout.strideC, rotating ? n : 0);
+            reserve(layout.offsetBiasIn, layout.strideBiasIn, rotating ? n : 0);
+            reserve(layout.offsetScaleA, layout.strideScaleA, rotating ? n : 0);
+            reserve(layout.offsetScaleB, layout.strideScaleB, rotating ? n : 0);
+            reserve(layout.offsetScaleAlphaVec, layout.strideScaleAlphaVec, rotating ? n : 0);
+
+            return cursor;
+        };
+
+        // Trim rather than decline when the full rotation exceeds the cap:
+        // fewer blocks still beats measuring everything cache-hot.
+        size_t total = place(blocks);
+        while(blocks > 1 && total > cap)
+        {
+            // At least one block goes each pass, so this terminates.
+            const size_t over   = total - cap;
+            const size_t excess = over / perBlock + (over % perBlock != 0);
+            blocks              = (excess >= blocks) ? 1 : blocks - excess;
+            total               = place(blocks);
+        }
+
+        // A single block over the cap, including a saturated total, is left for
+        // acquire to reject so it is reported as the capacity skip it is.
+        layout.total  = total;
+        layout.usable = true;
+        return layout;
+    }
+
+    /**
+     * Serialises tuning within this process, so the process-owned scratch has
+     * exactly one writer. A thread that reaches an untuned shape while another
+     * is tuning waits for it rather than skipping its own shape: what tune mode
+     * records must not depend on how the threads happened to be scheduled.
+     *
+     * Work that other threads or streams submit to the device while a search
+     * runs still shares the GPU with it and can shift the timings, so tune in a
+     * process whose GPU work is quiet enough to measure.
+     *
+     * Process-local by construction, and sufficient for what it guards: the
+     * scratch buffer belongs to this process, so a separate process tuning at
+     * the same time cannot corrupt it. What it does not do is coordinate ranks
+     * of a multi-process job. Several ranks in tune mode will each benchmark the
+     * same shapes, duplicating the work, and if they share one cache file they
+     * append to it unsynchronised. Tune once in a single-rank warm-up and run
+     * the job in cache mode, which never writes.
+     */
+    std::mutex& tuningLock()
+    {
+        static std::mutex gLock;
+        return gLock;
+    }
+
+    // Where a test makes later tuning attempts go wrong on purpose. Without the
+    // test hooks nothing can set one, and every check below is constant false.
+    enum class TuningFailureStage : int
+    {
+        None               = 0,
+        Setup              = 1,
+        Enumeration        = 2,
+        MidSearch          = 3,
+        TruncateAfterFirst = 4,
+        BudgetSpent        = 5,
+    };
+
+    std::atomic<int> g_injectedTuningFailure{0};
+
+    bool tuningFailureInjected(TuningFailureStage stage)
+    {
+        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
+    }
+
+    bool streamIsCapturing(hipStream_t stream)
+    {
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        return hipStreamIsCapturing(stream, &status) == hipSuccess
+               && status != hipStreamCaptureStatusNone;
+    }
+
+    // A fused all-to-all call signals and writes to its peer ranks, which a
+    // candidate launched on scratch would still do, and the ranks do not
+    // coordinate a search between them.
+    bool isFusedAllToAll(const RocblasltContractionProblem& prob)
+    {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo info;
+        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
+#else
+        static_cast<void>(prob);
+        return false;
+#endif
+    }
+
+    /**
+     * The indexes tune mode measures for prob, before the baseline is moved to
+     * the front, or nothing when they cannot be enumerated.
+     *
+     * All-kernel enumeration reuses the public getAllSolutions, which already
+     * dedups repeated indexes and drops custom kernels that cannot run
+     * pointer-array batch. Otherwise it is the list hipblasLtMatmulAlgoGetHeuristic
+     * returns, in its order, without the tuning file's entry: the ranked
+     * libraries' best, topped up from the size-independent ones when they
+     * return fewer than the cap.
+     */
+    std::optional<std::vector<int>> tuningCandidates(const RocblasltContractionProblem& prob,
+                                                     rocblaslt_handle                   handle,
+                                                     std::shared_ptr<void>              gemmData)
+    {
+        std::vector<int> indexes;
+        if(TuningPolicy::allKernels())
+        {
+            std::vector<rocblaslt_matmul_heuristic_result> all;
+            if(getAllSolutions(gemmData,
+                               handle,
+                               rocblaslt::RocGemmType::ROCBLASLT_GEMM,
+                               all,
+                               prob.workspaceSize)
+               != rocblaslt_status_success)
+                return std::nullopt;
+
+            // In solution-index order, as getAllSolutions returns them, so a
+            // search the budget stops covers the same prefix in every process,
+            // which is what lets a rerun under the same ceiling be skipped.
+            indexes.reserve(all.size());
+            for(const auto& result : all)
+                indexes.push_back(*(int*)result.algo.data);
+            return indexes;
+        }
+
+        const int                                      cap = TuningPolicy::candidateCap();
+        std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
+        int                                            returned = 0;
+        RocblasltContractionProblem                    probe    = prob;
+        const bool                                     found
+            = getBestSolutions(
+                  probe, handle, gemmData, cap, ranked.data(), &returned, prob.workspaceSize)
+              == rocblaslt_status_success;
+        const bool toppedUp
+            = returned < cap
+              && topUpWithSizeIndependentSolutions(
+                  handle, probe, gemmData, ranked.data(), &returned, cap, prob.workspaceSize);
+        if(!found && !toppedUp)
+            return std::nullopt;
+
+        indexes.reserve(returned);
+        for(int i = 0; i < returned; i++)
+            indexes.push_back(*(int*)ranked[i].algo.data);
+        return indexes;
+    }
+
+    /**
+     * Benchmark candidates on isolated scratch and say what happened.
+     *
+     * Returns a reason rather than a bare -1 so the caller can report exactly
+     * one terminal event per attempt. On TuningAttempt::Tuned, and only then,
+     * winnerIndexOut and winnerOut describe the winner.
+     *
+     * Nothing here touches the caller's buffers. The winner is launched once by
+     * the normal path afterwards, on the real ones.
+     *
+     * baselineIndex is the kernel the call launches if tuning finds nothing
+     * faster. It is measured first, and a search the budget stops is recorded
+     * only when it was measured, so a partial winner can never be slower than
+     * what the caller would have run untuned.
+     */
+    TensileLite::TuningAttempt benchmarkAndSelectWinner(
+        rocblaslt_handle                    handle,
+        const RocblasltContractionProblem&  prob,
+        const TensileLite::ProblemOverride& key,
+        std::shared_ptr<void>               gemmData,
+        std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>&
+                                                library,
+        std::shared_ptr<TensileLite::Hardware>& hardware,
+        TensileLite::hip::SolutionAdapter*      adapter,
+        int                                     baselineIndex,
+        TensileLite::TunedEntry&                winnerOut,
+        int&                                    winnerIndexOut)
+    {
+        using TensileLite::TuningAttempt;
+
+        // Wall clock from function entry, not the sum of the timed spans.
+        // Scratch allocation, rotation seeding, enumeration, support checks,
+        // solve() and code-object loading are most of the cost and none of them
+        // land in a span, so a span-only total said 10 seconds while the call
+        // took 17. Starting the clock at entry also stops a slow setup from
+        // handing the measurement loop a budget that is already spent.
+        const double budgetUs  = TuningPolicy::perShapeBudgetUs();
+        const auto   started   = std::chrono::steady_clock::now();
+        auto         elapsedUs = [&] {
+            return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now()
+                                                             - started)
+                .count();
+        };
+        auto outOfBudget = [&] {
+            return budgetUs > 0.0
+                   && (tuningFailureInjected(TuningFailureStage::BudgetSpent)
+                       || elapsedUs() > budgetUs);
+        };
+
+        const bool inPlace = (prob.C == prob.D);
+        if(inPlace)
+        {
+            double alpha = 0.0, beta = 0.0;
+            assignAlphaBeta(roc2TensileType(prob.compute_type, false),
+                            hipDataType_to_tensile_type(prob.a_type),
+                            prob.alpha,
+                            prob.beta,
+                            &alpha,
+                            &beta);
+            if(beta != 0.0)
+            {
+                // With C and D aliased, every launch overwrites the input for
+                // the next launch. The cold and the timed launches each cycle
+                // through the same rotation blocks, so a nonzero beta compounds
+                // C repeatedly and quickly measures Inf/NaN rather than the
+                // caller's problem. Resetting C
+                // inside the one event span would time the copies, so decline
+                // this case until the timing loop can provide an untimed reset
+                // before every reuse.
+                TensileLite::TuningCounters::instance().skipped++;
+                return TuningAttempt::SkippedInPlaceBeta;
+            }
+        }
+
+        const ScratchLayout layout = planScratch(prob,
+                                                 TuningPolicy::rotatingBytes(),
+                                                 TuningScratch::instance().cap(),
+                                                 TuningPolicy::coldIterations(),
+                                                 TuningPolicy::hotIterations());
+        if(!layout.usable)
+        {
+            TensileLite::TuningCounters::instance().skipped++;
+            return TuningAttempt::SkippedExtentUnknown;
+        }
+
+        TuningScratch::Denial denial = TuningScratch::Denial::None;
+        void*                 base   = TuningScratch::instance().acquire(layout.total, &denial);
+        if(base == nullptr)
+        {
+            // Only the cap is a policy decline. An allocation the device refused
+            // is a failure, and counting it as skipped would hide it among the
+            // shapes tuning is expected to pass over.
+            if(denial != TuningScratch::Denial::OverCap)
+                return TuningAttempt::FallbackScratchAlloc;
+
+            TensileLite::TuningCounters::instance().skipped++;
+            return TuningAttempt::SkippedScratchCap;
+        }
+
+        // Announced here, past the declines and before enumeration, because this
+        // is the first point at which the caller is certainly about to block.
+        // getAllSolutions over a thousand-odd candidates is itself part of that
+        // wait, so saying it afterwards would explain a pause only once it was
+        // nearly over.
+        TensileLite::TuningCounters::instance().attempts++;
+        if(TensileLite::shouldLogTuningStart(key))
+        {
+            std::ostringstream msg;
+            auto               opChar = [](hipblasOperation_t op) {
+                return op == HIPBLAS_OP_N ? 'N' : op == HIPBLAS_OP_C ? 'C' : 'T';
+            };
+            msg << "tuning-start m=" << prob.m << " n=" << prob.n << " k=" << prob.k
+                << " batch=" << prob.batch_count << " trans=" << opChar(prob.trans_a)
+                << opChar(prob.trans_b) << " types=" << hip_datatype_to_string(prob.a_type) << "/"
+                << hip_datatype_to_string(prob.d_type)
+                << "; this call will block until it finishes";
+            log_tuning_lifecycle(__func__, msg.str());
+        }
+
+        auto* bytes = static_cast<uint8_t*>(base);
+
+        // Candidates run against a copy of the problem whose outputs point into
+        // scratch. C is left alone unless it aliases D, in which case both move
+        // so setCEqualsD stays true and the predicate set does not change.
+        RocblasltContractionProblem scratchProb = prob;
+
+        scratchProb.D            = bytes + layout.offsetD;
+        scratchProb.E            = layout.bytesE ? bytes + layout.offsetE : prob.E;
+        scratchProb.workspace    = layout.bytesWorkspace ? bytes + layout.offsetWorkspace : nullptr;
+        scratchProb.Synchronizer = bytes + layout.offsetSynchronizer;
+        if(layout.bytesAmaxD)
+            scratchProb.amaxD = bytes + layout.offsetAmaxD;
+        if(layout.bytesBias)
+            scratchProb.bias = bytes + layout.offsetBias;
+        if(inPlace)
+            scratchProb.C = scratchProb.D;
+
+        auto resetSynchronizer = [&] {
+            return hipMemsetAsync(
+                       bytes + layout.offsetSynchronizer, 0, kSynchronizerBytes, prob.stream)
+                   == hipSuccess;
+        };
+
+        // Zero the whole buffer before anything reads it.
+        //
+        // Scratch comes from a raw hipMalloc, and not every span in it gets
+        // seeded: an in-place problem reads C through D, and a solution can read
+        // its own workspace. Those reads would land on whatever the allocator
+        // handed back, where a denormal pattern changes the timing of the very
+        // thing being measured and a NaN or Inf can change it a great deal. Zero
+        // is uniform, cheap and cannot denormal. A gradient epilogue's E, which
+        // it reads, is seeded with the caller's below.
+        if(tuningFailureInjected(TuningFailureStage::Setup)
+           || hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
+        {
+            static_cast<void>(hipGetLastError());
+            return TuningAttempt::FallbackSetup;
+        }
+
+        // Every path after the first scratch operation must drain this stream
+        // before the function releases the process-wide tuning lock. Most
+        // successful paths are already synchronized by the timing events, but
+        // enumeration failures, allocation exceptions and an exhausted budget
+        // can return earlier. Without this guard, another thread can acquire the
+        // lock on a different stream and reuse the same scratch while the
+        // memset/copies above are still in flight.
+        struct StreamDrain
+        {
+            hipStream_t stream;
+            ~StreamDrain()
+            {
+                static_cast<void>(hipStreamSynchronize(stream));
+                static_cast<void>(hipGetLastError());
+            }
+        } streamDrain{prob.stream};
+
+        if(is_grad_enabled(prob.epilogue) && layout.bytesE
+           && !rocblaslt::seedGradientAuxiliary(bytes + layout.offsetE,
+                                                prob.E,
+                                                layout.bytesE,
+                                                layout.strideE,
+                                                layout.blockCount,
+                                                prob.stream))
+            return TuningAttempt::FallbackSetup;
+
+        // Seed the rotation inputs over the zeros. Block 0 takes the caller's
+        // inputs so the data is representative of what the kernel will really
+        // see, and the rest are broadcast from it.
+        size_t blocks = layout.blockCount;
+        if(blocks > 1)
+        {
+            auto seed = [&](size_t offset, size_t stride, const void* src, size_t span) {
+                if(hipMemcpyAsync(bytes + offset, src, span, hipMemcpyDeviceToDevice, prob.stream)
+                   != hipSuccess)
+                    return false;
+                for(size_t b = 1; b < blocks; b++)
+                    if(hipMemcpyAsync(bytes + offset + b * stride,
+                                      bytes + offset,
+                                      span,
+                                      hipMemcpyDeviceToDevice,
+                                      prob.stream)
+                       != hipSuccess)
+                        return false;
+                return true;
+            };
+
+            const bool seeded
+                = seed(layout.offsetA, layout.strideA, prob.A, layout.bytesA)
+                  && seed(layout.offsetB, layout.strideB, prob.B, layout.bytesB)
+                  && (layout.bytesC == 0
+                      || seed(layout.offsetC, layout.strideC, prob.C, layout.bytesC))
+                  && (layout.bytesBiasIn == 0
+                      || seed(
+                          layout.offsetBiasIn, layout.strideBiasIn, prob.bias, layout.copyBiasIn))
+                  && (layout.bytesScaleA == 0
+                      || seed(layout.offsetScaleA,
+                              layout.strideScaleA,
+                              prob.scaleA,
+                              layout.bytesScaleA))
+                  && (layout.bytesScaleB == 0
+                      || seed(layout.offsetScaleB,
+                              layout.strideScaleB,
+                              prob.scaleB,
+                              layout.bytesScaleB))
+                  && (layout.bytesScaleAlphaVec == 0
+                      || seed(layout.offsetScaleAlphaVec,
+                              layout.strideScaleAlphaVec,
+                              prob.scaleAlphaVec,
+                              layout.bytesScaleAlphaVec));
+
+            if(!seeded || hipStreamSynchronize(prob.stream) != hipSuccess)
+            {
+                // Fall back to a single block rather than abandoning the shape.
+                static_cast<void>(hipGetLastError());
+                blocks = 1;
+            }
+        }
+
+        auto enumerated = tuningCandidates(prob, handle, gemmData);
+        if(!enumerated || tuningFailureInjected(TuningFailureStage::Enumeration))
+            return TuningAttempt::FallbackEnumeration;
+        std::vector<int> candidateIndexes = std::move(*enumerated);
+
+        // Moved to the front with the rest left in order, so it is measured
+        // first whichever way the candidates were enumerated.
+        if(baselineIndex >= 0)
+        {
+            auto at = std::find(candidateIndexes.begin(), candidateIndexes.end(), baselineIndex);
+            if(at != candidateIndexes.end())
+                std::rotate(candidateIndexes.begin(), at, at + 1);
+            else
+                candidateIndexes.insert(candidateIndexes.begin(), baselineIndex);
+        }
+
+        // Resolve through the same path replay uses. Enumeration and
+        // getSolutionByIndex are different lookups and can disagree for one
+        // index depending on which placeholder libraries have been
+        // materialised; benchmarking the enumerated object and replaying the
+        // resolved one would measure a kernel the cache never runs. Resolving
+        // here makes the two identical by construction.
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> candidates;
+        candidates.reserve(candidateIndexes.size());
+        for(int index : candidateIndexes)
+            if(auto solution = library->getSolutionByIndex(*hardware, index))
+                candidates.push_back(std::move(solution));
+
+        if(candidates.empty())
+            return TuningAttempt::FallbackEnumeration;
+
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "tuning-cache: setup candidates=" << candidates.size()
+                << (TuningPolicy::allKernels() ? " (all kernels)" : " (ranked prefix)")
+                << " baseline=" << baselineIndex << " scratch=" << layout.total
+                << "B blocks=" << blocks << " workspace=" << prob.workspaceSize << "B";
+            log_info(__func__, msg.str());
+        }
+
+        std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+        // Owned, because the exits below are not all returns. isSolutionSupported
+        // is called outside the per-candidate try block and can throw, and that
+        // exception unwinds all the way to the tuning fallback in the caller. A
+        // pair of raw handles destroyed only on the success path leaked two
+        // events per such failure until event creation itself started failing.
+        struct EventPair
+        {
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+
+            ~EventPair()
+            {
+                if(start)
+                    static_cast<void>(hipEventDestroy(start));
+                if(stop)
+                    static_cast<void>(hipEventDestroy(stop));
+            }
+        } events;
+
+        if(hipEventCreate(&events.start) != hipSuccess
+           || hipEventCreate(&events.stop) != hipSuccess)
+            return TuningAttempt::FallbackSetup;
+
+        // hipblaslt-bench's measurement, from the same code: per candidate the cold
+        // launches, then one timed batch of hot launches with the instruction cache
+        // flushed after each and the flush's per-device cost taken back out, the
+        // lowest time winning. Tune mode times on HIP events.
+        hipblaslt_bench::TimingConfig timing;
+        timing.iters         = TuningPolicy::hotIterations();
+        timing.use_gpu_timer = true;
+
+        hipblaslt_bench::SearchConfig search;
+        search.cold_calls = TuningPolicy::coldIterations();
+        search.flush      = TuningPolicy::flushICache();
+
+        hipStream_t stream = prob.stream;
+        if(search.flush)
+        {
+            int             device = 0;
+            hipDeviceProp_t props{};
+            if(hipGetDevice(&device) != hipSuccess
+               || hipGetDeviceProperties(&props, device) != hipSuccess)
+                return TuningAttempt::FallbackSetup;
+
+            search.flush_grid = hipblaslt_bench::flush_icache_grid(props);
+            if(!hipblaslt_bench::flush_cost_us(
+                   timing.use_gpu_timer, props, events.start, events.stop, stream, timing.flush_us))
+            {
+                static_cast<void>(hipGetLastError());
+                return TuningAttempt::FallbackSetup;
+            }
+
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "tuning-cache: icache flush enabled, " << timing.flush_us
+                    << " us per launch";
+                log_info(__func__, msg.str());
+            }
+        }
+
+        // The candidate being measured: one kernel set per rotation block. Only
+        // the buffer pointers differ, so the problem description built by
+        // isSolutionSupported is shared; solve() bakes the pointers from inputs
+        // into the invocation, which is why each block needs its own set rather
+        // than one set relaunched.
+        std::vector<std::vector<TensileLite::KernelInvocation>> perBlock;
+        size_t                                                  required     = 0;
+        bool                                                    launchFailed = false;
+
+        std::vector<double> measuredUs(candidates.size(), -1.0);
+        std::vector<size_t> requiredBytes(candidates.size(), 0);
+        size_t              measured  = 0;
+        size_t              attempted = 0;
+
+        auto discardCandidate = [&] {
+            static_cast<void>(hipStreamSynchronize(prob.stream));
+
+            // Clear any sticky async error so it cannot be attributed to the
+            // caller's real launch further down.
+            static_cast<void>(hipGetLastError());
+        };
+
+        // Opened as a candidate's timed phase starts and closed by recordMeasurement.
+        // One still open later could not be timed, and the search passed it over
+        // without recording it.
+        bool timedPhaseOpen      = false;
+        auto discardUntimedPhase = [&] {
+            if(timedPhaseOpen)
+            {
+                timedPhaseOpen = false;
+                discardCandidate();
+            }
+        };
+
+        auto prepare = [&](size_t c) -> bool {
+            discardUntimedPhase();
+            attempted++;
+            perBlock.clear();
+            required     = 0;
+            launchFailed = false;
+
+            const auto& solution = candidates[c];
+            try
+            {
+                static_cast<void>(resetSynchronizer());
+
+                rocblaslt_matmul_algo algo{};
+                *(int*)algo.data         = solution->index;
+                algo.max_workspace_bytes = prob.workspaceSize;
+
+                // Inside the guard, not before it. isSolutionSupported resolves
+                // and predicate-checks the candidate, and a lazily materialised
+                // library can throw while doing so. Checking outside meant one
+                // bad candidate aborted the whole search rather than being
+                // skipped, which on the default exhaustive path threw away
+                // every remaining candidate for that shape.
+                if(rocblaslt_status_success
+                       == isSolutionSupported(handle, scratchProb, gemmData, &algo, &required)
+                   && required <= prob.workspaceSize)
+                {
+                    rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
+                    perBlock.reserve(blocks);
+                    for(size_t b = 0; b < blocks; b++)
+                    {
+                        RocblasltContractionProblem blockProb = scratchProb;
+                        blockProb.D = bytes + layout.offsetD + b * layout.strideD;
+                        if(layout.bytesE)
+                            blockProb.E = bytes + layout.offsetE + b * layout.strideE;
+                        if(layout.bytesBias)
+                            blockProb.bias = bytes + layout.offsetBias + b * layout.strideBias;
+                        if(inPlace)
+                            blockProb.C = blockProb.D;
+                        if(blocks > 1)
+                        {
+                            blockProb.A = bytes + layout.offsetA + b * layout.strideA;
+                            blockProb.B = bytes + layout.offsetB + b * layout.strideB;
+                            if(!inPlace && layout.bytesC != 0)
+                                blockProb.C = bytes + layout.offsetC + b * layout.strideC;
+                            if(layout.bytesBiasIn)
+                                blockProb.bias
+                                    = bytes + layout.offsetBiasIn + b * layout.strideBiasIn;
+                            if(layout.bytesScaleA)
+                                blockProb.scaleA
+                                    = bytes + layout.offsetScaleA + b * layout.strideScaleA;
+                            if(layout.bytesScaleB)
+                                blockProb.scaleB
+                                    = bytes + layout.offsetScaleB + b * layout.strideScaleB;
+                            if(layout.bytesScaleAlphaVec)
+                                blockProb.scaleAlphaVec = bytes + layout.offsetScaleAlphaVec
+                                                          + b * layout.strideScaleAlphaVec;
+                        }
+
+                        auto inputs = GetTensileInputs(blockProb);
+                        perBlock.push_back(solution->solve(data->problem, inputs, *hardware));
+                    }
+                    return true;
+                }
+            }
+            catch(...)
+            {
+                // solve() can throw. One bad candidate must not fail the call.
+            }
+            discardCandidate();
+            return false;
+        };
+
+        // Launch i of a phase uses block i, as hipblaslt-bench's launches do.
+        auto launchBlock = [&](int64_t i) {
+            if(!launchFailed
+               && adapter->launchKernels(
+                      perBlock[static_cast<size_t>(i) % perBlock.size()], stream, nullptr, nullptr)
+                      != hipSuccess)
+                launchFailed = true;
+        };
+
+        auto recordMeasurement = [&](size_t c, hipblaslt_bench::TimingResult& result) -> bool {
+            timedPhaseOpen = false;
+            if(launchFailed)
+            {
+                discardCandidate();
+                return false;
+            }
+
+            measured++;
+            measuredUs[c]    = result.median_us;
+            requiredBytes[c] = required;
+
+            if(measured == 1 && tuningFailureInjected(TuningFailureStage::MidSearch))
+                throw std::runtime_error("tuning failure injected for a test");
+            return true;
+        };
+
+        // Time-based rather than every N candidates: a heartbeat tied to the
+        // candidate count fires hundreds of times on a shape whose kernels are
+        // quick and barely at all on one whose kernels are slow. Checked between
+        // candidates, so a single very long candidate can delay it.
+        const bool   wantProgress = (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0;
+        const double progressEveryUs = 10.0 * 1000.0 * 1000.0;
+        double       nextProgressUs  = progressEveryUs;
+
+        auto shouldStop = [&] {
+            if(outOfBudget()
+               || (measured > 0 && tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)))
+                return true;
+
+            if(wantProgress && elapsedUs() >= nextProgressUs)
+            {
+                std::ostringstream msg;
+                msg << "tuning-cache: progress attempted=" << attempted << " measured=" << measured
+                    << " total=" << candidates.size()
+                    << " elapsed=" << static_cast<long long>(elapsedUs() / 1.0e6) << "s";
+                log_info(__func__, msg.str());
+
+                // Advanced past now rather than by one interval, so a long gap
+                // does not queue up a burst of catch-up lines.
+                while(nextProgressUs <= elapsedUs())
+                    nextProgressUs += progressEveryUs;
+            }
+            return false;
+        };
+
+        // One pass, every candidate measured the same way. There is no cheap
+        // ranking round to drop a candidate before it has been measured
+        // properly, which is what a shortlist did: on a large shape the eventual
+        // winner screened 396th of 1025 and never reached the decision round.
+        const auto found = hipblaslt_bench::search_candidates(
+            candidates.size(),
+            search,
+            timing,
+            events.start,
+            events.stop,
+            stream,
+            hipblaslt_bench::search_callbacks()
+                .prepare(prepare)
+                .cold([&](size_t, int32_t i) { launchBlock(i); })
+                .launch([&](size_t, int64_t i) { launchBlock(i); })
+                .measuring([&](size_t) { timedPhaseOpen = true; })
+                .measured(recordMeasurement)
+                .should_stop(shouldStop));
+        discardUntimedPhase();
+
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "tuning-cache: measured attempted=" << attempted << " measured=" << measured
+                << " total=" << candidates.size()
+                << " elapsed_ms=" << static_cast<long long>(elapsedUs() / 1000.0);
+            log_info(__func__, msg.str());
+        }
+
+        // Nothing measured leaves nothing to record, whichever way the search
+        // ended. A budget that expires before the first candidate is timed is
+        // the common way to reach this with the search stopped.
+        //
+        // A stopped search whose baseline was not measured is treated the same
+        // way. Its best candidate was compared against nothing the caller would
+        // otherwise run, so recording it could make the shape slower.
+        bool baselineMeasured = false;
+        for(size_t c = 0; c < candidates.size(); c++)
+            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
+                baselineMeasured = true;
+
+        if(found.best >= candidates.size() || (found.stopped && !baselineMeasured))
+        {
+            if(found.stopped)
+            {
+                TensileLite::TuningCounters::instance().skipped++;
+                return TuningAttempt::SkippedBudget;
+            }
+            return TuningAttempt::FallbackNoWinner;
+        }
+
+        // Clamped because a kernel faster than the flush's own jitter can read at
+        // or below zero, and a row records a positive time.
+        auto recordedUs = [](double us) { return std::max(1e-3, us); };
+
+        for(size_t c = 0; c < candidates.size(); c++)
+            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
+                winnerOut.baselineTimeUs = recordedUs(measuredUs[c]);
+
+        const auto& winner               = candidates[found.best];
+        winnerOut.solutionIndex          = winner->index;
+        winnerOut.requiredWorkspaceBytes = requiredBytes[found.best];
+        winnerOut.winnerTimeUs           = recordedUs(measuredUs[found.best]);
+        winnerOut.baselineIndex          = baselineIndex;
+
+        // From the measured object, which candidate resolution above guarantees
+        // is the one getSolutionByIndex returns for this index, so the name
+        // written here is the name replay will compare against via
+        // getKernelNameFromAlgoIndex.
+        winnerOut.kernelName = winner->kernelName;
+
+        // This records an entry even when the winner is the default pick: it
+        // says the shape was measured, so tune mode does not benchmark it again
+        // on every process start.
+        winnerIndexOut = winner->index;
+
+        // Recorded on every row, so a later run can tell whether it could get
+        // any further than this one: the ceiling rounded down to milliseconds,
+        // zero meaning unlimited, and the search as configured for this caller.
+        winnerOut.budgetMs = static_cast<int64_t>(budgetUs / 1000.0);
+        winnerOut.search   = TuningPolicy::search(prob.workspaceSize);
+
+        // A search the budget stopped keeps its winner, marked incomplete: the
+        // baseline was measured, so the best of the prefix is no slower than
+        // what this call runs untuned, and the flag makes tune mode revisit the
+        // shape in a later run whose budget can finish the search.
+        if(found.stopped)
+        {
+            winnerOut.complete = false;
+            return TuningAttempt::TunedPartial;
+        }
+        return TuningAttempt::Tuned;
+    }
+} // namespace
+
+size_t tuningTensorSpanForTest(size_t elementSize,
+                               size_t rows,
+                               size_t cols,
+                               size_t colStride,
+                               size_t batchCount,
+                               size_t batchStride,
+                               bool*  expanded)
+{
+    return tensorSpanBytes(elementSize, rows, cols, colStride, batchCount, batchStride, expanded);
+}
+
+size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
+                                size_t                             rotatingBytes,
+                                size_t                             cap,
+                                int32_t                            coldIters,
+                                int32_t                            hotIters,
+                                uint64_t*                          values,
+                                size_t                             count)
+{
+    const ScratchLayout layout  = planScratch(prob, rotatingBytes, cap, coldIters, hotIters);
+    const uint64_t      known[] = {layout.usable,
+                                   layout.blockCount,
+                                   layout.total,
+                                   layout.bytesA,
+                                   layout.bytesB,
+                                   layout.bytesC,
+                                   layout.bytesD,
+                                   layout.bytesInPlaceC,
+                                   layout.bytesE,
+                                   layout.bytesBias,
+                                   layout.bytesBiasIn,
+                                   layout.copyBiasIn,
+                                   layout.bytesScaleA,
+                                   layout.bytesScaleB,
+                                   layout.bytesScaleAlphaVec};
+    for(size_t i = 0; i < count && i < std::size(known); i++)
+        values[i] = known[i];
+    return std::size(known);
+}
+
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count)
+{
+    const auto found = tuningCandidates(prob, handle, gemmData);
+    if(!found)
+        return 0;
+    for(size_t i = 0; i < count && i < found->size(); i++)
+        indexes[i] = (*found)[i];
+    return found->size();
+}
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // Amax uses Synchronizer for its counter, so retain its GSU region.
@@ -3885,6 +5446,11 @@ int tuningLastLaunchedIndexForTest()
     return index;
 }
 
+void tuningInjectFailureForTest(int stage)
+{
+    g_injectedTuningFailure.store(stage, std::memory_order_relaxed);
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -3921,32 +5487,44 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(prob.trans_b == HIPBLAS_OP_C)
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
-        if(algo == nullptr)
+        // Noted before algo is filled in below. An explicit algo launches as
+        // given, whatever the cache holds, though in tune mode its call can
+        // still tune the shape.
+        const bool callerSuppliedAlgo = (algo != nullptr);
+
+        const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+        const bool  keyed  = tuning.reads() && !prob.grouped_gemm
+                           && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        const bool tunes
+            = keyed && tuning.writes() && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
+
+        // A mode set without a path is otherwise reported by the heuristic
+        // query, which a matmul-only caller never makes.
+        if(tuning.mode() != TensileLite::TuningMode::Off && tuning.cachePath().empty())
+            TensileLite::announceTuningModeOnce(TensileLite::TuningLoadStatus::NoPath);
+
+        // Built by whichever of replay and the tuner needs it first.
+        std::optional<TensileLite::ProblemOverride> tuningKey;
+
+        if(!callerSuppliedAlgo && keyed)
         {
             // Cache replay for a call that passed no algo. hipblasLtMatmul
             // accepts algo == nullptr and then runs getBestSolutions below
             // without ever entering hipblasLtMatmulAlgoGetHeuristic, so without
-            // this such a call would never be served from the cache. An
-            // explicit algo launches as given, whatever the cache holds.
+            // this such a call would never be served from the cache.
             try
             {
-                const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+                // A matmul-only caller never reaches the heuristic entry
+                // point, which is the only other place that loads the file.
+                TensileLite::loadTuningFileForReplay(tuning.cachePath());
+                tuningKey = RocblasltContractionProblem2ProblemOverride(prob);
 
-                if(tuning.reads() && !prob.grouped_gemm
-                   && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                {
-                    // A matmul-only caller never reaches the heuristic entry
-                    // point, which is the only other place that loads the file.
-                    TensileLite::loadTuningFileForReplay(tuning.cachePath());
-
-                    if(tuning_cache_replay(handle,
-                                           RocblasltContractionProblem2ProblemOverride(prob),
-                                           prob,
-                                           gemmData,
-                                           &heuristicResult.algo)
-                       >= 0)
-                        algo = &heuristicResult.algo;
-                }
+                // A miss that may go on to tune is counted by the tuner, by
+                // what the call finds once it can tune.
+                if(tuning_cache_replay(
+                       handle, *tuningKey, prob, gemmData, &heuristicResult.algo, !tunes)
+                   >= 0)
+                    algo = &heuristicResult.algo;
             }
             catch(...)
             {
@@ -3956,6 +5534,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 algo = nullptr;
             }
         }
+        const bool replayed = !callerSuppliedAlgo && algo != nullptr;
 
         if(algo == nullptr)
         {
@@ -3976,6 +5555,331 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
         int* solutionIndex = (int*)algo->data;
+
+        // Tune mode: a shape no entry serves is benchmarked at its first matmul,
+        // through either entry point, since a call that passes no algo never
+        // enters hipblasLtMatmulAlgoGetHeuristic.
+        //
+        // The caller's algo is const. When the tuner picks the kernel, or finds
+        // another thread's winner, only the index used for this launch changes,
+        // and only for a caller that passed no algo.
+        int  launchIndex = -1;
+        int  tunedIndex  = -1;
+        int  servedIndex = -1;
+        bool benchmarked = false;
+
+        // Set when an attempt begins, so the handler below can tell an exception
+        // thrown while benchmarking from one thrown before the attempt started.
+        // The clock is here with it because a call whose attempt threw has still
+        // blocked for however long it ran.
+        std::optional<TensileLite::ProblemOverride> attemptKey;
+        std::chrono::steady_clock::time_point       attemptStart;
+
+        // __func__ inside the lambda would name the lambda.
+        const char* const funcName = __func__;
+
+        // Turns an attempt into its one terminal line, for the normal path and
+        // the exception handler alike.
+        auto reportAttempt = [&](const TensileLite::ProblemOverride& key,
+                                 TensileLite::TuningAttempt          result,
+                                 double                              elapsedSeconds,
+                                 int                                 winnerIndex,
+                                 bool                                persisted) {
+            if(!TensileLite::shouldLogTuningTerminal(key, result))
+                return;
+
+            std::ostringstream msg;
+            if(result == TensileLite::TuningAttempt::Tuned
+               || result == TensileLite::TuningAttempt::TunedPartial)
+            {
+                const bool partial = result == TensileLite::TuningAttempt::TunedPartial;
+
+                msg << (partial ? "tuning-partial winner=" : "tuning-done winner=") << winnerIndex
+                    << " elapsed=" << std::fixed << std::setprecision(1) << elapsedSeconds
+                    << "s persisted=" << (persisted ? "yes" : "no");
+                if(!persisted)
+                    msg << " (could not write "
+                        << TensileLite::TuningModeSingleton::getInstance().cachePath()
+                        << "; the winner is used now but lost at exit)";
+
+                // The entry is usable but not final: it beats default selection,
+                // it is replayed, and a run with a higher ceiling replaces it.
+                if(partial)
+                    msg << "; the time budget stopped the search, so this is the best of the "
+                           "candidates measured, not of all of them. Raise or unset "
+                           "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE to finish it";
+            }
+            else
+            {
+                msg << (TensileLite::tuningAttemptIsSkip(result) ? "tuning-skipped "
+                                                                 : "tuning-fallback ")
+                    << TensileLite::tuningAttemptReason(result);
+
+                // A decline made before anything is measured would always read
+                // 0.0s. A budget stop or a benchmarker that threw partway is
+                // where the time the call blocked is worth reporting.
+                if(elapsedSeconds >= 0.05)
+                    msg << "; elapsed=" << std::fixed << std::setprecision(1) << elapsedSeconds
+                        << "s";
+
+                msg << "; using default selection";
+            }
+
+            log_tuning_lifecycle(funcName, msg.str());
+        };
+
+        try
+        {
+            if(tunes)
+            {
+                if(!tuningKey)
+                {
+                    // An explicit algo skipped replay. Without the file this
+                    // call would tune every shape again on every process start.
+                    TensileLite::loadTuningFileForReplay(tuning.cachePath());
+                    tuningKey = RocblasltContractionProblem2ProblemOverride(prob);
+                }
+                const TensileLite::ProblemOverride& key   = *tuningKey;
+                TensileLite::OverrideMap&           cache = TensileLite::OverrideMap::getMap();
+
+                // A shape this process has settled is neither searched nor
+                // asked about again.
+                const bool settled = TensileLite::tuningAlreadyAttempted(key);
+
+                // "No usable entry", not "no entry": rows that failed name
+                // validation after a rebuild stay in the map, and must not keep
+                // their shape from being tuned again. Replay has already looked
+                // for a call that passed no algo, and launches what it found; a
+                // call with its own algo needs the answer only to decide whether
+                // to tune.
+                const int cachedIndex = replayed ? *solutionIndex
+                                        : callerSuppliedAlgo && !settled
+                                            ? tuning_cache_find_valid_entry(
+                                                  handle, key, prob, gemmData, prob.workspaceSize)
+                                            : -1;
+
+                // Counted once, by whether this call launches a cached entry,
+                // and only when the caller left the choice to the library. A
+                // call that waits for the tuning lock is counted by what it
+                // finds once it has it, before any search of its own; one that
+                // replay served was counted there.
+                auto countLookup = [&](bool servedFromCache) {
+                    if(callerSuppliedAlgo || replayed)
+                        return;
+                    TensileLite::recordTuningLookup(key, servedFromCache);
+                    auto& counters = TensileLite::TuningCounters::instance();
+                    if(servedFromCache)
+                        counters.hits++;
+                    else
+                        counters.misses++;
+                };
+
+                // A usable entry is not necessarily final. needsRetune says yes
+                // for an entry the budget cut short when this run can get
+                // further, and for a finished entry whose recorded search covered
+                // less than this run would, such as a ranked prefix when this run
+                // searches every kernel. The ceiling is rounded to milliseconds
+                // the way the benchmarker records it, so the two compare on equal
+                // terms.
+                auto needsRetune = [&] {
+                    const int64_t currentBudgetMs
+                        = static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0);
+                    return cache.needsRetune(
+                        key,
+                        TuningPolicy::search(prob.workspaceSize),
+                        currentBudgetMs,
+                        [&](const auto& entry) {
+                            return tuning_cache_entry_is_usable(
+                                handle, key, entry, prob, gemmData, prob.workspaceSize);
+                        });
+                };
+
+                bool searches = false;
+                if(!settled)
+                {
+                    searches = cachedIndex < 0 || needsRetune();
+
+                    // Settled at the shape's first matmul when its search is
+                    // final for this run: asking reads the settings and checks
+                    // every row, and a shape is searched at most once per
+                    // process in any case.
+                    if(!searches)
+                        TensileLite::recordTuningAttempt(key);
+                }
+
+                if(searches)
+                {
+                    // Waits rather than skipping: every shape tune mode meets is
+                    // tuned whatever the thread timing, and the shared scratch
+                    // keeps one writer.
+                    std::unique_lock<std::mutex> guard(tuningLock());
+
+                    // Re-read under the lock. A thread that waited while another
+                    // tuned this shape launches that winner instead of repeating
+                    // the search.
+                    const int lockedIndex = tuning_cache_find_valid_entry(
+                        handle, key, prob, gemmData, prob.workspaceSize);
+                    if(!callerSuppliedAlgo && lockedIndex >= 0)
+                        launchIndex = lockedIndex;
+                    countLookup(lockedIndex >= 0);
+
+                    if(!TensileLite::tuningAlreadyAttempted(key)
+                       && (lockedIndex < 0 || needsRetune()))
+                    {
+                        TensileLite::TunedEntry winner;
+                        benchmarked = true;
+
+                        // What this call launches if tuning finds nothing
+                        // faster: the caller's algo, else the cached entry, else
+                        // default selection's pick.
+                        const int untunedIndex = launchIndex >= 0 ? launchIndex : *solutionIndex;
+
+                        // Started before the key is stored, so the handler's
+                        // test for an attempt under way never sees the clock at
+                        // its default.
+                        attemptStart = std::chrono::steady_clock::now();
+                        attemptKey   = key;
+
+                        const TensileLite::TuningAttempt result
+                            = benchmarkAndSelectWinner(handle,
+                                                       prob,
+                                                       key,
+                                                       gemmData,
+                                                       library,
+                                                       hardware,
+                                                       adapter,
+                                                       untunedIndex,
+                                                       winner,
+                                                       tunedIndex);
+
+                        const double elapsedSeconds
+                            = std::chrono::duration<double>(std::chrono::steady_clock::now()
+                                                            - attemptStart)
+                                  .count();
+
+                        bool persisted = false;
+
+                        if(result == TensileLite::TuningAttempt::Tuned
+                           || result == TensileLite::TuningAttempt::TunedPartial)
+                        {
+                            winner.schemaVersion = TensileLite::kCurrentTuningSchemaVersion;
+                            winner.buildStamp    = TensileLite::currentBuildStamp();
+
+                            // Added beside the rows already here rather than in
+                            // their place, so this process holds what a later one
+                            // reads back from the file, and find's order, finished
+                            // searches first and the newest first within each,
+                            // picks the same winner for both. A partial winner
+                            // therefore leaves a usable completed row in use.
+                            // Rows that failed validation stay too; replay and
+                            // needsRetune both pass over them.
+                            cache.addIfAbsent(key, winner);
+
+                            // What this call launches is then what replay picks.
+                            if(!callerSuppliedAlgo)
+                                servedIndex = tuning_cache_find_valid_entry(
+                                    handle, key, prob, gemmData, prob.workspaceSize);
+
+                            persisted
+                                = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner);
+
+                            auto& counters = TensileLite::TuningCounters::instance();
+                            if(persisted)
+                                counters.tuned++;
+
+                            // Served by a tuned kernel from here on, so the summary
+                            // counts the shape as matched rather than as the
+                            // fallback its first lookup recorded.
+                            TensileLite::recordTuningLookup(key, true);
+
+                            // Whether or not the append succeeded: the winner is
+                            // in the in-memory cache, so the shape was tuned in
+                            // this run either way. persisted= on the outcome line
+                            // says whether the next run inherits it.
+                            TensileLite::recordTuningWinner(key);
+
+                            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                            {
+                                std::ostringstream msg;
+                                msg << "tuning-cache: winner " << tunedIndex << " at "
+                                    << winner.winnerTimeUs << " us vs baseline "
+                                    << winner.baselineIndex << " at " << winner.baselineTimeUs
+                                    << " us [" << counters.summary() << "]";
+                                log_info(__func__, msg.str());
+                            }
+                        }
+
+                        // Latched for every outcome that spent the search. A
+                        // shape is searched at most once per process, whatever
+                        // settings later matmuls bring, and repeating a search
+                        // that stopped or failed would stall the next matmul as
+                        // long again for the same result, at the default log
+                        // level silently, since a shape's start and failure are
+                        // each reported once. A partial winner would measure the
+                        // same prefix under the same ceiling. The declines made
+                        // before tuning-start cost microseconds and are retried,
+                        // so a transient condition can clear.
+                        if(result == TensileLite::TuningAttempt::Tuned
+                           || result == TensileLite::TuningAttempt::TunedPartial
+                           || result == TensileLite::TuningAttempt::SkippedBudget
+                           || result == TensileLite::TuningAttempt::FallbackSetup
+                           || result == TensileLite::TuningAttempt::FallbackEnumeration
+                           || result == TensileLite::TuningAttempt::FallbackNoWinner)
+                            TensileLite::recordTuningAttempt(key);
+
+                        reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
+                    }
+                }
+                else
+                {
+                    countLookup(cachedIndex >= 0);
+                }
+            }
+        }
+        catch(...)
+        {
+            // The cache and the tuner are optimisations, so a failure leaves the
+            // call on default selection rather than failing it. Caught here
+            // rather than by the function-level handler, because lazy library
+            // loading, enumeration and solve() can all throw after the call's
+            // own algo was chosen. benchmarked stays set, so data->problem is
+            // restored below.
+            static_cast<void>(hipGetLastError());
+            tunedIndex  = -1;
+            servedIndex = -1;
+            launchIndex = -1;
+
+            // Only for an attempt that was announced: an exception from the
+            // lookup or the file load never reached the benchmarker. An
+            // announced one is latched like any other failure after tuning-start.
+            if(attemptKey)
+            {
+                const double elapsedSeconds
+                    = std::chrono::duration<double>(std::chrono::steady_clock::now() - attemptStart)
+                          .count();
+
+                TensileLite::recordTuningAttempt(*attemptKey);
+                reportAttempt(*attemptKey,
+                              TensileLite::TuningAttempt::FallbackException,
+                              elapsedSeconds,
+                              -1,
+                              false);
+            }
+        }
+
+        if(benchmarked)
+        {
+            // Whether or not a winner emerged. isSolutionSupported rewrites
+            // data->problem from whatever it is handed, so after benchmarking it
+            // describes the scratch problem, whose D and possibly C point
+            // elsewhere.
+            updateTensileProblem(prob, data->problem);
+        }
+
+        if(!callerSuppliedAlgo && tunedIndex >= 0)
+            launchIndex = servedIndex >= 0 ? servedIndex : tunedIndex;
+        if(launchIndex >= 0)
+            solutionIndex = &launchIndex;
 
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
@@ -4020,8 +5924,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
         {
-            std::string kernel_name   = getKernelNameFromAlgoIndex(handle, *algo);
-            std::string Solution_name = getSolutionNameFromAlgoIndex(handle, *algo);
+            // The tuner can launch an index other than algo's.
+            auto loggedAlgo           = *algo;
+            *(int*)loggedAlgo.data    = *solutionIndex;
+            std::string kernel_name   = getKernelNameFromAlgoIndex(handle, loggedAlgo);
+            std::string Solution_name = getSolutionNameFromAlgoIndex(handle, loggedAlgo);
 
             logExtendedProfileFromTensileDataGemm(data->problem,
                                                   data->inputs,
@@ -4094,7 +6001,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         else
         {
             // cu-fallback detection
-            bool isCUFallback = solution->isFallbackForHW(*hardware);
+            bool isCUFallback = rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
             if(isCUFallback)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -4105,8 +6012,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     log_info(__func__, msg.str());
                 }
             }
-            // set XCC=1 to param when this is a fallback solution
-            data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
             // Build the inputs here rather than inline, so the flag pointer can
             // be pointed at this solution's region before the kernel arguments
@@ -4396,7 +6301,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
 
             // cu-fallback detection
-            bool isCUFallback = solution->isFallbackForHW(*hardware);
+            bool isCUFallback = rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
             if(isCUFallback)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -4407,8 +6312,6 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                     log_info(__func__, msg.str());
                 }
             }
-            // set XCC=1 to param when this is a fallback solution
-            data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
             data->inputs.ws = workspace;
 

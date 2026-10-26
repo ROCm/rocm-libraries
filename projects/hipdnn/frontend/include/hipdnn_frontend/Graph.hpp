@@ -1966,6 +1966,7 @@ private:
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
                 bool restartUnstalled = false;
+                int discardedNegativeSamples = 0;
                 auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
 
                 // One lambda for both strategies: it just runs the reusable profiling
@@ -1993,6 +1994,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -2020,6 +2022,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -2034,8 +2037,9 @@ private:
                     HIPDNN_FE_LOG_WARN(
                         "autotune: engine "
                         << result.engineName
-                        << ": stall watchdog fired or stalling was declined mid-sweep; "
-                           "discarding this pass and re-measuring every candidate unstalled.");
+                        << ": stall watchdog fired, stalling was declined, or stalled "
+                           "timing kept reading negative mid-sweep; discarding this pass and "
+                           "re-measuring every candidate unstalled.");
                     restartUnstalledRequested = true;
                     break;
                 }
@@ -2047,6 +2051,16 @@ private:
                                                            << result.errorMessage);
                     allResults.push_back(std::move(result));
                     continue;
+                }
+
+                if(discardedNegativeSamples > 0)
+                {
+                    HIPDNN_FE_LOG_WARN("autotune: engine "
+                                       << result.engineName << ": discarded "
+                                       << discardedNegativeSamples
+                                       << " negative elapsed reading(s) from the HIP event "
+                                          "timer and re-measured them "
+                                          "(ROCm/rocm-systems#12925).");
                 }
 
                 // --- Compute statistics ---

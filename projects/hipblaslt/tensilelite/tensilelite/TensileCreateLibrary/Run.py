@@ -62,7 +62,8 @@ from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architect
 from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
-from ..SolutionStructs.Naming import getKernelCompileKey, getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileKey, \
+    getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -243,6 +244,7 @@ def groupKernelRecords(kernels, splitGSU: bool):
     """Group placement/runtime aliases by generated-assembly identity."""
     groups = {}
     artifactOwners = {}
+    merges = RegisterAllocationMerges()
     for kernel in kernels:
         key = getKernelCompileKey(kernel, splitGSU)
         symbol = getKernelNameMin(kernel, splitGSU)
@@ -264,8 +266,10 @@ def groupKernelRecords(kernels, splitGSU: bool):
         group = groups[key]
         if group["symbol"] != symbol or group["base"] != base:
             raise RuntimeError(f"Compile key {key!r} maps to inconsistent kernel names")
+        merges.add(group["representative"], kernel, symbol)
         if all(alias is not kernel for alias in group["aliases"]):
             group["aliases"].append(kernel)
+    merges.warn("Their solutions run that kernel.")
     return [
         KernelCompileGroup(
             key,
@@ -1357,7 +1361,7 @@ def run():
     start = timer()
     print1("")
     print1(HR)
-    print1("# Tensile Create Library")
+    print1("# TensileLite Create Library")
     print2(HR)
     print2("")
 
@@ -1630,7 +1634,7 @@ def run():
         if not removeScratch(outputPath, buildTmpPath):
             printWarning(f"Cannot remove build_tmp")
 
-    print("# Tensile Library Writer DONE")
+    print("# TensileLite Library Writer DONE")
     print(HR)
     print("")
 

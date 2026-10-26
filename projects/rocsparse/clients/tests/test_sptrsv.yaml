@@ -235,7 +235,7 @@ Tests:
 
 
 - name: sptrsv_file
-  category: nigthly
+  category: nightly
   function: sptrsv
   indextype: *i32
   precision: *single_double_precisions
