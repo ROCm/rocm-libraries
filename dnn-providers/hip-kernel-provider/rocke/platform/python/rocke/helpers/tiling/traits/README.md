@@ -32,8 +32,8 @@ A row carries exactly these fields (plus `operand_signedness` on integer rows):
 
 | Field | Rule |
 |---|---|
-| `op_id` | Unique. The builtin name without `__builtin_amdgcn_`. A builtin whose A and B formats are picked by an operand has one row per format pair, named `<stem>_<a_dtype>_<b_dtype>` (e.g. `wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1`). |
-| `llvm_builtin` | The clang builtin. |
+| `op_id` | Unique. The builtin name without `__builtin_amdgcn_`. A builtin whose A and B formats are picked by an operand has one row per format pair, named `<stem>_<a_dtype>_<b_dtype>` (e.g. `wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1`). A dense row on a scaled builtin drops `scale_` from the stem (`mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1`), as its instruction's mnemonic does. |
+| `llvm_builtin` | The clang builtin. The gfx950 `f8f6f4` MFMA without scales (`v_mfma_f32_{16x16x128,32x32x64}_f8f6f4`) has no builtin of its own: its rows name the scaled builtin, which the compiler issues as that instruction when both scales are zero. They are family `dense`, beside the `scaled` rows of the same builtin. |
 | `llvm_intrinsic` | The LLVM intrinsic the builtin lowers to, without its type-overload suffix (see Targets). |
 | `family` | `dense`, `sparse` or `scaled`. |
 | `wave_size` | 32 or 64. |
@@ -119,7 +119,8 @@ reason (`gfx940` and `gfx941`: superseded by `gfx942`). The loader refuses a row
 `llvm_intrinsic` is read from the LLVM IR clang emits for the builtin, with the trailing name
 parts that only spell the operand types removed. Builtins that differ only in operand types share
 an intrinsic (`wmma_f32_16x16x16_f16_w32` and `wmma_f32_16x16x16_f16_w32_gfx12` are both
-`llvm.amdgcn.wmma.f32.16x16x16.f16`), and so do the per-format rows of one `f8f6f4` builtin.
+`llvm.amdgcn.wmma.f32.16x16x16.f16`), and so do the per-format rows of one `f8f6f4` builtin, the
+gfx950 dense rows among them.
 
 A scaled row's `scale.a_dtypes` / `scale.b_dtypes` are the scale formats the newest clang accepts
 in the instruction's scale-format operands, measured by compiling every pair of values. The gfx950 scaled MFMA

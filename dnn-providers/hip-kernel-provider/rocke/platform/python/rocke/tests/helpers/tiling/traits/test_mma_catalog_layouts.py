@@ -298,6 +298,34 @@ def test_pin_only_rows_lay_out_like_their_selectable_twin(
     assert sorted(a_relabelling.values()) == list(range(pinned.k))
 
 
+_UNSCALED_ON_SCALED_BUILTIN = [
+    traits
+    for traits in _ROWS
+    if traits.family != "scaled" and "_scale_" in traits.llvm_builtin
+]
+
+
+@pytest.mark.parametrize(
+    "unscaled",
+    _UNSCALED_ON_SCALED_BUILTIN,
+    ids=[t.op_id for t in _UNSCALED_ON_SCALED_BUILTIN],
+)
+def test_unscaled_rows_lay_out_like_the_scaled_instruction(unscaled: MmaTraits) -> None:
+    # The gfx950 f8f6f4 MFMA without scales is the scaled builtin called with zero scales: the
+    # scales change no register, so A, B and C sit exactly where the scaled row of the same
+    # formats places them.
+    scaled = _CATALOG.get(unscaled.op_id.replace("mfma_", "mfma_scale_", 1))
+    assert (scaled.llvm_builtin, scaled.family) == (unscaled.llvm_builtin, "scaled")
+    assert _encoder_maps(unscaled) == _encoder_maps(scaled)
+
+
+def test_every_scaled_gfx950_mfma_row_has_its_unscaled_twin() -> None:
+    scaled = {t.op_id for t in _ROWS if t.op_id.startswith("mfma_scale_")}
+    unscaled = {t.op_id for t in _UNSCALED_ON_SCALED_BUILTIN}
+    assert len(scaled) == 50
+    assert {op_id.replace("mfma_scale_", "mfma_", 1) for op_id in scaled} == unscaled
+
+
 def _a_map(op_id: str) -> LaneMap:
     return _encoder_map(a_warp_encoding(_CATALOG.get(op_id)), "M", "K")
 
