@@ -10,7 +10,6 @@
 #include <limits>
 #include <numeric>
 #include <optional>
-#include <roc/hostnumerics/detail/index_order.hpp>
 #include <roc/hostnumerics/expected.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
@@ -156,9 +155,14 @@ class Layout {
         if (order.size() != shape.rank())
             return Unexpected(
                 LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
-        if (const auto position = getInvalidOrderPosition(order, shape.rank()))
-            return Unexpected(LayoutFailure{LayoutError::InvalidOrder, *position, order[*position],
-                                            shape.rank()});
+        std::vector<bool> seen(shape.rank(), false);
+        for (size_t position = 0; position < order.size(); ++position) {
+            const size_t axis = order[position];
+            if (axis >= shape.rank() || seen[axis])
+                return Unexpected(
+                    LayoutFailure{LayoutError::InvalidOrder, position, axis, shape.rank()});
+            seen[axis] = true;
+        }
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank());
