@@ -742,12 +742,12 @@ def _pinned_attention_arch(arch):
 
 def build_attention_d256_gfx950(arch):
     """D256 bf16 prefill *fast* spec: 32x32-transposed + ``use_kq_lds_pad``
-    (slab-granularity K_lds pad) + ``use_softmax_mfma_interleave``.
+    (slab-granularity K_lds pad) + ``use_transposed_half_local_pv``.
 
     The slab pad's async-DMA write and its padded read remap must agree
     byte-for-byte or numerics silently corrupt, and an addressing drift would pass
     every other CPU test and fail only on GPU (#9233 review). Raises if the fast
-    spec / pad+interleave is not selected, so this can never pin the fallback.
+    spec / pad+half-local PV is not selected, so this can never pin the fallback.
     """
 
     def _build():
@@ -762,14 +762,14 @@ def build_attention_d256_gfx950(arch):
             if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
-                    "would pin the fallback (no pad/interleave)"
+                    "would pin the fallback (no pad/half-local PV)"
                 )
             spec = _tiled_spec_from_problem(problem, arch)
-            if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
+            if not (spec.use_kq_lds_pad and spec.use_transposed_half_local_pv):
                 raise RuntimeError(
-                    "expected pad+interleave in the D256 fast spec; got "
+                    "expected pad+half-local PV in the D256 fast spec; got "
                     f"pad={spec.use_kq_lds_pad} "
-                    f"interleave={spec.use_softmax_mfma_interleave}"
+                    f"half_local_pv={spec.use_transposed_half_local_pv}"
                 )
             return build_unified_attention_2d_tiled(spec, arch=arch)
 
@@ -3852,7 +3852,7 @@ def cases():
     # 4-warp GQA V-transpose (gfx942) routes.
     add(
         "attention_d256",
-        "attention_d256/gfx950/pad_interleave",
+        "attention_d256/gfx950/pad_hlpv",
         "gfx950",
         build_attention_d256_gfx950("gfx950"),
     )

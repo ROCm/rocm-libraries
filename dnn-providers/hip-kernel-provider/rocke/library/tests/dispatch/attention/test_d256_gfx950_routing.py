@@ -100,8 +100,6 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         "use_early_v_schedule",
         "use_sched_barrier",
         "use_softmax_mfma_interleave",
-        "softmax_interleave_mode",
-        "softmax_interleave_groups",
         "use_fast_paged_kv_desc",
         "use_mfma32_skip_legacy_qreg",
         "use_kq_lds_pad",
@@ -119,8 +117,8 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
     def test_ssot_constellation(self):
         ov = au._d256_gfx950_spec_overrides()
         self.assertEqual(set(ov), self.EXPECTED_KEYS)
-        self.assertIs(ov["use_softmax_mfma_interleave"], True)
-        self.assertEqual(ov["softmax_interleave_mode"], 2)
+        self.assertIs(ov["use_softmax_mfma_interleave"], False)
+        self.assertIs(ov["use_transposed_half_local_pv"], True)
         self.assertIs(ov["use_register_pv"], False)
         self.assertIs(ov["use_qblock_reverse"], True)
 
@@ -142,7 +140,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         # no-arg path: _impl already applies the D256 override, and
         # _resolve_lds_budget still runs (a valid spec is returned).
         base = au._tiled_spec_from_problem(problem, "gfx950")
-        self.assertIs(base.use_softmax_mfma_interleave, True)
+        self.assertIs(base.use_softmax_mfma_interleave, False)
         self.assertIs(base.use_register_pv, False)
         # passing the SSOT overrides explicitly reproduces the same valid spec
         # (proves overrides= is plumbed + applied, and the resolver still runs).

@@ -948,17 +948,18 @@ def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
 
 def _d256_gfx950_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
     """Route the D256 gfx950 bf16 prefill cohort to the 32x32
-    transposed fast path + FA3-style softmax<->MFMA interleave.
+    transposed fast path (num_warps=4, T=32, half-local PV).
 
     Gates the three launch-critical geometry selectors (num_warps / tile_size /
     block_m_per_warp) so the builder spec, ``_tiled_cache_key`` and
     ``_get_2d_launch_meta`` all agree; the remaining codegen flags (32x32 MFMA,
-    transposed stack, register_pv off, K single-buffer, interleave mode2/g4) are
-    applied by the spec override in ``_tiled_spec_from_problem``. Narrow +
-    arch/feature-guarded: every other shape is byte-identical.
+    transposed stack, register_pv off, K single-buffer) are applied by the spec
+    override in ``_tiled_spec_from_problem``. Narrow + arch/feature-guarded:
+    every other shape is byte-identical.
 
-    Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
-    mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
+    Four waves per workgroup sharing one T=32 K/V tile hide the K/V DMA wait
+    that dominated the two-wave T=64 body; the softmax<->MFMA interleave is off
+    because it lengthens the four-wave loop.
     """
     return arch == "gfx950" and _d256_gfx950_cohort(problem)
 
@@ -966,8 +967,7 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
 def _d256_gfx950_spec_overrides() -> dict:
     """Single source of truth for the D256 gfx950 bf16 prefill knob constellation.
 
-    The 32x32 transposed + FA3-style softmax<->MFMA-interleave (mode2/g4) +
-    slab-padded K_lds codegen pins. Consumed by BOTH the builder override in
+    The 32x32 transposed + half-local PV + slab-padded K_lds codegen pins. Consumed by BOTH the builder override in
     ``builders.common.attention_spec_builder._tiled_spec_from_problem`` (the
     production path) and the ``dispatch.attention`` gfx950 D256 candidate, so the
     dispatched spec and the built kernel cannot drift.
@@ -986,9 +986,7 @@ def _d256_gfx950_spec_overrides() -> dict:
         use_v_double_buffer=False,
         use_early_v_schedule=False,
         use_sched_barrier=False,
-        use_softmax_mfma_interleave=True,
-        softmax_interleave_mode=2,
-        softmax_interleave_groups=4,
+        use_softmax_mfma_interleave=False,
         use_fast_paged_kv_desc=False,
         use_mfma32_skip_legacy_qreg=False,
         # Slab-granularity K_lds pad (16 halves): breaks the row-aliased bank
@@ -1259,7 +1257,10 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     1.15-1.30× win on every FP8 SW long-prefill shape.
     """
     if _d256_gfx950_fast(problem, arch):
-        return 64
+        # T=32 with num_warps=4 (BLOCK_M=128): four waves share each K/V tile,
+        # which hides the K/V DMA latency the two-wave T=64 body exposed. T must
+        # stay a multiple of block_size, so block_size=64 keeps T=64 / nw=2.
+        return 32 if problem.block_size <= 32 else 64
     route = _gfx942_4warp_route(problem, arch)
     if route is not None:
         # BLOCK_N discriminator: 32 for bs16/32, 64 for bs64 (T % bs == 0).
@@ -1438,7 +1439,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
         MI355X comfortably).
     """
     if _d256_gfx950_fast(problem, arch):
-        return 2
+        # Paired with T=32 in _select_2d_tile_size (block_size <= 32).
+        return 4 if problem.block_size <= 32 else 2
     route = _gfx942_4warp_route(problem, arch)
     if route is not None:
         # Cache-key discriminator only; the real launch (block=(256,1,1) /

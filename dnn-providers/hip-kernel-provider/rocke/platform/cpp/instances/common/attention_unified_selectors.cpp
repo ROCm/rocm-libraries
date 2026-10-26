@@ -495,7 +495,8 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
 
     if(d256_gfx950_fast(p))
     {
-        return 64;
+        /* T must stay a multiple of block_size: block_size=64 keeps T=64 / nw=2. */
+        return (p->block_size <= 32) ? 32 : 64;
     }
     if(d256_gfx942_fast(p))
     {
@@ -592,6 +593,11 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
 {
     int target;
 
+    /* Python: _d256_gfx950_fast -> 4 (paired with T=32 in select_2d_tile_size). */
+    if(d256_gfx950_fast(p))
+    {
+        return (p->block_size <= 32) ? 4 : 2;
+    }
     /* Small/medium gfx942 prefill light narrow path. */
     if(enable_gfx942_small_q_narrow(p))
     {
