@@ -778,6 +778,11 @@ inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
     return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, out)
            && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
 }
+
+// Every rejection is reported as rocblaslt_status_invalid_value.
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt
