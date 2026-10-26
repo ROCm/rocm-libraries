@@ -19,6 +19,7 @@ import ctypes
 import importlib.util
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -114,6 +115,171 @@ class TestStemSpecs(unittest.TestCase):
                     spec = make_direct_spec(variant, probe, knobs)
                     n_ok += validate_direct_spec(variant, spec, "gfx1250")[0]
             self.assertGreater(n_ok, 0, variant)
+
+
+def _aot_specs(variant: str) -> list:
+    """Every spec of ``variant``'s AOT grid (all capabilities, both dtypes),
+    valid or not."""
+    from kernels.conv.direct_aot_jobs import (
+        DIRECT_CAPABILITIES,
+        _knob_grid,
+        probe_problem,
+    )
+    from kernels.conv.direct_variants import make_direct_spec
+
+    specs = []
+    for dtype in ("bf16", "fp16"):
+        for caps in DIRECT_CAPABILITIES[variant][1]:
+            probe = probe_problem(caps, dtype, variant)
+            for knobs in _knob_grid(variant, "gfx1250", dtype, caps):
+                specs.append(make_direct_spec(variant, probe, knobs))
+    return specs
+
+
+# Rejected specs the engine-agreement tests add to the AOT grid.
+_PATCH_REJECTS = (
+    (dict(PAD=1), {}),
+    (dict(S=2), {}),
+    (dict(K=60), dict(waves_c=3, tiles_c=1)),
+    (dict(), dict(waves_c=3, tiles_c=1, r_blk=3)),
+    (dict(), dict(waves_c=4, tiles_c=1, r_blk=4)),
+    (dict(), dict(waves_c=3, tiles_c=1, r_blk=4, ck=48)),
+    (dict(), dict(waves_c=3, tiles_c=1, r_blk=4, tile_w=0)),
+    (dict(), dict(waves_c=3, tiles_c=1, r_blk=4, sched="bogus")),
+    (dict(dtype="fp32"), dict(waves_c=3, tiles_c=1, r_blk=4)),
+    (dict(N=512, H=1024, W=1024), dict(waves_c=3, tiles_c=1, r_blk=4)),
+    (dict(KH=16, S=16), dict(waves_c=8, waves_p=8, tiles_c=6, tiles_p=8, r_blk=16)),
+)
+_SMALLC_REJECTS = (
+    (dict(C=8, KH=3, S=1, PAD=1), {}),
+    (dict(), {}),
+    (dict(KH=3, S=2, PAD=1), dict(out_h=15)),
+    (dict(KH=3, S=1, PAD=1), dict(tiles_c=3)),
+    (dict(KH=3, S=1, PAD=1), dict(out_h=32, out_w=32)),
+    (dict(KH=3, S=1, PAD=3), {}),
+    (dict(KH=3, S=1, PAD=1, groups=3, C=9, K=72), {}),
+    (dict(KH=3, S=1, PAD=1), dict(sched="")),
+    (dict(KH=3, S=1, PAD=1), dict(waves_c=0)),
+    (dict(KH=7, S=2, PAD=3), dict(tiles_c=5, waves_c=2, ck=256, stages=4)),
+)
+
+
+class TestStemEngines(unittest.TestCase):
+    """The C++ engine's validator, reason, kernel name, grid and LDS size
+    match Python's over the whole AOT grid and a set of rejected specs (the
+    byte-identity gate only covers the IR of specs both engines build)."""
+
+    def _agree(self, describe, to_dict, reason, specs):
+        for arch in ("gfx1250", "gfx950"):
+            for spec in specs:
+                ok, why_c, name, grid, lds = describe(to_dict(spec), arch)
+                why = reason(spec, arch)
+                self.assertEqual(ok, why is None, (arch, spec, why, why_c))
+                if why is not None:
+                    # The C++ text of an unknown scheduler strategy is the
+                    # first clause of Python's; every other reason is equal.
+                    self.assertTrue(why.startswith(why_c), (why, why_c))
+                self.assertEqual(name, spec.kernel_name())
+                self.assertEqual(lds, spec.lds_bytes())
+                if why is None:
+                    self.assertEqual(tuple(grid), spec.grid())
+
+    def test_patch_engines_agree_on_specs(self):
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_dgrad_patch_wmma_spec_to_dict
+
+        specs = _aot_specs("direct_dgrad_patch_wmma")
+        self.assertTrue(any(dgrad_patch_reason(s) is None for s in specs))
+        base = dict(waves_c=3, waves_p=1, tiles_c=1, r_blk=4)
+        for pkw, knobs in _PATCH_REJECTS:
+            spec = DgradPatchWmmaSpec(problem=_problem(**pkw), **{**base, **knobs})
+            self.assertIsNotNone(dgrad_patch_reason(spec), (pkw, knobs))
+            specs.append(spec)
+        self._agree(
+            eng.conv_dgrad_patch_wmma_describe,
+            conv_dgrad_patch_wmma_spec_to_dict,
+            dgrad_patch_reason,
+            specs,
+        )
+
+    def test_smallc_engines_agree_on_specs(self):
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_dgrad_smallc_wmma_spec_to_dict
+
+        specs = _aot_specs("direct_dgrad_smallc_wmma")
+        self.assertTrue(any(dgrad_smallc_reason(s) is None for s in specs))
+        base = dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=6, out_h=16, out_w=16)
+        for pkw, knobs in _SMALLC_REJECTS:
+            spec = DgradSmallcWmmaSpec(problem=_problem(**pkw), **{**base, **knobs})
+            self.assertIsNotNone(dgrad_smallc_reason(spec), (pkw, knobs))
+            specs.append(spec)
+        self._agree(
+            eng.conv_dgrad_smallc_wmma_describe,
+            conv_dgrad_smallc_wmma_spec_to_dict,
+            dgrad_smallc_reason,
+            specs,
+        )
+
+    def test_binding_rejects_bad_input(self):
+        """A rejected spec returns the rejection (no grid is computed from its
+        zero tile extents); a missing, mistyped or partial problem raises."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import (
+            conv_dgrad_patch_wmma_spec_to_dict,
+            conv_dgrad_smallc_wmma_spec_to_dict,
+        )
+
+        good = (
+            (
+                "conv_dgrad_patch_wmma",
+                conv_dgrad_patch_wmma_spec_to_dict,
+                DgradPatchWmmaSpec(
+                    problem=_problem(), waves_c=3, waves_p=1, tiles_c=1, r_blk=4
+                ),
+            ),
+            (
+                "conv_dgrad_smallc_wmma",
+                conv_dgrad_smallc_wmma_spec_to_dict,
+                DgradSmallcWmmaSpec(
+                    problem=_problem(KH=3, S=1, PAD=1),
+                    tiles_c=2,
+                    tiles_p=6,
+                    out_h=16,
+                    out_w=16,
+                ),
+            ),
+        )
+        for fam, to_dict, spec in good:
+            describe = getattr(eng, f"{fam}_describe")
+            lower = getattr(eng, f"{fam}_lower_llvm")
+            self.assertTrue(describe(to_dict(spec), "gfx1250")[0], fam)
+            for knobs in (dict(waves_c=0), dict(tiles_c=0), dict(waves_p=0)):
+                sd = to_dict(spec)
+                sd.update(knobs)
+                ok, why, _, grid, _ = describe(sd, "gfx1250")
+                self.assertFalse(ok, (fam, knobs))
+                self.assertIn("waves", why)
+                self.assertEqual(tuple(grid), (0, 0, 0))
+                with self.subTest(fam=fam, knobs=knobs), self.assertRaises(
+                    RuntimeError
+                ):
+                    lower(sd, arch="gfx1250")
+            partial = dict(to_dict(spec)["problem"])
+            del partial["kpg"]
+            for problem in (None, "N2H32", partial):
+                sd = to_dict(spec)
+                if problem is None:
+                    del sd["problem"]
+                else:
+                    sd["problem"] = problem
+                with self.subTest(fam=fam, problem=problem), self.assertRaises(
+                    ValueError
+                ):
+                    describe(sd, "gfx1250")
+                with self.subTest(fam=fam, problem=problem), self.assertRaises(
+                    ValueError
+                ):
+                    lower(sd, arch="gfx1250")
 
 
 def _gpu_skip() -> str:

@@ -2228,6 +2228,22 @@
         }
       },
       "expected_failures": {
+        "conv_dgrad_patch_wmma/gfx1250/bf16_p16_rb8": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_dgrad_patch_wmma/gfx1250/fp16_p4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
@@ -2264,7 +2280,7 @@
           "gfx942": 57,
           "gfx950": 184
         },
-        "expected_failures": 6,
+        "expected_failures": 10,
         "families": {
           "attention": 38,
           "attention_d128_swa": 1,
@@ -4520,6 +4536,22 @@
         }
       },
       "expected_failures": {
+        "conv_dgrad_patch_wmma/gfx1250/bf16_p16_rb8": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_dgrad_patch_wmma/gfx1250/fp16_p4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
@@ -4556,7 +4588,7 @@
           "gfx942": 57,
           "gfx950": 184
         },
-        "expected_failures": 6,
+        "expected_failures": 10,
         "families": {
           "attention": 38,
           "attention_d128_swa": 1,
@@ -5584,6 +5616,38 @@
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_s2_N2H16W16C32_K32Y3X3_t64x64x64_w2x2_a32x32x16_mem_default",
           "sha256": "873d7313816660ef4b8b3eb3a3b6a370ca0d95b808d32e0c4a5b2408022d8491",
+          "status": "ok"
+        },
+        "conv_dgrad_patch_wmma/gfx1250/bf16_p16_rb8": {
+          "arch": "gfx1250",
+          "bytes": 90535,
+          "family": "conv_dgrad_patch_wmma",
+          "kernel_name": "dgrad_patch_wmma_p16_c3_wc4_wp2_tc6_tp4_tw16_rb8_ck32_st2_bf16",
+          "sha256": "4c44fa6f73bdcc3c7b1fffac2736911f95d09860e5a632e215d17bcb754aaaee",
+          "status": "ok"
+        },
+        "conv_dgrad_patch_wmma/gfx1250/fp16_p4_pf": {
+          "arch": "gfx1250",
+          "bytes": 107732,
+          "family": "conv_dgrad_patch_wmma",
+          "kernel_name": "dgrad_patch_wmma_p4_c3_wc3_wp1_tc1_tp8_tw16_rb4_ck32_st2_pf_siterative-ilp",
+          "sha256": "34f91562335625e2b85372c98282a9c613a3a972a323cefa55d8cfdc47063972",
+          "status": "ok"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "arch": "gfx1250",
+          "bytes": 147708,
+          "family": "conv_dgrad_smallc_wmma",
+          "kernel_name": "dgrad_smallc_wmma_f3x3_s1_p1_c4_wc1_wp3_tc3_tp8_oh8_ow32_ck64_st2_pf_siterative-ilp_bf16",
+          "sha256": "726d637fb92165ae4df6f9f7eac63e4da0891bb3abc51cb76b6d8148b50db844",
+          "status": "ok"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "arch": "gfx1250",
+          "bytes": 122833,
+          "family": "conv_dgrad_smallc_wmma",
+          "kernel_name": "dgrad_smallc_wmma_f7x7_s2_p3_c3_wc2_wp4_tc5_tp6_oh32_ow32_ck32_st2",
+          "sha256": "292b3f42860025afa2f499510efa4c08a5305a2c74c10730f9a71e061c7cbaab",
           "status": "ok"
         },
         "conv_direct/gfx1250/dw_col_s2_fp16_w32": {
@@ -6866,7 +6930,7 @@
           "gfx1151": 10,
           "gfx12-generic": 1,
           "gfx1201": 8,
-          "gfx1250": 18,
+          "gfx1250": 22,
           "gfx90a": 5,
           "gfx942": 57,
           "gfx950": 184
@@ -6879,6 +6943,8 @@
           "attention_dense": 51,
           "conv": 20,
           "conv_dgrad": 13,
+          "conv_dgrad_patch_wmma": 2,
+          "conv_dgrad_smallc_wmma": 2,
           "conv_direct": 26,
           "conv_direct_depthwise_tiled": 4,
           "conv_direct_dgrad": 15,
@@ -6897,7 +6963,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 284
+        "ok_cases": 288
       }
     }
   },
