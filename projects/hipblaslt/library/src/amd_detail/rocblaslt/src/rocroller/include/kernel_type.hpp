@@ -3,12 +3,17 @@
 
 #pragma once
 
-// Only the rocRoller call path is built against rocRoller's headers, and it is
-// the only thing HIPBLASLT_USE_ROCROLLER is defined for here. The tile ranker
-// names two of rocRoller's enumerations and nothing else, and takes them from a
-// hipBLASLt declaration so that it builds without a rocRoller checkout. This is
-// an internal header: nothing outside library/src/amd_detail/rocblaslt/src
-// includes it, which is what keeps the two branches apart.
+// HIPBLASLT_USE_ROCROLLER is public on hipblaslt when the option is on and
+// private on hipblaslt-rocroller. Which branch this header takes is still
+// decided by that one macro.
+//
+// hipblaslt-rocroller defines it and includes this header from
+// rocroller_host.cpp, parameter_selection.cpp, gemm.cpp, solution_cache.cpp,
+// and custom_kernels.cpp. Those files take rocRoller's headers.
+// hipblaslt-rocroller-selection includes it from rocroller_selected.cpp and
+// solution_selection.cpp and does not define the macro, so those files take
+// rocroller_enums.hpp. handle.cpp, tensile_host.cpp, and
+// rocblaslt_auxiliary.cpp do not include it.
 //
 // The choice is a compile definition rather than __has_include on purpose: ROCm
 // installs rocRoller headers under /opt/rocm, so __has_include would pick up

@@ -1,12 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Windows host clang does not provide the BSD `uint` typedef that rocRoller
-// data-type headers use. Define it before those headers are included.
-#if defined(_WIN32)
-using uint = unsigned int;
-#endif
-
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"

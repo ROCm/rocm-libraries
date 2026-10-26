@@ -4,12 +4,6 @@
 // The rocRoller-off path does not rank tiles itself. It calls
 // chooseSolutionIndexParameters, which is what rocRoller calls before codegen.
 
-// Windows host clang does not provide the BSD `uint` typedef that rocRoller
-// data-type headers use. Define it before those headers are included.
-#if defined(_WIN32)
-using uint = unsigned int;
-#endif
-
 #include "include/rocroller_selected.hpp"
 
 #include "solution_selection.hpp"

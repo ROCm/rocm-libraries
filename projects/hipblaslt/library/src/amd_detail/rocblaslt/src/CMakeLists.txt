@@ -47,6 +47,8 @@ target_include_directories(hipblaslt-rocroller-selection
 # No rocRoller include directory, and so no libfmt either: the ranker names two
 # rocRoller enumerations and nothing else, and takes them from rocroller_enums.hpp.
 # That is what lets a checkout without shared/rocroller build this target.
+# kernel_type.hpp takes that header because this target does not define
+# HIPBLASLT_USE_ROCROLLER.
 target_compile_definitions(hipblaslt-rocroller-selection PRIVATE
     __HIP_PLATFORM_AMD__)
 target_link_libraries(hipblaslt-rocroller-selection PRIVATE
