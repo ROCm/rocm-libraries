@@ -916,6 +916,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void decidePromote();
     void promote(PromotePhase phase, DAGNode* node, int kind = -1);
     bool promoteDueBarrier();
+    bool promoteDuePrefetch();
     bool promoteDuePrefetchHoist() {
         return promoteDueHazardHoist(/*prefetch=*/true);
     }
@@ -1783,6 +1784,7 @@ void CDNA5ReadyQueue::decidePromote() {
     using Rule = bool (CDNA5ReadyQueue::*)();
     static constexpr std::pair<PlacementLevel, Rule> kRules[] = {
         {PlacementLevel::Barrier, &CDNA5ReadyQueue::promoteDueBarrier},
+        {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promoteDuePrefetch},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promoteDuePrefetchHoist},
         {PlacementLevel::Filler, &CDNA5ReadyQueue::promoteDueFillerHoist},
     };
@@ -1828,6 +1830,26 @@ bool CDNA5ReadyQueue::promoteDueBarrier() {
         return true;
     }
     return false;
+}
+
+// A prefetch at its pinned window (prefetchEarliestWmma_), once its source data is ready. The
+// Prefetch level places it, so it issues here rather than wherever the lower levels leave it.
+bool CDNA5ReadyQueue::promoteDuePrefetch() {
+    DAGNode* best = nullptr;
+    for (DAGNode* n : prefetchQueue) {
+        auto it = prefetchEarliestWmma_.find(n->inst);
+        if (it == prefetchEarliestWmma_.end() || wmmaIssuedCountThisRegion_ < it->second) continue;
+        // In its window it goes after the window's fills, right before the next WMMA, as the
+        // hoist did; a window already missed goes at once.
+        if (wmmaIssuedCountThisRegion_ == it->second && activeWmmaNode_ != nullptr &&
+            coIssueCyclePos_ < activeWmmaLatency_)
+            continue;
+        if (!issuableNow(n)) continue;
+        if (!best || n->id < best->id) best = n;
+    }
+    if (!best) return false;
+    promote(PromotePhase::NonWmmaFill, best, kPrefetch);
+    return true;
 }
 
 // prefetch: the kPrefetch candidates (Prefetch level); otherwise the SALU/VALU ones (Filler).
@@ -3377,7 +3399,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 else
                     inGroup = false;
             }
-            if (lead > 0 && isGlobalPrefetch(*inst) && loadWindow >= 0) {
+            if (isGlobalPrefetch(*inst) && loadWindow >= 0) {
                 byLoad[loadWindow].push_back(inst);
                 if (groupTop) prefetchStageBarrier_[inst] = groupTop;
             }
@@ -3386,10 +3408,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             std::reverse(prefetches.begin(), prefetches.end());  // back to original order
             const int n = static_cast<int>(prefetches.size());
             for (int k = 0; k < n; ++k) {
-                // A single-stage loop puts the whole group in the load's window.
+                // A single-stage loop, or a stage too short for a lead, puts the whole group in the
+                // load's window.
                 prefetchEarliestWmma_[prefetches[k]] =
-                    singleStageLoop() ? std::max(0, window)
-                                      : std::max(0, window - lead + k * lead / n);
+                    singleStageLoop() || lead <= 0 ? std::max(0, window)
+                                                   : std::max(0, window - lead + k * lead / n);
                 PASS_DEBUG(std::cerr << "[CDNA5 prefetchLead] load window=" << window << " #" << k
                                      << " earliest=" << prefetchEarliestWmma_[prefetches[k]]
                                      << "\n");
