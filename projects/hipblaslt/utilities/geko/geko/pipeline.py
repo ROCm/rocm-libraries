@@ -523,6 +523,11 @@ def run_optimize(
     if not workdir.is_dir():
         raise FileNotFoundError(f"Working directory not found: {workdir}")
 
+    state_path = workdir / "run_state.json"
+    state = RunState.load(state_path)
+    if not state.configured:
+        raise ValueError("Configuration step was not completed")
+
     input_dir = workdir / "optimizations"
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Optimizations directory not found: {input_dir}")
@@ -570,6 +575,8 @@ def run_optimize(
             logger.debug(f"Removing stale benchmark directory: {benchmarks_dir}")
             shutil.rmtree(benchmarks_dir)
 
+    state.optimized = False
+    state.dump(state_path)
     logger.debug(
         f"Calling optim.run with input_dir={input_dir} devices={devices} "
         f"client_build_dir={client_build_dir} n_slots={n_slots} retry={retry}"
@@ -648,3 +655,6 @@ def run_optimize(
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Optimization workflow completed successfully!")
+
+    state.optimized = True
+    state.dump(state_path)
