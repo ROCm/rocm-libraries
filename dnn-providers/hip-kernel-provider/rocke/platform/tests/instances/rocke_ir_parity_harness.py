@@ -631,8 +631,10 @@ def build_lightning_indexer_case(arch, **over):
     return _build
 
 
-def _d256_problem():
-    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
+def _d256_problem(head_size=256):
+    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16).
+
+    ``head_size=192`` gives the D192 point of the same cohort (same lean body)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
     return UnifiedAttentionProblem(
@@ -640,7 +642,7 @@ def _d256_problem():
         num_seqs=1,
         num_query_heads=16,
         num_kv_heads=2,
-        head_size=256,
+        head_size=head_size,
         block_size=16,
         max_seqlen_q=4096,
         max_seqlen_k=4096,
@@ -743,13 +745,15 @@ def build_attention_d256_gfx950(arch):
     return _build
 
 
-def build_attention_d256_gfx942(arch):
+def build_attention_d256_gfx942(arch, head_size=256):
     """D256 gfx942 4-warp GQA fast path.
 
     Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
     if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
     then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
     byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    ``head_size=192`` pins the same lean body at D192, including its
+    head-size-derived V-fill stride and the K/V key and Q row bounds.
     """
 
     def _build():
@@ -759,7 +763,7 @@ def build_attention_d256_gfx942(arch):
         )
         from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-        problem = _d256_problem()
+        problem = _d256_problem(head_size)
         with _pinned_attention_arch(arch):
             if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
@@ -3782,6 +3786,12 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa_d192",
+        "gfx942",
+        build_attention_d256_gfx942("gfx942", head_size=192),
     )
 
     # conv_direct: parametric direct grouped convolution.
