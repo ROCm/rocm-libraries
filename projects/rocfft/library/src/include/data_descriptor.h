@@ -173,22 +173,23 @@ struct FromString<std::string>
     }
 };
 
-struct SeekField
+// Advance current to the value token that follows key, and return it.
+// Throws if key is missing or is the last token.
+static inline std::sregex_token_iterator&
+    advance_to_field_value(const std::string& key, std::sregex_token_iterator& current)
 {
-    void Get(const std::string& key, std::sregex_token_iterator& current) const
+    static const std::sregex_token_iterator token_end;
+    while(current != token_end && current->str() != key)
     {
-        static const std::sregex_token_iterator token_end;
-        while(current != token_end && current->str() != key)
-        {
-            ++current;
-        }
-
-        if(current == token_end || ++current == token_end)
-        {
-            throw std::runtime_error("solution map: missing or truncated field '" + key + "'");
-        }
+        ++current;
     }
-};
+
+    if(current == token_end || ++current == token_end)
+    {
+        throw std::runtime_error("solution map: missing or truncated field '" + key + "'");
+    }
+    return current;
+}
 
 template <typename T>
 struct StringToVector
@@ -214,8 +215,7 @@ struct FieldParser
 {
     void parse(const std::string& expectedKey, T& value, std::sregex_token_iterator& current) const
     {
-        SeekField().Get(expectedKey, current);
-        FromString<T>().Get(value, current);
+        FromString<T>().Get(value, advance_to_field_value(expectedKey, current));
     }
 };
 
@@ -226,9 +226,8 @@ struct VectorFieldParser
                std::vector<T>&             vec,
                std::sregex_token_iterator& current) const
     {
-        SeekField().Get(expectedKey, current);
         vec.clear();
-        StringToVector<T>().Get(vec, current);
+        StringToVector<T>().Get(vec, advance_to_field_value(expectedKey, current));
     }
 };
 
