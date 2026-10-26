@@ -9,6 +9,7 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/cblas_reference_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/norm_check_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mxdatagen_maf1_0_gtest.cpp
 )
 
 # hipblaslt-test is created in clients/CMakeLists.txt before add_subdirectory(tests),

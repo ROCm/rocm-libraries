@@ -92,6 +92,11 @@ namespace TensileLite
         //   problem's data does not depend on the other problems in the run.
         // Maf2_0UnitScale (29): the MAF2.0 FP4 non-scaled row: MX FP4 sides get every block scale
         //   1.0 and N(0,1) data; every other tensor is filled as Maf2_0.
+        // Maf1_0 (30): MAF1.0 (MAF 2025) data init, no RNG. A = sin(idx), every other tensor
+        //   cos(idx), with idx = i + j*rows + b*rows*cols over the tensor's logical (unpadded)
+        //   layout, rounded once from double to nearest even. ScaleA/ScaleB are filled with
+        //   0.5. Block-scaled (MX) sides use mxDataGenerator Maf1_0: every block scale is 0.5
+        //   and the data codes are the rounded sin/cos (not divided by the scale).
         enum class InitMode
         {
             Zero = 0, // 0
@@ -124,6 +129,7 @@ namespace TensileLite
             UniformLowPrecision, // 27
             Maf2_0, // 28
             Maf2_0UnitScale, // 29
+            Maf1_0, // 30
             Count
         };
 
@@ -140,7 +146,8 @@ namespace TensileLite
                    || mode == InitMode::SerialDim1 || mode == InitMode::Identity
                    || mode == InitMode::TrigSin || mode == InitMode::TrigCos
                    || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos
-                   || mode == InitMode::Maf2_0 || mode == InitMode::Maf2_0UnitScale;
+                   || mode == InitMode::Maf2_0 || mode == InitMode::Maf2_0UnitScale
+                   || mode == InitMode::Maf1_0;
         }
 
         std::string ToString(InitMode mode);
@@ -454,7 +461,8 @@ namespace TensileLite
                                          std::shared_ptr<ProblemInputs> inputs,
                                          hipStream_t                    stream);
 
-            // tensorIndex (ContractionProblemGemm::TENSOR) only seeds Maf2_0.
+            // tensorIndex (ContractionProblemGemm::TENSOR) only seeds Maf2_0 and picks the
+            // Maf1_0 function.
             template <typename S>
             void initArray(rocisa::DataType dataType,
                            InitMode         initMode,
@@ -578,6 +586,8 @@ namespace TensileLite
                 case InitMode::Maf2_0:
                 case InitMode::Maf2_0UnitScale:
                     throw std::runtime_error("Maf2_0 is not supported for scalar values.");
+                case InitMode::Maf1_0:
+                    throw std::runtime_error("Maf1_0 is not supported for scalar values.");
                 case InitMode::SerialIdx:
                 case InitMode::SerialDim0:
                 case InitMode::SerialDim1:
@@ -664,6 +674,9 @@ namespace TensileLite
                 case InitMode::Maf2_0:
                 case InitMode::Maf2_0UnitScale:
                     initArrayMaf2_0<T>(array, elements, tensorIndex);
+                    break;
+                case InitMode::Maf1_0:
+                    initArrayMaf1_0<T>(array, {elements}, {1}, tensorIndex);
                     break;
                 case InitMode::SerialIdx:
                     initArrayConvert<T>(array, elements);
@@ -787,6 +800,9 @@ namespace TensileLite
                 case InitMode::Maf2_0UnitScale:
                     initArrayMaf2_0<T>(array, tensor.totalAllocatedElements(), tensorIndex);
                     break;
+                case InitMode::Maf1_0:
+                    initArrayMaf1_0<T>(array, tensor.sizes(), tensor.strides(), tensorIndex);
+                    break;
                 case InitMode::Free:
                 case InitMode::Count:
                     throw std::runtime_error("Invalid InitMode.");
@@ -838,6 +854,73 @@ namespace TensileLite
                 {
                     throw std::runtime_error(
                         "Maf2_0 init is not supported for this data type yet.");
+                }
+            }
+
+            // Maf1_0 is closed-form, so nothing is seeded. Element coord of the tensor gets
+            // idx = coord[0] + coord[1]*sizes[0] + coord[2]*sizes[0]*sizes[1] + ... (the logical
+            // index, so i + j*rows + b*rows*cols for a matrix; stride padding is skipped and left
+            // untouched) and is stored at sum(coord[d] * strides[d]). A gets sin(idx), ScaleA and
+            // ScaleB get the MAF1.0 scale factor 0.5, and every other tensor gets cos(idx).
+            template <typename T>
+            static void initArrayMaf1_0(T*                         array,
+                                                 std::vector<size_t> const& sizes,
+                                                 std::vector<size_t> const& strides,
+                                                 size_t                     tensorIndex)
+            {
+                if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                             || std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>
+                             || std::is_same_v<T, Float8> || std::is_same_v<T, BFloat8>
+                             || std::is_same_v<T, Float8_fnuz> || std::is_same_v<T, BFloat8_fnuz>)
+                {
+                    bool const isScale = tensorIndex == ContractionProblemGemm::TENSOR::SCALEA
+                                         || tensorIndex == ContractionProblemGemm::TENSOR::SCALEB;
+                    bool const   useCos = tensorIndex != ContractionProblemGemm::TENSOR::A;
+                    size_t const count  = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for schedule(static)
+                    for(size_t idx = 0; idx < count; idx++)
+                    {
+                        size_t offset = 0;
+                        size_t rest   = idx;
+                        for(size_t d = 0; d < sizes.size(); d++)
+                        {
+                            offset += (rest % sizes[d]) * strides[d];
+                            rest /= sizes[d];
+                        }
+                        double const x = static_cast<double>(idx);
+                        array[offset]  = roundMaf1_0<T>(isScale  ? 0.5
+                                                       : useCos ? std::cos(x)
+                                                                : std::sin(x));
+                    }
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "Maf1_0 init is not supported for this data type yet.");
+                }
+            }
+
+            // Rounds once from double to nearest even, saturating finite values to the largest
+            // finite one (Float, Half and the FP8 types convert straight from double). The
+            // BFloat16 constructor rounds to float first, so BFloat16 rounds the double to its 8
+            // significant bits here and converts the exact result.
+            template <typename T>
+            static T roundMaf1_0(double v)
+            {
+                if constexpr(std::is_same_v<T, BFloat16>)
+                {
+                    int e = 0;
+                    std::frexp(v, &e); // |v| < 2^e
+                    // ULP of the BF16 value: 2^(e-8), but not below the subnormal ULP 2^-133.
+                    int const    q       = std::max(e - 8, -133);
+                    double const r       = std::ldexp(std::nearbyint(std::ldexp(v, -q)), q);
+                    double const maxBf16 = std::ldexp(255.0, 120); // 0x7F7F
+                    return static_cast<BFloat16>(
+                        static_cast<float>(std::clamp(r, -maxBf16, maxBf16)));
+                }
+                else
+                {
+                    return static_cast<T>(v);
                 }
             }
 

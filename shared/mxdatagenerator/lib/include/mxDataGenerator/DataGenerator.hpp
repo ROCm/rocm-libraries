@@ -258,6 +258,39 @@ namespace DGen
         }
     };
 
+    // MAF1.0 block-scaled data, as ROCm/mblas-bench composes it from `--initialization
+    // trig_float --scale_init constant --scale_factor_a/b 0.5`: every block scale is `scale`
+    // rounded to the scale format (nearest even, saturating), and each element is
+    // sin(idx) (cos(idx) with useCos) evaluated in double and rounded once to the element
+    // format at a scale of one (nearest even, saturating, sign kept). The element code is
+    // not divided by the scale, so the dequantized value is scale * code.
+    // idx = indexOffset + sum_d coord[d] * indexStrides[d], where coord is the element's
+    // coordinate in the sizes passed to generate() (in that order, not the stride-sorted
+    // one). Empty indexStrides means dense with dimension 0 fastest: 1, sizes[0],
+    // sizes[0] * sizes[1], ... Padding cells (strides larger than dense) are set to +0.
+    // No RNG. Scaled DTYPEs only; min/max, clampToF32, includeNaN/Inf, forceDenorm and
+    // scaleInitMode are ignored.
+    struct Maf1_0
+    {
+        double               scale       = 0.5;
+        bool                 useCos      = false;
+        uint64_t             indexOffset = 0;
+        std::vector<index_t> indexStrides;
+
+        std::string toString() const
+        {
+            std::string s = std::string("Maf1_0(") + (useCos ? "cos" : "sin") + ", scale "
+                            + std::to_string(scale) + ", offset " + std::to_string(indexOffset);
+            if(!indexStrides.empty())
+            {
+                s += ", strides";
+                for(const auto st : indexStrides)
+                    s += " " + std::to_string(st);
+            }
+            return s + ")";
+        }
+    };
+
     using DataInitMode = std::variant<Bounded,
                                       BoundedAlternatingSign,
                                       Unbounded,
@@ -279,7 +312,8 @@ namespace DGen
                                       NaNs,
                                       Infs,
                                       RandInt,
-                                      Maf2_0>;
+                                      Maf2_0,
+                                      Maf1_0>;
 
     inline std::string toString(DataInitMode const& initMode)
     {
@@ -475,6 +509,9 @@ namespace DGen
         // Contiguous dimension (sorted_size[0], stride 1) for partial tail scale blocks.
         index_t m_contiguousDim = 0;
 
+        // Original dimension of each stride-sorted dimension (sorted_size[i] = size[m_perm[i]]).
+        std::vector<index_t> m_perm;
+
         index_t numScaleBlocks(index_t block_size) const
         {
             return ScaleBlockLayout{m_contiguousDim, block_size}.numScaleBlocks(m_dataDesc.array_size);
@@ -534,6 +571,9 @@ namespace DGen
 
         void generate_data_rand_int(int lo, int hi);
         void generate_data_maf2_0(Maf2_0 const& mode);
+        void generate_data_maf1_0(Maf1_0 const&               mode,
+                                  const std::vector<index_t>& size,
+                                  const std::vector<index_t>& stride);
 
         uint32_t scale_block_mean(const std::vector<uint32_t>& scales,
                                   std::vector<uint64_t>&       data,
@@ -754,7 +794,8 @@ namespace DGen
                             [&](const NaNs&) { generate_data_nans(); },
                             [&](const Infs&) { generate_data_infs(); },
                             [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); },
-                            [&](const Maf2_0& m) { generate_data_maf2_0(m); }},
+                            [&](const Maf2_0& m) { generate_data_maf2_0(m); },
+                            [&](const Maf1_0& m) { generate_data_maf1_0(m, size, stride); }},
                    m_options.initMode);
     }
 
@@ -804,6 +845,7 @@ namespace DGen
             throw std::invalid_argument("Invalid dimensions: the smallest stride must be 1.");
 
         m_contiguousDim = sorted_size[0];
+        m_perm          = perm;
 
         // find array sizes (unpacked)
         m_dataDesc.array_size = sorted_stride[n_size - 1] * sorted_size[n_size - 1];
@@ -2018,6 +2060,98 @@ namespace DGen
                         = mode.unitScaleNormalData
                               ? maf2_0ElementCode(normal_dist[tid](m_gen[tid]), magnitudes, signBit)
                               : codes[code_dist(m_gen[tid])];
+                    std::memcpy(
+                        &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
+                }
+            }
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_maf1_0(Maf1_0 const&               mode,
+                                                           const std::vector<index_t>& size,
+                                                           const std::vector<index_t>& stride)
+    {
+        if constexpr(!isScaled<DTYPE>())
+        {
+            throw std::invalid_argument(
+                "DataGenerator::generate_data_maf1_0: Maf1_0 needs a block-scaled data type");
+        }
+        else
+        {
+            // size and stride are stride-sorted; m_perm maps them back to the caller's order.
+            const auto n_size = size.size();
+            if(!(mode.scale > 0.0) || !std::isfinite(mode.scale))
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf1_0: scale must be positive and finite");
+            if(!mode.indexStrides.empty() && mode.indexStrides.size() != n_size)
+                throw std::invalid_argument("DataGenerator::generate_data_maf1_0: indexStrides "
+                                            "must be empty or have one entry per dimension");
+
+            // Index stride of each sorted dimension; the dense default runs over the
+            // caller's dimension order.
+            std::vector<index_t> denseStrides(n_size);
+            for(index_t d = 0, acc = 1; d < n_size; d++)
+            {
+                denseStrides[d] = acc;
+                acc *= size[std::find(m_perm.begin(), m_perm.end(), d) - m_perm.begin()];
+            }
+            std::vector<index_t> sortedIndexStrides(n_size);
+            for(index_t i = 0; i < n_size; i++)
+                sortedIndexStrides[i] = mode.indexStrides.empty() ? denseStrides[m_perm[i]]
+                                                                  : mode.indexStrides[m_perm[i]];
+
+            const uint8_t scale      = nearestScaleByteRne(sortedFiniteScales<DTYPE>(), mode.scale);
+            const auto    block_size = m_options.blockScaling;
+            const auto    numBlocks  = numScaleBlocks(block_size);
+
+            // Element codes under a scale of one.
+            std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+            std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+            setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+            const uint8_t signBit = static_cast<uint8_t>(
+                1u << (DTYPE::dataInfo.exponentBits + DTYPE::dataInfo.mantissaBits));
+            const auto    magnitudes = sortedNonNegativeCodes<DTYPE>(s_one[0], signBit);
+            const uint8_t zero       = maf2_0ElementCode(0.0, magnitudes, signBit);
+
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                std::memcpy(
+                    &m_scaleBytes[scale_i * m_scaleDesc.byte_size], &scale, m_scaleDesc.byte_size);
+
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size);
+                    block_i++)
+                {
+                    const auto data_i = dataIndex(scale_i, block_i, block_size);
+
+                    // Memory offset -> coordinates, largest stride first; an offset that is
+                    // not an element is padding. Size-1 dimensions are skipped so that one
+                    // sharing a stride cannot claim the offset.
+                    uint64_t idx     = mode.indexOffset;
+                    index_t  rest    = data_i;
+                    bool     padding = false;
+                    for(index_t d = n_size; d-- > 0;)
+                    {
+                        if(size[d] == 1)
+                            continue;
+                        const index_t coord = rest / stride[d];
+                        rest -= coord * stride[d];
+                        if(coord >= size[d])
+                        {
+                            padding = true;
+                            break;
+                        }
+                        idx += coord * sortedIndexStrides[d];
+                    }
+                    padding = padding || rest != 0;
+
+                    const double  x = static_cast<double>(idx);
+                    const uint8_t code
+                        = padding ? zero
+                                  : maf2_0ElementCode(mode.useCos ? std::cos(x) : std::sin(x),
+                                                      magnitudes,
+                                                      signBit);
                     std::memcpy(
                         &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
                 }

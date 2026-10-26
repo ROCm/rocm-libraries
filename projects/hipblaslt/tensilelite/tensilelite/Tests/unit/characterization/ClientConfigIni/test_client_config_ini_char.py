@@ -974,7 +974,7 @@ class TestDataInitNameEnum:
     def test_all_enum_values_have_names(self):
         """All defined enum values resolve to a string name."""
         for val in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                    16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 29]:
+                    16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30]:
             name = CW.DataInitName(val).name
             assert isinstance(name, str) and len(name) > 0
 
@@ -985,6 +985,7 @@ class TestDataInitNameEnum:
         assert CW.DataInitName(27).name == "UniformLowPrecision"
         assert CW.DataInitName(28).name == "Maf2_0"
         assert CW.DataInitName(29).name == "Maf2_0UnitScale"
+        assert CW.DataInitName(30).name == "Maf1_0"
 
 
 # ===========================================================================

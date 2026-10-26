@@ -31,8 +31,9 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 
 #include <vector>
 
-// seedIndex (abc + 3 * batch, abc = 0 for A and 1 for B) only salts the maf2_0 seed; every
-// other initMethod uses one fixed seed for all matrices and batches.
+// seedIndex (abc + 3 * batch, abc = 0 for A and 1 for B) salts the maf2_0 seed and, for maf1_0,
+// picks sin (A) or cos (B) and the batch's index offset batch * row * col; every other
+// initMethod uses one fixed seed for all matrices and batches.
 // integer_exact supports fp8 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,

@@ -31,6 +31,7 @@
 #include "hipblaslt_test.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
@@ -201,6 +202,70 @@ static void maf2_0_fill_normal(
         for(size_t i = 0; i < size_64; i++)
             h[i] = T(dist(gen));
     }
+    CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
+}
+
+// Rounds a double once to T, to nearest even (FP8 saturating finite values). hip_bfloat16 has no
+// double constructor: the double is first rounded to odd in float, which keeps the later float to
+// BF16 nearest-even rounding equal to a direct double to BF16 rounding (float has 16 more mantissa
+// bits than BF16).
+template <typename T>
+static T maf1_0_round(double v)
+{
+    if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        float f = static_cast<float>(v);
+        if(static_cast<double>(f) != v)
+        {
+            if(std::fabs(static_cast<double>(f)) > std::fabs(v))
+                f = std::nextafter(f, 0.0f);
+            uint32_t bits;
+            std::memcpy(&bits, &f, sizeof(bits));
+            bits |= 1u;
+            std::memcpy(&f, &bits, sizeof(bits));
+        }
+        return hip_bfloat16(f);
+    }
+    else
+        return T(v);
+}
+
+// MAF1.0 trig data: A = sin(idx), B and C = cos(idx), idx = i + j*M + b*M*N with b the batch
+// (batch_index + the batch within this call, so pointer-array batches differ too). The index is
+// logical, so ld padding does not shift it; padding cells are set to 0. Values are computed in
+// double on the host, like the generateMXInput path, and rounded once to T.
+template <typename T>
+static void maf1_0_fill_trig(T*       A,
+                             size_t   M,
+                             size_t   N,
+                             size_t   lda,
+                             size_t   stride,
+                             size_t   batch_count,
+                             ABC_dims abc,
+                             size_t   batch_index)
+{
+    if(batch_count == 0 || M == 0 || N == 0)
+        return;
+    // Same extent as maf2_0_fill_normal: later batches only when stride >= lda (stride 0
+    // broadcasts one matrix). Overlapping batches are written in order, so the last one wins.
+    const size_t   batches = stride >= lda ? batch_count : 1;
+    const size_t   extent  = M + lda * (N - 1);
+    const size_t   size_64 = extent + (batches - 1) * stride;
+    const bool     use_cos = abc != ABC_dims::A;
+    const bool     overlap = batches > 1 && stride < extent;
+    std::vector<T> h(size_64, T(0.0f));
+#pragma omp parallel for collapse(2) if(!overlap)
+    for(size_t b = 0; b < batches; b++)
+        for(size_t j = 0; j < N; j++)
+        {
+            const size_t first = (batch_index + b) * M * N + j * M;
+            for(size_t i = 0; i < M; i++)
+            {
+                const double arg = static_cast<double>(first + i);
+                h[b * stride + j * lda + i]
+                    = maf1_0_round<T>(use_cos ? std::cos(arg) : std::sin(arg));
+            }
+        }
     CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
 }
 
@@ -1088,6 +1153,22 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else
                 throw std::invalid_argument(
                     "hipblaslt_init_device: maf2_0 is not supported for this data type yet");
+            break;
+        case hipblaslt_initialization::maf1_0:
+            if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                         || std::is_same_v<T, hipblasLtHalf> || std::is_same_v<T, hip_bfloat16>
+#if HIP_FP8_TYPE_OCP
+                         || std::is_same_v<T, hipblaslt_f8> || std::is_same_v<T, hipblaslt_bf8>
+#endif
+#if HIP_FP8_TYPE_FNUZ
+                         || std::is_same_v<T, hipblaslt_f8_fnuz>
+                         || std::is_same_v<T, hipblaslt_bf8_fnuz>
+#endif
+                         )
+                maf1_0_fill_trig(A, M, N, lda, stride, batch_count, abc, batch_index);
+            else
+                throw std::invalid_argument(
+                    "hipblaslt_init_device: maf1_0 is not supported for this data type yet");
             break;
         case hipblaslt_initialization::uniform_01:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {

@@ -604,3 +604,96 @@ TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
     expectRandomNarrowRange<TensileLite::BFloat16>(
         8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }
+
+// Maf1_0 fills element (i, j, b) of a padded 3 x 4 x 2 tensor (ld 5, batch stride 23) with
+// sin (A) or cos (other tensors) of the logical index i + 3 * j + 12 * b, ScaleA/ScaleB with
+// 0.5, and leaves the padding alone.
+TEST(Maf1_0Init, LogicalIndexOverPaddedLayout)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 5, 23};
+    size_t const              allocated = 1 + 2 * 1 + 3 * 5 + 1 * 23;
+    for(size_t tensor : {size_t(ContractionProblemGemm::TENSOR::A),
+                         size_t(ContractionProblemGemm::TENSOR::B),
+                         size_t(ContractionProblemGemm::TENSOR::C),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEA),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEB)})
+    {
+        SCOPED_TRACE("tensor " + std::to_string(tensor));
+        std::vector<double> array(allocated, 42.0);
+        DataInitialization::initArrayMaf1_0(array.data(), sizes, strides, tensor);
+        std::vector<bool> written(allocated, false);
+        for(size_t b = 0; b < 2; b++)
+            for(size_t j = 0; j < 4; j++)
+                for(size_t i = 0; i < 3; i++)
+                {
+                    double const x = double(i + 3 * j + 12 * b);
+                    double const expected
+                        = tensor == ContractionProblemGemm::TENSOR::A ? std::sin(x)
+                          : tensor == ContractionProblemGemm::TENSOR::SCALEA
+                                  || tensor == ContractionProblemGemm::TENSOR::SCALEB
+                              ? 0.5
+                              : std::cos(x);
+                    size_t const offset = i + 5 * j + 23 * b;
+                    EXPECT_EQ(array[offset], expected) << i << "," << j << "," << b;
+                    written[offset] = true;
+                }
+        for(size_t k = 0; k < allocated; k++)
+            if(!written[k])
+                EXPECT_EQ(array[k], 42.0) << "padding " << k;
+    }
+}
+
+// Each value is rounded once from double. sin(11446) = -0.923828140... lies just past the BF16
+// midpoint -0.923828125, which is where rounding to float first lands (and would then tie to
+// even, -0.921875).
+TEST(Maf1_0Init, RoundsOnceFromDouble)
+{
+    using TensileLite::Client::DataInitialization;
+    TensileLite::BFloat16 bf;
+    DataInitialization::initArrayMaf1_0(&bf, {1}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(bf.data, 0x0000);
+    std::vector<TensileLite::BFloat16> row(11447);
+    DataInitialization::initArrayMaf1_0(
+        row.data(), {row.size()}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(row[11446].data, 0xbf6d);
+    EXPECT_EQ(float(row[1]), 0.83984375f); // sin(1) = 0.84147 -> 0x3f57
+
+    // OCP E4M3: sin(1) -> 0.8125, sin(2) -> 0.9375; cos(0) = 1.
+    std::vector<TensileLite::Float8> f8(3);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(float(f8[1]), 0.8125f);
+    EXPECT_EQ(float(f8[2]), 0.9375f);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::B);
+    EXPECT_EQ(float(f8[0]), 1.0f);
+
+    std::vector<float> f32(2);
+    DataInitialization::initArrayMaf1_0(f32.data(), {2}, {1}, ContractionProblemGemm::TENSOR::C);
+    EXPECT_EQ(f32[1], static_cast<float>(std::cos(1.0)));
+}
+
+TEST(Maf1_0Init, UnsupportedTypesThrow)
+{
+    using TensileLite::Client::DataInitialization;
+    int32_t i32 = 0;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&i32, {1}, {1}, 0), std::runtime_error);
+    std::complex<float> c32;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&c32, {1}, {1}, 0), std::runtime_error);
+    using TensileLite::Client::InitMode;
+    EXPECT_THROW(DataInitialization::getValue<float>(InitMode::Maf1_0), std::runtime_error);
+}
+
+TEST(Maf1_0Init, NameRoundTrips)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_EQ(static_cast<int>(InitMode::Maf1_0), 30);
+    EXPECT_EQ(TensileLite::Client::ToString(InitMode::Maf1_0), "Maf1_0");
+    InitMode           mode = InitMode::Zero;
+    std::istringstream in("Maf1_0");
+    in >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+    std::istringstream num("30");
+    num >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+}

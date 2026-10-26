@@ -808,3 +808,197 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(Fp4ScaleCase{HIP_R_8F_UE8M0, 32},
                       Fp4ScaleCase{HIP_R_8F_E4M3, 16},
                       Fp4ScaleCase{static_cast<hipDataType>(HIP_R_8F_E5M3_EXT), 16}));
+
+// ---------------------------------------------------------------------------
+// maf1_0 MX data: every block scale is 0.5, and the code of stored element n (= i + j * rows) is
+// sin (A, seedIndex % 3 == 0) or cos (B) of n + batch * rows * cols (batch = seedIndex / 3),
+// rounded once to nearest even at unit scale, so its value is 0.5 * code. Checked against a
+// brute-force rounding over every encoding.
+// ---------------------------------------------------------------------------
+
+struct Maf1_0Case
+{
+    hipDataType dataType;
+    hipDataType scaleType;
+    int         mxBlock;
+    uint8_t     halfScale; // 0.5 in the scale format
+};
+
+static bool isFp8(hipDataType dt)
+{
+    return dt == HIP_R_8F_E4M3 || dt == HIP_R_8F_E5M2;
+}
+
+static bool isFp4(hipDataType dt)
+{
+    return dt == static_cast<hipDataType>(HIP_R_4F_E2M1);
+}
+
+static uint8_t maf1_0SignBit(hipDataType dt)
+{
+    return isFp8(dt) ? 0x80 : isFp4(dt) ? 0x8 : 0x20;
+}
+
+// Code of element n of a packed data buffer.
+static uint8_t maf1_0CodeAt(hipDataType dt, std::vector<uint8_t> const& data, size_t n)
+{
+    if(isFp8(dt))
+        return data[n];
+    if(isFp4(dt))
+        return (data[n / 2] >> ((n % 2) * 4)) & 0xF;
+    return fp6At(data, n);
+}
+
+static double maf1_0Decode(hipDataType dt, uint8_t code)
+{
+    if(isFp8(dt))
+        return decodeOcpFp8(code, dt == HIP_R_8F_E4M3);
+    if(isFp4(dt))
+        return decodeFp4At(std::vector<uint8_t>{code}, 0);
+    return decodeOcpFp6(code, dt == static_cast<hipDataType>(HIP_R_6F_E2M3));
+}
+
+// The finite code nearest to v (the even one on a tie), carrying the sign of v.
+static uint8_t maf1_0NearestEven(hipDataType dt, double v)
+{
+    uint8_t const signBit = maf1_0SignBit(dt);
+    int           best    = 0;
+    double        bestErr = INFINITY;
+    for(int c = 0; c < signBit; ++c)
+    {
+        double const d = maf1_0Decode(dt, static_cast<uint8_t>(c));
+        if(!std::isfinite(d))
+            continue;
+        double const err = std::abs(d - std::abs(v));
+        if(err < bestErr || (err == bestErr && c % 2 == 0))
+        {
+            best    = c;
+            bestErr = err;
+        }
+    }
+    return static_cast<uint8_t>(best | (std::signbit(v) ? signBit : 0));
+}
+
+static double maf1_0Trig(uint32_t seedIndex, size_t n, size_t elements)
+{
+    double const x = static_cast<double>(n + seedIndex / 3 * elements);
+    return seedIndex % 3 == 0 ? std::sin(x) : std::cos(x);
+}
+
+class MXDataGenMaf1_0 : public ::testing::TestWithParam<Maf1_0Case>
+{
+};
+
+TEST_P(MXDataGenMaf1_0, HalfScalesAndRoundedTrigData)
+{
+    const auto     c        = GetParam();
+    const uint64_t rows     = 256;
+    const uint64_t cols     = 64;
+    const size_t   elements = rows * cols;
+    for(uint32_t seedIndex : {0u, 1u, 3u, 4u}) // A, B, batch-1 A, batch-1 B
+    {
+        SCOPED_TRACE("seedIndex " + std::to_string(seedIndex));
+        const auto out = runFp8MX(c.dataType, c.scaleType, "maf1_0", seedIndex, c.mxBlock);
+        for(size_t b = 0; b < (rows / c.mxBlock) * cols; ++b)
+            ASSERT_EQ(out.scale[b], c.halfScale) << "block " << b;
+        ASSERT_EQ(out.ref.size(), elements);
+        for(size_t n = 0; n < elements; ++n)
+        {
+            const uint8_t code = maf1_0CodeAt(c.dataType, out.data, n);
+            ASSERT_EQ(code, maf1_0NearestEven(c.dataType, maf1_0Trig(seedIndex, n, elements)))
+                << "n=" << n;
+            ASSERT_EQ(out.ref[n], static_cast<float>(0.5 * maf1_0Decode(c.dataType, code)))
+                << "n=" << n;
+        }
+    }
+}
+
+TEST_P(MXDataGenMaf1_0, MatricesAndBatchesDifferAndRepeat)
+{
+    const auto c       = GetParam();
+    const auto a0      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 0, c.mxBlock);
+    const auto a0again = runFp8MX(c.dataType, c.scaleType, "maf1_0", 0, c.mxBlock);
+    const auto b0      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 1, c.mxBlock);
+    const auto a1      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 3, c.mxBlock);
+    const auto b1      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 4, c.mxBlock);
+    EXPECT_EQ(a0.data, a0again.data);
+    EXPECT_EQ(a0.scale, a0again.scale);
+    EXPECT_EQ(a0.ref, a0again.ref);
+    EXPECT_NE(a0.data, b0.data) << "A (sin) and B (cos) must differ";
+    EXPECT_NE(a0.data, a1.data) << "batches must differ";
+    EXPECT_NE(b0.data, b1.data) << "batches must differ";
+}
+
+// With K along the stored columns (non-transposed A) the index is still i + j * rows of the
+// stored matrix.
+TEST_P(MXDataGenMaf1_0, IndexFollowsTheStoredMatrix)
+{
+    const auto           c    = GetParam();
+    const uint64_t       rows = 64;
+    const uint64_t       cols = 256;
+    std::vector<uint8_t> data(rows * cols, 0);
+    std::vector<uint8_t> scale(rows * cols, 0);
+    generateMXInput(c.dataType,
+                    c.scaleType,
+                    data.data(),
+                    scale.data(),
+                    rows,
+                    cols,
+                    rows,
+                    /*isTranspose=*/false,
+                    c.mxBlock,
+                    1,
+                    /*isMatrixA=*/true,
+                    MXScaleLayout::None,
+                    "maf1_0",
+                    -1.0f,
+                    1.0f,
+                    "",
+                    0);
+    for(size_t b = 0; b < (rows / c.mxBlock) * cols; ++b)
+        ASSERT_EQ(scale[b], c.halfScale) << "block " << b;
+    for(size_t n = 0; n < rows * cols; ++n)
+        ASSERT_EQ(maf1_0CodeAt(c.dataType, data, n),
+                  maf1_0NearestEven(c.dataType, std::sin(static_cast<double>(n))))
+            << "n=" << n;
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp8,
+                         MXDataGenMaf1_0,
+                         ::testing::Values(Maf1_0Case{HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, 0x7E},
+                                           Maf1_0Case{HIP_R_8F_E5M2, HIP_R_8F_UE8M0, 32, 0x7E},
+                                           Maf1_0Case{HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 16, 0x7E}));
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp6,
+    MXDataGenMaf1_0,
+    ::testing::Values(Maf1_0Case{static_cast<hipDataType>(HIP_R_6F_E2M3), HIP_R_8F_UE8M0, 32, 0x7E},
+                      Maf1_0Case{
+                          static_cast<hipDataType>(HIP_R_6F_E3M2), HIP_R_8F_UE8M0, 16, 0x7E}));
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp4,
+    MXDataGenMaf1_0,
+    ::testing::Values(Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_UE8M0, 32, 0x7E},
+                      Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_E4M3, 16, 0x30},
+                      Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                 static_cast<hipDataType>(HIP_R_8F_E5M3_EXT),
+                                 16,
+                                 0x70}));
+
+// Hand-computed codes: E4M3 sin(1) = 0.8415 -> 0.8125 (0x35), sin(2) = 0.9093 -> 0.875 (0x37),
+// cos(0) = 1 (0x38); FP4 sin(1) -> 1.0 (0x2), element 1 being the high nibble of byte 0.
+TEST(MXDataGenMaf1_0Golden, HandComputedCodes)
+{
+    const auto a = runFp8MX(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, "maf1_0", 0);
+    EXPECT_EQ(a.data[0], 0x00);
+    EXPECT_EQ(a.data[1], 0x35);
+    EXPECT_EQ(a.data[2], 0x37);
+    EXPECT_EQ(a.ref[1], 0.40625f);
+    const auto b = runFp8MX(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, "maf1_0", 1);
+    EXPECT_EQ(b.data[0], 0x38);
+    EXPECT_EQ(b.ref[0], 0.5f);
+    const auto f4 = runFp8MX(static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_UE8M0, "maf1_0", 0);
+    EXPECT_EQ((f4.data[0] >> 4) & 0xF, 0x2);
+    EXPECT_EQ(f4.ref[1], 0.5f);
+}

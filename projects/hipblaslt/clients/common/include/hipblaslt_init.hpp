@@ -30,10 +30,12 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
 #include <omp.h>
+#include <stdexcept>
 #include <vector>
 
 template <typename T>
@@ -128,7 +130,7 @@ void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            size_t                   stride,
                            size_t                   batch_count,
                            int                      norm_dist_one_special_type = -1,
-                           // pointer-array batch index; only seeds maf2_0
+                           // pointer-array batch index; only used by maf2_0 and maf1_0
                            size_t batch_index = 0);
 
 /* ============================================================================================ */
@@ -1350,6 +1352,26 @@ inline void hipblaslt_init_inf(void*       A,
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_inf" << std::endl;
         break;
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Fill N elements of a host array with one value, e.g. a constant scale factor */
+inline void hipblaslt_init_constant(void* A, size_t N, hipDataType type, double value)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        std::fill_n(static_cast<float*>(A), N, static_cast<float>(value));
+        break;
+    case HIP_R_64F:
+        std::fill_n(static_cast<double*>(A), N, value);
+        break;
+    case HIP_R_16F:
+        std::fill_n(static_cast<hipblasLtHalf*>(A), N, hipblasLtHalf(static_cast<float>(value)));
+        break;
+    default:
+        throw std::invalid_argument("hipblaslt_init_constant: unsupported type");
     }
 }
 

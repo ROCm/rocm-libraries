@@ -331,6 +331,8 @@ namespace DGen
         //     NaN payload or the Inf encoding.
         //   * Maf2_0 draws scale bytes and data encodings directly, with
         //     no float value per element to quantise.
+        //   * Maf1_0 fixes every scale byte and rounds each element at a
+        //     scale of one, not to a block-max-derived scale.
         // Route those through the host CPU `DataGenerator<DTYPE>` and
         // then hipMemcpy the bytes to device.
         inline bool requiresHostFallback(DataInitMode const& initMode)
@@ -340,7 +342,7 @@ namespace DGen
                     using T = std::decay_t<decltype(mode)>;
                     return std::is_same_v<T, DenormMins> || std::is_same_v<T, DenormMaxs>
                            || std::is_same_v<T, NaNs> || std::is_same_v<T, Infs>
-                           || std::is_same_v<T, Maf2_0>;
+                           || std::is_same_v<T, Maf2_0> || std::is_same_v<T, Maf1_0>;
                 },
                 initMode);
         }

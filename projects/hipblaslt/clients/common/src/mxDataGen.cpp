@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace
 {
@@ -68,7 +69,9 @@ namespace
                                std::string_view const initMethod,
                                hipDataType            dataType,
                                float                  min_val,
-                               float                  max_val)
+                               float                  max_val,
+                               uint64_t               elementCount = 0,
+                               uint32_t               seedIndex    = 0)
     {
         opt.min         = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
         opt.max         = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
@@ -137,6 +140,15 @@ namespace
             mode.normalScale = static_cast<int>(dataType) == static_cast<int>(HIP_R_4F_E2M1);
             opt.initMode     = DataInitMode(mode);
         }
+        else if(initMethod == "maf1_0")
+        {
+            // MAF1.0: A = sin(idx), B = cos(idx), idx = i + j * rows + batch * rows * cols of the
+            // stored matrix (seedIndex = abc + 3 * batch); every block scale 0.5.
+            Maf1_0 mode;
+            mode.useCos      = seedIndex % 3 != 0;
+            mode.indexOffset = uint64_t(seedIndex / 3) * elementCount;
+            opt.initMode     = DataInitMode(mode);
+        }
         else
             throw std::runtime_error(
                 std::string("generateMXInput: unsupported initMethod '")
@@ -144,7 +156,7 @@ namespace
                 + "'. Supported methods: Bounded/uniform_01, hpl, "
                   "uniform_low_precision, "
                   "TrigonometricFromFloat/trig_float, norm_dist, rand_int, maf2_0, "
-                  "maf2_0_unit_scale, "
+                  "maf2_0_unit_scale, maf1_0, "
                   "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
                   "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
                   "DenormMins, DenormMaxs, NaNs, Infs.");
@@ -488,7 +500,12 @@ std::vector<float> generateData(T                           dgen,
         = swizzledScaleBytes.empty() ? scaleBytes : swizzledScaleBytes;
     std::memcpy(scale, deviceScaleBytes.data(), deviceScaleBytes.size() * sizeof(uint8_t));
 
-    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
+    // Maf1_0 already writes element (i, j) of the stored matrix at i + j * stride with its
+    // sin/cos(i + j * row) code, and every block has the same scale. getAlignedFloat's reordering
+    // only exists to pair runs of data with their block scale, so it would just move elements
+    // away from their index; keep the generator's layout and reference instead.
+    bool const maf1_0 = std::holds_alternative<DGen::Maf1_0>(opt.initMode);
+    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose) || maf1_0)
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.
@@ -574,7 +591,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
 
     DataGeneratorOptions opt;
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyInitMethodString(opt, initMethod, dataType, min_val, max_val, row * col, seedIndex);
     applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
     // maf2_0 salts the seed per matrix and batch (seedIndex = abc + 3 * batch) from its own

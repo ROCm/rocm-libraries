@@ -3169,6 +3169,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && arg.initialization != hipblaslt_initialization::maf2_0
                && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
+               && arg.initialization != hipblaslt_initialization::maf1_0
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3179,7 +3180,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
                        "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
-                       "maf2_0 or maf2_0_unit_scale, not "
+                       "maf2_0, maf2_0_unit_scale or maf1_0, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
@@ -3288,6 +3289,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && arg.initialization != hipblaslt_initialization::maf2_0
                && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
+               && arg.initialization != hipblaslt_initialization::maf1_0
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3298,7 +3300,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
                        "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
-                       "maf2_0 or maf2_0_unit_scale, not "
+                       "maf2_0, maf2_0_unit_scale or maf1_0, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
@@ -3562,7 +3564,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
                || arg.scaleA == hipblaslt_scaling_format::Vector)
             {
-                if(arg.norm_check)
+                // MAF1.0 (as mblas-bench): a scalar or vector scale factor of 0.5.
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleA[i].buf(), size_scaleAVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
                 else
@@ -3573,7 +3578,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
             {
-                if(arg.norm_check)
+                // MAF1.0 (as mblas-bench): a scalar or vector scale factor of 0.5.
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleB[i].buf(), size_scaleBVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
                 else
@@ -4050,7 +4058,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleA[i].buf(), size_scaleAVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
                 else
@@ -4060,7 +4070,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleB[i].buf(), size_scaleBVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
                 else

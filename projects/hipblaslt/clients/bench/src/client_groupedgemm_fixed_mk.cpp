@@ -307,10 +307,11 @@ static int parse_arguments(int                          argc,
                         std::cerr << "Invalid initialization type: " << initializationStr << '\n';
                         return EXIT_FAILURE;
                     }
-                    // initialize_a_b_c_bias has no maf2_0 fill; reject instead of leaving buffers
-                    // unfilled.
+                    // initialize_a_b_c_bias has no maf2_0 or maf1_0 fill; reject instead of
+                    // leaving buffers unfilled.
                     if(*parsed == hipblaslt_initialization::maf2_0
-                       || *parsed == hipblaslt_initialization::maf2_0_unit_scale)
+                       || *parsed == hipblaslt_initialization::maf2_0_unit_scale
+                       || *parsed == hipblaslt_initialization::maf1_0)
                     {
                         std::cerr << "Initialization " << initializationStr
                                   << " is not supported by this client; use hipblaslt-bench\n";

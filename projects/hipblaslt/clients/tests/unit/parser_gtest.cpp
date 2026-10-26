@@ -53,7 +53,8 @@ namespace
     X(norm_dist_one_special)         \
     X(uniform_low_precision)         \
     X(maf2_0)                        \
-    X(maf2_0_unit_scale)
+    X(maf2_0_unit_scale)             \
+    X(maf1_0)
 
     // Keep in sync with string_to_hipblaslt_activation_type().
 #define HIPBLASLT_TEST_ACTIVATIONS(X) \
