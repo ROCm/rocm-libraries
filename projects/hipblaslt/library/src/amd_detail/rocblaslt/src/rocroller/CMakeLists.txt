@@ -28,9 +28,9 @@ else()
     target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller_interface)
 endif()
 target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common)
-# This is the only target whose sources are built against rocRoller's headers,
-# and kernel_type.hpp reads this definition to decide between those headers and
-# hipBLASLt's own declaration of the enumerations it needs.
+# This is the only target whose sources are built against rocRoller's headers.
+# kernel_type.hpp and analytical_utils.hpp include them when this definition
+# is set. The ranker does not define it, and takes rocroller_enums.hpp.
 target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
 target_include_directories(hipblaslt-rocroller
     PRIVATE
