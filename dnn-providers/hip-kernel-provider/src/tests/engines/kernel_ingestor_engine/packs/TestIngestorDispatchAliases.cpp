@@ -46,6 +46,8 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
     expectOneHandler("hipkernel.conv_fwd.dispatch", CONV_FWD_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
                      GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
 }
 
 } // namespace

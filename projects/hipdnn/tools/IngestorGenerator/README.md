@@ -766,7 +766,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 972 rocKE kernels (840 plus 132 additive-bias) in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
@@ -930,7 +930,7 @@ enumerate:
                                   # cell sweeps; the cell's default is the kept spec equal to the
                                   # registry default elsewhere. Two features' selects must agree
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
-  max_kernels: 840                # slice only: more is an error. Every space refuses two
+  max_kernels: 972                # slice only: more is an error. Every space refuses two
                                   # kernels with one name
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
