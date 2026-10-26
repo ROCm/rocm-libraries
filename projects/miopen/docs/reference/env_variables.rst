@@ -114,6 +114,18 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | solvers are still used as a fallback when no non-naive solver
         | succeeds.
         |
+        | At most ``GPU_MAX_HW_QUEUES`` minus 2 skipped streams (at least
+        | 1; 2 at the HIP default of 4 queues) may be outstanding. Beyond
+        | that, the next naive evaluation waits for one to finish rather
+        | than timing a kernel that shares a hardware queue with it.
+        |
+        | A skipped kernel's scratch buffer is released at the next MIOpen
+        | kernel launch, allocation, or find on the handle that runs after
+        | the kernel finishes and outside a HIP graph capture. Replaying a
+        | captured graph does not release it, so a workload that only
+        | replays after capture keeps the buffer until the next such call
+        | or until the handle is destroyed.
+        |
         | Limitation: a skipped kernel keeps reading the caller's input
         | tensors until it finishes. Its results are discarded, so stale
         | or reused data is harmless, but unmapping those pages while it
@@ -137,22 +149,6 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | default value of 300 gives naive a budget of 3× the best
         | non-naive time.
       - | Integer percentage (default: 300)
-
-    * - | ``MIOPEN_NAIVE_MAX_DRAINING``
-        | Caps how many streams abandoned by ``MIOPEN_NAIVE_TIMEOUT``
-        | may be outstanding at once. On reaching the cap, the next
-        | naive evaluation waits for one to retire rather than creating
-        | another stream. When unset, the cap derives from
-        | ``GPU_MAX_HW_QUEUES`` - the HIP variable governing how many
-        | hardware queues streams get before they start sharing one -
-        | less the handle's own stream and the one being handed out, so
-        | the default of 4 queues gives a cap of 2. An evaluation
-        | sharing a queue with a kernel abandoned earlier times that
-        | contention rather than the solver, and that measurement
-        | reaches FindDb. Raise it only if profiling shows the extra
-        | concurrent streams do not contend on your architecture.
-      - | Integer count
-        | 0 or unset: Derive from ``GPU_MAX_HW_QUEUES`` (default)
 
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.

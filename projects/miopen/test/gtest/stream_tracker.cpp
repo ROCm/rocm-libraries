@@ -7,15 +7,19 @@
 #include <miopen/handle.hpp>
 #include <miopen/hipoc_kernel.hpp>
 #include <miopen/stream_tracker.hpp>
+#include <miopen/tensor.hpp>
+#include <miopen/tensor_ops.hpp>
 
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -42,11 +46,68 @@ struct StreamGate
     }
 };
 
+// Fixed rather than DefaultMaxDraining(): several tests abandon a gated stream
+// and then acquire on the same thread before opening the gate, which needs room
+// for a second stream. A cap of 1, from the caller's GPU_MAX_HW_QUEUES, would
+// block that acquire() on a gate only this thread can open.
+constexpr std::size_t kTestMaxDraining = 2;
+
 class GPU_StreamTracker_FP32 : public ::testing::Test
 {
 protected:
     miopen::Handle& handle = get_handle();
-    miopen::StreamTracker tracker;
+    miopen::StreamTracker tracker{kTestMaxDraining};
+};
+
+/// Drives reclaim through the Handle entry points rather than the tracker: the
+/// fix for issue #12121 lives in Handle::Run, and nothing short of a real launch
+/// on a capturing handle stream exercises it. The handle gets its own stream
+/// because the default handle's null stream cannot be captured.
+class GPU_StreamTrackerHandle_FP32 : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        handle = std::make_unique<miopen::Handle>(stream);
+        ASSERT_EQ(hipMalloc(&data, desc.GetElementSpace() * sizeof(float)), hipSuccess);
+
+        // Compile and load the kernel now: neither is legal mid-capture.
+        Launch();
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    }
+
+    void TearDown() override
+    {
+        handle.reset();
+        (void)hipFree(data);
+        (void)hipStreamDestroy(stream);
+    }
+
+    /// A kernel launch through Handle::Run on the handle's stream.
+    void Launch()
+    {
+        const float value = 1.0f;
+        miopen::SetTensor(*handle, desc, data, &value);
+    }
+
+    /// Abandons an idle slot on the handle's own tracker whose scratch nothing
+    /// else references, so a reclaim actually frees it. Idle means any reclaim
+    /// that runs will take it; whether one runs is what the tests check.
+    std::weak_ptr<miopen::ScratchAllocation> AbandonIdleSlotHoldingScratch()
+    {
+        auto& tracker                                    = handle->GetStreamTracker();
+        auto slot                                        = tracker.acquire(*handle);
+        slot.scratch                                     = handle->GetScratchBuffer(65536);
+        std::weak_ptr<miopen::ScratchAllocation> scratch = slot.scratch;
+        tracker.abandon(std::move(slot));
+        return scratch;
+    }
+
+    hipStream_t stream = nullptr;
+    std::unique_ptr<miopen::Handle> handle;
+    miopen::TensorDescriptor desc{miopenFloat, {1, 1, 1, 256}};
+    void* data = nullptr;
 };
 
 } // namespace
@@ -260,7 +321,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireWaitsOutABacklogRatherThanGrowOrDecline)
     // back that one. It must not decline: the caller would skip a solver
     // evaluation, and a skipped naive solver can lose a find it would have won -
     // which reaches the user find-db and outlives the backlog that caused it.
-    const auto cap = miopen::StreamTracker::MaxDraining();
+    const auto cap = tracker.MaxDraining();
 
     std::vector<std::unique_ptr<StreamGate>> gates;
     std::vector<hipStream_t> abandoned;
@@ -480,4 +541,54 @@ TEST_F(GPU_StreamTracker_FP32, ScratchSurvivesAbandon)
     auto reclaimed = tracker.acquire(handle);
     EXPECT_EQ(scratch.use_count(), 1); // draining slot scratch reset; only local remains
     tracker.release(reclaimed);
+}
+
+TEST_F(GPU_StreamTrackerHandle_FP32, CapturedLaunchKeepsScratchPinnedAndTheCaptureValid)
+{
+    // Regression for issue #12121 at the launch path itself. A launch recorded
+    // into a graph must neither poll the abandoned stream nor free its scratch:
+    // either breaks the caller's capture.
+    for(const auto mode : {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal})
+    {
+        SCOPED_TRACE(mode == hipStreamCaptureModeGlobal ? "global capture mode"
+                                                        : "thread-local capture mode");
+        const auto scratch = AbandonIdleSlotHoldingScratch();
+        ASSERT_TRUE(handle->GetStreamTracker().HasPinnedScratch());
+
+        ASSERT_EQ(hipStreamBeginCapture(stream, mode), hipSuccess);
+        Launch();
+        const bool released_mid_capture = scratch.expired();
+        hipGraph_t graph                = nullptr;
+        const auto end_status           = hipStreamEndCapture(stream, &graph);
+
+        EXPECT_FALSE(released_mid_capture) << "Handle::Run reclaimed during a capture";
+        EXPECT_TRUE(handle->GetStreamTracker().HasPinnedScratch());
+        EXPECT_EQ(end_status, hipSuccess) << "Handle::Run invalidated the capture";
+        EXPECT_NE(graph, nullptr);
+        if(graph != nullptr)
+            (void)hipGraphDestroy(graph);
+
+        // The first launch outside the capture is what hands the buffer back.
+        Launch();
+        EXPECT_TRUE(scratch.expired()) << "uncaptured launch left the scratch pinned";
+        EXPECT_FALSE(handle->GetStreamTracker().HasPinnedScratch());
+    }
+}
+
+TEST_F(GPU_StreamTrackerHandle_FP32, CreateReleasesPinnedScratch)
+{
+    // Allocation is the other reclaim point, for callers that never launch
+    // again after a find.
+    const auto scratch = AbandonIdleSlotHoldingScratch();
+    ASSERT_FALSE(scratch.expired());
+
+    const auto buffer = handle->Create(64);
+    EXPECT_TRUE(scratch.expired()) << "Handle::Create left the scratch pinned";
+    EXPECT_FALSE(handle->GetStreamTracker().HasPinnedScratch());
+}
+
+TEST(CPU_StreamTracker_NONE, ZeroCapIsRaisedToOne)
+{
+    // A zero cap would leave acquire() waiting on an empty backlog forever.
+    EXPECT_EQ(miopen::StreamTracker{0}.MaxDraining(), 1u);
 }

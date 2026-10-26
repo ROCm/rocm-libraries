@@ -46,7 +46,15 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
         EventPtr done;
     };
 
-    StreamTracker() = default;
+    /// Backlog cap from DefaultMaxDraining().
+    StreamTracker() : StreamTracker(DefaultMaxDraining()) {}
+
+    /// Backlog cap of `max_draining`, raised to 1 if zero: a cap of zero would
+    /// leave acquire() waiting on an empty backlog.
+    explicit StreamTracker(std::size_t max_draining)
+        : max_draining_(max_draining > 0 ? max_draining : 1)
+    {
+    }
 
     /// Blocks until every abandoned stream has drained. Kernels left running by
     /// a timed-out evaluation execute from code objects the Handle unloads during
@@ -65,11 +73,15 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     /// avoid. Find results reach the user find-db, so a transient backlog would
     /// persist as a worse recorded solver choice. A stall is recoverable; that is
     /// not.
+    ///
+    /// Throws instead of waiting once the runtime reports a device error, since
+    /// HIP never clears one and the backlog could never drain; see SweepLocked.
     Slot acquire(const Handle& handle);
 
     /// Reclaims abandoned slots whose stream has gone idle, dropping the scratch
     /// references they hold. Non-blocking: a slot whose stream is still busy is
-    /// left in place for a later sweep.
+    /// left in place for a later sweep, as is one whose query returns an error:
+    /// only success proves the kernel stopped writing the scratch.
     ///
     /// Unconditional, so call it only where a HIP graph capture cannot be in
     /// flight - find and the allocation path qualify by construction. Anywhere a
@@ -78,7 +90,7 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     /// the middle of someone's recording (issue #12121).
     void sweep();
 
-    /// True while an abandoned slot is still holding a scratch buffer alive.
+    /// True while an abandoned slot still awaits reclaim with a scratch buffer.
     ///
     /// The kernel launch path tests this before doing anything else, so a build
     /// with nothing abandoned - which is nearly all of them - pays one uncontended
@@ -93,6 +105,11 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     /// a caller is recording a graph - under PyTorch that lands in a caching
     /// allocator doing its own capture-time bookkeeping. Skipping leaves the
     /// buffer pinned until the next launch that is not being captured.
+    ///
+    /// So the release guarantee is "at the next uncaptured launch, allocation, or
+    /// find on the handle", not "as soon as the kernel retires". Graph replay does
+    /// not go through Handle::Run, so a workload that finds, captures, and from
+    /// then on only replays keeps the scratch until the handle is destroyed.
     void SweepUnlessCapturing(hipStream_t stream);
 
     void release(Slot slot);
@@ -101,23 +118,28 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     void abandon(Slot slot);
 
     /// How many abandoned streams may be outstanding before acquire() blocks.
-    ///
-    /// Derived from GPU_MAX_HW_QUEUES, the same variable ROCclr uses to decide
-    /// how many hardware rings streams get before they start sharing. A slot
-    /// sharing a ring with a runaway kernel from an earlier abandonment times
-    /// that contention rather than the solver, and that number is what reaches
-    /// the find-db, so the backlog is bounded by the runtime's own budget.
-    /// MIOPEN_NAIVE_MAX_DRAINING overrides it outright.
-    static std::size_t MaxDraining();
+    std::size_t MaxDraining() const { return max_draining_; }
+
+    /// The cap a default-constructed tracker uses, derived from GPU_MAX_HW_QUEUES,
+    /// the same variable ROCclr uses to decide how many hardware rings streams
+    /// get before they start sharing. A slot sharing a ring with a runaway kernel
+    /// from an earlier abandonment times that contention rather than the solver,
+    /// and that number is what reaches the find-db, so the backlog is bounded by
+    /// the runtime's own budget.
+    static std::size_t DefaultMaxDraining();
 
 private:
-    /// Callers already holding mutex_.
-    void SweepLocked();
+    /// Callers already holding mutex_. Retires only slots whose query succeeds.
+    /// Returns the first answer that is neither success nor "not ready" - the
+    /// runtime's sticky device error - or hipSuccess.
+    hipError_t SweepLocked();
 
     /// Guards every container below. acquire()/release()/abandon() run during
     /// find while sweep() also runs from the allocation and kernel launch paths,
     /// so two threads sharing a handle can reach these concurrently.
     std::mutex mutex_;
+
+    const std::size_t max_draining_;
 
     /// Abandoned slots still holding a buffer. Readable without the lock so the
     /// launch path can opt out cheaply; mutated only under it.

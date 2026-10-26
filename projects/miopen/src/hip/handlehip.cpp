@@ -47,9 +47,6 @@
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEVICE_CU)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS)
-/// Abandoned evaluation streams allowed outstanding before a find waits for one.
-/// 0 derives it from GPU_MAX_HW_QUEUES; see StreamTracker::MaxDraining.
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_NAIVE_MAX_DRAINING, 0)
 
 namespace miopen {
 
@@ -492,21 +489,22 @@ private:
 
 } // namespace
 
-std::size_t StreamTracker::MaxDraining()
+std::size_t StreamTracker::DefaultMaxDraining()
 {
     static const std::size_t cap = [] {
-        if(const auto override_value = env::value(MIOPEN_NAIVE_MAX_DRAINING); override_value != 0)
-            return static_cast<std::size_t>(override_value);
-
-        // ROCclr's default when the variable is unset.
-        std::size_t hw_queues = 4;
+        // ROCclr's own default for GPU_MAX_HW_QUEUES (rocclr/utils/flags.hpp).
+        // HIP has no API reporting the effective value, so mirror its parsing.
+        long long hw_queues = 4;
         if(const auto raw = env::getEnvironmentVariable("GPU_MAX_HW_QUEUES"))
         {
             try
             {
-                const auto parsed = std::stoul(*raw);
+                // Signed, so "-1" is rejected rather than wrapping to a huge cap.
+                const auto parsed = std::stoll(*raw);
                 if(parsed > 0)
-                    hw_queues = static_cast<std::size_t>(parsed);
+                    hw_queues = parsed;
+                else
+                    MIOPEN_LOG_W("Ignoring non-positive GPU_MAX_HW_QUEUES=" << *raw);
             }
             catch(const std::exception&)
             {
@@ -516,23 +514,23 @@ std::size_t StreamTracker::MaxDraining()
 
         // Two rings are already spoken for whenever this matters: the handle's
         // own stream, and the slot the blocked acquire() is about to hand out.
-        return hw_queues > 3 ? hw_queues - 2 : std::size_t{1};
+        return hw_queues > 3 ? static_cast<std::size_t>(hw_queues - 2) : std::size_t{1};
     }();
     return cap;
 }
 
-void StreamTracker::SweepLocked()
+hipError_t StreamTracker::SweepLocked()
 {
     if(draining_.empty())
-        return;
+        return hipSuccess;
 
     const ScopedRelaxedCaptureMode capture_guard;
 
+    auto failure = hipSuccess;
     for(auto it = draining_.begin(); it != draining_.end();)
     {
-        const auto retired = it->done ? hipEventQuery(it->done.get()) == hipSuccess
-                                      : hipStreamQuery(it->stream) == hipSuccess;
-        if(retired)
+        const auto status = it->done ? hipEventQuery(it->done.get()) : hipStreamQuery(it->stream);
+        if(status == hipSuccess)
         {
             if(it->scratch)
             {
@@ -542,10 +540,23 @@ void StreamTracker::SweepLocked()
             it->done.reset();
             available_.push_back(std::move(*it));
             it = draining_.erase(it);
+            continue;
         }
-        else
-            ++it;
+
+        // Only hipSuccess proves the kernel retired; every other answer leaves the
+        // slot - and the scratch the kernel may still be writing - where it is.
+        // The completion check itself answers only hipSuccess or hipErrorNotReady.
+        // No capture rejection can reach here: the guard above puts this thread in
+        // relaxed mode, which exempts it from every thread's captures, and these
+        // streams and events are never captured themselves. The guard fails only
+        // on the runtime's process-wide device error, which every call returns
+        // before looking at the stream or event, and which never clears - so any
+        // other answer means this backlog can no longer drain.
+        if(status != hipErrorNotReady && failure == hipSuccess)
+            failure = status;
+        ++it;
     }
+    return failure;
 }
 
 void StreamTracker::SweepUnlessCapturing(hipStream_t stream)
@@ -560,7 +571,9 @@ void StreamTracker::SweepUnlessCapturing(hipStream_t stream)
 void StreamTracker::sweep()
 {
     const std::lock_guard<std::mutex> lock(mutex_);
-    SweepLocked();
+    // A device error is surfaced by acquire(), the one caller that would wait on
+    // it. Here it is left to the caller's own next HIP call, which fails with it.
+    (void)SweepLocked();
 }
 
 void StreamTracker::release(Slot slot)
@@ -606,7 +619,7 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
 {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    SweepLocked();
+    auto status = SweepLocked();
 
     // Reclaiming costs nothing new, so the cap applies only to growth below.
     const auto cap = MaxDraining();
@@ -619,10 +632,12 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
         // nothing against a kernel that has already overrun its budget severalfold.
         while(available_.empty() && draining_.size() >= cap)
         {
+            if(status != hipSuccess)
+                MIOPEN_THROW_HIP_STATUS(status, "Waiting for an abandoned evaluation stream");
             lock.unlock();
             std::this_thread::sleep_for(kDrainPollInterval);
             lock.lock();
-            SweepLocked();
+            status = SweepLocked();
         }
     }
 
