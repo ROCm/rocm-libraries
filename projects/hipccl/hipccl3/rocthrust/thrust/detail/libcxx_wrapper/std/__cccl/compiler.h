@@ -32,8 +32,16 @@
 #  define THRUST_COMPILER(...) _CCCL_COMPILER(__VA_ARGS__)
 
 #  define THRUST_CUDA_COMPILER(...)  _CCCL_CUDA_COMPILER(__VA_ARGS__)
-// TODO: changed this, not sure if this is correct!
-#  define THRUST_HAS_CUDA_COMPILER() _CCCL_CUDA_COMPILATION()
+
+// Upstream CCCL removed '_CCCL_HAS_CUDA_COMPILER'. Should be '1' for a compiler that
+// can potentially offload device CUDA/HIP code. For example, should be '0' for pure host GCC.
+#  if _CCCL_CUDA_COMPILER(NVCC) || _CCCL_CUDA_COMPILER(NVHPC) || _CCCL_CUDA_COMPILER(CLANG) \
+    || _CCCL_CUDA_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC)
+#    define THRUST_HAS_CUDA_COMPILER() 1
+#  else
+#    define THRUST_HAS_CUDA_COMPILER() 0
+#  endif
+
 #  define THRUST_CUDA_COMPILATION()  _CCCL_CUDA_COMPILATION()
 
 #  define THRUST_PRAGMA(ARG)          _CCCL_PRAGMA(ARG)
