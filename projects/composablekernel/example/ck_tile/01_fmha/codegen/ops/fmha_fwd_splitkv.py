@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -28,6 +28,7 @@ from codegen.ops.fmha_fwd import (
     FmhaFwdTileSize,
     DTYPE_BITS,
     K0_MAX_SUBMAX_MAP,
+    TDM_K0_MAX_SUBMAX_MAP,
     FMHA_FWD_KERNEL_HEADER,
     FMHA_FWD_API_PER_ARCH,
     FMHA_FWD_API_PER_DTYPE,
@@ -401,7 +402,14 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.hdim_q % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm"]:
+        elif self.pipeline_tag == "qr_tdm":
+            # Mirrors fmha_fwd.py: TDM stores the head dim at its true length,
+            # so the unpadded check uses the TDM map (96 and 160 map to
+            # themselves), and the padded one still needs 8-element alignment.
+            if self.dpad == "t":
+                return "a.hdim_q % 8 == 0"
+            return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -418,7 +426,11 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.hdim_v % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm"]:
+        elif self.pipeline_tag == "qr_tdm":
+            if self.dvpad == "t":
+                return "a.hdim_v % 8 == 0"
+            return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -575,7 +587,13 @@ class FmhaFwdSplitKVApiPool:
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
                     max_bm0 = max((t.bm0 for t in pool_by_hdim), default=0)
                     inners = str()
-                    for i_trait, trait in enumerate(pool_by_hdim):
+                    # Dispatch returns on the first hit, and the qr entries that
+                    # pad one side only carry predicates loose enough to shadow
+                    # qr_tdm, so qr_tdm has to come first. sorted() is stable,
+                    # so each group keeps its emission order.
+                    for i_trait, trait in enumerate(
+                        sorted(pool_by_hdim, key=lambda t: t.pipeline_tag != "qr_tdm")
+                    ):
                         inners += FMHA_FWD_SPLITKV_API_INNER_DISPATCH.format(
                             F_if=if_(i_trait),
                             F_arch=arch,
@@ -909,13 +927,32 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     @staticmethod
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
         pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
-        # qr_tdm asserts away bias / logits soft cap / dropout / quantization.
-        # Keep the generated set minimal: no bias, no soft cap, no sink.
         if dtype in ["fp16", "bf16"] and hdim == 128:
+            # qr_tdm is generated for no bias / no logits soft cap / no sink
+            # only: the pipeline static_asserts the soft cap away, its sink is
+            # the prefill one that counts the sink once per split
+            # (SplitKvSinkDoubleCount / SplitKvSinkDroppedSink catch that), and
+            # split-kv with bias dispatches to nothing even on develop. Like
+            # fmha_fwd.py it pads both sequence lengths together and both head
+            # dims together; the qr entries padding one side only stay as they
+            # are, which is why the dispatch chain still has to put qr_tdm
+            # first (see FmhaFwdSplitKVApiPool.api).
+            #
+            # `superseded` is the qr entry the unpadded qr_tdm one replaces
+            # outright -- same dispatch predicate on both sides. The head-dim
+            # padded pair is not in it: qr_tdm needs hdim % 8 == 0 there (see
+            # dcheck) while qr takes any head dim, so qr keeps that entry as
+            # the fallback and qr_tdm wins the aligned case by coming first.
             Pipeline = FmhaFwdSplitKVPipeline
-            for mask in get_mask_map(mask_impl).keys():
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", "t", "f", mask))  # fmt: skip
+            tdm, superseded = [], []
+            for mask, pagedkv in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"]
+            ):
+                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
+                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
+                superseded.append(Pipeline("qr", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
+            pipelines = tdm + [p for p in pipelines if p not in superseded]
         return pipelines
 
     @staticmethod
@@ -925,9 +962,6 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 #                      bm0, bn0, bk0, bn1, bk1,
                 "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "64" : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                # qr_tdm shares this tile. A bn0 32 variant was measured and
-                # dropped: 4-5x slower, because progressive K reload requires
-                # Gemm0::NIterPerWarp == 4, i.e. bn0 == 64.
                 "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
             }  # fmt: skip
@@ -974,17 +1008,9 @@ def get_fwd_splitkv_blobs(
             if not isinstance(tiles, list):
                 tiles = [tiles]
             hdim = int(hdim_str)
-            pipelines = factory.get_pipelines(dtype, hdim, mask_impl)
-            # qr_tdm and qr are mutually exclusive: every trait combination
-            # qr_tdm covers is dropped from qr, so no dispatch predicate is
-            # satisfied by both and emission order carries no meaning. qr keeps
-            # everything qr_tdm leaves out -- bias, logits soft cap, sink,
-            # col-major V, unpadded variants, and every head dim qr_tdm is not
-            # generated for.
-            shadowed = [replace(p, tag="qr") for p in pipelines if p.tag == "qr_tdm"]
-            for tile, pipeline in itertools.product(tiles, pipelines):
-                if pipeline in shadowed:
-                    continue
+            for tile, pipeline in itertools.product(
+                tiles, factory.get_pipelines(dtype, hdim, mask_impl)
+            ):
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
                     continue
