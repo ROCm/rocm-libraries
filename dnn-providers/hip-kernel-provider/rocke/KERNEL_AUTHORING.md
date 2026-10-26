@@ -192,6 +192,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
       dashboard, and representative shapes are handed to benchmarking. Publish
       relative evidence only through a policy-qualified PR or result document.
+- [ ] **MMA ops** — an MMA op added, removed or rewired in `core.arch` comes with
+      the tiling package's regenerated backend coverage record
+      ([`extending.md` §5.5](platform/dsl_docs/development/extending.md#55-the-tiling-mma-catalog-and-its-backend-coverage-record)).
 
 ### D. Perf optimization (no new feature)
 
