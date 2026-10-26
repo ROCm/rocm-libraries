@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.Parallel``: thread-count logic,
+"""Characterization tests for ``tensilelite.Common.Parallel``: thread-count logic,
 global-parameter overwrite, the pcall wrappers, ``apply_print_exception``, and
 the single-threaded / n_jobs=1 (in-process) paths of ``ParallelMap`` /
 ``ParallelMap2``. The real fork/spawn process-pool paths are not unit-driven
@@ -14,12 +14,12 @@ import importlib
 
 import pytest
 
-from Tensile.Common.GlobalParameters import globalParameters
+from tensilelite.Common.GlobalParameters import globalParameters
 
-# `import Tensile.Common.Parallel as P` resolves to the joblib `Parallel` class
+# `import tensilelite.Common.Parallel as P` resolves to the joblib `Parallel` class
 # (re-exported into the Common package namespace, shadowing the submodule). Load
 # the real module via import_module.
-P = importlib.import_module("Tensile.Common.Parallel")
+P = importlib.import_module("tensilelite.Common.Parallel")
 
 pytestmark = pytest.mark.unit
 
@@ -68,7 +68,7 @@ def test_cpu_thread_count_capped():
 
 
 def test_overwrite_global_parameters():
-    from Tensile.Common import GlobalParameters as GPmod
+    from tensilelite.Common import GlobalParameters as GPmod
     saved = dict(GPmod.globalParameters)
     try:
         P.OverwriteGlobalParameters({"OnlyKey": 1})
@@ -79,7 +79,7 @@ def test_overwrite_global_parameters():
 
 
 def test_pcall_multi_and_single_arg():
-    from Tensile.Common import GlobalParameters as GPmod
+    from tensilelite.Common import GlobalParameters as GPmod
     saved = dict(GPmod.globalParameters)
     try:
         assert P.pcallWithGlobalParamsMultiArg(_add, (2, 3), dict(saved)) == 5

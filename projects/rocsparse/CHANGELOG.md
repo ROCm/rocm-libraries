@@ -3,6 +3,19 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Changed
+* The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
+
+### Resolved issues
+* Fixed `rocsparse_spilu0` with a zero batch stride (all batch instances sharing the same values) for CSR matrices with long rows, that is, at least 512 non-zeros in a row on wave32 devices and 1024 on wave64 devices. The kernel launched one grid row per batch instance although the workspace holds the completion flags of a single instance, so the instances after the first accessed memory outside the workspace. The kernel now runs a single instance, as the other CSR `rocsparse_spilu0` kernel already did.
+* Fixed incomplete factorizations with a zero batch stride for `rocsparse_spic0` (CSR and BSR), `rocsparse_spilu0` (BSR), and `rocsparse_spildlt0` (CSR). The kernels launched one grid row per batch instance while every instance wrote the same values, so concurrent instances raced on those values and reported singularity positions for an instance that never ran. A zero value stride now factorizes a single instance, and that instance's singularity positions are copied to the others. `rocsparse_spildlt0` still writes each instance's diagonal output.
+* Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` rejecting rows whose hash table exactly fills the device shared-memory limit. The 8192-entry bucket was not checked, so 64-bit column indices requested 64 KiB of dynamic LDS, and a hash equal to the opt-in limit was still launched. Both now fall back to the bitmap path. This showed up as `rocsparse_status_internal_error` in the `GemmCalcGrids` csrgemm tests.
+* Fixed `rocsparse_Xcsr2hyb` leaving dangling ELL and COO pointers in a reused HYB matrix when the new conversion had no ELL or COO part (including `m == 0` or `n == 0`). A later `rocsparse_destroy_hyb_mat` or `rocsparse_Xcsr2hyb` freed them a second time.
+* Fixed an integer overflow in `rocsparse_csr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion. The ELL element count is now stored as a 64-bit integer, and ELL element indices are computed with 64-bit integers in `rocsparse_csr2ell`, `rocsparse_csr2hyb`, `rocsparse_ell2csr`, and `rocsparse_hyb2csr`, and in the ELL part of `rocsparse_check_matrix_hyb` and `rocsparse_check_matrix_ell`, which read the ELL arrays out of bounds and skipped the check when `m * ell_width` exceeded `INT32_MAX`.
+* Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
@@ -18,6 +31,13 @@ Documentation for rocSPARSE is available at
 
 ### Changed
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest 1.11.0 or later must be installed before building the client tests (`BUILD_CLIENTS_TESTS`). Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* `install.sh -d` no longer builds and installs GoogleTest from source.
+* The 24 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/rocsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `ROCSPARSE_TEST_MIRROR`. The `--matrices-dir` and `--matrices-dir-install` options of `install.sh` and the `--matrices-dir` option of `rmake.py` still download missing matrices.
+
+### Removed
+* Removed the GoogleTest superbuild in `deps/CMakeLists.txt`, together with `deps/external-gtest.cmake` and `cmake/get-cli-arguments.cmake`.
 
 ### Optimized
 * Improved the performance of the sparse triangular solves and the incomplete factorizations on gfx942 and gfx950. The kernels no longer write back and invalidate the L2 cache for every solved or factorized row. The row results and their completion flags are now exchanged with device-scope atomic stores and loads instead. This affects `rocsparse_spsv` and `rocsparse_sptrsv` (CSR, CSC, COO, and ELL formats), `rocsparse_spsm` and `rocsparse_sptrsm` (CSR, CSC, and COO formats), `rocsparse_Xcsrsv_solve`, `rocsparse_Xcsrsm_solve`, `rocsparse_Xcsrilu0`, `rocsparse_Xcsric0`, `rocsparse_spilu0`, `rocsparse_spic0`, and `rocsparse_spildlt0`. It also affects `rocsparse_Xbsrsv_solve` with block sizes up to 32, `rocsparse_Xbsrilu0` with block sizes up to 8, and `rocsparse_Xbsric0` with block sizes up to 16 and at most 128 blocks per block row. Larger block sizes and `rocsparse_Xbsrsm_solve` keep the previous synchronization, because their kernels reread row results too often for device-scope atomics to pay off.
@@ -36,7 +56,12 @@ Documentation for rocSPARSE is available at
 * Fixed kernel launches whose `grid.x * blockDim.x` exceeded the 32-bit work-item dispatch limit. CDNA rejects those launches (`hipErrorInvalidConfiguration` / `rocsparse_status_internal_error`). `rocsparse_axpby` (both the `beta` scaling of `y` and the `axpyi` update), `rocsparse_axpyi`, `rocsparse_roti` and `rocsparse_rot`, `rocsparse_scatter`, ELL SpMV (non-transposed and transposed), and COO AoS SpMV (atomic and transposed) now clamp `grid.x` to `(2^32 - 1) / blockDim.x` and cover the remainder with a grid-stride loop.
 * Fixed an integer overflow in the binary search that maps nonzeros to rows in the nnz-split algorithms of `rocsparse_spmv` (CSR) and `rocsparse_spmm` (CSR and CSC). With 32-bit indices and matrices with more than `2^30` rows, the search midpoint `(left + right) / 2` could overflow, causing out-of-bounds reads or incorrect row assignments. The midpoint is now computed as `left + (right - left) / 2`.
 * Fixed an invalid kernel launch in legacy `rocsparse_Xbsr2csr` and the 64-bit BSR-to-CSR conversion, where the 1024-thread kernels overflowed the 32-bit work-item grid limit at about 4.2 million block rows because the grid was not clamped.
+* Fixed an integer overflow in the SELL SpMV kernels used by `rocsparse_v2_spmv`. With 32-bit indices, the row index of each thread was computed in 32-bit arithmetic, so for matrices with close to `2^31` rows the threads past the last row wrapped to a negative row index that passed the `row < m` check. Those threads could read past the end of the slice offsets, and the non-transposed kernel could write `y` at a negative index. The row index is now computed in 64-bit arithmetic. The transposed kernel for slice sizes up to 128 also no longer reads `x` for threads past the last row.
 * Fixed an overflow issue in the COO atomic SpMV kernels used by `rocsparse_spmv` and `rocsparse_v2_spmv` for COO and COO AoS matrices. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-ID calculation could overflow and prevent some nonzeros from being accumulated. The kernels now compute element IDs in 64-bit arithmetic.
+* Fixed `install.sh --matrices-dir-install` and `--matrices-dir`, which reported success when a test matrix couldn't be extracted, downloaded or converted.
+* Fixed the test matrix conversion with `ROCSPARSE_MTX_DIR`, which moved the `.mtx` files out of that directory and deleted them after conversion. They are now copied, and matrices missing from that directory are taken from the DVC archives.
+* Fixed the test matrix conversion in address sanitizer builds, where the converter failed to load the shared address sanitizer runtime.
+* Fixed the test matrix converter, which accepted a `.mtx` file with fewer entries than its header declares.
 
 ## rocSPARSE 5.1.0 for ROCm 10.1
 

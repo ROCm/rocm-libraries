@@ -77,17 +77,9 @@ Verified mappings:
 - pointers: `ptr addrspace(1)` (`global`), `ptr addrspace(3)` (`lds`), `ptr` otherwise.
 - vectors: `<N x elem>`.
 - SmemType: lowers to `ptr addrspace(3)` for value-level usage.
-- scalars: `i1`, `i8`, `i32`, `i64`, `f16`, `bf16`, `f32`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
+- scalars: `i1`, `i8` (also `u8`), `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`, `f64`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
 
-If you add a new dtype, check:
-
-- scalar LLVM type mapping in `_llvm_type`;
-- vector mapping if `<N x T>` is needed;
-- pointer / address-space handling;
-- load and store ops;
-- cast / pack / unpack;
-- MFMA atom support (and `MFMA_F16_ATOMS` catalog or new catalog);
-- manifest dtype parsing and reference verification.
+To add a dtype, follow [Adding a dtype](../development/extending.md#54-adding-a-dtype).
 
 ## Address Spaces
 
@@ -155,7 +147,7 @@ When in doubt, inspect the LLVM text via `art.llvm_text` and the generated ISA v
 - HIP typedefs for vector types;
 - builtin shims for intrinsics clang may not expose directly (e.g. `_llvm_amdgcn_raw_ptr_buffer_load_lds`, `_llvm_amdgcn_ds_read_tr16_b64`);
 - `__shared__` storage for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*`;
 - C++ `for` and `if` for structured control flow.
 

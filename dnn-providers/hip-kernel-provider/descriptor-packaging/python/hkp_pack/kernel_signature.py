@@ -156,6 +156,19 @@ def _metadata_document(elf, where):
     )
 
 
+def exported_kernels(code_object, where):
+    """Every kernel symbol `code_object` exports, sorted.
+
+    Read from the object's own AMDGPU metadata, so it answers what the bytes
+    contain and not what any descriptor says they do.
+    """
+    document = _metadata_document(amdgcn_object(code_object, where), where)
+    kernels = document.get("amdhsa.kernels")
+    if not kernels:
+        raise HkpPackError(f"{where}: AMDGPU metadata note lists no kernels")
+    return sorted(str(kernel.get(".name")) for kernel in kernels)
+
+
 def kernel_signature(code_object, symbol, where):
     """The marshalled argument list of `symbol` within `code_object`.
 

@@ -93,6 +93,56 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     }
 }
 
+// w4a16 group scaling. Not part of isBlockScaling(), which selects the MX generator and layouts.
+
+// K-group size of a w4a16 scale mode, or 0 when `s` is not one.
+inline int w4a16GroupSize(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_BF16:
+    case hipblaslt_scaling_format::Block_32_BF16_ZP:
+    case hipblaslt_scaling_format::Block_32_F16:
+    case hipblaslt_scaling_format::Block_32_F16_ZP:
+        return 32;
+    case hipblaslt_scaling_format::Block_64_BF16:
+    case hipblaslt_scaling_format::Block_64_BF16_ZP:
+    case hipblaslt_scaling_format::Block_64_F16:
+    case hipblaslt_scaling_format::Block_64_F16_ZP:
+        return 64;
+    case hipblaslt_scaling_format::Block_128_BF16:
+    case hipblaslt_scaling_format::Block_128_BF16_ZP:
+    case hipblaslt_scaling_format::Block_128_F16:
+    case hipblaslt_scaling_format::Block_128_F16_ZP:
+        return 128;
+    default:
+        return 0;
+    }
+}
+
+inline bool isW4A16Scaling(hipblaslt_scaling_format s)
+{
+    return w4a16GroupSize(s) != 0;
+}
+
+// True for the asymmetric modes, whose scale allocation carries a packed int4
+// zero-point region after the scales.
+inline bool isW4A16ZeroPoint(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_BF16_ZP:
+    case hipblaslt_scaling_format::Block_64_BF16_ZP:
+    case hipblaslt_scaling_format::Block_128_BF16_ZP:
+    case hipblaslt_scaling_format::Block_32_F16_ZP:
+    case hipblaslt_scaling_format::Block_64_F16_ZP:
+    case hipblaslt_scaling_format::Block_128_F16_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
     switch(s)

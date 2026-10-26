@@ -592,8 +592,6 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--odist", manual_params.odist, "Logical distance between output batches")
         ->default_val(0);
-    non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
-    non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.

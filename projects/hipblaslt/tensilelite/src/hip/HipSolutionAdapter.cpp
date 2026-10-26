@@ -589,6 +589,26 @@ namespace TensileLite
             // bounded against the one it actually passes.
             if(enableCluster)
             {
+                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
+                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+
+                // Incomplete clusters can hang in hipDrvLaunchKernelEx. Do not pad
+                // here: the work partition and reduction state already use this grid.
+                if(kernel.numWorkGroups.x % kernel.clusterDim.x != 0
+                   || kernel.numWorkGroups.y % kernel.clusterDim.y != 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: workgroup grid must be divisible by cluster "
+                              << "dimensions (numWorkGroups " << kernel.numWorkGroups
+                              << ", clusterDim " << kernel.clusterDim
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+
                 // hipDrvLaunchKernelEx enumerates the grid in workgroups.
                 if(!fitsLaunchDim(kernel.numWorkGroups))
                 {
@@ -661,14 +681,6 @@ namespace TensileLite
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             if(enableCluster)
             {
-                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
-                {
-                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
-                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
-                              << ") for kernel: " << kernel.kernelName << std::endl;
-                    return hipErrorInvalidValue;
-                }
-
                 HIP_LAUNCH_CONFIG config = {0};
                 // The grid dimension is not affected by cluster launch, and is still enumerated
                 // using number of blocks.

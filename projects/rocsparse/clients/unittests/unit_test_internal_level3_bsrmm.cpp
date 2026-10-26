@@ -73,9 +73,9 @@ TEST_F(BsrMM, identity_times_dense)
     const rocsparse_int       nnzb      = 2;
     const rocsparse_int       block_dim = 1;
 
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
     // B column-major 2x2 = [[1,2],[3,4]] -> {1,3,2,4}
     device_vector<float> B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
     device_vector<float> C{std::vector<float>(4, 0.0f)};
@@ -117,13 +117,13 @@ TEST_F(BsrMM, identity_times_dense)
 
 TEST_F(BsrMM, bad_args)
 {
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
-    device_vector<float>   B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
-    device_vector<float>   C{std::vector<float>(4, 0.0f)};
-    MatDescr               descr;
-    const float            alpha = 1.0f, beta = 0.0f;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<float>         B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
+    device_vector<float>         C{std::vector<float>(4, 0.0f)};
+    MatDescr                     descr;
+    const float                  alpha = 1.0f, beta = 0.0f;
 
     EXPECT_EQ(rocsparse_sbsrmm(nullptr,
                                rocsparse_direction_row,
@@ -182,11 +182,11 @@ TEST_F(GebsrMM, identity_times_dense)
 {
     const rocsparse_direction dir = rocsparse_direction_row;
 
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
-    device_vector<float>   B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
-    device_vector<float>   C{std::vector<float>(4, 0.0f)};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<float>         B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
+    device_vector<float>         C{std::vector<float>(4, 0.0f)};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr && B.ptr && C.ptr);
 
     MatDescr descr;
@@ -226,13 +226,13 @@ TEST_F(GebsrMM, identity_times_dense)
 
 TEST_F(GebsrMM, bad_args)
 {
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{1.0f, 1.0f}};
-    device_vector<float>   B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
-    device_vector<float>   C{std::vector<float>(4, 0.0f)};
-    MatDescr               descr;
-    const float            alpha = 1.0f, beta = 0.0f;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    device_vector<float>         B{std::vector<float>{1.0f, 3.0f, 2.0f, 4.0f}};
+    device_vector<float>         C{std::vector<float>(4, 0.0f)};
+    MatDescr                     descr;
+    const float                  alpha = 1.0f, beta = 0.0f;
 
     EXPECT_EQ(rocsparse_sgebsrmm(nullptr,
                                  rocsparse_direction_row,

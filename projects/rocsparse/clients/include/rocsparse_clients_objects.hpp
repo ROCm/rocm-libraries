@@ -139,40 +139,33 @@ namespace rocsparse_clients
             return this->m_spmat;
         }
 
+        // Tridiagonal matrix with 2 on the diagonal and -1 on the off-diagonals.
         static host_csr_matrix<T, I, J>* init(int64_t size)
         {
-            const int64_t nnz = (size > 2) ? ((size - 2) * 3 + 4) : 4;
+            const int64_t nnz = 3 * size - 2;
             auto that = new host_csr_matrix<T, I, J>(size, size, nnz, rocsparse_index_base_zero);
 
-            that->ptr[0] = 0;
-            that->ptr[1] = 2;
-            for(int64_t i = 2; i < size; ++i)
+            int64_t k = 0;
+            for(int64_t i = 0; i < size; ++i)
             {
-                that->ptr[i] = that->ptr[i - 1] + 3;
+                that->ptr[i] = k;
+                if(i > 0)
+                {
+                    that->ind[k] = i - 1;
+                    that->val[k] = -1;
+                    ++k;
+                }
+                that->ind[k] = i;
+                that->val[k] = 2;
+                ++k;
+                if(i < size - 1)
+                {
+                    that->ind[k] = i + 1;
+                    that->val[k] = -1;
+                    ++k;
+                }
             }
-            that->ptr[size] = that->ptr[size - 1] + 2;
-
-            that->val[0] = 2;
-            that->val[1] = -1;
-            for(int64_t i = 2; i < size; ++i)
-            {
-                that->val[2 + 3 * (i - 2) + 0] = -1;
-                that->val[2 + 3 * (i - 2) + 1] = 2;
-                that->val[2 + 3 * (i - 2) + 2] = -1;
-            }
-            that->val[nnz - 2] = -1;
-            that->val[nnz - 1] = 2;
-
-            that->ind[0] = 0;
-            that->ind[1] = 1;
-            for(int64_t i = 2; i < size; ++i)
-            {
-                that->ind[2 + 3 * (i - 2) + 0] = i - 1;
-                that->ind[2 + 3 * (i - 2) + 1] = i;
-                that->ind[2 + 3 * (i - 2) + 2] = i + 1;
-            }
-            that->ind[nnz - 2] = size - 2;
-            that->ind[nnz - 1] = size - 1;
+            that->ptr[size] = k;
             return that;
         }
 

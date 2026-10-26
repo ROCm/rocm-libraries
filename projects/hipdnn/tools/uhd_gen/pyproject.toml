@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uhd_gen"
+version = "0.1.0"
+description = "UHD Generation Tool - Train and export heuristic models for hipDNN"
+readme = "README.md"
+requires-python = ">=3.12"
+# requirements.txt holds the floors and says where they come from.
+dynamic = ["dependencies"]
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+uhd-gen = "uhd_gen.__main__:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools]
+# This file sits *inside* the package, so the package is this directory: mapped here, an sdist
+# carries it and a wheel built from that sdist (`python -m build`) holds it. The generated
+# FlatBuffers bindings are imported from `_generated/` (see __init__.py).
+package-dir = {"uhd_gen" = "."}
+packages = [
+    "uhd_gen",
+    "uhd_gen.dataset",
+    "uhd_gen._generated.hipdnn_flatbuffers_sdk",
+    "uhd_gen._generated.hipdnn_flatbuffers_sdk.data_objects",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Dense WMMA FMHA forward for gfx1250 (gfx1250-class CDNA, GFX12 programming model).
 
-This is the gfx1250 analogue of ``instances/gfx1151/wmma_fmha_fwd.py``, but it is
-a **standalone** kernel rather than an adapter over the shared
+This is a **standalone** gfx1250 kernel rather than an adapter over the shared
 ``mfma_attention_fwd_inner_body`` — because the gfx1250 WMMA atom is **16x16x32**
-(K=32), the attention tiling is structurally different from the gfx1151 K=16 body:
+(K=32), the attention tiling is structurally different from the gfx11/gfx12 K=16
+body:
 
   * The QK^T score tile spanning one K-loop iteration is **16 q-rows x 32 k**
     (``BLOCK_K = 32``), built from **two** WMMA N-sub-tiles (each op.n=16 wide)

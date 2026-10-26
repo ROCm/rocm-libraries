@@ -37,7 +37,8 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0)
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0 || strcmp(name, "fp8e4m3") == 0
+       || strcmp(name, "bf8e5m2") == 0)
     {
         return 1;
     }
@@ -632,12 +633,13 @@ static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                    base_ptr,
                    gidx);
     rocke_ll_emitf(L,
-                   "  store <%lld x %s> %s, ptr addrspace(3) %s, align %lld",
+                   "  store <%lld x %s> %s, ptr addrspace(3) %s, align %lld%s",
                    (long long)vec,
                    elem_ty,
                    rocke_ll_operand(L, value),
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   rocke_ll_lds_aa_suffix(L, gname));
 }
 
 static void op_tile_smem_load_v4(rocke_lower_t* L, const rocke_op_t* op)
@@ -697,12 +699,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
      * 2 (not 1). Replicate that exact dict here rather than the shared
      * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
      * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
+     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
         {
             elem_bytes = 1;
         }
@@ -737,12 +739,13 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* scalar = rocke_ll_fresh(L, "smem.s");
         rocke_ll_emitf(L,
-                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld%s",
                        scalar,
                        volatile_kw,
                        elem_ty,
                        base,
-                       (long long)align);
+                       (long long)align,
+                       rocke_ll_lds_aa_suffix(L, gname));
         rocke_ll_emitf(L,
                        "  %s = insertelement <1 x %s> undef, %s %s, i32 0",
                        ll_res(op),
@@ -753,13 +756,14 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     else
     {
         rocke_ll_emitf(L,
-                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld%s",
                        ll_res(op),
                        volatile_kw,
                        (long long)vec,
                        elem_ty,
                        base,
-                       (long long)align);
+                       (long long)align,
+                       rocke_ll_lds_aa_suffix(L, gname));
     }
 }
 
@@ -896,6 +900,7 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_type_t* stype = smem->type;
     const char* gname = rocke_ll_smem_global_name(L, smem, NULL);
     const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+    rocke_ll_lds_prov_set(L, op->results[0], gname);
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
 }
 
@@ -903,6 +908,9 @@ static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* base = op->operands[0];
     const rocke_value_t* off = op->operands[1];
+    const char* prov = rocke_ll_lds_prov_get(L, base);
+    if(prov)
+        rocke_ll_lds_prov_set(L, op->results[0], prov);
     rocke_ll_emitf(L,
                    "  %s = add i64 %s, %s",
                    ll_res(op),
@@ -1449,26 +1457,6 @@ static const char* ll_lds_ptr_operand(rocke_lower_t* L, const char* op_name, con
     return name;
 }
 
-static void ll_require_gfx1250_llvm23(rocke_lower_t* L, const char* op)
-{
-    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires gfx1250, got %s",
-                      op,
-                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
-    }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires LLVM flavor llvm23, got %s",
-                      op,
-                      rocke_llvm_flavor_name(L->flavor));
-    }
-}
-
 static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1486,13 +1474,14 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    ptr_name,
                    (long long)size_bytes,
                    rocke_ll_operand(L, voff),
                    rocke_ll_operand(L, soff),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_addr)));
 }
 
 static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op)
@@ -1510,13 +1499,14 @@ static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    lds,
                    (long long)bytes_per_lane,
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_ptr)));
 }
 
 static void op_tile_buffer_load_lds_async(rocke_lower_t* L, const rocke_op_t* op)
@@ -1642,7 +1632,8 @@ static void op_tile_global_store_async_from_lds(rocke_lower_t* L, const rocke_op
     int64_t cachepolicy;
     const char* suffix;
     const char* key;
-    ll_require_gfx1250_llvm23(L, "global_store_async_from_lds");
+    rocke_ll_require_llvm23_target_fact(
+        L, "global_store_async_from_lds", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     if(op->num_operands != 2)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_store_async_from_lds expects two operands");
     dst = op->operands[0];
@@ -1691,7 +1682,8 @@ static void op_tile_global_load_tr16_b128(rocke_lower_t* L, const rocke_op_t* op
     const char* suffix;
     const char* key;
     const char* llvm_type;
-    ll_require_gfx1250_llvm23(L, "global_load_tr16_b128");
+    rocke_ll_require_llvm23_target_fact(
+        L, "global_load_tr16_b128", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     if(op->num_operands != 1 || op->num_results != 1)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_load_tr16_b128 expects one operand and result");
     src = op->operands[0];
@@ -1744,7 +1736,7 @@ static void op_tile_cluster_load(rocke_lower_t* L, const rocke_op_t* op)
     int lanes;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "cluster_load");
+    rocke_ll_require_llvm23_target_fact(L, "cluster_load", ROCKE_LL_FACT_MULTICAST_LOAD);
     if(op->num_operands != 2 || op->num_results != 1)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load expects two operands and one result");
     ptr = op->operands[0];
@@ -1824,7 +1816,8 @@ static void op_tile_cluster_load_async_to_lds(rocke_lower_t* L, const rocke_op_t
     int64_t cachepolicy;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "cluster_load_async_to_lds");
+    rocke_ll_require_llvm23_target_fact(
+        L, "cluster_load_async_to_lds", ROCKE_LL_FACT_MULTICAST_LOAD);
     if(op->num_operands != 3)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds expects three operands");
     src = op->operands[0];
@@ -1883,7 +1876,7 @@ static void op_tile_tensor_lds_transfer(rocke_lower_t* L,
     static const int lanes[] = {4, 8, 4, 4, 8};
     int64_t cachepolicy;
     int i;
-    ll_require_gfx1250_llvm23(L, short_name);
+    rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_TDM);
     if(op->num_operands != 5)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects five descriptor groups", short_name);
     for(i = 0; i < 5; ++i)

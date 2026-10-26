@@ -86,5 +86,15 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
                                                  handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csrilu0_info->get_singularity_numeric_exact(), A->batch_count));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::broadcast_instance0_async(
+            handle, csrilu0_info->get_singularity_numeric_near(), A->batch_count));
+    }
+
     return rocsparse_status_success;
 }

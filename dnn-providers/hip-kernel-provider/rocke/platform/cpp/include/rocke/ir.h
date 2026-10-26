@@ -112,6 +112,9 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_E5M3,
     ROCKE_SCALAR_TF32,
     ROCKE_SCALAR_F64,
+    ROCKE_SCALAR_I4,
+    ROCKE_SCALAR_U4,
+    ROCKE_SCALAR_U8,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -198,7 +201,12 @@ typedef struct rocke_attr_map
 
 /* One enumerator per distinct op name string in rocke.core.ir. Every lowerer
  * dispatches on this enum instead of Python getattr(self, "_op_"+name). The
- * canonical dotted name string is recovered with rocke_opcode_name(). */
+ * canonical dotted name string is recovered with rocke_opcode_name().
+ *
+ * A new opcode goes at the end, just before ROCKE_OP__COUNT. Inserting one
+ * anywhere else renumbers every opcode after it, which breaks the C ABI (see
+ * "when to bump" in rocke/abi.h). tests/core/test_opcode_values.cpp pins the
+ * value of every existing opcode. */
 typedef enum rocke_opcode
 {
     ROCKE_OP_INVALID = 0,
@@ -447,6 +455,23 @@ typedef enum rocke_opcode
     ROCKE_OP_VECTOR_UNDEF,
     ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
 
+    /* arith.* f32 <-> f64 conversions */
+    ROCKE_OP_ARITH_CVT_F32_TO_F64,
+    ROCKE_OP_ARITH_CVT_F64_TO_F32,
+
+    /* arith.* unsigned (u8) ops. Appended so no existing opcode index shifts. */
+    ROCKE_OP_ARITH_UMAX,
+    ROCKE_OP_ARITH_UMIN,
+    ROCKE_OP_ARITH_UITOFP_F32,
+    ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
+
+    /* Range marker (Python IRBuilder._assume_range): its result is its first
+     * operand; it emits no instruction. Appended so no existing index shifts. */
+    ROCKE_OP_ARITH_ASSUME_RANGE,
+
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -630,6 +655,9 @@ typedef struct rocke_mem_opts
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
  * never NULL; never arena-owned (static storage). */
 const rocke_type_t* rocke_i1(void);
+const rocke_type_t* rocke_i4(void);
+const rocke_type_t* rocke_u4(void);
+const rocke_type_t* rocke_u8(void);
 const rocke_type_t* rocke_i8(void);
 const rocke_type_t* rocke_i16(void);
 const rocke_type_t* rocke_i32(void);
@@ -667,14 +695,25 @@ const rocke_type_t* rocke_smem_type(
  * canonical name, which encodes kind + components). */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
 
-/* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
+/* True when `t`, or the element of a vector `t`, is an unsigned integer (u8,
+ * u4). The twin of core/ir.py::_is_unsigned: every op whose result depends on
+ * signedness asks it which form to emit. NULL-safe. */
+bool rocke_type_is_unsigned(const rocke_type_t* t);
+
+/* AMDGPU buffer-load cache-policy bits (the AUX operand; Python module
+ * constants). Bit 0 (1) is GLC on gfx90a and SC0 on gfx942/gfx950; bit 1 (2) is
+ * SLC on gfx90a and NT (streaming) on gfx942/gfx950. */
 typedef enum rocke_cache_policy
 {
-    ROCKE_CACHE_ALL = 0,
-    ROCKE_CACHE_GLOBAL = 1,
-    ROCKE_CACHE_STREAM = 2,
-    ROCKE_NON_TEMPORAL = 3
+    ROCKE_CACHE_ALL = 0, /* no bits: the default caching */
+    ROCKE_CACHE_GLOBAL = 1, /* GLC / SC0 */
+    ROCKE_CACHE_STREAM = 2, /* SLC / NT */
+    ROCKE_NON_TEMPORAL = 3 /* GLC + SLC / SC0 + NT */
 } rocke_cache_policy_t;
+
+/* The bits of a cache-policy name ("all", "global", "stream", "nt"; Python
+ * cache_policy_from_name). Returns false for any other name. */
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out);
 
 /* ============================== ATTR MAP ================================ */
 
@@ -766,6 +805,9 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
 
 /* ----- arith integer / logic ----- */
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python add_nuw: integer a + c that does not wrap as unsigned ("add nuw").
+ * Operands are two i32 or two i64 values. */
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_mul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_div(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -773,8 +815,12 @@ rocke_value_t* rocke_b_mod(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
 rocke_value_t* rocke_b_land(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a);
+/* Signed max / min; an unsigned operand is refused (TypeError). */
 rocke_value_t* rocke_b_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Unsigned max / min of two u8 values. */
+rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -789,6 +835,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -807,6 +856,9 @@ rocke_value_t* rocke_b_cmp_gt(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
+ * values. */
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
@@ -825,6 +877,8 @@ rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
+/* Bitcast to a type of the same bit width; another width (ValueError) or a
+ * pointer (TypeError) is refused before any op is built. */
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_select(rocke_ir_builder_t* b,
                               rocke_value_t* cond,
@@ -841,10 +895,18 @@ rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* u8 -> f32 (LLVM uitofp). Exact. */
+rocke_value_t* rocke_b_uitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 <-> f64 have their own opcodes; cast_to_f32 / cast_f32_to reject f64. */
+rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v);
+rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
@@ -853,9 +915,15 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* scale);
 /* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
 rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> u8, round to nearest even and saturate to [0, 255]; NaN gives 0. */
+rocke_value_t* rocke_b_cvt_f32_to_u8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -960,6 +1028,10 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
 rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -1178,6 +1250,10 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
                                               rocke_value_t* a,
                                               rocke_value_t* bb,
@@ -1335,6 +1411,8 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
                                      const rocke_type_t* dtype /* NULL=>fp8e4m3 */);
 
 /* ----- vector bitcast / packed f32->f16 conversion ----- */
+/* Reinterpret a vector as another vector type of the same bit width; another
+ * width (ValueError) or a pointer (TypeError) is refused before any op is built. */
 rocke_value_t*
     rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1536,6 +1614,13 @@ void rocke_b_sync(rocke_ir_builder_t* b);
 void rocke_b_s_barrier_bare(rocke_ir_builder_t* b);
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector);
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): mode "compiler"
+ * follows the barrier with a compiler memory barrier, "workgroup" also
+ * brackets it with workgroup-scope release / acquire fences; NULL or "none" is
+ * the plain op. Any other mode records ROCKE_ERR_VALUE. */
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);

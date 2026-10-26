@@ -15,6 +15,8 @@
 #include <flatbuffers/verifier.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <mutex>
 #include <vector>
 
 namespace hipdnn_backend
@@ -95,6 +97,7 @@ void ExecutionPlanDescriptor::finalize()
     _tensorUids = std::move(tensorIdentities.uids);
     _tensorAlignments = std::move(tensorIdentities.alignments);
     _isOverrideShapeEnabled = graph->isOverrideShapeEnabled();
+    _graphId = graph->getGraphId();
 
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContext(
         pluginResourceManager, engineId, &engineConfigPluginData, graph.get());
@@ -416,8 +419,9 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: resource manager is "
                   "null.");
 
-    // Build and cache the serialized plan once; reuse it for all later
-    // size/fill calls (mirrors GraphDescriptor's _graphSerializedBuffer cache).
+    const std::lock_guard<std::mutex> lock(_serializedPlanCacheMutex);
+
+    // Build the serialized plan on the first call. Reuse it for all later size and fill calls.
     if(_serializedPlanCache.empty())
     {
         std::vector<uint8_t> pluginPayload;
@@ -543,6 +547,17 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
 
+uint64_t ExecutionPlanDescriptor::nextPlanId()
+{
+    static std::atomic<uint64_t> s_lastPlanId{0};
+    return s_lastPlanId.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+uint64_t ExecutionPlanDescriptor::recordExecution()
+{
+    return _executionCount.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
 hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR;
@@ -550,7 +565,11 @@ hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()
 
 std::string ExecutionPlanDescriptor::toString() const
 {
-    std::string str = "ExecutionPlanDescriptor: {workspaceSize=" + std::to_string(_workspaceSize);
+    std::string str = "ExecutionPlanDescriptor: {planId=" + std::to_string(_planId);
+    str += ", graphId="
+           + (_graphId.has_value() ? hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId)
+                                   : std::string("(none)"));
+    str += ", workspaceSize=" + std::to_string(_workspaceSize);
     str += ", engineId=" + std::to_string(_engineId);
     str += _engineConfig ? ", engineConfig="
                                + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()))

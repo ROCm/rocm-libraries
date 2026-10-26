@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -211,9 +211,11 @@ rocsparseio_status rocsparseio_open(rocsparseio_handle* p_handle,
                                     ...);
 
 //! @brief Close the rocsparseio file.
+//! @details The handle is released even if closing the file fails.
 //! @param[in] handle pointer to the rocsparseio handle.
 //! @retval rocsparseio_status_success the operation completed successfully.
 //! @retval rocsparseio_status_invalid_handle \p handle is a null pointer.
+//! @retval rocsparseio_status_invalid_file_operation closing the file failed, for example because buffered data could not be written.
 
 rocsparseio_status rocsparseio_close(rocsparseio_handle handle);
 

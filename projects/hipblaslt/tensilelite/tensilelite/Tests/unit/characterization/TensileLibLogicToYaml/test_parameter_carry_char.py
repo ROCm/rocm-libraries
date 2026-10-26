@@ -18,12 +18,12 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileLibLogicToYaml")
-LibraryIO = importlib.import_module("Tensile.LibraryIO")
+M = importlib.import_module("tensilelite.TensileLibLogicToYaml")
+LibraryIO = importlib.import_module("tensilelite.LibraryIO")
 
-from Tensile.Common.Architectures import ARCH_BUILD_ALIASES
-from Tensile.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
-from Tensile.Common.ValidParameters import validParameters, validParametersForArch
+from tensilelite.Common.Architectures import ARCH_BUILD_ALIASES
+from tensilelite.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
+from tensilelite.Common.ValidParameters import validParameters, validParametersForArch
 
 _CHAR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # common/config_helpers.findConfigs collects every other .yaml under Tensile/Tests
@@ -589,7 +589,7 @@ def _logicWithoutEpilogues(path, directory):
 def test_emitted_config_regenerates_the_same_kernel(tmp_path, path, index, arch, keepEpilogues):
     import codegen_harness
     import config_harness
-    from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+    from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
 
     # By default the config tunes the logic's kernel without its epilogues.
     logic = path if keepEpilogues else _logicWithoutEpilogues(path, tmp_path)

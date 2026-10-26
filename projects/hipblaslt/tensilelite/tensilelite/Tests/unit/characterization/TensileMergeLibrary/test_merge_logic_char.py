@@ -15,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileMergeLibrary")
+M = importlib.import_module("tensilelite.TensileMergeLibrary")
 
 
 @pytest.fixture(autouse=True)

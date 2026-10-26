@@ -16,9 +16,9 @@ import os
 
 import pytest
 
-import Tensile.ClientWriter as CW
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import globalParameters
+import tensilelite.ClientWriter as CW
+from tensilelite import LibraryIO
+from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
 

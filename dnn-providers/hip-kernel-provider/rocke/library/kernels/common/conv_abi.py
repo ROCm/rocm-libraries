@@ -44,6 +44,7 @@ __all__ = [
     "conv_desc_names",
     "conv_direct_arg_names",
     "conv_direct_args_signature",
+    "conv_direct_transform_signature",
     "conv_fwd_problem_block",
     "conv_manifest_args_signature",
 ]
@@ -515,6 +516,20 @@ def conv_direct_args_signature(
     return _conv_signature(
         conv_direct_arg_names(direction=direction), dtype, dtype, dtype_d
     )
+
+
+def conv_direct_transform_signature(
+    dtype: str = "fp16", runtime_channels: bool = False
+) -> List[Dict[str, Any]]:
+    """Launch signature of the MFMA dgrad's weight-transform kernels: source,
+    destination and their byte sizes, then -- for the runtime-channel ones --
+    the per-group channel counts."""
+    from kernels.common.conv_direct_grouped import DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
+
+    names = [("A", "a"), ("D", "d"), ("A_bytes", "i32"), ("D_bytes", "i32")]
+    if runtime_channels:
+        names += [(n, "i32") for n in DIRECT_WEIGHT_TRANSFORM_RTC_ARGS]
+    return _conv_signature(names, dtype, dtype, dtype)
 
 
 def conv_manifest_args_signature(

@@ -140,6 +140,31 @@ Arbitrary options are intentionally not exposed through `compile_kernel`; call
 `build_hsaco_from_llvm_ir` directly for isolated compiler diagnostics. Raw
 options are not automatically validated or included in artifact identity.
 
+## Compiling In A Fresh Process
+
+An in-process compile is not always a function of the IR alone. LLVM's AMDGPU
+IGroupLP strategy behind `llvm.amdgcn.iglp.opt(i32 1)` (the single-wave
+small-GEMM strategy) keeps its DS-write counts in file-scope statics that it adds
+to and never resets, so the schedule of an `iglp_opt(1)` kernel depends on every
+`iglp_opt(1)` kernel the same process compiled before it (its own assertion,
+compiled out in release builds, expects the counts to be zero). Measured on the
+attention backward kernels: the same IR gives another code object, with a
+different resource-gate verdict, after other compiles.
+
+`build_hsaco_from_llvm_ir(..., fresh_process=True)` compiles the module in a new
+Python process that compiles nothing else
+(`rocke.runtime._comgr_fresh_process`): the comgr library this process resolved
+(passed as `ROCKE_COMGR_LIB`), this rocke package first on `PYTHONPATH`, and
+comgr's own on-disk cache off. A compile error raises `ComgrError` with the
+child's message; a child that dies raises `ComgrProcessDied` (a `ComgrError`).
+`compile_kernel` does this for a kernel whose builder set the kernel attribute
+`COMGR_FRESH_PROCESS_ATTR` (`"comgr_fresh_process"`, compile policy only: no
+lowerer reads it, so the LLVM IR is unchanged). The attention backward main
+kernel sets it whenever it emits `iglp_opt(1)`; other families compile in-process
+as before. The cost is one short process start per such kernel. `compile_module`
+links its modules in-process, so it refuses a kernel carrying the attribute
+(`ValueError`); compile such a kernel with `compile_kernel`.
+
 ## HIP Module Layer
 
 `runtime/hip_module.py` is the matching ctypes wrapper for `libamdhip64.so` (the HIP runtime). It exposes only what the DSL needs.

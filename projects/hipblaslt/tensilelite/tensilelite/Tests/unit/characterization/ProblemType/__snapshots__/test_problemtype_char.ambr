@@ -70,6 +70,7 @@
     'IndicesSummation': list([
       2,
     ]),
+    'Int4EncodingA': 'Signed',
     'MXBlockA': 0,
     'MXBlockB': 0,
     'MacDataTypeA': '<DataType Float>',
@@ -92,6 +93,9 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'ScaleBlockSizesA': list([
+    ]),
+    'ScaleZeroPointA': False,
     'SetConstStrideA': list([
     ]),
     'SetConstStrideB': list([
@@ -196,6 +200,7 @@
     'IndicesSummation': list([
       2,
     ]),
+    'Int4EncodingA': 'Signed',
     'MXBlockA': 0,
     'MXBlockB': 0,
     'MacDataTypeA': '<DataType Float>',
@@ -218,6 +223,9 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'ScaleBlockSizesA': list([
+    ]),
+    'ScaleZeroPointA': False,
     'SetConstStrideA': list([
     ]),
     'SetConstStrideB': list([
@@ -263,7 +271,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 90,
+    'len': 93,
   })
 # ---
 # name: test_no_data_type_raises
@@ -336,6 +344,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -358,6 +367,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -464,6 +476,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -486,6 +499,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -592,6 +608,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -614,6 +631,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -720,6 +740,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float8>',
@@ -742,6 +763,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -848,6 +872,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -870,6 +895,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -977,6 +1005,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -999,6 +1028,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1105,6 +1137,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1127,6 +1160,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1233,6 +1269,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1255,6 +1292,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1361,6 +1401,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1383,6 +1424,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1489,6 +1533,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1511,6 +1556,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1621,6 +1669,7 @@
       'IndicesSummation': list([
         3,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1643,6 +1692,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1749,6 +1801,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType BFloat16>',
@@ -1771,6 +1824,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1878,6 +1934,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1900,6 +1957,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2007,6 +2067,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2029,6 +2090,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2136,6 +2200,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2158,6 +2223,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2265,6 +2333,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2287,6 +2356,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2395,6 +2467,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2417,6 +2490,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2523,6 +2599,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType ComplexFloat>',
@@ -2545,6 +2622,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2651,6 +2731,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType ComplexFloat>',
@@ -2673,6 +2754,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2779,6 +2863,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2801,6 +2886,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2907,6 +2995,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Double>',
@@ -2929,6 +3018,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3035,6 +3127,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3057,6 +3150,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3163,6 +3259,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3185,6 +3282,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3292,6 +3392,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3314,6 +3415,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3420,6 +3524,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3442,6 +3547,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3548,6 +3656,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3570,6 +3679,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3676,6 +3788,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3698,6 +3811,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3804,6 +3920,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -3826,6 +3943,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3932,6 +4052,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -3954,6 +4075,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4062,6 +4186,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -4084,6 +4209,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4190,6 +4318,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Int8>',
@@ -4212,6 +4341,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4318,6 +4450,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4340,6 +4473,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4458,6 +4594,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 32,
       'MXBlockB': 32,
       'MacDataTypeA': '<DataType Float>',
@@ -4480,6 +4617,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4588,6 +4728,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4610,6 +4751,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': True,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4716,6 +4860,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4738,6 +4883,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4844,6 +4992,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4866,6 +5015,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4972,6 +5124,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4994,6 +5147,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5100,6 +5256,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5122,6 +5279,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5228,6 +5388,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -5250,6 +5411,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5358,6 +5522,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5380,6 +5545,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5489,6 +5657,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5511,6 +5680,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5620,6 +5792,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5642,6 +5815,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5751,6 +5927,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5773,6 +5950,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5880,6 +6060,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5902,6 +6083,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6008,6 +6192,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6030,6 +6215,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6136,6 +6324,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6158,6 +6347,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6264,6 +6456,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6286,6 +6479,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6392,6 +6588,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6414,6 +6611,9 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizesA': list([
+      ]),
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([

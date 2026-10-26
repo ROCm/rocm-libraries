@@ -6,8 +6,17 @@ import importlib.util
 from pathlib import Path
 import subprocess
 
+import pytest
 
-def test_differential_gate_streams_unbuffered_progress(monkeypatch, tmp_path):
+
+@pytest.mark.parametrize(("flavor", "expected_gate_calls"), [(None, 2), ("llvm23", 1)])
+def test_differential_gate_streams_unbuffered_progress(
+    monkeypatch, tmp_path, flavor, expected_gate_calls
+):
+    if flavor is None:
+        monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    else:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     tools = Path(__file__).resolve().parents[3] / "tools"
     monkeypatch.syspath_prepend(str(tools))
     path = tools / "check_byte_identity.py"
@@ -33,7 +42,7 @@ def test_differential_gate_streams_unbuffered_progress(monkeypatch, tmp_path):
 
     assert module.main() == 0
     gate_calls = [call for call in calls if str(module.RUN_DIFF) in call[0]]
-    assert len(gate_calls) == 2
+    assert len(gate_calls) == expected_gate_calls
     for command, kwargs in gate_calls:
         assert command[:3] == [module.sys.executable, "-u", str(module.RUN_DIFF)]
         assert "capture_output" not in kwargs

@@ -79,27 +79,6 @@ class Expected(NamedTuple):
 # entry is a kernel bug to fix rather than a line to add.
 EXPECTED_WARNINGS: dict[tuple[str, str, str], Expected] = {}
 
-_HARNESS_REASON = (
-    "attention 3d d128/b64: the parity harness builds the gfx950 3D "
-    "kernel for these gfx942 cases, so they demand CDNA4 intrinsics on "
-    "a CDNA3 target; the same two cases check_ir_validity.py lists in "
-    "KNOWN_BAD, found here at declaration-demand time with the "
-    "intrinsic named"
-)
-_BF16_3D = "attention/gfx942/3d_bf16_d128_b64"
-_FP16_3D = "attention/gfx942/3d_fp16_d128_b64"
-
-for _flavor in ("llvm20", "llvm22", "llvm23"):
-    for _key, _cases in (
-        ("ds.read.tr16.b64", (_BF16_3D, _FP16_3D)),
-        ("mfma.f32.16x16x32.bf16", (_BF16_3D,)),
-        ("mfma.f32.16x16x32.f16", (_FP16_3D,)),
-    ):
-        EXPECTED_WARNINGS[(_key, "gfx942", _flavor)] = Expected(
-            _HARNESS_REASON, frozenset(_cases)
-        )
-del _flavor, _key, _cases
-
 # `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 were
 # listed here as artifact false negatives. Generator 5 builds each probe from
 # the declare `opt` resolves, so `immarg` comes from the LLVM being measured and

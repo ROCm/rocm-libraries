@@ -25,7 +25,7 @@ from unittest.mock import Mock
 import pytest
 
 # Prime the component registry before StreamK imports (avoids circular import).
-from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.code import Module, Label
 from rocisa.label import LabelManager
@@ -41,17 +41,17 @@ from rocisa.instruction import (
     SSubU32,
 )
 
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.ExecutionPolicy import (
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.ExecutionPolicy import (
     hasDynamicAssignment, hasHybridAssignment, normalize_execution_policy,
 )
-from Tensile.Components.StreamK import (
+from tensilelite.Components.StreamK import (
     StreamKDynamic,
     StreamKHybrid,
 )
-from Tensile.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
-from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Utilities import reject
+from tensilelite.Components.WorkAssignment import WorkAssignment, DynamicWorkQueue, Hybrid
+from tensilelite.SolutionStructs import Solution
+from tensilelite.SolutionStructs.Utilities import reject
 
 
 # ---------------------------------------------------------------------------
