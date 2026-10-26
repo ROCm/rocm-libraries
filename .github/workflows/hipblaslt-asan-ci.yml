@@ -11,6 +11,9 @@ on:
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
+      - ".github/scripts/hipblaslt_asan_diagnostics.py"
+      - ".github/scripts/prepare_hipblaslt_asan_debugger.sh"
+      - ".github/scripts/tests/hipblaslt_asan_diagnostics_test.py"
   workflow_dispatch:
 
 permissions:
@@ -36,9 +39,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github
+          sparse-checkout: |
+            .github
+            test/therock
           sparse-checkout-cone-mode: true
           fetch-depth: 1
+
+      - name: Test ASAN diagnostics
+        run: python3 -m unittest discover -s .github/scripts/tests -p hipblaslt_asan_diagnostics_test.py
 
       - name: Load CI environment
         id: ci-env
@@ -258,15 +266,26 @@ jobs:
           test -x "${THEROCK_BIN_DIR}/hipblaslt-test"
           echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
 
-      - name: Driver / GPU sanity check
-        timeout-minutes: 3
-        env:
-          RUNNER_NAME: ${{ runner.name }}
+      - name: Prepare debugger for timeout diagnostics
+        timeout-minutes: 5
         run: |
-          echo "Runner: ${RUNNER_NAME}"
-          export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
-          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
-          timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
+          mkdir -p ./test_logs/diagnostics
+          bash rocm-libraries/.github/scripts/prepare_hipblaslt_asan_debugger.sh \
+            "${GITHUB_WORKSPACE}/diagnostic-tools" \
+            2>&1 | tee ./test_logs/diagnostics/debugger-setup.log
+          echo "${GITHUB_WORKSPACE}/diagnostic-tools/bin" >> "$GITHUB_PATH"
+          if [ -f diagnostic-tools/packages.sha256 ]; then
+            cp diagnostic-tools/packages.sha256 ./test_logs/diagnostics/debugger-packages.sha256
+          fi
+
+      - name: Verify debugger attachment in the GPU container
+        timeout-minutes: 2
+        env:
+          HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE: "1"
+        run: |
+          python3 -m unittest discover -s rocm-libraries/.github/scripts/tests \
+            -p hipblaslt_asan_diagnostics_test.py \
+            2>&1 | tee ./test_logs/diagnostics/debugger-self-test.log
 
       - name: ASAN runtime environment
         run: |
@@ -282,25 +301,39 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        continue-on-error: true
+        env:
+          RUNNER_NAME: ${{ runner.name }}
+        run: |
+          python3 rocm-libraries/.github/scripts/hipblaslt_asan_diagnostics.py sanity \
+            --output-dir ./test_logs/diagnostics --bin-dir ./build/bin
+
       - name: Test hipBLASLt (quick)
-        # A passing smoke run takes 2-3 minutes; hangs used to run to the
-        # 180-minute step limit. Cap the test well below that and name the
-        # runner, since hangs have clustered on specific hosts.
+        # Preserve the 20-minute execution limit, then collect live evidence
+        # before terminating the process group. The step cap is a final backstop.
         timeout-minutes: 30
         env:
+          RUNNER_NAME: ${{ runner.name }}
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
           TEST_TYPE: quick
-          RUNNER_NAME: ${{ runner.name }}
         run: |
           mkdir -p ./test_logs
-          status=0
-          timeout -k 60 20m python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 \
-            | tee ./test_logs/hipblaslt-test_output.log || status=$?
-          if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
-            echo "::error::hipBLASLt ASAN test hung and was killed after 20 minutes on runner ${RUNNER_NAME}"
-          fi
-          exit "${status}"
+          python3 rocm-libraries/.github/scripts/hipblaslt_asan_diagnostics.py run \
+            --output-dir ./test_logs/diagnostics --timeout 1200 \
+            -- python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 \
+            | tee ./test_logs/hipblaslt-test_output.log
+
+      - name: Upload ASAN diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipblaslt-asan-diagnostics-${{ matrix.family }}-${{ github.run_attempt }}
+          path: test_logs/
+          if-no-files-found: warn
+          retention-days: 7
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
