@@ -27,6 +27,7 @@
 #include <cmath>
 #include <iterator>
 
+#include <vector>
 #include <thread>
 
 #if MIOPEN_BACKEND_HIP
