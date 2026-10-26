@@ -1076,6 +1076,47 @@ Build-time: filter, padding, dtype and the tile geometry. Constraints: stride
 tile within the 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`).
 
+## Direct Forward on WMMA (gfx1250)
+
+`library/kernels/common/conv_direct_fwd_wmma.py`, spec `DirectFwdWmmaSpec`,
+builder `build_direct_fwd_wmma` (C++ twin `instance_conv_direct_fwd_wmma.h`).
+The forward counterpart of the WMMA dgrad, dense and grouped:
+
+    Y[n, p, q, k] = sum_{r, s, c} X[n, S*p + r*dh - PAD, S*q + s*dw - PAD, c] * W[k, r, s, c]
+
+A workgroup owns `block_k = waves_k * tiles_k * 16` output channels of one
+group and `tile_n` images of `tile_h x tile_w` output pixels
+(`waves_p * tiles_p * 16` in all). Its loop walks the group's input channels
+in chunks of `ck` through an LDS ring of `stages` slots: one 3-D TDM transfer
+per image stages the X halo (`S * (tile - 1) + (K - 1) * dil + 1` rows and
+columns, zero-filled past the image) and one stages the chunk's weights. Every
+tap reads a shifted window of the halo (no im2col); the Y tile is staged in
+LDS and stored with TDM.
+
+Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
+
+- `pack_groups` packs `G` small groups (`cpg`, `kpg` in 2..16) into one
+  block-diagonal super-group; it bakes `cpg` and `kpg`.
+- `split_barrier` splits the per-chunk barrier into signal / wait;
+  `wave_epilogue` stores each wave's tiles with its own TDM transfer.
+- `phase_split` (stride 2) keeps the even and odd input columns in two
+  sub-halos so B fragments read consecutive LDS rows.
+- `row_ring` / `tap_ring` stage the weights one filter row / one tap per
+  ring slot, for wider tiles and deeper chunks.
+- `pingpong` (with `pp_group` steps per phase) runs the waves as two ranks
+  one barrier apart, so one reads LDS while the other multiplies.
+- `tap_reuse` reuses B fragments across filter rows (whole output rows per
+  wave); `tap_shift` builds the next filter column's fragments with an
+  in-wave lane rotation (`v_permlane16`).
+
+Runtime (kernargs): batch, extents, the group count and both channel counts
+(unless packed). Build-time: filter (square), stride 1 or 2, per-axis
+dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
+`cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
+tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
+within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant
+`direct_fwd_wmma`), filtered per problem by tile efficiency.
+
 ## Direct Wgrad Kernels
 
 Sources: `library/kernels/common/conv_direct_wgrad_tiled.py`,

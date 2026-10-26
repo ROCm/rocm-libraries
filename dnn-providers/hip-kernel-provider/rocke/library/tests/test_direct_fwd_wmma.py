@@ -167,6 +167,109 @@ class TestFwdWmmaSpec(unittest.TestCase):
             )
         )
 
+    def test_engines_agree_on_specs(self):
+        """The C++ engine's validator, kernel name, grid and LDS size match
+        Python's over the AOT grid and a set of rejected specs (the
+        byte-identity gate only covers the IR of specs both engines build)."""
+        eng = pytest.importorskip("rocke_engine")
+        from kernels.conv.direct_aot_jobs import (
+            DIRECT_CAPABILITIES,
+            _knob_grid,
+            probe_problem,
+        )
+        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+
+        specs = []
+        _, caps_list = DIRECT_CAPABILITIES["direct_fwd_wmma"]
+        for caps in caps_list:
+            for dtype in ("bf16", "fp16"):
+                probe = probe_problem(caps, dtype, "direct_fwd_wmma")
+                for knobs in _knob_grid("direct_fwd_wmma", "gfx1250", dtype, caps):
+                    specs.append(DirectFwdWmmaSpec(problem=probe, **knobs))
+        for pkw, knobs in (
+            ({}, dict(ck=48)),
+            (dict(C=36), {}),
+            ({}, dict(tile_w=12)),
+            ({}, dict(waves_k=1, waves_p=1)),
+            ({}, dict(tile_w=8, tile_n=8)),
+            ({}, dict(waves_k=1, waves_p=2, tiles_k=8, tiles_p=8)),
+            ({}, dict(tiles_k=8, tiles_p=8, waves_k=1, waves_p=8, ck=128)),
+            ({}, dict(tile_n=0)),
+            ({}, dict(tile_w=-16)),
+            ({}, dict(sched="no-such-strategy")),
+            ({}, dict(sched="")),
+            (dict(stride=3), {}),
+            (dict(dil_h=2, dil_w=2, PAD=5), {}),
+            (dict(dil_h=0), {}),
+            (dict(KH=3, PAD=1, H=1, W=1), {}),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=3)),
+            (dict(C=24, K=24, groups=8), dict(pack_groups=8)),
+            (dict(C=64, K=64, groups=8), dict(pack_groups=8)),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=8, tiles_k=1, waves_k=1)),
+            ({}, dict(pack_groups=0)),
+            (dict(stride=2), dict(tap_reuse=True)),
+            ({}, dict(tap_reuse=True, row_ring=True)),
+            ({}, dict(tap_reuse=True, tile_w=8)),
+            ({}, dict(tap_reuse=True, pingpong=True)),
+            ({}, dict(tap_shift=True)),
+            (dict(PAD=16, dil_w=16), dict(tap_reuse=True, tap_shift=True)),
+            ({}, dict(phase_split=True)),
+            (dict(stride=2), dict(phase_split=True, tile_w=8, tile_n=4)),
+            ({}, dict(wave_epilogue=True, tiles_p=3)),
+            ({}, dict(row_ring=True, tap_ring=True)),
+            ({}, dict(row_ring=True, split_barrier=True)),
+            ({}, dict(stages=1)),
+            ({}, dict(pingpong=True, prefetch=True)),
+            ({}, dict(pingpong=True, wave_epilogue=True)),
+            ({}, dict(pingpong=True, waves_k=1, waves_p=3)),
+            ({}, dict(pingpong=True, tile_w=8, tile_n=4)),
+            ({}, dict(pp_group=2)),
+            ({}, dict(waves_k=8, waves_p=8)),
+            (dict(N=8, H=768, W=768, C=256, K=128), {}),
+            (dict(N=1, H=8, W=8, C=4096, K=32768), {}),
+            (dict(dtype="fp32"), {}),
+        ):
+            specs.append(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
+        for arch in ("gfx1250", "gfx950"):
+            for spec in specs:
+                ok, _, name, grid, lds = eng.conv_direct_fwd_wmma_describe(
+                    conv_direct_fwd_wmma_spec_to_dict(spec), arch
+                )
+                why = fwd_wmma_reason(spec, arch)
+                self.assertEqual(ok, why is None, (arch, spec, why))
+                self.assertEqual(name, spec.kernel_name())
+                self.assertEqual(lds, spec.lds_bytes())
+                if why is None:
+                    self.assertEqual(tuple(grid), spec.grid())
+
+    def test_binding_rejects_bad_input(self):
+        """A rejected spec returns the rejection (no grid is computed from its
+        zero tile extents); a missing, mistyped or partial problem raises."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+
+        for knobs in (dict(waves_k=0), dict(tiles_k=0), dict(waves_p=0)):
+            sd = conv_direct_fwd_wmma_spec_to_dict(
+                DirectFwdWmmaSpec(problem=_problem(), **knobs)
+            )
+            ok, why, _, grid, _ = eng.conv_direct_fwd_wmma_describe(sd, "gfx1250")
+            self.assertFalse(ok, knobs)
+            self.assertIn("waves and tiles", why)
+            self.assertEqual(tuple(grid), (0, 0, 0))
+        good = conv_direct_fwd_wmma_spec_to_dict(DirectFwdWmmaSpec(problem=_problem()))
+        partial = dict(good["problem"])
+        del partial["kpg"]
+        for problem in (None, "N2H13", partial):
+            sd = dict(good)
+            if problem is None:
+                del sd["problem"]
+            else:
+                sd["problem"] = problem
+            with self.subTest(problem=problem), self.assertRaises(ValueError):
+                eng.conv_direct_fwd_wmma_describe(sd, "gfx1250")
+            with self.subTest(problem=problem), self.assertRaises(ValueError):
+                eng.conv_direct_fwd_wmma_lower_llvm(sd, arch="gfx1250")
+
     def test_ir_is_shape_independent(self):
         """One binary serves every extent, group count and channel count."""
         from rocke.core.ir_serialize import serialize
