@@ -97,8 +97,7 @@ void copyConvertedRange(std::span<const std::byte> sourceStorage, ptrdiff_t sour
                                                        sizeof(typename SourceTag::Storage),
                             sizeof(encoded));
                 if constexpr (UseFloat16Lookup && SourceTag::type == ScalarType::Float16)
-                    value =
-                        detail::convertScalarValue<Intermediate>(float16Values[encoded], options);
+                    value = convertScalar<Intermediate>(float16Values[encoded], options);
                 else
                     value =
                         detail::decodeScalarValueKnown<SourceTag, Intermediate>(encoded, options);
