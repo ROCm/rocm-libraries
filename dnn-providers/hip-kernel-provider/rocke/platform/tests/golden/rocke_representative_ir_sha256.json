@@ -650,6 +650,14 @@
           "sha256": "d32450c52a4fbb78818d2c34b3fa73dc4e6f4b63b8b96530d7cf3f3c1f7c6565",
           "status": "ok"
         },
+        "attention_dense/gfx950/persist_swa_sinks_wskip_d128_sq512": {
+          "arch": "gfx950",
+          "bytes": 479116,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_bm128_sq512_sk512_causal_swa128_sinks_lazyrs_wskip_persist512",
+          "sha256": "e9b3abd038c4a926d9f29f698cfe5b11a82919b25ac81756c52eb82f25d9806b",
+          "status": "ok"
+        },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
           "arch": "gfx950",
           "bytes": 435344,
@@ -2278,14 +2286,14 @@
           "gfx1250": 12,
           "gfx90a": 5,
           "gfx942": 62,
-          "gfx950": 181
+          "gfx950": 182
         },
         "expected_failures": 6,
         "families": {
           "attention": 39,
           "attention_d128_swa": 1,
           "attention_d256": 3,
-          "attention_dense": 55,
+          "attention_dense": 56,
           "conv": 20,
           "conv_dgrad": 13,
           "conv_direct": 26,
@@ -2305,7 +2313,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 280
+        "ok_cases": 281
       }
     },
     "llvm22": {
@@ -2956,6 +2964,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
           "sha256": "de5e0e013aa79665d563b2b294cf4535ed47215051ae2d919b2a34dd5749f4b3",
+          "status": "ok"
+        },
+        "attention_dense/gfx950/persist_swa_sinks_wskip_d128_sq512": {
+          "arch": "gfx950",
+          "bytes": 479216,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_bm128_sq512_sk512_causal_swa128_sinks_lazyrs_wskip_persist512",
+          "sha256": "355613309513c746632368e210e66e035554fda5dcf679078a89fbbb92b7f8cb",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
@@ -4586,14 +4602,14 @@
           "gfx1250": 12,
           "gfx90a": 5,
           "gfx942": 62,
-          "gfx950": 181
+          "gfx950": 182
         },
         "expected_failures": 6,
         "families": {
           "attention": 39,
           "attention_d128_swa": 1,
           "attention_d256": 3,
-          "attention_dense": 55,
+          "attention_dense": 56,
           "conv": 20,
           "conv_dgrad": 13,
           "conv_direct": 26,
@@ -4613,7 +4629,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 280
+        "ok_cases": 281
       }
     },
     "llvm23": {
@@ -5264,6 +5280,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_swa128_sinks_lazyrs_persist256",
           "sha256": "5e14421578949d5747c345903dde6fdcb694fe2678a6236060365c71e4999883",
+          "status": "ok"
+        },
+        "attention_dense/gfx950/persist_swa_sinks_wskip_d128_sq512": {
+          "arch": "gfx950",
+          "bytes": 479280,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_bm128_sq512_sk512_causal_swa128_sinks_lazyrs_wskip_persist512",
+          "sha256": "1949971a6807607dfcdb2a416ba6072478f4442d69aa6d28f6b9f6616aff5856",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_swa_w128_sq512": {
@@ -6917,14 +6941,14 @@
           "gfx1250": 18,
           "gfx90a": 5,
           "gfx942": 62,
-          "gfx950": 181
+          "gfx950": 182
         },
         "expected_failures": 0,
         "families": {
           "attention": 39,
           "attention_d128_swa": 1,
           "attention_d256": 3,
-          "attention_dense": 55,
+          "attention_dense": 56,
           "conv": 20,
           "conv_dgrad": 13,
           "conv_direct": 26,
@@ -6945,7 +6969,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 286
+        "ok_cases": 287
       }
     }
   },

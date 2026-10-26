@@ -3667,6 +3667,18 @@ def cases():
                 "sliding_window": 128,
             },
         ),
+        # Per-wave skip of the band's fully masked first QK / last PV.
+        (
+            "persist_swa_sinks_wskip_d128_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 512,
+                "block_m": 128,
+                "use_sinks": True,
+                "sliding_window": 128,
+                "window_wave_skip": True,
+            },
+        ),
         # --- optional LSE output: the ordinary epilogue, the packed (varlen)
         # store guard, and the persistent epilogue with keyless rows + sink LSE.
         ("lse_default_sq512", {"emit_lse": True}),

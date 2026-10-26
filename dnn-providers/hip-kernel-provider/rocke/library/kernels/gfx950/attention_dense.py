@@ -210,6 +210,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # window_wave_skip: causal sliding window on the persistent grid only. A wave
+    # whose 32 query rows see no key of the band's first tile skips that tile's QK,
+    # and one whose rows see no key of the last tile skips that tile's trailing PV.
+    # Both tiles are fully masked for such a wave, so the output is unchanged.
+    window_wave_skip: bool = field(default=False, kw_only=True)
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -335,6 +340,13 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 )
             if self.paged or self.varlen:
                 raise ValueError("right_bound > 0 is not supported with paged / varlen")
+        if self.window_wave_skip and not (
+            self.causal and self.sliding_window > 0 and self.persistent
+        ):
+            raise ValueError(
+                "window_wave_skip requires a causal sliding window on the "
+                "persistent grid"
+            )
         if self.paged and not self.causal:
             raise ValueError("paged attention is causal-only")
         if self.causal_bottom_right:
@@ -507,6 +519,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append("lse")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
+        if self.window_wave_skip:
+            parts.append("wskip")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -1843,6 +1857,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # this tile's QK reads instead of at the end of the iteration (see
     # emit_loop_body).
     EARLY_K = SW == 0 and D == 128
+    WAVE_SKIP = spec.window_wave_skip
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -2548,13 +2563,43 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
-        s0 = do_qk(start_buf)
-        if SW > 0:
-            do_mask(s0, start_tile, lower=True, upper=causal)
+
+        def prologue_scores():
+            s_reg = do_qk(start_buf)
+            if SW > 0:
+                do_mask(s_reg, start_tile, lower=True, upper=causal)
+            else:
+                do_mask(s_reg, start_tile)
+            if RAG_KBOUND:
+                do_kbound_mask(s_reg, start_tile)
+            return s_reg
+
+        if WAVE_SKIP:
+            # A wave whose rows are all a full window past the first tile's last
+            # key would mask every score of it: keep the masked value and skip
+            # the QK. Wave-uniform 0/1-trip loop (no barrier inside).
+            behind = b.cmp_le(
+                b.add(b.mul(start_tile, b.const_i32(BN)), b.const_i32(BN - 1)),
+                b.sub(q_tok0, b.const_i32(SW)),
+            )
+            trips = b.readfirstlane(b.select(behind, b.const_i32(0), b.const_i32(1)))
+            ps = b.scf_for_iter(
+                b.const_i32(0),
+                trips,
+                b.const_i32(1),
+                [
+                    (f"ps{nsub}_{i}", neg_inf)
+                    for nsub in range(N_SUB)
+                    for i in range(16)
+                ],
+                iv_name="wsp",
+            )
+            with ps as (_iv, _c):
+                s_new = prologue_scores()
+                b.scf_yield(*[v for row in s_new for v in row])
+            s0 = [list(ps.results[nsub * 16 : nsub * 16 + 16]) for nsub in range(N_SUB)]
         else:
-            do_mask(s0, start_tile)
-        if RAG_KBOUND:
-            do_kbound_mask(s0, start_tile)
+            s0 = prologue_scores()
 
         if use_sinks:
             # Load sink value for this query head and convert to log2 domain
@@ -2672,7 +2717,26 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
         last_vbuf = b.mod(b.add(n_upper, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
-        o_acc = do_pv(o_acc, p_prev, last_vbuf)
+        if WAVE_SKIP:
+            # The last tile's probabilities are all zero for a wave whose rows
+            # all precede its first key: skip its PV (it would add exact zeros).
+            past_diag = b.cmp_gt(
+                b.mul(b.sub(n_upper, b.const_i32(1)), b.const_i32(BN)),
+                b.add(q_tok0, b.const_i32(31 + RIGHT)),
+            )
+            trips = b.readfirstlane(b.select(past_diag, b.const_i32(0), b.const_i32(1)))
+            ep = b.scf_for_iter(
+                b.const_i32(0),
+                trips,
+                b.const_i32(1),
+                [(f"we{dt}", o_acc[dt]) for dt in range(D_TILES)],
+                iv_name="wse",
+            )
+            with ep as (_iv, ec):
+                b.scf_yield(*do_pv(list(ec), p_prev, last_vbuf))
+            o_acc = list(ep.results)
+        else:
+            o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
         # Epilogue: recompute (bt, hq) from the live loop IV so they need not cross
         # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Same
