@@ -37,7 +37,7 @@ GFX1250_FAMILY = "gfx1250_lowering"
 # Families whose every config uses an llvm23-gated op (their kernels move data
 # with TDM). Under another flavor both engines reject all of them, which the
 # gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
-LLVM23_ONLY_FAMILIES = ("conv_direct_dgrad_wmma",)
+LLVM23_ONLY_FAMILIES = ("conv_direct_dgrad_wmma", "conv_direct_fwd_wmma")
 
 
 def _cxx() -> str | None:

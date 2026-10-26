@@ -107,6 +107,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, stride-1 dgrad, dense and grouped (`cpg`, `kpg` multiples of 8), `PAD` in 0..K-1. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward, dense and grouped (`cpg`, `kpg` multiples of 8, or small groups packed block-diagonally), square filters, stride 1 or 2, per-axis dilation. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 
 ---
 
