@@ -1182,8 +1182,7 @@ static void op_tile_buffer_load(rocke_lower_t* L, const rocke_op_t* op)
         llvm_elem = "i32";
     else
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "buffer_load: unsupported elem_type");
-        return;
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "tile.buffer_load: unsupported elem_type '%s'", elem);
     }
     narrow = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
     rocke_ll_need(L, narrow ? "raw.ptr.buffer.load.i16" : "raw.ptr.buffer.load.i32");

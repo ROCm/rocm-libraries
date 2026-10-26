@@ -6183,6 +6183,8 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
         _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        if elem_type not in _LLVM_ELEM:
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         llvm_elem = _LLVM_ELEM[elem_type]
         if elem_type in ("f16", "bf16"):
             self._need("raw.ptr.buffer.load.i16")
