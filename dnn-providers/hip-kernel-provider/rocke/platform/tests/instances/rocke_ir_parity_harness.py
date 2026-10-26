@@ -548,6 +548,31 @@ def build_attention_dense(arch, *, geometry=None, **over):
     return _build
 
 
+def build_attention_dense_gfx942(**over):
+    """Dense flash-attn prefill spec (library ``kernels/gfx942/attention_dense``)."""
+
+    def _build():
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec,
+            build_attention_dense as _build_dense,
+        )
+
+        spec = dict(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        spec.update(over)
+        return _build_dense(Gfx942AttentionDenseSpec(**spec), arch="gfx942")
+
+    return _build
+
+
 def build_kda_chunkwise_gfx950(kind, arch, **over):
     """gfx950 chunkwise KDA kernel from a representative spec.
 
@@ -3406,6 +3431,7 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
@@ -3446,6 +3472,14 @@ def cases():
         (
             "persist_hkvmaj_sq512",
             {"persistent": True, "num_persistent": 256, "persist_decode": "hkv_major"},
+        ),
+        (
+            "persist_hqswz_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "persist_decode": "hq_minor_swz",
+            },
         ),
         (
             "persist_intl_sq512",
@@ -3627,6 +3661,23 @@ def cases():
             f"attention_dense/gfx950/{_variant}",
             "gfx950",
             build_attention_dense("gfx950", **_over),
+        )
+
+    # Dense flash-attn prefill on gfx942: the block orders of both grids (the
+    # library's gfx942 dense golden pins more variants, but outside this gate).
+    _persist942 = {"persistent": True, "num_persistent": 304}
+    for _variant, _over in (
+        ("causal_sq512", {}),
+        ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
+        ("persist_causal_sq512", _persist942),
+        ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
+        ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+    ):
+        add(
+            "attention_dense",
+            f"attention_dense/gfx942/{_variant}",
+            "gfx942",
+            build_attention_dense_gfx942(**_over),
         )
 
     # Attention band on the unified kernels: top-left alignment, full attention

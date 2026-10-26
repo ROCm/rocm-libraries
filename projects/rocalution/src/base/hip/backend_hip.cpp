@@ -283,6 +283,8 @@ namespace rocalution
 
         _get_backend_descriptor()->HIP_dev = -1;
 
+        _get_backend_descriptor()->accelerator = false;
+
         log_debug(0, "rocalution_stop_hip()", "* end");
     }
 
