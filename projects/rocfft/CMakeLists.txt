@@ -22,9 +22,6 @@
 
 cmake_minimum_required( VERSION 3.25 )
 
-# We use C++20 features, this will add compile option: -std=c++20
-set( CMAKE_CXX_STANDARD 20 )
-
 # This should appear before the project command, because it does not
 # use FORCE
 if( WIN32 )
@@ -47,9 +44,12 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
+project( rocfft LANGUAGES CXX C )
+set( CMAKE_CXX_STANDARD 20 )
+
 set( ROCFFT_BUILD_SCOPE ON )
 
-project( rocfft LANGUAGES CXX C )
+include( cmake/buildopts.cmake )
 
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
@@ -207,8 +207,6 @@ if( ROCFFT_BUILD_INTERNAL_TESTS )
 endif()
 
 add_subdirectory( library )
-
-include( cmake/buildopts.cmake )
 
 # Build clients of the library
 if( BUILD_CLIENTS )
