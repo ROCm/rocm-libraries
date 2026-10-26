@@ -3,6 +3,14 @@
 """
 TheRock Nightly Test Scope
 --------------------------
+TEMPORARY: this script is a workaround and is expected to be deleted.
+
+TheRock does not yet scope a schedule run to the components an external
+repository actually owns, so rocm-libraries has to compute that scope itself
+and hand it over as `changed_projects`. Once TheRock narrows schedule runs to
+the calling repository's own components natively, delete this script, its test,
+and the `configure` job in therock-multi-arch-ci-nightly.yml that consumes it.
+
 Computes the set of projects the multi-arch nightly CI workflow should test.
 
 A scheduled run has no diff to narrow testing against, so TheRock would
