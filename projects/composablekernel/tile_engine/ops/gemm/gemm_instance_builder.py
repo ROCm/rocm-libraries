@@ -63,6 +63,11 @@ def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
         ) from None
 
 
+# Non-default output (C) types per input datatype. fp8/bf8 kernels write fp16 by
+# default; bf16 C is opt-in and adds a _c<dtype> suffix to the kernel name.
+C_DATATYPE_OVERRIDES = {"fp8": ("bf16",), "bf8": ("bf16",)}
+
+
 class GemmKernelBuilder:
     # Ops that generate (arch, dtype) pairs the shared warp-tile table does not
     # cover (gfx1250, fp32, gfx1201 non-fp16) set this to True so their warp
@@ -81,6 +86,7 @@ class GemmKernelBuilder:
         seed=None,
         tier=None,
         manifest_path=None,
+        c_datatype=None,
     ):
         self.kernel_name_prefix = kernel_name_prefix
         self.working_path = Path(working_path)
@@ -92,6 +98,20 @@ class GemmKernelBuilder:
         self.seed = seed
         self.tier = tier
         self.manifest_path = manifest_path
+        # Output (C) type override. None, or the default C type of this datatype,
+        # keeps the default kernels and names unchanged.
+        default_c = self._default_c_datatype()
+        if c_datatype is not None and c_datatype != default_c:
+            if datatype not in C_DATATYPE_OVERRIDES or (
+                c_datatype not in C_DATATYPE_OVERRIDES[datatype]
+            ):
+                raise ValueError(
+                    f"c_datatype '{c_datatype}' is not supported for datatype "
+                    f"'{datatype}'; supported overrides: {C_DATATYPE_OVERRIDES}"
+                )
+            self.c_datatype = c_datatype
+        else:
+            self.c_datatype = None
 
         # Create working directory if it doesn't exist
         self.working_path.mkdir(parents=True, exist_ok=True)
@@ -101,6 +121,19 @@ class GemmKernelBuilder:
             with open(config_json, "r") as f:
                 self.config = json.load(f)
             self.group_size_k = self.config.get("group_size_k", 128)
+
+    def _default_c_datatype(self):
+        if self.datatype in ["fp4", "fp8", "bf8"]:
+            return "fp16"
+        return self.datatype
+
+    def _c_datatype(self):
+        """Output (C) datatype: the override if one was given, else the default."""
+        return self.c_datatype or self._default_c_datatype()
+
+    def _c_name_suffix(self):
+        """Kernel-name suffix for a non-default C type; empty for the default."""
+        return f"_c{self.c_datatype}" if self.c_datatype else ""
 
     def _apply_sampling(self, kernel_list):
         """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
@@ -217,7 +250,7 @@ class GemmKernelBuilder:
                 tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
                 tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
 
-                kernel_name += f"_{tile_str}"
+                kernel_name += f"_{tile_str}" + self._c_name_suffix()
 
                 kernel_list.append(
                     {
@@ -359,7 +392,7 @@ class GemmKernelBuilder:
         if tile_config is not None:
             kernel_name += f"_{self._format_tile_config_string(tile_config)}"
 
-        return kernel_name
+        return kernel_name + self._c_name_suffix()
 
     def _list_kernels(self):
         """Write kernel list to file for CMake to read (with comprehensive validation)"""
@@ -540,13 +573,9 @@ class GemmKernelBuilder:
         # Determine data types for validation
         a_datatype = self.datatype
         b_datatype = self.datatype
-        c_datatype = self.datatype
+        c_datatype = self._c_datatype()
 
         layout = self.layout
-
-        # Special handling for certain data types
-        if self.datatype in ["fp4", "fp8", "bf8"]:
-            c_datatype = "fp16"
 
         # Use the comprehensive validation function
         return is_tile_config_valid(
@@ -806,9 +835,7 @@ class GemmKernelBuilder:
         acc_type = "float"
 
         # Determine output type
-        c_type = self.datatype
-        if self.datatype in ["fp4", "fp8", "bf8"]:
-            c_type = "fp16"
+        c_type = self._c_datatype()
 
         # Assign layouts based on self.layout
         if self.kernel_name_prefix == "gemm_multi_d":
