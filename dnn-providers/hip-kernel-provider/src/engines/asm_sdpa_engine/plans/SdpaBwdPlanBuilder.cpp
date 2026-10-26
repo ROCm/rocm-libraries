@@ -8,6 +8,7 @@
 #include "plans/SdpaBwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -746,6 +747,39 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(headDimQk != 64 && headDimQk != 128 && headDimQk != 192,
                                "Head dimension must be one of {64, 128, 192} (Actual value: "
                                    + std::to_string(headDimQk) + ")");
+
+    // Each kernel takes B, H, S_q, S_kv and D once, from Q, K and V, and addresses
+    // every tensor with them, so O, dO and dQ must have Q's dims and V, dK and dV
+    // must have K's. The frontend lets V have fewer heads than K (it checks only
+    // that both divide H_q); DQDKDV then reads V and writes dV past their last
+    // head. On gfx942, H_q = H_k = 4 with H_v = 2 or 1 gave wrong dQ, dK and dV.
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->Get(0) != batchSize,
+                               "k tensor batch must equal q batch (Actual dims: k "
+                                   + toString(kTensor->dims()) + ", q " + toString(qTensor->dims())
+                                   + ")");
+    struct SameDims
+    {
+        const char* name;
+        const TensorAttributes* tensor;
+        const char* refName;
+        const TensorAttributes* ref;
+    };
+    const std::array<SameDims, 6> sameDims{{{"o", oTensor, "q", qTensor},
+                                            {"do", doTensor, "q", qTensor},
+                                            {"dq", dqTensor, "q", qTensor},
+                                            {"v", vTensor, "k", kTensor},
+                                            {"dk", dkTensor, "k", kTensor},
+                                            {"dv", dvTensor, "k", kTensor}}};
+    for(const auto& match : sameDims)
+    {
+        const auto* dims = match.tensor->dims();
+        const auto* refDims = match.ref->dims();
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !std::equal(dims->begin(), dims->end(), refDims->begin(), refDims->end()),
+            std::string(match.name) + " tensor dims must equal " + match.refName
+                + " dims (Actual: " + match.name + " " + toString(dims) + ", " + match.refName + " "
+                + toString(refDims) + ")");
+    }
 
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.

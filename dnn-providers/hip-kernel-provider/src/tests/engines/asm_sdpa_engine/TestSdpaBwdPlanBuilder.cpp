@@ -1212,6 +1212,63 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPackedStats)
     }
 }
 
+// Every kernel takes B, H, S and D from Q, K and V, so a tensor whose dims differ
+// is addressed with the wrong shape. On gfx942, Q and K with 4 heads and V with
+// 2 or 1 gave wrong dQ, dK and dV, and DQDKDV wrote dV past its last head.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMismatchedTensorDims)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    const std::vector<int64_t> qkDims = {1, 4, 128, 128};
+    for(const int64_t headsV : {2, 1})
+    {
+        const std::vector<int64_t> vDims = {1, headsV, 128, 128};
+        declineTests.emplace_back(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                      qkDims,
+                                      generateStrides(qkDims),
+                                      qkDims,
+                                      generateStrides(qkDims),
+                                      vDims,
+                                      generateStrides(vDims),
+                                      qkDims,
+                                      generateStrides(qkDims),
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16),
+                                  "V and dV with " + std::to_string(headsV)
+                                      + " heads, Q and K with 4");
+    }
+
+    // Only one tensor differs in each of the rest, so only its check can decline.
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    const std::vector<int64_t> oneHead = {2, 1, 256, 128};
+    for(const char* name : {"o", "do", "dq", "v", "dk", "dv"})
+    {
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(dims), {{name, generateStrides(oneHead), oneHead}}),
+            std::string(name) + " with 1 head, Q and K with 2");
+    }
+    const std::vector<int64_t> oneBatch = {1, 2, 256, 128};
+    const auto oneBatchStrides = generateStrides(oneBatch);
+    declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims),
+                                          {{"k", oneBatchStrides, oneBatch},
+                                           {"v", oneBatchStrides, oneBatch},
+                                           {"dk", oneBatchStrides, oneBatch},
+                                           {"dv", oneBatchStrides, oneBatch}}),
+                              "K, V, dK and dV with batch 1, Q with 2");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
 // =============================================================================
 // Canonical mask-attribute policy (resolveDiagonalBand + getMaskType)
 // =============================================================================
