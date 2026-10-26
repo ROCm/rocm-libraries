@@ -266,6 +266,32 @@ TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
     EXPECT_TRUE(std::isinf(convertScalar<float>(std::numeric_limits<double>::infinity(), wrap)));
 }
 
+template <typename T>
+class CharacterConversion : public ::testing::Test {};
+using Characters = ::testing::Types<char, wchar_t, char8_t, char16_t, char32_t>;
+TYPED_TEST_SUITE(CharacterConversion, Characters);
+
+TYPED_TEST(CharacterConversion, ConvertsNumericValuesUnderEveryPolicy) {
+    using T = TypeParam;
+    for (const auto options : {identity, saturate, wrap}) {
+        EXPECT_EQ(convertScalar<int64_t>(T{42}, options), 42);
+        EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::max(), options),
+                  static_cast<uint64_t>(std::numeric_limits<T>::max()));
+    }
+    EXPECT_EQ(convertScalar<int64_t>(std::numeric_limits<T>::min(), saturate),
+              static_cast<int64_t>(std::numeric_limits<T>::min()));
+    EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::min(), saturate), 0);
+}
+
+TEST(ScalarConversion, NarrowsCharacterAndCharacterBackedEnumValues) {
+    enum class Sample : char16_t { High = 256 };
+    EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, saturate), 255);
+    EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, wrap), 0);
+    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, saturate), 255);
+    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, wrap), 0);
+    EXPECT_EQ(convertScalar<int64_t>(Sample::High, identity), 256);
+}
+
 TEST(ScalarConversion, RequiresExplicitPolicies) {
     static_assert(!std::is_default_constructible_v<ScalarConversionOptions>);
     static_assert(!std::is_constructible_v<ScalarConversionOptions, IntegerRounding>);
