@@ -659,6 +659,22 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN2ServesPaddedVarlenWithAMask)
     EXPECT_TRUE(graphMatch(padded).has_value());
 }
 
+TEST(TestFlydslSdpaBwdMergedGraph, BI8DeclinesABiasOutsideTheStagingContract)
+{
+    // A row-broadcast bias has no padding behind its single row: staged only at Sk % 8 == 0.
+    const auto rowBroadcast = [](int64_t seqKv) {
+        Shape shape;
+        shape.seqKv = seqKv;
+        return specOf(shape).withEdit([=](SdpaBwdGraph& g) {
+            auto& bias = addBias(g, {2, 8, 1, seqKv});
+            bias.strides = {int64_t{8} * 24, 24, 24, 1};
+        });
+    };
+    ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(rowBroadcast(20))));
+    EXPECT_FALSE(graphMatch(rowBroadcast(20)).has_value());
+    EXPECT_TRUE(graphMatch(rowBroadcast(24)).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // kernel_match
 // ---------------------------------------------------------------------------
@@ -793,6 +809,10 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAGqaPackedObjectOnlyAGroupedQueryGr
     EXPECT_FALSE(serves(baseSpec(), packed));
     // A grouped graph is served unpacked too.
     EXPECT_TRUE(serves(specOf(grouped), plainRow()));
+    // Packing is dense only: padded varlen is served unpacked.
+    const auto paddedVarlen = specOf(grouped).withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
+    EXPECT_FALSE(serves(paddedVarlen, packed));
+    EXPECT_TRUE(serves(paddedVarlen, plainRow()));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
@@ -942,31 +962,26 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAMultiQueryGraphWithAPackedObject)
     EXPECT_TRUE(serves(specOf(multiQuery), packed));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseRowStrideIsNotAMultipleOfEight)
+TEST(TestFlydslSdpaBwdMergedGraph, BI8DeclinesABiasWhoseRowStrideIsNotAMultipleOfEight)
 {
+    // Every merged bias object stages the bias, whatever else it is built for.
     Shape ragged;
     ragged.seqKv = 12;
-    auto noStore = biasRow();
-    noStore.storeDb = 0;
-    // Every bias object stages the bias, whatever else it is built for.
-    EXPECT_FALSE(serves(withBias(specOf(ragged), false), biasRow()));
-    EXPECT_FALSE(serves(withBias(specOf(ragged), false), noStore));
-    EXPECT_TRUE(serves(withBias(baseSpec(), false), biasRow()));
-    EXPECT_TRUE(serves(withBias(baseSpec(), false), noStore));
+    EXPECT_FALSE(graphMatch(withBias(specOf(ragged), false)).has_value());
+    EXPECT_TRUE(graphMatch(withBias(baseSpec(), false)).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseHeadStrideIsNotAMultipleOfEight)
+TEST(TestFlydslSdpaBwdMergedGraph, BI8DeclinesABiasWhoseHeadStrideIsNotAMultipleOfEight)
 {
     const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) {
         auto& bias = addBias(g);
         // A row stride of 16 with head planes 4 elements past their rows.
         bias.strides = {g.heads * (g.seqQ * 16 + 4), g.seqQ * 16 + 4, 16, 1};
     });
-    EXPECT_FALSE(serves(padded, biasRow()));
-    EXPECT_TRUE(serves(withBias(baseSpec(), false), biasRow()));
+    EXPECT_FALSE(graphMatch(padded).has_value());
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseRowStrideIsBelowThePaddedKeyLength)
+TEST(TestFlydslSdpaBwdMergedGraph, BI8DeclinesABiasWhoseRowStrideIsBelowThePaddedKeyLength)
 {
     // Row strides are multiples of 8, but the bias chunk contract needs a row to span
     // ceil8(Skv) elements.
@@ -976,8 +991,8 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8DeclinesABiasWhoseRowStrideIsBelowThePadd
             bias.strides = {g.heads * g.seqQ * rowStride, g.seqQ * rowStride, rowStride, 1};
         });
     };
-    EXPECT_FALSE(serves(withRowStride(8), biasRow()));
-    EXPECT_TRUE(serves(withRowStride(16), biasRow()));
+    EXPECT_FALSE(graphMatch(withRowStride(8)).has_value());
+    EXPECT_TRUE(graphMatch(withRowStride(16)).has_value());
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, BI8ServesABroadcastBiasWhoseBroadcastAxesHaveNoStride)
@@ -997,12 +1012,12 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8ServesARowBroadcastBiasAndLaunchesItWithA
                   Golden().set("B", ptrOf(sdpa_bwd_uid::BIAS)).strides("b", 128, 16, 0));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, BI8AppliesToABiasObjectNotAPlainOne)
+TEST(TestFlydslSdpaBwdMergedGraph, BI8AppliesToABiasGraphNotAPlainOne)
 {
-    // The same 12-wide bias rows: only a bias object stages them.
+    // The same 12-wide rows: only a bias graph needs the staging contract.
     Shape ragged;
     ragged.seqKv = 12;
-    EXPECT_FALSE(serves(withBias(specOf(ragged), false), biasRow()));
+    EXPECT_FALSE(graphMatch(withBias(specOf(ragged), false)).has_value());
     EXPECT_TRUE(serves(specOf(ragged), plainRow()));
 }
 

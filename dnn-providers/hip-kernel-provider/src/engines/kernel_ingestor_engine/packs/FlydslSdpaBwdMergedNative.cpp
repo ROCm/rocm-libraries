@@ -117,7 +117,6 @@ constexpr std::string_view HEAD_DIM_V_TOKEN = "flydsl_sdpa_bwd_merged.head_dim_v
 constexpr std::string_view DROPOUT_TOKEN = "flydsl_sdpa_bwd_merged.dropout";
 constexpr std::string_view DBIAS_TOKEN = "flydsl_sdpa_bwd_merged.dbias";
 constexpr std::string_view GQA_PACK_TOKEN = "flydsl_sdpa_bwd_merged.gqa_pack";
-constexpr std::string_view BIAS_STAGING_TOKEN = "flydsl_sdpa_bwd_merged.bias_staging";
 constexpr std::string_view BATCH_TOKEN = "flydsl_sdpa_bwd_merged.batch";
 constexpr std::string_view HEADS_TOKEN = "flydsl_sdpa_bwd_merged.heads";
 constexpr std::string_view KV_HEADS_TOKEN = "flydsl_sdpa_bwd_merged.kv_heads";
@@ -330,6 +329,15 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                          "192, 224 or 256)");
         return std::nullopt;
     }
+    // BI-8: every merged bias object stages the bias through LDS.
+    if(problem.biasUid != bwd::NO_UID && !native::stagesBias(problem))
+    {
+        logDecline("bias",
+                   "the bias layout is outside the LDS staging contract every merged bias object "
+                   "needs (16-byte base, strides multiples of 16 bytes, last row padded to a "
+                   "whole 16-byte chunk)");
+        return std::nullopt;
+    }
 
     const auto dtype = flydsl_sdpa::kernelDataTypeName(problem.dtype);
     if(!dtype.has_value())
@@ -359,7 +367,6 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     // graph is served by the non-pack objects, which rebase per head.
     bound[std::string(GQA_PACK_TOKEN)]
         = int64_t{native::packedSpansFit(problem, PACK_MAX_BLOCK_Q) ? 1 : 0};
-    bound[std::string(BIAS_STAGING_TOKEN)] = int64_t{native::stagesBias(problem) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
@@ -379,7 +386,6 @@ struct GraphFacts
     bool dropout = false;
     bool dbias = false;
     bool gqaPack = false;
-    bool biasStaging = false;
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
@@ -401,15 +407,14 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto dropout = tryGetBoundInt(bound, DROPOUT_TOKEN);
     const auto dbias = tryGetBoundInt(bound, DBIAS_TOKEN);
     const auto gqaPack = tryGetBoundInt(bound, GQA_PACK_TOKEN);
-    const auto biasStaging = tryGetBoundInt(bound, BIAS_STAGING_TOKEN);
     const auto batch = tryGetBoundInt(bound, BATCH_TOKEN);
     const auto numHeads = tryGetBoundInt(bound, HEADS_TOKEN);
     const auto numKvHeads = tryGetBoundInt(bound, KV_HEADS_TOKEN);
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
-    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !biasStaging
-       || !batch || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
+    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !batch
+       || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
     {
         return std::nullopt;
     }
@@ -420,7 +425,6 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *dropout != 0,
                       *dbias != 0,
                       *gqaPack != 0,
-                      *biasStaging != 0,
                       *batch,
                       *numHeads,
                       *numKvHeads,
@@ -431,8 +435,8 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
 
 /**
  * @brief Kernel-scoped applicability: the object's class, dtype, dropout, head-dim tile,
- *        bias staging, dB store and GQA packing against the graph, and a launch grid that
- *        fits int32.
+ *        dB store and GQA packing against the graph, and a launch grid that fits int32 (the
+ *        bias staging contract is graph_match's, BI-8).
  */
 bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
                                       const BoundTokens& bound,
@@ -454,11 +458,6 @@ bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
         return false;
     }
     if(!servesHeadDims(*row, facts->headDimQk, facts->headDimV))
-    {
-        return false;
-    }
-    // Every bias object reads the bias through LDS.
-    if(row->hasBias != 0 && !facts->biasStaging)
     {
         return false;
     }
