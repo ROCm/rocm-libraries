@@ -219,6 +219,22 @@ if(BUILD_TESTING)
                  rocke_buffer_rsrc_hip)
   endif()
 
+  # A buffer descriptor refused as a loop-carried value by the C++ builder and
+  # verifier.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")
+    add_executable(rocke_loop_carried_descriptor core/test_loop_carried_descriptor.cpp)
+    target_link_libraries(rocke_loop_carried_descriptor PRIVATE rocke_core)
+    add_test(NAME rocke_loop_carried_descriptor COMMAND rocke_loop_carried_descriptor)
+    set_tests_properties(rocke_loop_carried_descriptor PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_loop_carried_descriptor)
+    set_target_properties(rocke_loop_carried_descriptor
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_loop_carried_descriptor
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_loop_carried_descriptor)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
