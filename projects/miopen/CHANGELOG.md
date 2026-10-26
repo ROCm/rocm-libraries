@@ -17,6 +17,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
   one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
 
+### Removed
+* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
+* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
@@ -100,8 +104,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
 * [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
 * [Conv] Removed the gfx803 find-database files.
-* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
-* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
 
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
