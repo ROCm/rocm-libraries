@@ -16,6 +16,7 @@ Run:
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import importlib.util
 import unittest
 
@@ -90,6 +91,8 @@ class TestStemSpecs(unittest.TestCase):
             (_problem(KH=3, S=2, PAD=1), dict(out_h=15), "multiples of S"),
             (p, dict(tiles_c=3), "block_c"),
             (p, dict(out_h=32, out_w=32), "dY window"),
+            (_problem(KH=3, S=0, PAD=1), {}, "stride 0 must be >= 1"),
+            (_problem(KH=3, S=-1, PAD=1), {}, "stride -1 must be >= 1"),
         ):
             why = dgrad_smallc_reason(DgradSmallcWmmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, knobs)
@@ -149,6 +152,7 @@ _PATCH_REJECTS = (
     (dict(dtype="fp32"), dict(waves_c=3, tiles_c=1, r_blk=4)),
     (dict(N=512, H=1024, W=1024), dict(waves_c=3, tiles_c=1, r_blk=4)),
     (dict(KH=16, S=16), dict(waves_c=8, waves_p=8, tiles_c=6, tiles_p=8, r_blk=16)),
+    (dict(S=0), dict(waves_c=3, tiles_c=1, r_blk=4)),
 )
 _SMALLC_REJECTS = (
     (dict(C=8, KH=3, S=1, PAD=1), {}),
@@ -161,6 +165,10 @@ _SMALLC_REJECTS = (
     (dict(KH=3, S=1, PAD=1), dict(sched="")),
     (dict(KH=3, S=1, PAD=1), dict(waves_c=0)),
     (dict(KH=7, S=2, PAD=3), dict(tiles_c=5, waves_c=2, ck=256, stages=4)),
+    # A non-positive stride is refused before any stride division (the C++
+    # validator used to divide by it).
+    (dict(KH=3, S=0, PAD=1), {}),
+    (dict(KH=3, S=-1, PAD=1), {}),
 )
 
 
@@ -249,6 +257,10 @@ class TestStemEngines(unittest.TestCase):
                 ),
             ),
         )
+        reason_of = {
+            "conv_dgrad_patch_wmma": dgrad_patch_reason,
+            "conv_dgrad_smallc_wmma": dgrad_smallc_reason,
+        }
         for fam, to_dict, spec in good:
             describe = getattr(eng, f"{fam}_describe")
             lower = getattr(eng, f"{fam}_lower_llvm")
@@ -280,6 +292,25 @@ class TestStemEngines(unittest.TestCase):
                     ValueError
                 ):
                     lower(sd, arch="gfx1250")
+            # An explicit None dtype is refused, as Python's validator does,
+            # rather than read as the fp16 default; an omitted one is fp16.
+            self.assertIn("dtype None", reason_of[fam](_with_dtype(spec, None)))
+            sd = to_dict(spec)
+            sd["problem"]["dtype"] = None
+            with self.subTest(fam=fam, dtype=None), self.assertRaises(ValueError):
+                describe(sd, "gfx1250")
+            with self.subTest(fam=fam, dtype=None), self.assertRaises(ValueError):
+                lower(sd, arch="gfx1250")
+            del sd["problem"]["dtype"]
+            ok, _, name, _, _ = describe(sd, "gfx1250")
+            self.assertTrue(ok, fam)
+            self.assertEqual(name, _with_dtype(spec, "fp16").kernel_name(), fam)
+
+
+def _with_dtype(spec, dtype):
+    return dataclasses.replace(
+        spec, problem=dataclasses.replace(spec.problem, dtype=dtype)
+    )
 
 
 def _gpu_skip() -> str:

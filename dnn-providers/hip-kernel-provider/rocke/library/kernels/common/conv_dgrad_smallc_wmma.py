@@ -141,6 +141,8 @@ class DgradSmallcWmmaSpec:
         return self.ck * self.w_pitch
 
     def lds_bytes(self) -> int:
+        if self.S < 1:  # no tile geometry; the validator rejects the stride
+            return 0
         ring = 2 * self.stages * (self.x_elems + self.wei_elems)
         z = 4 * self.block_p * self.z_pitch
         out = 2 * self.out_h * self.out_w * self.problem.cpg
@@ -203,6 +205,8 @@ def dgrad_smallc_reason(spec: DgradSmallcWmmaSpec, arch: str = "gfx1250") -> str
         return f"missing wmma_f32_16x16x32_{ab} on {arch}"
     if p.groups != 1 or p.is_dilated:
         return "ungrouped, undilated convolutions only"
+    if p.stride < 1:
+        return f"stride {p.stride} must be >= 1"
     if p.cpg > SMALLC_MAX_C:
         return f"C {p.cpg} > {SMALLC_MAX_C}"
     if p.stride == p.KH and p.PAD == 0:

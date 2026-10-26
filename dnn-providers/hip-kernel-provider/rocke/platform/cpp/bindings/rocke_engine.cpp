@@ -1928,6 +1928,11 @@ rocke_dgrad_patch_wmma_spec_t dpw_build_spec(const py::dict& d, std::deque<std::
         }
         std::string v;
         fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradPatchWmmaSpec.problem.dtype must be a string, not None");
         if(dict_str(pd, "dtype", v))
             s.problem.dtype = keep(v);
     }
@@ -2029,6 +2034,11 @@ rocke_dgrad_smallc_wmma_spec_t dsw_build_spec(const py::dict& d, std::deque<std:
         }
         std::string v;
         fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradSmallcWmmaSpec.problem.dtype must be a string, not None");
         if(dict_str(pd, "dtype", v))
             s.problem.dtype = keep(v);
     }

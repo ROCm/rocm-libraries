@@ -159,6 +159,8 @@ int rocke_dgrad_smallc_wmma_threads_per_block(const rocke_dgrad_smallc_wmma_spec
 
 long rocke_dgrad_smallc_wmma_lds_bytes(const rocke_dgrad_smallc_wmma_spec_t* spec)
 {
+    if(dsw_S(spec) < 1) /* no tile geometry; the validator rejects the stride */
+        return 0;
     long ring = 2L * spec->stages * ((long)dsw_x_elems(spec) + dsw_wei_elems(spec));
     long z = 4L * rocke_dgrad_smallc_wmma_block_p(spec) * dsw_z_pitch(spec);
     long out = 2L * spec->out_h * spec->out_w * spec->problem.cpg;
@@ -267,6 +269,12 @@ bool rocke_dgrad_smallc_wmma_is_valid_spec(const rocke_dgrad_smallc_wmma_spec_t*
     if(p->groups != 1 || p->dil_h != 1 || p->dil_w != 1)
     {
         set_reason(reason, reason_cap, "ungrouped, undilated convolutions only");
+        return false;
+    }
+    if(p->stride < 1)
+    {
+        snprintf(msg, sizeof msg, "stride %d must be >= 1", p->stride);
+        set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->cpg > DSW_MAX_C)
