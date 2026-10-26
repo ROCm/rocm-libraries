@@ -212,6 +212,7 @@ class TestDataTypeLabels:
         "name, labels",
         [
             ("convolution.DTYPES", convolution.DTYPES),
+            ("convolution.TENSOR_DTYPES", convolution.TENSOR_DTYPES),
             ("pointwise._PORT_DTYPES", pointwise._PORT_DTYPES),
         ],
     )
@@ -1878,6 +1879,12 @@ class TestConvolutionOpBinding:
         for kwargs in (
             {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
             {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
+            {"spatial": (4, 4, 4, 4), "dtype": "double"},
+            {"dtype": "int8", "layouts": {"filter": "nhwc"}},
+            {"dtype": "fp8_e4m3"},
+            {"dtype": "fp8_e5m2"},
+            {"dtype": "fp8_e4m3_fnuz"},
+            {"dtype": "fp8_e5m2_fnuz"},
             {"groups": 4, "dtypes": {"filter": "half"}},
             {"stride": [2, 2], "dilation": [2, 2]},
             {"pre_padding": [1, 1], "post_padding": [1, 1]},
@@ -1903,7 +1910,12 @@ class TestConvolutionFwdExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
+        [
+            ((8,), "spatial:1d"),
+            ((8, 8), "spatial:2d"),
+            ((4, 8, 8), "spatial:3d"),
+            ((4, 4, 8, 8), "spatial:4d"),
+        ],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
     def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
@@ -1925,16 +1937,30 @@ class TestConvolutionFwdExtract:
         features = self._extract(channels=1, filters=1, spatial=(1, 1), kernel=1)
         assert not {f for f in features if f.startswith("layout:")}
 
-    def test_disagreeing_layouts_raise(self) -> None:
-        with pytest.raises(FeatureError, match="layouts disagree"):
-            self._extract(layouts={"filter": "nhwc"})
+    def test_disagreeing_layouts_are_mixed(self) -> None:
+        features = self._extract(layouts={"filter": "nhwc"})
+        assert features == self.PLAIN - {"layout:nchw"} | {"layout:mixed"}
 
     @pytest.mark.parametrize(
         "dtype, expected",
-        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+        [
+            ("float", "dtype:fp32"),
+            ("half", "dtype:fp16"),
+            ("bfloat16", "dtype:bf16"),
+            ("double", "dtype:fp64"),
+            ("int8", "dtype:int8"),
+            ("fp8_e4m3", "dtype:fp8e4m3"),
+            ("fp8_e5m2", "dtype:fp8e5m2"),
+            ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
+            ("fp8_e5m2_fnuz", "dtype:fp8e5m2_fnuz"),
+        ],
     )
     def test_dtype(self, dtype: str, expected: str) -> None:
         assert self._extract(dtype=dtype) == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    def test_int8_accumulating_into_int32_is_mixed(self) -> None:
+        features = self._extract(dtype="int8", dtypes={"response": "int32"})
+        assert {"dtype:int8", "precision:mixed"} <= features
 
     def test_dtype_is_the_data_ports(self) -> None:
         features = self._extract(dtype="float", dtypes={"activation": "half"})
@@ -1950,11 +1976,13 @@ class TestConvolutionFwdExtract:
     @pytest.mark.parametrize(
         "dtypes, virtual, match",
         [
-            ({"activation": "int8"}, (), "x_tensor_uid dtype"),
-            ({"response": "int32"}, (), r"\['int32'\]"),
+            ({"activation": "uint8"}, (), "x_tensor_uid dtype"),
+            # int32 is a response dtype, not a data dtype.
+            ({"activation": "int32"}, (), "x_tensor_uid dtype"),
+            ({"response": "int64"}, (), r"\['int64'\]"),
             # A virtual tensor does not count toward precision, but its dtype
             # is still checked.
-            ({"response": "int32"}, ("response",), r"\['int32'\]"),
+            ({"response": "int64"}, ("response",), r"\['int64'\]"),
         ],
     )
     def test_uncatalogued_dtype_raises(self, dtypes, virtual, match: str) -> None:
@@ -2094,7 +2122,7 @@ class TestConvolutionFwdExtract:
         with pytest.raises(FeatureError, match="in spatial dim 0"):
             convolution_fwd.extract(node, tensors)
 
-    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2), 4)])
+    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2, 2), 5)])
     def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
         with pytest.raises(FeatureError, match=f"{n} spatial dims"):
             self._extract(spatial=spatial)
