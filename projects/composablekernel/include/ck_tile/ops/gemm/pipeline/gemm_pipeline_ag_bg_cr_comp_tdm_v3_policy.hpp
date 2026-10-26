@@ -52,6 +52,36 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
         return number<min(sub_tile_num, max_sub_tile_num)>{};
     }
 
+    /// Estimated per-wave VGPRs of the v3 main loop: the accumulators plus one A and one B
+    /// register tile of a single K sub-tile. v3 reads each K sub-tile (k-atom) from LDS right
+    /// before its WMMAs and keeps no second register tile, so unlike GetEstimatedVgprCount there
+    /// is no double-buffer factor. Addresses and descriptors are not counted.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr index_t GetEstimatedFootprintVgpr()
+    {
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
+        using CDataType = remove_cvref_t<typename Problem::CDataType>;
+
+        constexpr index_t MPerBlock    = Problem::BlockGemmShape::kM;
+        constexpr index_t NPerBlock    = Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock    = Problem::BlockGemmShape::kK;
+        constexpr index_t MWarps       = Problem::BlockGemmShape::BlockWarps::at(DefaultBase::I0);
+        constexpr index_t NWarps       = Problem::BlockGemmShape::BlockWarps::at(DefaultBase::I1);
+        constexpr index_t BytesPerVGPR = 4;
+        constexpr index_t KPerSubTile  = KPerBlock / GetPipelineSubTileNum<Problem>().value;
+
+        constexpr index_t acc_vgpr =
+            sizeof(CDataType) * MPerBlock * NPerBlock / Problem::kBlockSize / BytesPerVGPR;
+        constexpr index_t a_vgpr = sizeof(ADataType) * MPerBlock * KPerSubTile /
+                                   numeric_traits<ADataType>::PackedSize / MWarps /
+                                   get_warp_size() / BytesPerVGPR;
+        constexpr index_t b_vgpr = sizeof(BDataType) * NPerBlock * KPerSubTile /
+                                   numeric_traits<BDataType>::PackedSize / NWarps /
+                                   get_warp_size() / BytesPerVGPR;
+        return acc_vgpr + a_vgpr + b_vgpr;
+    }
+
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto GetBlockGemm()
     {
