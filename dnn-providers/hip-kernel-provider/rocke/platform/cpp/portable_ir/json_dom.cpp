@@ -355,7 +355,10 @@ static jd_val_t* jdp_value(jdp_t* jp)
         return jdp_object(jp);
     if(c == '[')
         return jdp_array(jp);
-    if(c == '-' || (c >= '0' && c <= '9'))
+    /* Python's json.dumps spells IEEE non-finite doubles as NaN and
+     * Infinity. Float attrs are doubles and must preserve those values, so
+     * accept the producer's spellings through strtod as well as JSON numbers. */
+    if(c == '-' || c == 'N' || c == 'I' || (c >= '0' && c <= '9'))
         return jdp_number(jp);
     if(jdp_lit(jp, "true"))
     {

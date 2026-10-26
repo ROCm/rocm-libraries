@@ -1163,22 +1163,29 @@ def build_unified_attention_3d_tiled(
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-        # other 3 lanes.
+        # other 3 lanes. m_new is the running max (m_val included), so
+        # alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+        # tile-local max would overflow alpha once a tile scores ~128 log2 units
+        # below an earlier one. Until the row has an unmasked key (or, in
+        # segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+        # instead, so P and alpha are 0, not NaN. A row with neither in the
+        # segment stores m = -inf, which the reduce kernel weights by 0.
         local_max = neg_inf
         for v in masked.values():
             local_max = b.fmax(local_max, v)
-        full_max_raw = _row_reduce(local_max, b.fmax)
-        ok = b.fcmp("ogt", full_max_raw, neg_inf)
-        m_new = b.select(ok, full_max_raw, zero_f)
+        tile_max = _row_reduce(local_max, b.fmax)
+        m_new = b.fmax(m_val, tile_max)
+        ok = b.fcmp("ogt", m_new, neg_inf)
+        m_safe = b.select(ok, m_new, zero_f)
         p_regs = {}
         sum_p = zero_f
         for key, v in masked.items():
-            p = b.exp2_fast(b.fsub(v, m_new))
+            p = b.exp2_fast(b.fsub(v, m_safe))
             p_regs[key] = p
             sum_p = b.fadd(sum_p, p)
         l_local = _row_reduce(sum_p, b.fadd)
 
-        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        alpha = b.exp2_fast(b.fsub(m_val, m_safe))
         new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.

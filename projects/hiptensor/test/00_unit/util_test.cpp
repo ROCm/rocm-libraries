@@ -87,7 +87,7 @@ TEST(CheckApiParamsTest, UtilTest)
 
 TEST(hiptensorGetVersionTest, UtilTest)
 {
-    EXPECT_EQ(hiptensorGetVersion(), 2005000);
+    EXPECT_EQ(hiptensorGetVersion(), 2006000);
 }
 
 TEST(logLevelToStringTest, UtilTest)

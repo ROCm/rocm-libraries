@@ -395,6 +395,13 @@ do not abort the coverage upload. Both binaries are passed as extra `llvm-cov` `
 attribute coverage to library translation units compiled into the test executables. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
 with flag `rocSPARSE`.
 
+`make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
+profiles (`rocsparse-unit-test` and `rocsparse-unit-test-device`) and the `rocsparse-test` profiles
+separately and writes `coverage-report/coverage-unit.info` and
+`coverage-report/coverage-integration.info`. Jenkins uploads them with the Codecov flags
+`rocSPARSE-unit` and `rocSPARSE-integration`, only if `coverage_split` succeeds; the combined
+`rocSPARSE` flag covers both. `make coverage_cleanup` deletes the profiles of a previous run.
+
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
