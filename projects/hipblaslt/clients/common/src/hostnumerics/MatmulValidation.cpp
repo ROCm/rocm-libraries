@@ -19,8 +19,8 @@ namespace hipblaslt::hostnumerics
     using roc::hostnumerics::ComparisonReport;
     using roc::hostnumerics::ComparisonTolerance;
     using roc::hostnumerics::findAllCloseTolerance;
-    using roc::hostnumerics::Layout;
     using roc::hostnumerics::IndexSelection;
+    using roc::hostnumerics::Layout;
     using roc::hostnumerics::ScalarType;
     using roc::hostnumerics::Shape;
     using roc::hostnumerics::Tensor;

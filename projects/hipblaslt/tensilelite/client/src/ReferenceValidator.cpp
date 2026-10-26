@@ -391,13 +391,13 @@ namespace TensileLite
         }
 
         bool ReferenceValidator::checkResults(
-            TensorDescriptor const&                   tensor,
-            void const*                               refPtr,
-            void const*                               resPtr,
-            size_t                                    maxElements,
-            bool                                      isgpu,
+            TensorDescriptor const&                  tensor,
+            void const*                              refPtr,
+            void const*                              resPtr,
+            size_t                                   maxElements,
+            bool                                     isgpu,
             const roc::hostnumerics::IndexSelection& outputSelection,
-            double                                    threshold)
+            double                                   threshold)
         {
             const roc::hostnumerics::ScalarType scalarType
                 = toHostNumericsScalarType(tensor.dataType());
@@ -620,9 +620,9 @@ namespace TensileLite
             return false;
         }
 
-        bool ReferenceValidator::validate(ContractionProblemGemm const&             problem,
-                                          ContractionInputs const&                  reference,
-                                          ContractionInputs const&                  result,
+        bool ReferenceValidator::validate(ContractionProblemGemm const&            problem,
+                                          ContractionInputs const&                 reference,
+                                          ContractionInputs const&                 result,
                                           const roc::hostnumerics::IndexSelection& outputSelection)
         {
             if(problem.tensors().empty())
@@ -662,7 +662,7 @@ namespace TensileLite
                               || tensorRole == ContractionProblemGemm::TENSOR::E
                           ? outputSelection
                           : referenceIndexSelection(tensor,
-                                                     static_cast<size_t>(m_elementsToValidate));
+                                                    static_cast<size_t>(m_elementsToValidate));
 
                 void const* refPtr = nullptr;
                 void const* resPtr = nullptr;

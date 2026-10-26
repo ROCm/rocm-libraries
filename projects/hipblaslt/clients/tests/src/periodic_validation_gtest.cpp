@@ -101,10 +101,10 @@ namespace
                       ptrdiff_t      columnStride,
                       size_t         batchStride)
     {
-        auto storage = hn::generate(
-            type,
-            hn::Shape{batches * batchStride},
-            hn::GenerationRecipe::realOnlyLastDimensionFastest(hn::GenerationRecipe::constant({.value = 40}), 0));
+        auto storage = hn::generate(type,
+                                    hn::Shape{batches * batchStride},
+                                    hn::GenerationRecipe::realOnlyLastDimensionFastest(
+                                        hn::GenerationRecipe::constant({.value = 40}), 0));
         return storage.shareStorageWithLayout(hn::Layout(
             hn::Shape{batches, rows, cols}, {ptrdiff_t(batchStride), rowStride, columnStride}, 0));
     }
@@ -158,7 +158,8 @@ namespace
                 auto         recipe = [&](uint64_t seed) {
                     return hn::GenerationRecipe::realOnlyLastDimensionFastest(
                         floating ? hn::GenerationRecipe::uniformReal({.lower = -1, .upper = 1})
-                                 : hn::GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), seed);
+                                 : hn::GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}),
+                        seed);
                 };
                 auto at = hn::generate(hn::ScalarType::BFloat16,
                                        hn::Shape{periodsA[s], length},
