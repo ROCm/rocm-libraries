@@ -245,13 +245,23 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             WGMXCCSgpr   = tmpSgpr2+1
             CU_CountSgpr = WGMXCCSgpr+1
 
+            # Short waves remap out of line.
+            coldRemap = writer.shortWave(kernel)
             module.add(SLShiftRightB32(dst=sgpr(WGMXCCSgpr), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
             module.add(SFf1B32(dst=sgpr(WGMXCCSgpr), src=sgpr(WGMXCCSgpr), comment="Get log(WGMXCC)"))
-            module.add(SLShiftRightB32(dst=sgpr(CU_CountSgpr), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get CU_Count"))
+            if not coldRemap:
+                module.add(SLShiftRightB32(dst=sgpr(CU_CountSgpr), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get CU_Count"))
 
             module.addComment0("remap WGs if WGMXCC > 1 ( log(WGMXCC) > 0 )")
             module.add(SCmpGtI32(src0=sgpr(WGMXCCSgpr), src1=0))
-            module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
+            if coldRemap:
+                labelCold = Label(label=writer.labels.getNameInc("WGMXCC"), comment="")
+                module.add(SCBranchSCC1(labelCold.getLabelName()))
+                hotModule = module
+                module = Module("WGMXCC remap")
+                module.add(SLShiftRightB32(dst=sgpr(CU_CountSgpr), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get CU_Count"))
+            else:
+                module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
 
             module.addComment0("only remap WGs in the range")
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2, tag="wgmXCC_tmpVgpr2")
@@ -297,6 +307,9 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.addComment0("WorkGroup0 = temp0 + temp1")
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
 
+            if coldRemap:
+                writer.coldBlock(labelCold, label_skipWGMXCC, module)
+                module = hotModule
             module.add(label_skipWGMXCC)
 
     return module
@@ -309,7 +322,9 @@ def DefaultWGM(writer, kernel, sgprWGM):
     # We allocate a temp sgpr and keep sgpr[WGM] untouched.
     tmpWGM = writer.sgprPool.checkOut(1, tag="DefaultWGM_tmpWGM")
 
-    module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
+    coldRemap = writer.shortWave(kernel) and kernel["WorkGroupMapping"] == 1 and not clusterEnabled(kernel["ClusterDim"])
+    if kernel["WorkGroupMappingXCC"] == -1 or not coldRemap:
+        module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
     if(kernel["WorkGroupMappingXCC"] == -1):
         # New bit layout: WGM is in bits [9:0] (10-bit signed, range -511..511).
         # Sign-extend from bit 9: (val & 0x3FF) ^ 0x200 - 0x200
@@ -317,7 +332,7 @@ def DefaultWGM(writer, kernel, sgprWGM):
         module.add(SXorB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="flip sign bit"))
         module.add(SSubU32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="sign-extend 10-bit"))
     else:
-        module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM), comment="Restore WGM"))
+        module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM) if not coldRemap else sgpr(sgprWGM), comment="Restore WGM"))
 
     wgmLabel         = Label(label=writer.labels.getNameInc("WGM"), comment="")
     wgmLabelPositive = Label(label=writer.labels.getNameInc("WGMPositive"), comment="")
@@ -325,6 +340,14 @@ def DefaultWGM(writer, kernel, sgprWGM):
     if clusterEnabled(kernel["ClusterDim"]):
       module.add(ClusterAIDRemap(writer, kernel))
       module.add(SBranch(wgmLabel.getLabelName()))
+    elif coldRemap:
+      # The usual runtime WGM is the solution's, where 0 and 1 keep the order;
+      # short waves remap out of line.
+      labelCold = Label(label=writer.labels.getNameInc("WGMRemap"), comment="")
+      module.add(SCmpGtU32(src0=sgpr(tmpWGM), src1=1, comment="WGM != 0 and 1 ?"))
+      module.add(SCBranchSCC1(labelName=labelCold.getLabelName(), comment="branch if remap"))
+      hotModule = module
+      module = Module("WGM remap")
 
     module.add(SCmpGtI32(src0=sgpr(tmpWGM), src1=1, comment="WGM > 1 ?"))
     module.add(SCBranchSCC1(labelName=wgmLabelPositive.getLabelName(), comment="branch if WGM > 1"))
@@ -385,6 +408,9 @@ def DefaultWGM(writer, kernel, sgprWGM):
             if wgmType:
                 module.add(SBranch(wgmLabel.getLabelName()))
 
+    if coldRemap:
+        writer.coldBlock(labelCold, wgmLabel, module)
+        module = hotModule
     module.add(wgmLabel)
 
     writer.sgprPool.checkIn(tmpWGM)

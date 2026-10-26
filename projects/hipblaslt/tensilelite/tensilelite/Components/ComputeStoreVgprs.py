@@ -72,18 +72,22 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
             tmpVgpr = writer.vgprPool.checkOutAligned(2,2, tag="ComputeStoreVgprsVALU_tmpVgpr")
             tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             # dot2: consecutive NumWaveSplitK threads compute the same element, divide it first before computing tile indices
-            if kernel["NumWaveSplitK"] > 1:
+            # All threads of a workgroup of NumWaveSplitK threads share one element: tid0 = tid1 = 0.
+            tidZero = kernel["NumWaveSplitK"] > 1 and kernel["NumThreads"] <= kernel["NumWaveSplitK"] \
+                and len(packedC1) == 1 and writer.shortWave(kernel)
+            if kernel["NumWaveSplitK"] > 1 and not tidZero:
                 newSerial = writer.vgprPool.checkOut(1, "newSerial")
                 module.add(vectorStaticDivide(newSerial, "Serial", kernel["NumWaveSplitK"], tmpVgprRes, comment="Divided by NumWaveSplitK"))
                 module.add(vectorStaticDivideAndRemainder(tid1, tid0, newSerial, divisor, tmpVgprRes))
                 writer.vgprPool.checkIn(newSerial)
-            else:
+            elif not tidZero:
                 module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", divisor, tmpVgprRes))
 
             writer.vgprPool.checkIn(tmpVgpr)
             tmpS1Res = ContinuousRegister(tmpS1, 1)
-            module.add(vectorStaticMultiply(vgpr(tid0), vgpr(tid0), tid0Scale, tmpS1Res))
-            if tid1Scale != 1:
+            if not tidZero:
+                module.add(vectorStaticMultiply(vgpr(tid0), vgpr(tid0), tid0Scale, tmpS1Res))
+            if tid1Scale != 1 and not tidZero:
                 module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tid1), tid1Scale, tmpS1Res))
 
             if kernel["BufferStore"]:
@@ -97,9 +101,13 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
                 # Eventually need to modify if supporting packed coord1, to start just assert if that case is detected
                 #--
                 strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(tid1), src1=sgpr(strideC1), comment="rowStart vgpr"))
                 strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(tid1), src1=sgpr(strideD1), comment="rowStart vgpr"))
+                if tidZero:
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.cinRowPtr), src=0, comment="rowStart vgpr"))
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrD), src=0, comment="rowStart vgpr"))
+                else:
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(tid1), src1=sgpr(strideC1), comment="rowStart vgpr"))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(tid1), src1=sgpr(strideD1), comment="rowStart vgpr"))
                 module.addSpaceLine()
 
             # Compute coord0 and coord1
@@ -110,9 +118,14 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
             module.add(SMulI32(dst=sgpr(tmpS0), src0=hex(kernel["MacroTile0"]), src1=sgpr(wg0), comment="%s = wg0*MT0"%sgpr(tmpS0)))
 
             # coord = tid*VW + workgroup offset
-            module.add(VAddU32(dst=vgpr(tid0), src0=sgpr(tmpS0), src1=vgpr(tid0), comment="coord0 = tid0*VW + wg0*MT0"))
-            module.add(SMulI32(dst=sgpr(wgMT1), src0=hex(kernel["MacroTile1"]), src1=sgpr(wg1), comment="<- wg1*MT1"))
-            module.add(VAddU32(dst=vgpr(tid1), src0=sgpr(wgMT1), src1=vgpr(tid1), comment="coord1 = tid1*VW + wg1*MT1"))
+            if tidZero:
+                module.add(VMovB32(dst=vgpr(tid0), src=sgpr(tmpS0), comment="coord0 = wg0*MT0"))
+                module.add(SMulI32(dst=sgpr(wgMT1), src0=hex(kernel["MacroTile1"]), src1=sgpr(wg1), comment="<- wg1*MT1"))
+                module.add(VMovB32(dst=vgpr(tid1), src=sgpr(wgMT1), comment="coord1 = wg1*MT1"))
+            else:
+                module.add(VAddU32(dst=vgpr(tid0), src0=sgpr(tmpS0), src1=vgpr(tid0), comment="coord0 = tid0*VW + wg0*MT0"))
+                module.add(SMulI32(dst=sgpr(wgMT1), src0=hex(kernel["MacroTile1"]), src1=sgpr(wg1), comment="<- wg1*MT1"))
+                module.add(VAddU32(dst=vgpr(tid1), src0=sgpr(wgMT1), src1=vgpr(tid1), comment="coord1 = tid1*VW + wg1*MT1"))
 
             if len(packedC1) > 1:
                 module.add(writer.extractPackedCoord1ToRowStart(kernel, packedC1, tid1, 'D'))

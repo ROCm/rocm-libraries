@@ -107,7 +107,8 @@ class GSU(Component):
         indices = list(range(0, kernel["ProblemType"]["NumIndicesC"]))
         numDim = len(indices)
 
-        if kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+        if (kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") \
+           and not writer.gsuIsOne(kernel):
             gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
             with writer.allocTmpSgpr(1, tag="computeStoreSrdStart_tmpSgprGSU") as tmpSgprGSU:
                 module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
@@ -333,6 +334,12 @@ class GSUOn(GSU):
     def graWorkGroup(self, writer, kernel):
         module = Module("GSU On graWorkGroup")
 
+        if writer.gsuIsOne(kernel):
+            module.add(SMovB64(dst=sgpr("GSUSumIdx", 2), src=0, comment="Set GSUSumIdx to 0"))
+            module.add(SMovB32(dst=sgpr("GSULog2BpeC"), src=log2(writer.states.bpeCexternalGSU1)))
+            module.add(SMovB32(dst=sgpr("GSULog2BpeD"), src=log2(writer.states.bpeCexternalGSU1)))
+            return module
+
         gsuLabel    = Label(label=writer.labels.getNameInc("GSU"), comment="")
         gsuLabelEnd = Label(label=writer.labels.getNameInc("GSU_End"), comment="")
         with writer.allocTmpSgpr(1, tag="GSU On graWorkGroup_tmpSgprGSU") as tmpSgprGSU:
@@ -390,6 +397,8 @@ class GSUOn(GSU):
 
     def computeLoadSrd(self, writer, kernel, tP, stmp, tileStart):
         module = Module("GSU On computeLoadSrd")
+        if writer.gsuIsOne(kernel):
+            return module  # gsuOffset = 0
 
         tc = tP["tensorChar"]
         isgfx950 = kernel["ISA"][:2] == (9, 5)
@@ -500,6 +509,13 @@ class GSUOn(GSU):
 
                 du = kernel["_DepthU%s"%tc]
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
+                if writer.gsuIsOne(kernel) and not isMirrorIdx and not ('MXS' in tc) \
+                   and not (kernel["enableTDMMetadata"] and tP["isM"]):
+                    if writer.isConstUnitStride(stride):
+                        module.add(SMovB32(dst=incr, src=duBpe, comment="incr%s = DepthU*Bpe*MI_dim(%d)"%(tc, mi_dim)))
+                    else:
+                        module.add(SMulI32(dst=incr, src0=duBpe, src1=stride, comment="incr%s = DepthU*Bpe*MI_dim(%d)*stride"%(tc, mi_dim)))
+                    return module
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
 
                 # MX scale GSU SRD increment, gated by MXScaleFormat:
@@ -537,6 +553,10 @@ class GSUOn(GSU):
 
     def graIncrementsRestore(self, writer, kernel, loopCounterName):
         module = Module("GSU On graIncrementsRestore")
+        if writer.gsuIsOne(kernel):
+            module.add(SMulI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
+                               src1=kernel["DepthU"], comment="=loopCounterName*DepthU"))
+            return module
 
         with writer.allocTmpSgpr(1, tag="GSU On graIncrementsRestore_tmpSgprInfo") as tmpSgprInfo:
             gsuSgpr = tmpSgprInfo.idx
@@ -549,6 +569,8 @@ class GSUOn(GSU):
 
     def calculateLoopNumIter(self, writer, kernel, loopCounterName, tmpSgprInfo):
         module = Module("GSU On calculateLoopNumIter")
+        if writer.gsuIsOne(kernel):
+            return module
 
         tmpSgpr = tmpSgprInfo.idx
         # if GSU numIter++ if gsuSumIdx < remainder
@@ -675,6 +697,8 @@ class GSUOn(GSU):
 
     def tailLoopNumIter(self, writer, kernel, loopCounter):
         module = Module("GSU On tailLoopNumIter")
+        if writer.gsuIsOne(kernel):
+            return module  # the only GSU slice keeps the tail
 
         with writer.allocTmpSgpr(3, tag="GSU On tailLoopNumIter_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
@@ -2364,7 +2388,8 @@ class GSUOn(GSU):
         # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
         # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
         # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
-        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) \
+           and not writer.gsuIsOne(kernel):
             with writer.allocTmpSgpr(1, tag="initializeSrd_tmpSgprGSU") as tmpSgprGSU:
                 module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
@@ -2382,6 +2407,11 @@ class GSUOn(GSU):
     # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
     def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
         module = Module("routeToGeneralBatchedOrStridedBatched")
+        if writer.gsuIsOne(kernel):
+            if kernel["ProblemType"]["SupportUserArgs"]:
+                writer.cmpNamedArgTypeEq(module, 3, "ArgType == 3 for General Batched GEMM")
+                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))
+            return module
         module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
         if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
             module.add(SCBranchSCC0(labelName=argTypeChecks.getLabelName()))

@@ -455,6 +455,9 @@ class StateValues:
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
   staggerUCode: bool                     = 0
+  # Out-of-line code emitted after s_endpgm (see coldBlock).
+  coldModules: list                      = field(default_factory=list)
+  argTypeUnpacked: bool                  = False
   waveIdxReleasedAfterStagger: bool      = False
   # Wave-separated TDM packs loop-invariant WaveIdx bits into ArgType[8+] before
   # releasing WaveIdx; named ArgType comparisons must mask 0xFF.
@@ -5314,6 +5317,33 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     version = isp.get("KernArgsVersion", 0) if isp else 0
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
+  def shortWave(self, kernel):
+    # gfx11 WaveSplitK waves stream a few K iterations, so their prologue and
+    # epilogue latency is not amortized: keep the common path short and free of
+    # taken branches.
+    return kernel.get("WaveSplitK", False) and tuple(kernel.get("ISA", (0,)))[0] == 11 \
+      and not isPersistent(kernel)
+
+  def coldBlock(self, label, returnLabel, body):
+    """Move `body` out of line: the caller branches to `label`, the block runs
+    after s_endpgm and branches back to `returnLabel`."""
+    cold = Module("cold " + label.getLabelName())
+    # The block lands after the loop's UNDEFs: restate the SGPR names it uses.
+    for name in sorted(set(re.findall(r"sgpr([A-Za-z_]\w*)", str(body)))):
+      if name in self.sgprs:
+        cold.add(RegSet("s", "sgpr" + name, self.sgprs[name]))
+    cold.add(label)
+    cold.add(body)
+    cold.add(SBranch(labelName=returnLabel.getLabelName()))
+    self.states.coldModules.append(cold)
+
+  def gsuIsOne(self, kernel):
+    # Without user GSU the host always passes the solution's GlobalSplitU
+    # (ContractionSolution::calculateAutoGSU), so GSU == 1 is known here. Short
+    # waves drop the runtime GSU checks.
+    return self.shortWave(kernel) and kernel["GlobalSplitU"] == 1 \
+      and not kernel["InternalSupportParams"]["SupportUserGSU"] and kernel["AdaptiveGemmGSUA"] == 0
+
   ##############################################################################
   # Kernel Body - Subtiled version
   ##############################################################################
@@ -7117,6 +7147,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.deferredActivationModules = None
 
     module.add(self.functionEnd(kernel, addLabel=True))
+    for cold in self.states.coldModules:
+      module.add(cold)
+    self.states.coldModules = []
 
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
@@ -7445,6 +7478,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
     # - block scales (UseScaleAB=Block) without any compile-time or runtime stagger
     self.states.staggerUCode = True
+    self.states.coldModules = []
+    # Without TDM nothing is packed above bit 7 of ArgType; short waves skip the mask.
+    self.states.argTypeUnpacked = self.shortWave(kernel) and not (kernel["enableTDMA"] or kernel["enableTDMB"])
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
        (isPersistent(kernel) and \
@@ -12145,6 +12181,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     correct independent of whether pack has run yet (persistent graWorkGroup
     is emitted before pack but runs after pack on tile N+1).
     """
+    if getattr(self.states, "argTypeUnpacked", False):
+      argType = sgpr("ArgType")
+      module.add(SCmpEQU32(src0=argType, src1=value, comment=comment))
+      return
     with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
       module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
                          comment="mask ArgType domain (bits 8+ = TDM wave id)"))
