@@ -42,6 +42,23 @@ from gemm_utils import (  # noqa: E402
 )
 import numpy as np  # noqa: E402
 
+# LOCAL (not for upstream): memoize the host fp8/bf8 encode across the kernels of a
+# batch. GpuGemmRunner.run re-encodes A and B on every call, which dominates the
+# per-kernel time at large shapes; the host matrices are cached per shape below, so
+# the same source buffers come back for every kernel in this worker.
+import gemm_utils as _gu  # noqa: E402
+
+for _fn_name in ("_fp32_to_fp8_u8", "_fp32_to_bf8_u8"):
+    _orig = getattr(_gu, _fn_name)
+
+    def _memo(x, use_ocp=None, _orig=_orig, _cache={}):
+        key = (x.__array_interface__["data"][0], x.shape, x.strides, x.dtype.str, use_ocp)
+        if key not in _cache:
+            _cache[key] = _orig(x, use_ocp=use_ocp)
+        return _cache[key]
+
+    setattr(_gu, _fn_name, _memo)
+
 
 def _is_multi_abd(kernel_name):
     """A multi_abd kernel name carries the ``_multiabd_`` suffix (see codegen)."""
