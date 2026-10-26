@@ -1005,9 +1005,7 @@ def resolve_ids(
                 "to reuse them"
             )
         ids = mint_ids(config)
-        kdp_documents = build_kdp_documents(
-            config, ids, generated_from=generated_from
-        )
+        kdp_documents = build_kdp_documents(config, ids, generated_from=generated_from)
         report = _report(config, ids, kdp_documents, None, None, None, None)
         return IdResolution(
             ids=ids,
