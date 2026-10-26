@@ -135,6 +135,21 @@ if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
   endif()
 endif()
 
+if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+  message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
+  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+else()
+  # Don't force, users should be able to override GPU_TARGETS at the command line if desired
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "GPU architectures to build for")
+endif()
+
+# tolerate comma as a value separator since the compiler does the
+# same
+string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+# Filter out target flags as hipFFT builds generic code for each target.
+list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
+
 # Dependencies
 include(cmake/dependencies.cmake)
 
@@ -183,7 +198,7 @@ message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 # Version
 set ( HIPFFT_VERSION_MAJOR "1" )
 set ( HIPFFT_VERSION_MINOR "0" )
-set ( HIPFFT_VERSION_PATCH "27" )
+set ( HIPFFT_VERSION_PATCH "28" )
 set ( VERSION_STRING "${HIPFFT_VERSION_MAJOR}.${HIPFFT_VERSION_MINOR}.${HIPFFT_VERSION_PATCH}" )
 set( hipfft_SOVERSION 0.1 )
 set( hipfftw_SOVERSION 0.1 )

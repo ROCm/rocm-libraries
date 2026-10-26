@@ -28,7 +28,7 @@
 #define GUARD_TENSOR_VIEW_HPP
 
 #include "miopen_cstdint.hpp"
-#include <initializer_list>
+#include "miopen_initializer_list.hpp"
 
 template <int N>
 struct tensor_layout_t;

@@ -4,7 +4,9 @@
 """Archive consumers carry the loader and thread dependencies of the lowerer."""
 
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,20 +27,31 @@ def load_driver(name, path):
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
-@pytest.mark.parametrize("consumer", ["online", "differential", "micro_parity"])
+@pytest.mark.parametrize("consumer", ["differential", "micro_parity"])
 def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer):
-    run = Mock(return_value=SimpleNamespace(returncode=0, stdout=b"", stderr=""))
+    def complete_compile(command, **_kwargs):
+        if "-o" in command:
+            Path(command[command.index("-o") + 1]).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
-    if consumer == "online":
-        online.build_lib(str(tmp_path / "librocke.so"))
-    elif consumer == "differential":
+    if consumer == "differential":
         driver = load_driver(
             "link_test_run_diff",
             PLATFORM / "tests/instances/differential/run_diff.py",
         )
         monkeypatch.setattr(driver, "TMP", tmp_path)
-        assert driver.compile_c("fixture", tmp_path / "librocke_core.a")[0]
+        # Fingerprint invalidation has dedicated differential-runner coverage;
+        # this test isolates link-command construction and cache publication.
+        monkeypatch.setattr(
+            driver, "_native_emitter_fingerprint", lambda *_args, **_kwargs: "fixture"
+        )
+        archive = tmp_path / "librocke_core.a"
+        archive.touch()
+        (tmp_path / "fixture_emit.c").write_text("int main() { return 0; }\n")
+        assert driver.compile_c("fixture", archive, src_dir=tmp_path)[0]
     else:
         driver = load_driver(
             "link_test_run_parity", PLATFORM / "tests/instances/parity/run_parity.py"
@@ -64,6 +77,78 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             assert command.index(flag) > archive_index
         else:
             assert flag not in command
+
+
+@pytest.mark.parametrize(
+    ("platform", "library_name"),
+    [("linux", "librocke.so"), ("darwin", "librocke.dylib"), ("win32", "rocke.dll")],
+)
+def test_online_build_uses_the_cmake_shared_target(
+    monkeypatch, tmp_path, platform, library_name
+):
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if "--build" in command:
+            stage = tmp_path / f".stage-{os.getpid()}"
+            (stage / library_name).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    monkeypatch.setattr(online.subprocess, "run", run)
+    monkeypatch.setattr(online.sys, "platform", platform)
+    destination = tmp_path / library_name
+
+    assert online.build_lib(str(destination)) == str(destination)
+    assert destination.is_file()
+    build = next(command for command in calls if "--build" in command)
+    assert build[build.index("--target") + 1] == "rocke_shared"
+    configure = next(command for command in calls if "-S" in command)
+    assert "-DROCKE_BUILD_SHARED_ENGINE=ON" in configure
+    assert "-DBUILD_TESTING=ON" in configure
+
+
+@pytest.mark.skipif(
+    shutil.which("cmake") is None or shutil.which("ctest") is None,
+    reason="CMake and CTest required",
+)
+def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path):
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(PLATFORM),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ctest_dir = tmp_path / "installed-ctest"
+    ctest_dir.mkdir()
+    shutil.copy2(
+        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    )
+    listed = subprocess.run(
+        ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tests = json.loads(listed.stdout)["tests"]
+    rocke_pytest = next(test for test in tests if test["name"] == "rocke_pytest")
+    properties = {prop["name"]: prop["value"] for prop in rocke_pytest["properties"]}
+    environment = properties["ENVIRONMENT"]
+
+    assert environment[0] == "PYTHONPATH=."
+    assert environment[1].startswith("ROCKE_REPLAY_CLI=")
+    assert environment[2].startswith("ROCKE_PROVENANCE_MANIFEST=")
+    assert environment[3].startswith("ROCKE_UNSIGNED_INT_OPS_CLI=")
+    assert len(environment) == 4
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

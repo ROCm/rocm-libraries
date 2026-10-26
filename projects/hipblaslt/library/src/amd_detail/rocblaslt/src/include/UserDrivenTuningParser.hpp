@@ -27,16 +27,14 @@
 
 #pragma once
 
+#include "TuningCacheStore.hpp"
 #include "auxiliary.hpp"
 #include "tensile_host.hpp"
 #include <Tensile/DataTypes.hpp>
-#include <shared_mutex>
 
-#include <map>
-#include <optional>
-#include <set>
+#include <atomic>
+#include <cstdint>
 #include <string>
-#include <vector>
 
 class OverrideSingleton
 {
@@ -90,242 +88,249 @@ private:
 namespace TensileLite
 {
     /**
-     * What a tuning file row resolves to.
+     * HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH, read on first use.
      *
-     * A solution index is only a position in one build's kernel library, so on
-     * its own it cannot tell whether it still names the kernel that was tuned.
-     * The name recorded beside it is what lets replay check that: kernel_name
-     * in files hipblaslt-bench writes, solution_name in some older files, and
-     * neither in the oldest, which are trusted only when they were written by
-     * the running build.
+     * Read once rather than per call, so the hot path costs nothing and a
+     * process cannot change mode halfway through a run. Setting either variable
+     * after the first hipBLASLt call has no effect.
      */
-    struct TunedEntry
-    {
-        int32_t                    solutionIndex = -1;
-        std::optional<std::string> kernelName;
-        std::optional<std::string> solutionName;
-
-        bool sameIdentity(const TunedEntry& other) const
-        {
-            return solutionIndex == other.solutionIndex && kernelName == other.kernelName
-                   && solutionName == other.solutionName;
-        }
-    };
-
-    class ProblemOverride
+    class TuningModeSingleton
     {
     public:
-        ProblemOverride();
-        ProblemOverride(bool             transA,
-                        bool             transB,
-                        rocisa::DataType inputTypeA,
-                        rocisa::DataType inputTypeB,
-                        rocisa::DataType computeType,
-                        rocisa::DataType outputType,
-                        size_t           m,
-                        size_t           n,
-                        size_t           k,
-                        size_t           batchSize);
-        ProblemOverride(const ProblemOverride& problem);
-
-        inline bool transA() const
+        static TuningModeSingleton& getInstance()
         {
-            return m_transA;
-        }
-        inline bool transB() const
-        {
-            return m_transB;
-        }
-        inline rocisa::DataType inputTypeA() const
-        {
-            return m_inputTypeA;
-        }
-        inline rocisa::DataType inputTypeB() const
-        {
-            return m_inputTypeB;
-        }
-        inline rocisa::DataType computeType() const
-        {
-            return m_computeType;
-        }
-        inline rocisa::DataType outputType() const
-        {
-            return m_outputType;
-        }
-        inline size_t m() const
-        {
-            return m_m;
-        }
-        inline size_t n() const
-        {
-            return m_n;
-        }
-        inline size_t k() const
-        {
-            return m_k;
-        }
-        inline size_t batchSize() const
-        {
-            return m_batchSize;
-        }
-
-    private:
-        bool             m_transA;
-        bool             m_transB;
-        rocisa::DataType m_inputTypeA;
-        rocisa::DataType m_inputTypeB;
-        rocisa::DataType m_computeType;
-        rocisa::DataType m_outputType;
-        size_t           m_m;
-        size_t           m_n;
-        size_t           m_k;
-        size_t           m_batchSize;
-    };
-
-    void getContractionProblemsFromFile(const std::string& path);
-
-    template <>
-    struct Comparison<ProblemOverride>
-    {
-        enum
-        {
-            implemented = true
-        };
-
-        static int compare(ProblemOverride const& lhs, ProblemOverride const& rhs)
-        {
-            return LexicographicCompare(lhs.transA(),
-                                        rhs.transA(),
-                                        lhs.transB(),
-                                        rhs.transB(),
-                                        lhs.inputTypeA(),
-                                        rhs.inputTypeA(),
-                                        lhs.inputTypeB(),
-                                        rhs.inputTypeB(),
-                                        lhs.computeType(),
-                                        rhs.computeType(),
-                                        lhs.outputType(),
-                                        rhs.outputType(),
-                                        lhs.m(),
-                                        rhs.m(),
-                                        lhs.n(),
-                                        rhs.n(),
-                                        lhs.k(),
-                                        rhs.k(),
-                                        lhs.batchSize(),
-                                        rhs.batchSize());
-        }
-    };
-
-    class OverrideMap
-    {
-    public:
-        static OverrideMap& getMap()
-        {
-            static OverrideMap gInstance;
+            static TuningModeSingleton gInstance;
             return gInstance;
         }
 
-        OverrideMap() {}
-        ~OverrideMap() {}
-        // copy contructor
-        OverrideMap(const OverrideMap&) = delete;
-        // assignment operator
-        OverrideMap& operator=(const OverrideMap&) = delete;
+        TuningModeSingleton(const TuningModeSingleton&)            = delete;
+        TuningModeSingleton& operator=(const TuningModeSingleton&) = delete;
 
-        int size()
+        TuningMode mode() const
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      size = m_override.size();
-            return size;
+            return m_config.mode;
+        }
+        const std::string& cachePath() const
+        {
+            return m_config.cachePath;
+        }
+        bool reads() const
+        {
+            return m_config.reads();
+        }
+        bool writes() const
+        {
+            return m_config.writes();
         }
 
-        /**
-         * Copy out every entry recorded for a key, in file order. Copies, so
-         * no caller walks the multimap outside the lock.
-         */
-        std::vector<TunedEntry> find(const ProblemOverride& prob_key)
+        /** Re-read the environment. Tests only, like OverrideSingleton::reloadForTest. */
+        void reloadForTest()
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-
-            std::vector<TunedEntry> found;
-            auto                    range = m_override.equal_range(prob_key);
-            for(auto it = range.first; it != range.second; ++it)
-                found.push_back(it->second);
-            return found;
-        }
-
-        /**
-         * Insert unless this key already records the same entry, so a file that
-         * repeats a row does not stack duplicates. The identity is the index and
-         * the recorded names together: two rows can share an index while naming
-         * different kernels, and only one of them can still be valid.
-         */
-        void addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
-        {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-
-            auto range = m_override.equal_range(key);
-            for(auto it = range.first; it != range.second; ++it)
-                if(it->second.sameIdentity(entry))
-                    return;
-            m_override.emplace(key, entry);
-        }
-
-        /**
-         * Whether a path has already been read. Tracked per path rather than
-         * inferred from the map, so a file that yields no usable rows is still
-         * read only once.
-         */
-        bool isLoaded(const std::string& path)
-        {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            return m_loaded.count(path) != 0;
-        }
-
-        void markLoaded(const std::string& path)
-        {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_loaded.insert(path);
-        }
-
-        void resetForTest()
-        {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.clear();
-            m_loaded.clear();
-        }
-
-        std::mutex& getLock()
-        {
-            return m_guard;
+            load();
         }
 
     private:
-        std::multimap<ProblemOverride, TunedEntry> m_override;
-        std::set<std::string>                      m_loaded;
-        std::mutex                                 m_guard;
-        std::shared_timed_mutex                    m_mutex;
-    };
-} // namespace Tensile
-
-namespace std
-{
-    template <>
-    struct hash<TensileLite::ProblemOverride>
-    {
-        inline size_t operator()(TensileLite::ProblemOverride const& po) const
+        TuningModeSingleton()
         {
-            return TensileLite::hash_combine(po.transA(),
-                                             po.transB(),
-                                             po.inputTypeA(),
-                                             po.inputTypeB(),
-                                             po.computeType(),
-                                             po.outputType(),
-                                             po.m(),
-                                             po.n(),
-                                             po.k(),
-                                             po.batchSize());
+            load();
+        }
+
+        void load();
+
+        TuningModeConfig m_config;
+    };
+
+    /** Running tallies behind the closing summary and the test hooks. */
+    struct TuningCounters
+    {
+        static TuningCounters& instance()
+        {
+            static TuningCounters gInstance;
+            return gInstance;
+        }
+
+        std::atomic<uint64_t> entriesLoaded{0};
+        std::atomic<uint64_t> hits{0};
+        std::atomic<uint64_t> misses{0};
+        std::atomic<uint64_t> invalidated{0};
+        std::atomic<uint64_t> tuned{0};
+        std::atomic<uint64_t> skipped{0};
+
+        // Searches that got as far as tuning-start, whatever their outcome.
+        std::atomic<uint64_t> attempts{0};
+
+        std::string summary() const
+        {
+            return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="
+                   + std::to_string(hits.load()) + " misses=" + std::to_string(misses.load())
+                   + " invalidated=" + std::to_string(invalidated.load()) + " tuned="
+                   + std::to_string(tuned.load()) + " skipped=" + std::to_string(skipped.load());
         }
     };
-} // namespace std
+
+    /**
+     * Which tuning file this process consults, if any.
+     *
+     * HIPBLASLT_TUNING_CACHE_PATH and HIPBLASLT_TUNING_OVERRIDE_FILE are
+     * mutually exclusive rather than merged: with no tuning mode set the
+     * override file behaves as it always has, and with one set only the cache
+     * is consulted and the override is ignored, which the startup line says.
+     */
+    struct TuningFileSelection
+    {
+        bool        active = false;
+        std::string path;
+    };
+
+    TuningFileSelection selectTuningFile();
+
+    /** The build rows are trusted against: the running library's own. */
+    const std::string& currentBuildStamp();
+
+    /**
+     * Append one tuned winner to the tuning file.
+     *
+     * Takes the problem rather than the key so the type columns can be written
+     * in the spelling the parser reads back. See appendTuningRow for what
+     * concurrent writers can rely on.
+     */
+    bool appendTunedEntry(const std::string&                 path,
+                          const RocblasltContractionProblem& problem,
+                          const TunedEntry&                  entry);
+
+    /**
+     * What one tuning attempt did.
+     *
+     * Skips are policy: the tuner understood the problem and chose not to
+     * measure it, which is expected on some shapes forever. Fallbacks are
+     * everything else and usually mean something is wrong. Scratch splits
+     * across that line: a request over the configured cap is the cap doing its
+     * job, while a device that refuses the allocation is a failure.
+     */
+    enum class TuningAttempt : uint32_t
+    {
+        Tuned = 0,
+        /** Budget stopped the search, but a winner was measured and recorded. */
+        TunedPartial,
+        SkippedInPlaceBeta,
+        SkippedExtentUnknown,
+        SkippedScratchCap,
+        SkippedBudget,
+        FallbackScratchAlloc,
+        FallbackSetup,
+        FallbackEnumeration,
+        FallbackNoWinner,
+        FallbackException,
+    };
+
+    /** True for a policy decline, false for a failure. */
+    bool tuningAttemptIsSkip(TuningAttempt result);
+
+    /** Human-readable cause, without the tuning-cache prefix or event token. */
+    const char* tuningAttemptReason(TuningAttempt result);
+
+    /**
+     * Load a tuning file into OverrideMap::getMap(). Each path is read at most
+     * once per process.
+     */
+    void getContractionProblemsFromFile(const std::string& path);
+
+    /**
+     * getContractionProblemsFromFile for cache replay, which runs on every
+     * matmul that passes no algo. A file that is not there is looked for again
+     * at most once a second rather than on every call, since each look is a
+     * failed open and a stat. The heuristic entry point still looks on every
+     * query.
+     */
+    void loadTuningFileForReplay(const std::string& path);
+
+    /** Let the next loadTuningFileForReplay look at once. Tests only. */
+    void resetReplayLoadForTest();
+
+    /** How the cache file was read, for the startup line. */
+    enum class TuningLoadStatus : uint32_t
+    {
+        Ok = 0,
+        NotFound,
+        ReadError,
+        NoPath,
+    };
+
+    /**
+     * Announce the mode, path and load result once per process, and arrange for
+     * the closing summary. Does nothing in off mode.
+     */
+    void announceTuningModeOnce(TuningLoadStatus status);
+
+    /**
+     * Note that a lookup for this problem did or did not find a usable entry.
+     *
+     * Counted by distinct key rather than by call, because the summary is read
+     * against loaded=N and a hot loop over one uncached shape would otherwise
+     * report thousands of fallbacks for one missing row. A key that matches
+     * once counts as matched. Does nothing in off mode.
+     */
+    void recordTuningLookup(const ProblemOverride& key, bool matched);
+
+    /**
+     * True only the first time this key's entry identity is rejected. The
+     * heuristic lookup, the execution path and the recheck under the tuning lock
+     * can all meet one stale row, and it is still one rejected entry.
+     */
+    bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry);
+
+    /**
+     * Note that this process will not search this problem again, and ask
+     * whether it has.
+     *
+     * Set once a search has been spent on the shape, whatever its outcome, and
+     * when the shape's cached search turns out final for this run, so a later
+     * matmul neither starts the same search again nor asks again. Per process,
+     * not per file: a later run with a higher HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE
+     * is what lets a shape the ceiling stopped finish.
+     */
+    void recordTuningAttempt(const ProblemOverride& key);
+    bool tuningAlreadyAttempted(const ProblemOverride& key);
+
+    /**
+     * Note that this problem was tuned in this process, whether or not the
+     * winner reached the file: it is in the in-memory cache either way.
+     */
+    void recordTuningWinner(const ProblemOverride& key);
+
+    /**
+     * Whether a tuning-start or terminal line should be written.
+     *
+     * With the info bit set, always. Otherwise success and failure are bounded
+     * separately, so a key whose first attempt failed can still report the tune
+     * that succeeds later. A failure is bounded per key once that key announced
+     * a start, since a start with no ending would look like a hang, and per
+     * reason before that, since those declines repeat across thousands of
+     * shapes.
+     */
+    bool shouldLogTuningStart(const ProblemOverride& key);
+    bool shouldLogTuningTerminal(const ProblemOverride& key, TuningAttempt result);
+
+    /** Cache events logged at most once per key. */
+    enum class TuningKeyEvent : uint32_t
+    {
+        Hit = 0,
+        Miss,
+        Invalid,
+    };
+
+    /**
+     * Whether this key's event is worth logging: only with the info bit set,
+     * and once per key, since replay meets the same key on every call.
+     */
+    bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
+
+    /** Drop the announcement latch and every per-key set. Tests only. */
+    void resetTuningDiagnosticsForTest();
+
+    /** The distinct-key tally behind the summary line, for tests. */
+    void tuningLookupTallyForTest(uint64_t* shapes,
+                                  uint64_t* matched,
+                                  uint64_t* fellback,
+                                  uint64_t* tuned);
+} // namespace TensileLite

@@ -92,6 +92,9 @@ CI_CONFIG_NAMES = (
 # right after its own name at each level (bf8 lists the same warp tiles as fp8
 # on every arch, so default_ci_config_gfx1250_fp8.json serves bf8 too).
 CI_CONFIG_DTYPE_ALIAS = {"bf8": "fp8"}
+# Variant-specific sweep files, tried before the CI names above (the gfx1250
+# preshuffle sweep covers all five preshuffle pipelines).
+VARIANT_CI_CONFIG_NAMES = {"gemm_preshuffle": ("default_config_{arch}.json",)}
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
 
 # Map the driver's --variant (a configs-dir selector) onto the single codegen/
@@ -135,6 +138,10 @@ SUPPORTED_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8")
 # to K of roughly 256k; pass --verify-tol for larger K.
 DEFAULT_VERIFY_TOL = 2e-2
 VERIFY_TOL = {"fp32": 256 * 2.0**-23}
+CSV_FIELDS = [
+    "kernel", "problem_idx", "M", "N", "K", "device",
+    "latency_ms", "tflops", "non_zero", "max_rel", "verified",
+]
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
 # The 4-char codes (rcrr, ...) are the multi_abd A,B,E,D layouts; TE gemm_multi_abd
 # only supports rcrr today.
@@ -183,7 +190,8 @@ def resolve_configs(args, arch):
     cfg_dir = _THIS_DIR / VARIANT_CONFIGS[args.variant]
     alias = CI_CONFIG_DTYPE_ALIAS.get(args.dtype, args.dtype)
     names = [n.format(arch=arch, dtype=d)
-             for n in CI_CONFIG_NAMES for d in (args.dtype, alias)]
+             for n in VARIANT_CI_CONFIG_NAMES.get(args.variant, ()) + CI_CONFIG_NAMES
+             for d in (args.dtype, alias)]
     return [str(next((cfg_dir / n for n in names if (cfg_dir / n).exists()),
                      cfg_dir / names[-1]))]
 
@@ -201,11 +209,13 @@ def load_problems(path, variant):
     return DEFAULT_PROBLEMS
 
 
-def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
+def _run_batch_on_device(device_id, unit, args, worker_path, base_env, extra=None):
     """Run one (problem, kernel-batch) unit in a device-pinned subprocess.
 
-    Returns (rows, lines, n_fail) where rows are dicts ready for the CSV writer,
-    lines are formatted strings to print, and n_fail counts failures.
+    ``extra`` holds op-specific keys added to the worker payload. Returns
+    (rows, lines, n_fail, n_skip) where rows are dicts ready for the CSV writer,
+    lines are formatted strings to print, n_fail counts failures and n_skip
+    counts kernels the worker reported as unsupported for the problem.
     """
     prob_idx, prob_dict, batch = unit
     M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
@@ -224,13 +234,18 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
 
     items = [_item(cfg, lib) for _, cfg, lib in batch]
     payload = json.dumps(
-        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+        {
+            "items": items,
+            "verify": args.verify,
+            "verify_tol": args.verify_tol,
+            **(extra or {}),
+        }
     )
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
 
-    rows, lines, n_fail = [], [], 0
+    rows, lines, n_fail, n_skip = [], [], 0, 0
     proc = None
     try:
         proc = subprocess.Popen(
@@ -260,7 +275,12 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             bidx = result.get("idx", 0)
             _, cfg, _ = batch[bidx]
             reported.add(bidx)
-            if result.get("ok", False):
+            if result.get("skipped", False):
+                lines.append(
+                    f"  [gpu{device_id}] {cfg.name:<58} SKIPPED (unsupported problem)"
+                )
+                n_skip += 1
+            elif result.get("ok", False):
                 status = "OK" if result.get("non_zero", 0) > 0 else "ZERO"
                 mismatch = False
                 if args.verify and "verified" in result:
@@ -303,7 +323,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             for idx in sorted(missing):
                 _, cfg, _ = batch[idx]
                 lines.append(f"  [gpu{device_id}] {cfg.name:<58} MISSING (crash)")
-            n_fail += len(missing)
+            n_fail += len(missing) or int(proc.returncode != 0)
 
     except subprocess.TimeoutExpired:
         lines.append(f"  [gpu{device_id}] batch timeout ({len(batch)} kernels)")
@@ -322,7 +342,98 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             pass
         n_fail += len(batch)
 
-    return rows, lines, n_fail
+    return rows, lines, n_fail, n_skip
+
+
+def unique_built_kernels(configs, lib_paths):
+    """Pair configs with their built .so, dropping failed builds and configs
+    that map to an already-seen .so. Returns (kernels, n_duplicates)."""
+    built = [(cfg, lib) for cfg, lib in zip(configs, lib_paths) if lib is not None]
+    seen, kernels = set(), []
+    for cfg, lib in built:
+        key = str(lib.resolve())
+        if key not in seen:
+            seen.add(key)
+            kernels.append((cfg, lib))
+    return kernels, len(built) - len(kernels)
+
+
+def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_path,
+                         base_env, csv_path, extra=None):
+    """Phase 3: fan (problem, kernel-batch) units out over device-pinned workers.
+
+    ``pairs[i]`` lists the indices into ``built_kernels`` to run on
+    ``problems[i]``. Rows go to ``csv_path`` as they arrive. Returns a stats
+    dict with measurements, failures, skipped and seconds.
+    """
+    print(f"\n{'=' * 80}")
+    print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
+    print(f"{'=' * 80}")
+    print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
+    print(f"  Batch size: {args.batch_size} kernels per subprocess")
+    print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
+
+    csv_file = open(csv_path, "w", newline="")
+    writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+
+    work_q = queue.Queue()
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
+        prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
+        for start in range(0, len(idx), args.batch_size):
+            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
+            work_q.put((prob_idx, prob_dict, batch))
+
+    io_lock = threading.Lock()
+    stats = {"measurements": 0, "failures": 0, "skipped": 0}
+    t0 = time.perf_counter()
+
+    def device_thread(device_id):
+        while True:
+            try:
+                unit = work_q.get_nowait()
+            except queue.Empty:
+                return
+            rows, lines, n_fail, n_skip = _run_batch_on_device(
+                device_id, unit, args, worker_path, base_env, extra
+            )
+            with io_lock:
+                for ln in lines:
+                    print(ln)
+                for row in rows:
+                    writer.writerow(row)
+                csv_file.flush()
+                stats["measurements"] += len(rows)
+                stats["failures"] += n_fail
+                stats["skipped"] += n_skip
+            work_q.task_done()
+
+    threads = [
+        threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    csv_file.close()
+    stats["seconds"] = time.perf_counter() - t0
+    return stats
+
+
+def print_summary(build_time, stats, devices, csv_path):
+    print(f"\n{'=' * 80}")
+    print("BENCHMARK COMPLETE")
+    print(f"{'=' * 80}")
+    print(f"  Build time: {build_time:.0f}s")
+    print(f"  Benchmark time: {stats['seconds']:.0f}s")
+    print(f"  Total time: {build_time + stats['seconds']:.0f}s")
+    print(f"  Devices used: {len(devices)}")
+    print(f"  Successful measurements: {stats['measurements']}")
+    print(f"  Failed measurements: {stats['failures']}")
+    if stats["skipped"]:
+        print(f"  Skipped (unsupported problem): {stats['skipped']}")
+    print(f"  Output: {csv_path}")
 
 
 def main():
@@ -332,7 +443,7 @@ def main():
     parser.add_argument(
         "configs",
         nargs="*",
-        help="TE sweep config JSON files (default: variant's default_ci_config.json)",
+        help="TE sweep config JSON files (gfx1250 preshuffle defaults to default_config_gfx1250.json; other variants use default_ci_config.json)",
     )
     parser.add_argument(
         "--variant",
@@ -538,23 +649,15 @@ def main():
     )
     build_time = time.perf_counter() - t0
 
-    built_kernels = [
-        (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
-    ]
-    vfb.report_builds(all_configs, lib_paths)
+    build_failures = sum(lib is None for lib in lib_paths)
+    if len(lib_paths) != len(all_configs):
+        print("  ERROR: Incomplete kernel build results")
+        return 1
+    if build_failures:
+        print(f"  ERROR: {build_failures}/{len(all_configs)} kernel builds failed")
 
-    # Dedupe by .so path (distinct configs can map to the same physical kernel).
-    seen_libs = set()
-    unique_kernels = []
-    duplicate_count = 0
-    for cfg, lib in built_kernels:
-        lib_key = str(lib.resolve())
-        if lib_key not in seen_libs:
-            seen_libs.add(lib_key)
-            unique_kernels.append((cfg, lib))
-        else:
-            duplicate_count += 1
-    built_kernels = unique_kernels
+    vfb.report_builds(all_configs, lib_paths)
+    built_kernels, duplicate_count = unique_built_kernels(all_configs, lib_paths)
 
     print(
         f"\n  Built {len(all_configs)} configs -> {len(built_kernels)} unique kernels "
@@ -576,97 +679,17 @@ def main():
     # (without the fallback, keep the old all-pairs behaviour).
     pairs = vfb.pairs(problems, built_kernels)
 
-    # ========================================================================
-    # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
-    # ========================================================================
-    print(f"\n{'=' * 80}")
-    print("Phase 3: Benchmark (multi-GPU, subprocess isolation, batched)")
-    print(f"{'=' * 80}")
-    print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
-    print(f"  Batch size: {args.batch_size} kernels per subprocess")
-    print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
-
-    csv_path = Path(args.csv)
-    csv_fields = [
-        "kernel",
-        "problem_idx",
-        "M",
-        "N",
-        "K",
-        "device",
-        "latency_ms",
-        "tflops",
-        "non_zero",
-        "max_rel",
-        "verified",
-    ]
-    csv_file = open(csv_path, "w", newline="")
-    writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
-    writer.writeheader()
-
     worker_path = _THIS_DIR / "run_one_gemm_kernel.py"
     base_env = os.environ.copy()
     base_env["GEMM_PYPATH"] = os.pathsep.join(
         [str(_DISPATCHER_ROOT / "python"), str(_THIS_DIR)]
     )
-
-    # Build a single work queue of (prob_idx, prob_dict, kernel-batch) units and
-    # fan them out across device-pinned worker threads.
-    work_q = queue.Queue()
-    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
-        prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
-        for start in range(0, len(idx), args.batch_size):
-            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
-            work_q.put((prob_idx, prob_dict, batch))
-
-    io_lock = threading.Lock()
-    stats = {"measurements": 0, "failures": 0}
-    bench_t0 = time.perf_counter()
-
-    def device_thread(device_id):
-        while True:
-            try:
-                unit = work_q.get_nowait()
-            except queue.Empty:
-                return
-            rows, lines, n_fail = _run_batch_on_device(
-                device_id, unit, args, worker_path, base_env
-            )
-            with io_lock:
-                for ln in lines:
-                    print(ln)
-                for row in rows:
-                    writer.writerow(row)
-                csv_file.flush()
-                stats["measurements"] += len(rows)
-                stats["failures"] += n_fail
-            work_q.task_done()
-
-    threads = [
-        threading.Thread(target=device_thread, args=(d,), daemon=True) for d in devices
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    bench_time = time.perf_counter() - bench_t0
-    csv_file.close()
-
-    # ========================================================================
-    # Summary
-    # ========================================================================
-    print(f"\n{'=' * 80}")
-    print("BENCHMARK COMPLETE")
-    print(f"{'=' * 80}")
-    print(f"  Build time: {build_time:.0f}s")
-    print(f"  Benchmark time: {bench_time:.0f}s")
-    print(f"  Total time: {build_time + bench_time:.0f}s")
-    print(f"  Devices used: {len(devices)}")
-    print(f"  Successful measurements: {stats['measurements']}")
-    print(f"  Failed measurements: {stats['failures']}")
-    print(f"  Output: {csv_path}")
-    return 0
+    csv_path = Path(args.csv)
+    stats = benchmark_on_devices(
+        problems, pairs, built_kernels, devices, args, worker_path, base_env, csv_path
+    )
+    print_summary(build_time, stats, devices, csv_path)
+    return int(bool(build_failures or stats["failures"]))
 
 
 if __name__ == "__main__":
