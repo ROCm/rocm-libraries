@@ -98,15 +98,28 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 // then handles values outside Target's range. Conversion does not validate its
 // input; the caller must meet the requirements of the chosen IntegerOverflow.
 //
-// Examples:
-//   convertToInteger<int8_t>(double{2.5}, IntegerRounding::NearestEven,
-//                            IntegerOverflow::Identity) == 2
-//   convertToInteger<int8_t>(double{-3.75}, IntegerRounding::TowardZero,
-//                            IntegerOverflow::Identity) == -3
-//   convertToInteger<int8_t>(int32_t{300}, IntegerRounding::TowardZero,
-//                            IntegerOverflow::Saturate) == 127
-//   convertToInteger<uint8_t>(int32_t{-1}, IntegerRounding::TowardZero,
-//                             IntegerOverflow::ModuloWrap) == 255
+// Examples, after `using enum IntegerRounding; using enum IntegerOverflow;`:
+//   convertToInteger<int8_t>(double{2.5}, NearestEven, Identity) == 2
+//   convertToInteger<int8_t>(double{3.5}, NearestEven, Identity) == 4
+//   convertToInteger<int8_t>(double{-3.75}, TowardZero, Identity) == -3
+//   convertToInteger<int8_t>(int32_t{300}, TowardZero, Saturate) == 127
+//   convertToInteger<int8_t>(int32_t{300}, TowardZero, ModuloWrap) == 44
+//   convertToInteger<uint8_t>(int32_t{-1}, TowardZero, Saturate) == 0
+//   convertToInteger<uint8_t>(int32_t{-1}, TowardZero, ModuloWrap) == 255
+//   convertToInteger<int8_t>(double{1e300}, TowardZero, Saturate) == 127
+//   convertToInteger<int64_t>(bool{true}, TowardZero, Identity) == 1
+//   convertToInteger<size_t>(uint64_t{42}, TowardZero, Identity) == 42
+//   convertToInteger<char>(double{65.0}, TowardZero, Identity) == 'A'
+//
+// Rejected at compile time:
+//   convertToInteger<bool>(double{0.5}, ...)                  Target cannot be bool.
+//   convertToInteger<float>(int32_t{1}, ...)                  Target must be an integer.
+//   convertToInteger<char>(std::complex<double>{65, 0}, ...)  Source must be a real number.
+//
+// Outside the domain, with an undefined result:
+//   convertToInteger<int8_t>(int32_t{300}, TowardZero, Identity)  Result does not fit.
+//   convertToInteger<int8_t>(infinity, TowardZero, ModuloWrap)    Input is not finite.
+//   convertToInteger<int8_t>(NaN, rounding, overflow)             NaN is never valid.
 template <std::integral Target, typename Source>
     requires(!std::is_same_v<Target, bool> && std::is_arithmetic_v<Source>)
 Target convertToInteger(Source value, IntegerRounding rounding, IntegerOverflow overflow) noexcept {
