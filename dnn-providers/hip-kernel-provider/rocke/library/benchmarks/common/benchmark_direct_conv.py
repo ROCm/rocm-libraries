@@ -2772,6 +2772,20 @@ def main() -> int:
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
 
+    # A per-axis padding runs only from the cache, on the rotated-filter dgrad
+    # kernel: the sweeps below build kernels with one padding for both axes.
+    for prob, _, direction in cases:
+        if prob.PAD_W != prob.PAD:
+            print(
+                f"[skip] {prob.short()} dir={direction}: per-axis padding "
+                f"(PAD={prob.PAD}x{prob.PAD_W}) runs only with --run-from-cache",
+                file=sys.stderr,
+            )
+    cases = [c for c in cases if c[0].PAD_W == c[0].PAD]
+    if not cases:
+        print("error: no case left to sweep", file=sys.stderr)
+        return 2
+
     import ctypes
 
     from rocke import compile_kernel

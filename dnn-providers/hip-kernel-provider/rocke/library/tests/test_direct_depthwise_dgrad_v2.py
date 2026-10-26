@@ -155,6 +155,30 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
             dc.is_valid_depthwise_dgrad_stream_spec(_stream(p), "gfx1250")[0]
         )
 
+    def test_benchmark_sweep_refuses_per_axis_padding(self):
+        # Only --run-from-cache serves a per-axis padding (on the rotated-filter
+        # kernel); the uncached sweep would build the row-streaming kernel.
+        import contextlib
+        import io
+        import sys
+        from unittest import mock
+
+        try:
+            from benchmarks.common import benchmark_direct_conv as bdc
+        except ImportError as e:  # the benchmark module imports torch
+            self.skipTest(f"benchmark module not importable: {e}")
+
+        cmd = (
+            "convfp16 -n 2 -c 64 -H 16 -W 16 -k 64 -y 5 -x 3 -p 2 -q 1 "
+            "-u 1 -v 1 -g 64 -F 2"
+        )
+        err = io.StringIO()
+        argv = ["benchmark_direct_conv.py", "--arch", "gfx1250", "--miopen-cmd", cmd]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(err):
+            rc = bdc.main()
+        self.assertEqual(rc, 2)
+        self.assertIn("--run-from-cache", err.getvalue())
+
     def test_aot_grid(self):
         from rocke.core.arch import ArchTarget
 
