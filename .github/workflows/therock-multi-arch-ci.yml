@@ -210,7 +210,7 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
-          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
+          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON -DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"
         }
 
   linux_build_and_test:
