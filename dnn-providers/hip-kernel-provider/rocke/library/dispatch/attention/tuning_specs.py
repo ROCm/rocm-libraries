@@ -177,6 +177,7 @@ _SEMANTIC_FIELDS = frozenset(
         "use_decode_grid",
         "causal_top_left",
         "right_bound",
+        "emit_lse",
     }
 )
 
@@ -350,6 +351,9 @@ def make_explicit_attention_3d_specs(
         dtype=problem.dtype,
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
+        # The output the caller asked for, never a tuning knob (see
+        # _SEMANTIC_FIELDS): every swept geometry keeps it.
+        emit_lse=problem.emit_lse,
     )
     return segment, reduce
 
