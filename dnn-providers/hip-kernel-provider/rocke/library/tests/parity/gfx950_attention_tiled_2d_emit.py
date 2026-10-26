@@ -1055,6 +1055,20 @@ _CONFIGS = {
         use_transposed_half_local_pv=True,
         use_early_v_schedule=True,
     ),
+    # Longest-first query blocks (D256/b16/GQA-8, two sequences): the reversed
+    # grid-y decode reads total_q from cu_q[num_seqs].
+    63: dict(
+        head_size=256,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        use_qblock_reverse=True,
+    ),
 }
 
 

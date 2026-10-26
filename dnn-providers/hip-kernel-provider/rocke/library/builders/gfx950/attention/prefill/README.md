@@ -235,10 +235,12 @@ LSE buffer checks use metadata only.
 
 Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
 pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
-then launches the LSE kernel. Only the dense candidates declare the `lse` feature, so
-an unpinned (`auto`) LSE request is refused rather than routed to a kernel without
-the output. The prefill CLI, hipDNN, unified attention, and split-KV decode do not
-write LSE. The gfx942 dense kernel has the same opt-in.
+then launches the LSE kernel. A candidate whose kernel cannot write LSE does not
+declare the `lse` feature, so an LSE request is refused rather than routed to a
+kernel without the output. The prefill CLI, hipDNN, and the standalone split-KV
+decode kernels do not write LSE; unified attention writes it on its split-KV path
+only (see `dispatch/attention/README.md`). The gfx942 dense kernel has the same
+opt-in.
 
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):

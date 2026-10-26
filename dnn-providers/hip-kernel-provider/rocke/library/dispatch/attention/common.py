@@ -200,7 +200,8 @@ class AttentionRequest(OperatorRequest):
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
-    # candidates whose kernels implement it (dense, RDNA WMMA) admit it.
+    # candidates whose kernels implement it (dense, RDNA WMMA, and the
+    # gfx942/gfx950 unified split-KV path) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
     # are the bucket maxima, and any widths the kernel takes up to them (RDNA
@@ -800,6 +801,7 @@ def _problem_with_num_cus(
         target_ctas=int(req.target_ctas),
         causal_top_left=top_left,
         right_bound=right_bound,
+        emit_lse=bool(req.emit_lse),
     )
 
 
@@ -866,6 +868,27 @@ class AttentionSpec:
     right_bound: int = 0
     # Left bound, part of kernel_name() for every mask.
     sliding_window: int = 0
+    # The optional LSE output is a distinct kernel (the split-KV reduce takes one
+    # more pointer), so it must not collapse onto the LSE-off kernel_name /
+    # spec_hash either. LSE-off leaves both exactly as before the field existed
+    # (see :meth:`identity`).
+    emit_lse: bool = False
+
+    def __post_init__(self) -> None:
+        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
+        # (1, "yes") would silently produce an LSE identity: refuse it instead.
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
+
+    def identity(self) -> dict:
+        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
+        so an LSE-off spec keeps the hash that stored caches already hold."""
+        payload = asdict(self)
+        if not self.emit_lse:
+            del payload["emit_lse"]
+        return payload
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -888,6 +911,8 @@ class AttentionSpec:
             parts.append("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
         if self.sliding_window > 0:
             parts.append(f"sw{self.sliding_window}")
+        if self.emit_lse:
+            parts.append("lse")
         return kernel_name_join(*parts)
 
 
@@ -967,7 +992,13 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+            # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
+            # spec_hash taken over it) is the one stored before the field existed.
+            return tuple(
+                (f.name, repr(getattr(spec, f.name)))
+                for f in fields(spec)
+                if not (f.name == "emit_lse" and not spec.emit_lse)
+            )
 
         return (
             "explicit",

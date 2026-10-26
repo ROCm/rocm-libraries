@@ -4,8 +4,8 @@
 """Auto dispatch of contiguous-layout (``layout='dense'``) requests (host only).
 
 An unpinned request that declares contiguous tensors and has more than one
-query row gets the dense kernel's default body; paged / unspecified layouts and
-single-row requests keep the unified route.
+query row gets the dense kernel's default body; paged / unspecified layouts keep
+the unified route, and single-row requests take the strided decode kernel.
 """
 
 import dataclasses
@@ -44,8 +44,21 @@ def _request(arch, **overrides):
         ({"sliding_window": 1024}, "attention_gfx950_dense_persist"),
         ({"use_sinks": True}, "attention_gfx950_dense_persist"),
         ({"hdim_q": 64, "hdim_v": 64}, "attention_gfx950_dense_persist"),
-        # Too few work items for 256 persistent CTAs.
-        ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_grid"),
+        # Too few work items for 256 persistent CTAs: plain causal D128 still
+        # takes wide DMA (at the half-height tile); anything else takes grid.
+        ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_persist_widedma"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "sliding_window": 128},
+            "attention_gfx950_dense_grid",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64},
+            "attention_gfx950_dense_grid",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "mask_type": 0},
+            "attention_gfx950_dense_grid",
+        ),
         # The moving bottom-right diagonal runs only on the grid body.
         (
             {"seqlen_q": 512, "seqlen_k": 8192, "mask_type": 2},
@@ -81,9 +94,9 @@ def test_unspecified_layout_keeps_unified(arch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_single_query_row_is_not_routed_to_dense(arch):
-    with pytest.raises(ValueError):
-        dispatch_attention(_request(arch, seqlen_q=1, mask_type=0))
+def test_single_query_row_is_routed_to_strided_decode(arch):
+    result = dispatch_attention(_request(arch, seqlen_q=1, mask_type=0))
+    assert result.candidate.name == "attention_strided_decode"
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])

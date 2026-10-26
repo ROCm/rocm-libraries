@@ -295,7 +295,9 @@ static bool d256_gfx950_fast(const rocke_unified_attn_problem_t* p)
 static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
 {
     /* Excludes caches > 2 GiB (need i64 path, fall back to default builder). */
-    return arch_is("gfx942") && p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
+    /* d192 rides the same lean 4-warp body as d256. */
+    return arch_is("gfx942") && (p->head_size == 192 || p->head_size == 256)
+           && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
            && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
            && !p->use_qq_bias && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
            && !enable_i64_kv_addr(p);

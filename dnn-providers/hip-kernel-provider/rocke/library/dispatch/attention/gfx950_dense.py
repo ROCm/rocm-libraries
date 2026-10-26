@@ -151,6 +151,26 @@ def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
     return True, 0, True  # plain causal, compile-time shifted diagonal
 
 
+def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
+    """Query tile of the variant's default spec.
+
+    The shared 256-row tile, except on the wide-DMA body (the only one whose
+    ``block_m`` is recorded, so its tuning IDs already name the tile) when that
+    tile leaves CTAs idle: while the full-tile work count (query blocks x query
+    heads x batch) is at most the persistent CTA count, a 128-row tile doubles
+    the work items and halves each causal item's KV loop. Measured on the
+    256-CU part at D128, both dtypes, plain causal: the 128-row tile wins every
+    shape at or below that count and loses at every larger one.
+    """
+    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+
+    bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
+    if not variant.wide_lds_dma or int(req.hdim_q) != 128:
+        return bm
+    work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
+    return bm // 2 if work <= _DEFAULT_NUM_PERSISTENT else bm
+
+
 def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
     """``ragged`` for the tile the knobs choose: non-tile-multiple lengths take
     the on-chip ragged path."""
@@ -163,11 +183,12 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
 def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     """The variant's default ``Gfx950AttentionDenseSpec`` for ``req``.
 
-    Persist and wide DMA come from the variant; the tile and every other
-    tuning field start at the shipped default and are varied by the knob space.
-    Wide DMA cannot take the ragged path, so where the default tile would be
-    ragged it starts at the first registered tile that is not (its ``block_m``
-    is then resolved per problem and recorded).
+    Persist and wide DMA come from the variant; the tile is the sliding-window
+    tile where that applies, else :func:`_default_block_m`, and every other
+    tuning field starts at the shipped
+    default; the knob space varies them. Wide DMA cannot take the ragged path,
+    so where its default tile would be ragged it starts at the first registered
+    tile that is not (its ``block_m`` is resolved per problem and recorded).
     """
     from kernels.common.attention_dense_kv_split import max_kv_segments_for_extent
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -191,9 +212,11 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     )
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
-    bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
     causal, right_bound, moving_bottom_right = _dense_band(req)
+    # The sliding-window tile keeps its own geometry; otherwise the shared tile,
+    # halved on an under-filled wide-DMA grid.
+    bm = int(geometry["block_m"]) if window_tile else _default_block_m(req, variant)
     ragged = _is_ragged(sq, sk, bm, bn)
     kv_segments = 1
     if (
@@ -266,13 +289,16 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     The persistent body pays off once the default tile yields at least one
     work item per persistent CTA and the causal diagonal is fixed (the moving
     bottom-right diagonal runs only on the grid body). Wide DMA additionally
-    needs a plain causal D128 problem whose lengths are tile multiples. Each
-    later entry is a fallback for when an earlier body refuses the request.
+    needs a causal D128 problem whose lengths are tile multiples. For plain
+    causal (no lookahead) it is also taken below that work count: its default
+    tile halves there (:func:`_default_block_m`), which keeps every persistent
+    CTA busy. Each later entry is a fallback for when an earlier body refuses
+    the request.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     try:
-        causal, _right_bound, moving_bottom_right = _dense_band(req)
+        causal, right_bound, moving_bottom_right = _dense_band(req)
     except ValueError:
         return ()
     geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
@@ -280,8 +306,8 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
     persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
-    wide = (
-        persistent
+    wide_ok = (
+        not moving_bottom_right
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
         and not int(req.sliding_window)
@@ -290,11 +316,14 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
         and sk % bn == 0
     )
     by_id = {v.variant_id: v.candidate_name for v in GFX950_DENSE_VARIANTS}
-    order = (
-        ("persist_widedma", "persist", "grid")
-        if wide
-        else ("persist", "grid") if persistent else ("grid",)
-    )
+    if persistent:
+        order = (
+            ("persist_widedma", "persist", "grid") if wide_ok else ("persist", "grid")
+        )
+    elif wide_ok and not right_bound:
+        order = ("persist_widedma", "grid")
+    else:
+        order = ("grid",)
     return tuple(by_id[v] for v in order)
 
 

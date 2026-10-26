@@ -173,3 +173,71 @@ def test_max_kv_segments_for_extent():
     assert max_kv_segments_for_extent(1, 32768, 32, 128, max_segments=8) == 8
     assert max_kv_segments_for_extent(1, 512, 32, 128, max_segments=8) == 8
     assert max_kv_segments_for_extent(1, 32768, 512, 128) == 1
+
+
+def _bottom_right_req(arch, sq, sk, mask_type=2):
+    return attention.AttentionRequest(
+        batch=1,
+        nhead_q=32,
+        nhead_k=8,
+        seqlen_q=sq,
+        seqlen_k=sk,
+        hdim_q=128,
+        hdim_v=128,
+        arch=arch,
+        mask_type=mask_type,
+        kv_block_size=64,
+        dtype="bf16",
+        num_cus=256 if arch == "gfx950" else 304,
+    )
+
+
+@pytest.mark.parametrize(
+    "arch,spec_id,block_m",
+    [("gfx950", "gfx950_dense_grid", 128), ("gfx942", "gfx942_dense", 256)],
+)
+def test_bottom_right_tuning_id_replays_across_chunk_shapes(arch, spec_id, block_m):
+    # (512, 8192) and (256, 4096) default to different KV-segment counts; the
+    # same recorded knobs must name the same configuration on both.
+    knobs = {"block_m": block_m, "kv_segments": 2}
+    first = attention.attention_tuning_spec(
+        _bottom_right_req(arch, 512, 8192), spec_id, knobs=knobs
+    )
+    second_req = _bottom_right_req(arch, 256, 4096)
+    second = attention.attention_tuning_spec(second_req, spec_id, knobs=knobs)
+    assert dict(first.knobs) == dict(second.knobs)
+    assert first.tuning_id == second.tuning_id
+    replay = attention.attention_tuning_spec(
+        second_req, spec_id, tuning_id=first.tuning_id
+    )
+    assert replay.tuning_id == first.tuning_id
+    assert dict(replay.knobs) == dict(first.knobs)
+
+
+@pytest.mark.parametrize(
+    "arch,spec_id",
+    [("gfx950", "gfx950_dense_grid"), ("gfx942", "gfx942_dense")],
+)
+@pytest.mark.parametrize("sq,sk,mask_type", [(2048, 2048, 0), (2048, 2048, 2)])
+def test_defaults_fingerprint_unchanged_off_the_moving_diagonal(
+    arch, spec_id, sq, sk, mask_type
+):
+    # Only a moving bottom-right diagonal records extra fields; every other base
+    # keeps the fingerprint (and so the stored keys) it had before.
+    from dispatch.attention.dense_rules import DenseSpace, _dense_defaults
+
+    base = attention.attention_tuning_spec(
+        _bottom_right_req(arch, sq, sk, mask_type), spec_id
+    ).kernel_spec
+    space = DenseSpace(
+        abi="t",
+        arch=arch,
+        path="dense",
+        variant_id="t",
+        candidate_name="t",
+        recorded_fields=frozenset({"waves_per_eu"}),
+    )
+    assert space.recorded(base) == space.recorded_fields
+    assert space.defaults(base, base) == dict(
+        _dense_defaults(base, space.recorded_fields)
+    )
