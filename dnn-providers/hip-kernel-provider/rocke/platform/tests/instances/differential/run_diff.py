@@ -87,6 +87,14 @@ PYROOT, LIB_ROOT = _python_and_library_roots(ROCKE)
 PARITY = ROCKE / "tests" / "instances" / "parity"
 LIB_PARITY = LIB_ROOT / "tests" / "parity"
 INCLUDE = ROCKE / "cpp" / "include"
+# Library-owned C++ mirrors (library/cpp): a library family's emitter compiles
+# against these headers plus the library archive, linked ahead of
+# librocke_core.a. Platform-only copies of this tree have neither.
+LIB_CPP = LIB_ROOT / "cpp"
+LIB_INCLUDE = LIB_CPP / "include"
+LIBRARY_ARCHIVE_NAME = "librocke_library.a"
+# Set by main() from --library-archive; None when no library archive was built.
+LIBRARY_ARCHIVE: Path | None = None
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
@@ -111,6 +119,18 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
 # .ll / canonical-ir for a blessed config fails --check-golden.
 GOLDEN_DIR = HERE / "golden"
 GOLDEN_FILE = GOLDEN_DIR / "llvm_gfx_all.json"
+# Families discovered under library/tests/parity are blessed into a library-
+# owned golden beside their emitters, so a library codegen change re-blesses a
+# library file only. Each family is anchored in exactly one of the two files.
+LIB_GOLDEN_DIR = LIB_PARITY / "golden"
+LIB_GOLDEN_FILE = LIB_GOLDEN_DIR / "llvm_gfx_all.json"
+
+
+def golden_file_for(src_dir: Path) -> Path:
+    """The golden file that anchors families discovered in ``src_dir``."""
+    return LIB_GOLDEN_FILE if Path(src_dir) == LIB_PARITY else GOLDEN_FILE
+
+
 PYTHON_BATCH_WORKER = HERE / "python_batch_worker.py"
 
 
@@ -245,32 +265,61 @@ _BUILD_INPUT_DIGESTS: dict[Path, str] = {}
 _BUILD_INPUT_DIGESTS_LOCK = threading.Lock()
 
 
-def _shared_build_input_digest(archive: Path) -> str:
+def _library_link_inputs(src_dir: Path) -> tuple[list[str], list[str]]:
+    """Extra ``-I`` flags and archives for an emitter in ``src_dir``.
+
+    Only library emitters see the library headers and archive; platform
+    emitters keep compiling against the platform engine alone, which is what
+    keeps platform free of any library dependency.
+    """
+    if Path(src_dir) != LIB_PARITY:
+        return [], []
+    includes = ["-I", str(LIB_INCLUDE)] if LIB_INCLUDE.is_dir() else []
+    archives = [str(LIBRARY_ARCHIVE)] if LIBRARY_ARCHIVE is not None else []
+    return includes, archives
+
+
+def library_sources_present() -> bool:
+    """True when library/cpp carries C++ that a library emitter may link."""
+    return any((LIB_CPP / "instances").rglob("*.cpp"))
+
+
+def _shared_build_input_digest(archive: Path, extra_archives=()) -> str:
     """Hash immutable shared build inputs once per differential process."""
     archive = archive.resolve()
+    extra = tuple(Path(a).resolve() for a in extra_archives)
+    key = (archive, extra)
     with _BUILD_INPUT_DIGESTS_LOCK:
-        cached = _BUILD_INPUT_DIGESTS.get(archive)
+        cached = _BUILD_INPUT_DIGESTS.get(key)
         if cached is not None:
             return cached
         digest = hashlib.sha256()
-        digest.update(archive.read_bytes())
-        for header in sorted(INCLUDE.rglob("*")):
-            if header.is_file():
-                digest.update(header.relative_to(INCLUDE).as_posix().encode("utf-8"))
-                digest.update(header.read_bytes())
+        for linked in (archive, *extra):
+            digest.update(linked.read_bytes())
+        include_roots = [INCLUDE]
+        if extra and LIB_INCLUDE.is_dir():
+            include_roots.append(LIB_INCLUDE)
+        for root in include_roots:
+            for header in sorted(root.rglob("*")):
+                if header.is_file():
+                    digest.update(root.name.encode("utf-8"))
+                    digest.update(header.relative_to(root).as_posix().encode("utf-8"))
+                    digest.update(header.read_bytes())
         compiler = shutil.which("c++")
         if compiler:
             compiler_path = Path(compiler)
             digest.update(str(compiler_path.resolve()).encode("utf-8"))
             digest.update(compiler_path.read_bytes())
         result = digest.hexdigest()
-        _BUILD_INPUT_DIGESTS[archive] = result
+        _BUILD_INPUT_DIGESTS[key] = result
         return result
 
 
-def _native_emitter_fingerprint(source: Path, archive: Path, command: list[str]) -> str:
+def _native_emitter_fingerprint(
+    source: Path, archive: Path, command: list[str], extra_archives=()
+) -> str:
     digest = hashlib.sha256()
-    digest.update(_shared_build_input_digest(archive).encode("ascii"))
+    digest.update(_shared_build_input_digest(archive, extra_archives).encode("ascii"))
     digest.update(source.read_bytes())
     digest.update(json.dumps(command, separators=(",", ":")).encode("utf-8"))
     return digest.hexdigest()
@@ -286,6 +335,7 @@ def compile_c(name, archive, src_dir=None):
     cache_dir = archive.parent / "rocke_diff_emitters"
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_stem = cache_dir / f"{name}_emit_c"
+    lib_includes, lib_archives = _library_link_inputs(src_dir)
     # The engine archive is C++20; emitters are compiled as C++20 against it.
     # A content fingerprint safely reuses the executable across invocations;
     # all public headers are included conservatively because each emitter's
@@ -295,14 +345,18 @@ def compile_c(name, archive, src_dir=None):
         "-std=c++20",
         "-I",
         str(INCLUDE),
+        *lib_includes,
         str(src),
+        # Library archive first: its objects reference rocke_core symbols, and
+        # a static link resolves left to right.
+        *lib_archives,
         str(archive),
         "-lm",
         *(["-ldl", "-pthread"] if sys.platform == "linux" else []),
         "-o",
         str(output_stem),
     ]
-    fingerprint = _native_emitter_fingerprint(src, archive, cmd)
+    fingerprint = _native_emitter_fingerprint(src, archive, cmd, lib_archives)
     out = cache_dir / f"{name}_emit_c_{fingerprint[:16]}"
     if out.is_file():
         return out, ""
@@ -1086,6 +1140,12 @@ def _main():
         default=str(Path(tempfile.gettempdir()) / "rocke_verify" / "librocke_core.a"),
     )
     ap.add_argument(
+        "--library-archive",
+        default="",
+        help="the library-owned C++ mirrors (librocke_library.a from library/cpp); "
+        f"default: {LIBRARY_ARCHIVE_NAME} beside --archive, when it exists",
+    )
+    ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"
     )
     ap.add_argument(
@@ -1211,7 +1271,7 @@ def _main():
                 )
                 status = 1
                 continue
-            status |= _golden_step(args, kind, flavor, cur, scope, failures=[])
+            status |= _golden_step(args, kind, flavor, cur, scope, [], fams)
         return status
 
     # A golden is per flavor, so its runs always pin one; a plain parity run
@@ -1223,11 +1283,38 @@ def _main():
         sys.exit(
             f"archive not found: {archive}  (build: cmake -S {CKC} -B /tmp/rocke_verify && cmake --build /tmp/rocke_verify -j)"
         )
+
+    global LIBRARY_ARCHIVE
+    library_archive = (
+        Path(args.library_archive)
+        if args.library_archive
+        else archive.parent / LIBRARY_ARCHIVE_NAME
+    )
+    if library_archive.exists():
+        LIBRARY_ARCHIVE = library_archive.resolve()
+    elif args.library_archive:
+        sys.exit(f"library archive not found: {library_archive}")
+
+    # A library emitter linked without the library archive fails to link, which
+    # would read as COMPILE_FAIL on every family instead of naming the cause.
+    if (
+        LIBRARY_ARCHIVE is None
+        and library_sources_present()
+        and any(d == LIB_PARITY for _, d in fams)
+    ):
+        sys.exit(
+            f"library/cpp carries C++ mirrors but no {LIBRARY_ARCHIVE_NAME} was "
+            f"found beside {archive}; build the rocke_library_core target too "
+            "(tools/check_byte_identity.py does), or pass --library-archive"
+        )
+
     print(
         f"mode={args.mode}  flavor={flavor}  families={len(fams)}  jobs={jobs}  "
         f"archive={archive}"
     )
     print(f"engine build-id: {archive_build_id(archive)}")
+    if LIBRARY_ARCHIVE is not None:
+        print(f"library archive: {LIBRARY_ARCHIVE}")
     results = _run_families(
         fams,
         archive,
@@ -1253,14 +1340,49 @@ def _main():
 
     if golden:
         return _golden_step(
-            args, kind, flavor, collect_ref_shas(results), scope, failures
+            args, kind, flavor, collect_ref_shas(results), scope, failures, fams
         )
     return exit_code
 
 
-def _golden_step(args, kind, flavor, cur, scope, failures):
-    """Record `cur` into the golden, or check it against the golden."""
-    golden_file = Path(args.golden_file)
+def _golden_files(args, fams) -> dict[Path, set[str]]:
+    """Each golden file this run records into or checks, with the families it
+    anchors. A family is anchored beside its emitters (platform or library);
+    an explicit --golden-file takes every family."""
+    if Path(args.golden_file).resolve() != GOLDEN_FILE.resolve():
+        return {Path(args.golden_file): {name for name, _ in fams}}
+    files: dict[Path, set[str]] = {}
+    for name, src_dir in fams:
+        files.setdefault(golden_file_for(src_dir), set()).add(name)
+    return files
+
+
+def _golden_step(args, kind, flavor, cur, scope, failures, fams):
+    """Record `cur` into the golden, or check it against the golden, one
+    golden file at a time."""
+    files = _golden_files(args, fams)
+    if args.check_golden and len(files) > 1:
+        sections = {
+            path: GoldenStore.load(path).section(kind, flavor) for path in files
+        }
+        twice = sorted(set.intersection(*(set(s) for s in sections.values())))
+        if twice:
+            print("\nGOLDEN CONFLICT: blessed in two golden files: " + ", ".join(twice))
+            return 1
+    status = 0
+    for golden_file, names in files.items():
+        file_scope = None if scope is None else [f for f in scope if f in names]
+        if file_scope == []:
+            continue
+        file_cur = {f: v for f, v in cur.items() if f in names}
+        status |= _golden_step_file(
+            args, kind, flavor, golden_file, file_cur, file_scope, failures
+        )
+    return status
+
+
+def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
+    """Record `cur` into `golden_file`, or check it against that file."""
     store = GoldenStore.load(golden_file)
     where = f"{kind}[{flavor}]" if kind == LL else kind
     if args.record_golden:
@@ -1300,7 +1422,7 @@ def _golden_step(args, kind, flavor, cur, scope, failures):
         )
         return 1
     result = compare(blessed, cur, families=scope)
-    print(f"\n=== GOLDEN CHECK ({where}) ===")
+    print(f"\n=== GOLDEN CHECK ({where}, {golden_file}) ===")
     print(f"  blessed configs : {result.blessed}")
     print(f"  UNBLESSED CHANGE: {len(result.changed)}")
     print(f"  MISSING (gone)  : {len(result.missing)}")

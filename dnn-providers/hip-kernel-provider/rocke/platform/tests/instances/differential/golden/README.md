@@ -1,10 +1,12 @@
 # Differential golden anchor
 
-`llvm_gfx_all.json` anchors the output of every parity family (`tests/instances/parity` and
-`library/tests/parity`): for each sampled config, the sha256 of what the Python reference
-emitter produces. A change that alters a blessed config's output fails the check, whether or
-not the C++ engine changed with it -- the byte-identity gate cannot see a change made the same
-way in both engines; this file can.
+`llvm_gfx_all.json` anchors the output of every parity family in `tests/instances/parity`:
+for each sampled config, the sha256 of what the Python reference emitter produces. Families in
+`library/tests/parity` are anchored the same way, in the same format, in
+`library/tests/parity/golden/llvm_gfx_all.json`. `run_diff.py` records and checks each family
+in the file beside its emitters, and fails if a family is blessed in both. A change that alters
+a blessed config's output fails the check, whether or not the C++ engine changed with it -- the
+byte-identity gate cannot see a change made the same way in both engines; this file can.
 
 It holds two kinds of hash (format: `golden_store.py`):
 

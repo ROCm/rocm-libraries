@@ -378,7 +378,8 @@ invariants.
 - New kernels must become reusable spec-driven builders under `instances/`, not
   one-off scripts.
 - Optimization work must leave a replayable case study in the relevant
-  `examples/<arch>/<workload>/` folder.
+  `examples/<arch>/<workload>/` folder (`library/builders/<arch>/<workload>/`
+  for a library family).
 - General lessons from an optimization must be promoted into
   `dsl_docs/optimization/` as a skill, lever, or runbook update.
 - Reusable kernels must be wired into registry/test/byte-identity coverage before
@@ -511,7 +512,8 @@ Every emission change is mirrored in the C++ engine anyway (byte-identity), so
 inlined raw IR is mirrored too, once per copy. A helper is mirrored once, as one
 function (e.g. `library/kernels/common/_fmha_common.py` and
 `cpp/instances/common/_fmha_common.cpp`). If it emits SSA: Python + C++ mirror +
-byte-identity in the same PR, the same rule the kernel already follows.
+byte-identity in the same PR, the same rule the kernel already follows. A library
+family's mirror lives in `library/cpp/`, not `cpp/`.
 
 ### Do NOT
 
