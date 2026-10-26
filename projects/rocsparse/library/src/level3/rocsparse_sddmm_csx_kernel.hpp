@@ -288,7 +288,7 @@ namespace rocsparse
                                  J N,
                                  I nnz,
                                  const C* __restrict__ dense_C,
-                                 J lda,
+                                 int64_t lda,
                                  C* __restrict__ csx_val,
                                  const I* __restrict__ csx_ptr,
                                  const J* __restrict__ csx_ind,

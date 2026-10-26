@@ -221,7 +221,7 @@ namespace rocsparse
                                   J N,
                                   I nnz,
                                   const C* __restrict__ dense_C,
-                                  J lda,
+                                  int64_t lda,
                                   C* __restrict__ coo_val,
                                   const I* __restrict__ coo_row,
                                   const I* __restrict__ coo_col,
