@@ -396,9 +396,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # AISPARSE-654: rocsparse::conjugate is hidden in librocsparse; defining TU for
   # unit_test_internal_common_conjugate.cpp.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_conjugate.cpp
-  # AISPARSE-649: rocsparse::gthr_strided_batched_template is hidden in
-  # librocsparse; defining TU for unit_test_internal_level1_gthr_grids.cpp.
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_buffer_size.cpp
