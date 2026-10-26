@@ -53,33 +53,22 @@ namespace
         return {extent + kFusedA2ALocalFeatures, extent};
     }
 
-    // Expected to gain A2AGemm collective.
-    enum class Collective
-    {
-        GemmA2A,
-        Unknown,
-    };
+    using hipblaslt_bench::Collective;
+    using hipblaslt_bench::collective_name;
+    using hipblaslt_bench::parse_collective;
 
-    constexpr const char* kCollectiveGemmA2A = "gemm-a2a";
+    // A2AGemm: every rank gathers the same K block per peer, so only K grows
+    // with the world. At 2 ranks this is the 1024 x 512 x 1024 problem.
+    constexpr int64_t kA2AGemmFeatures   = 1024;
+    constexpr int64_t kA2AGemmTokens     = 512;
+    constexpr int64_t kA2AGemmBlockBound = 512;
 
-    // An unset name selects GemmA2A, the only collective before A2A_COLLECTIVE.
-    Collective parse_collective(const char* name)
-    {
-        if(name == nullptr || name[0] == '\0' || std::strcmp(name, kCollectiveGemmA2A) == 0)
-            return Collective::GemmA2A;
-        return Collective::Unknown;
-    }
+    // Largest DepthU * A2ASubRounds the A2AGemm path is tuned with.
+    constexpr int64_t kA2AGemmMaxBoundStep = 128;
 
-    const char* collective_name(Collective c)
+    int64_t a2a_gemm_bound_for_world(uint32_t world)
     {
-        switch(c)
-        {
-        case Collective::GemmA2A:
-            return kCollectiveGemmA2A;
-        case Collective::Unknown:
-            break;
-        }
-        return "";
+        return kA2AGemmBlockBound * int64_t(world);
     }
 
     uint32_t rank_child_launches()
@@ -93,12 +82,21 @@ namespace
         return kRankChildDefaultLaunches;
     }
 
-    Arguments rank_child_arguments(const hipblaslt_bench::LauncherEnv& env)
+    Arguments rank_child_arguments(const hipblaslt_bench::LauncherEnv& env, Collective collective)
     {
-        const FusedA2AShape shape = fused_a2a_shape_for_world(env.world);
-
         Arguments arg;
         arg.init();
+        if(collective == Collective::A2AGemm)
+        {
+            arg.M[0]       = kA2AGemmFeatures;
+            arg.N[0]       = kA2AGemmTokens;
+            arg.K[0]       = a2a_gemm_bound_for_world(env.world);
+            arg.a2a_extent = arg.K[0];
+            arg.a2a_world  = uint8_t(env.world);
+            return arg;
+        }
+
+        const FusedA2AShape shape = fused_a2a_shape_for_world(env.world);
         arg.M[0]       = shape.features;
         arg.N[0]       = kFusedA2ATokens;
         arg.K[0]       = kFusedA2AContractBound;
@@ -127,7 +125,7 @@ namespace hipblaslt_bench
             return kRankChildFailed;
         }
 
-        const Arguments arg = rank_child_arguments(env);
+        const Arguments arg = rank_child_arguments(env, collective);
 
         TcpRendezvous rendezvous(env, kRendezvousTimeoutSec);
 
@@ -138,6 +136,7 @@ namespace hipblaslt_bench
 
         RankResources res;
         res.rendezvous = &rendezvous;
+        res.collective = collective;
         if(!setup_rank(env, arg, res))
             return kRankChildFailed;
 
@@ -162,14 +161,36 @@ namespace hipblaslt_bench
         hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
         std::vector<hipblasLtBfloat16> gold, landed;
         auto                           launch = make_launch(res, heur, launchCount, lastStatus);
+        const uint32_t                 launches = rank_child_launches();
+
+        if(collective == Collective::A2AGemm)
+        {
+            // The agreement after each rank rewrites its B publishes it to the peers.
+            bool verified = true;
+            for(uint32_t i = 0; i < launches && verified; ++i)
+            {
+                const bool written = a2a_gemm_write_input(env, arg, res, int64_t(i));
+                if(!agreement.agree(written, std::logical_and<>{}))
+                    return kRankChildFailed;
+
+                launch(int64_t(i));
+
+                const bool synced  = hipStreamSynchronize(res.stream) == hipSuccess;
+                const bool correct = synced && a2a_gemm_check(env, arg, res, int64_t(i));
+                const bool ok      = correct && lastStatus == HIPBLAS_STATUS_SUCCESS;
+                if(!ok)
+                    hipblaslt_cerr << "error: rank " << env.rank << " failed launch " << i << "\n";
+                verified = agreement.agree(ok, std::logical_and<>{});
+            }
+            return verified ? kRankChildPassed : kRankChildFailed;
+        }
 
         const size_t recvBytes
             = size_t(arg.a2a_world) * arg.N[0] * shard_of(arg) * sizeof(hipblasLtBfloat16);
 
         // A failed launch still runs the rest of the iteration.
-        bool           verified = true;
-        bool           cleared  = true;
-        const uint32_t launches = rank_child_launches();
+        bool verified = true;
+        bool cleared  = true;
         for(uint32_t i = 0; i < launches && verified; ++i)
         {
             const uint32_t slice = i % kRecvSlices;
@@ -209,14 +230,29 @@ namespace hipblaslt_bench
 constexpr uint32_t kFusedWorlds[] = {2, 3, 4, 5, 6, 7, 8};
 
 // Collectives the multi-process sweep runs.
-constexpr Collective kFusedCollectives[] = {Collective::GemmA2A};
+constexpr Collective kFusedCollectives[] = {Collective::GemmA2A, Collective::A2AGemm};
 
 TEST(FusedA2ACollective_smoke, NamesRoundTrip)
 {
     EXPECT_EQ(parse_collective(nullptr), Collective::GemmA2A);
     EXPECT_EQ(parse_collective(""), Collective::GemmA2A);
     EXPECT_EQ(parse_collective(collective_name(Collective::GemmA2A)), Collective::GemmA2A);
+    EXPECT_EQ(parse_collective(collective_name(Collective::A2AGemm)), Collective::A2AGemm);
     EXPECT_EQ(parse_collective("bias"), Collective::Unknown);
+}
+
+TEST(FusedA2AWorldShape_smoke, EveryWorldFrom2To8FitsTheA2AGemmShape)
+{
+    for(uint32_t world : kFusedWorlds)
+    {
+        const int64_t k        = a2a_gemm_bound_for_world(world);
+        const int64_t rowBytes = (k / int64_t(world)) * int64_t(sizeof(hipblasLtBfloat16));
+        EXPECT_EQ(k % (kA2AGemmMaxBoundStep * int64_t(world)), 0) << "world " << world;
+        EXPECT_LE(rowBytes / 16, int64_t{1} << 14) << "world " << world;
+        EXPECT_EQ((kA2AGemmTokens * rowBytes) % 128, 0) << "world " << world;
+    }
+
+    EXPECT_EQ(a2a_gemm_bound_for_world(2), 1024);
 }
 
 // One rule has to give a legal fused-A2A problem at every world, with the same
@@ -294,6 +330,9 @@ INSTANTIATE_TEST_SUITE_P(
     FusedA2AMultiProcess_multi_gpu,
     ::testing::Combine(::testing::ValuesIn(kFusedCollectives), ::testing::ValuesIn(kFusedWorlds)),
     [](const ::testing::TestParamInfo<std::tuple<Collective, uint32_t>>& info) {
-        const char* tag = std::get<0>(info.param) == Collective::GemmA2A ? "GemmA2A" : "Unknown";
+        const Collective c   = std::get<0>(info.param);
+        const char*      tag = c == Collective::GemmA2A   ? "GemmA2A"
+                               : c == Collective::A2AGemm ? "A2AGemm"
+                                                          : "Unknown";
         return std::string(tag) + "_" + std::to_string(std::get<1>(info.param)) + "gpu";
     });

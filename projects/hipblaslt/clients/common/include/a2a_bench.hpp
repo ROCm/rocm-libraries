@@ -3,9 +3,9 @@
 
 #pragma once
 
-// Benchmark logic for the fused GEMM + all-to-all epilogue. One rank per
-// process, started by an external launcher; identity and rendezvous come from
-// the environment variables torchrun sets.
+// Benchmark logic for the fused GEMM + all-to-all epilogue and prologue. One
+// rank per process, started by an external launcher; identity and rendezvous
+// come from the environment variables torchrun sets.
 
 #include "allclose.hpp"
 #include "benchmark_hooks.hpp"
@@ -21,6 +21,7 @@
 #include <SdmaQueue.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <memory>
 #include <vector>
@@ -33,8 +34,45 @@ namespace hipblaslt_bench
 
     constexpr uint32_t kRecvSlices = 2;
 
+    // GemmA2A scatters D's leading features after the GEMM; A2AGemm gathers B
+    // before it.
+    enum class Collective
+    {
+        GemmA2A,
+        A2AGemm,
+        Unknown,
+    };
+
+    constexpr const char* kCollectiveGemmA2A = "gemm-a2a";
+    constexpr const char* kCollectiveA2AGemm = "a2a-gemm";
+
+    // An unset name selects GemmA2A.
+    inline Collective parse_collective(const char* name)
+    {
+        if(name == nullptr || name[0] == '\0' || std::strcmp(name, kCollectiveGemmA2A) == 0)
+            return Collective::GemmA2A;
+        if(std::strcmp(name, kCollectiveA2AGemm) == 0)
+            return Collective::A2AGemm;
+        return Collective::Unknown;
+    }
+
+    inline const char* collective_name(Collective c)
+    {
+        switch(c)
+        {
+        case Collective::GemmA2A:
+            return kCollectiveGemmA2A;
+        case Collective::A2AGemm:
+            return kCollectiveA2AGemm;
+        case Collective::Unknown:
+            break;
+        }
+        return "";
+    }
+
     struct RankResources
     {
+        Collective                         collective = Collective::GemmA2A;
         hipblasLtHandle_t                  handle    = nullptr;
         hipblasLtFusedEpilogueDescriptor_t fused     = nullptr;
         hipblasLtMatmulDesc_t              mm        = nullptr;
@@ -49,6 +87,14 @@ namespace hipblaslt_bench
 
         void* dRecv[kRecvSlices]                                     = {};
         void* recvPtrs[kRecvSlices][HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
+        // A2AGemm only. peerB[rank] aliases dB; the rest are IPC maps.
+        void*                            dGather                                = nullptr;
+        void*                            peerB[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+        hipblasLtMatmulDesc_t            plainMm                                = nullptr;
+        hipblasLtMatmulHeuristicResult_t plainHeur                              = {};
+        void*                            dRefB                                  = nullptr;
+        void*                            dRefD                                  = nullptr;
 
         hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
@@ -68,6 +114,9 @@ namespace hipblaslt_bench
                 for(void* p : recvPtrs[s])
                     if(p != nullptr && p != dRecv[s])
                         static_cast<void>(hipIpcCloseMemHandle(p));
+            for(void* p : peerB)
+                if(p != nullptr && p != dB)
+                    static_cast<void>(hipIpcCloseMemHandle(p));
 
             for(hipblasLtMatrixLayout_t l : lay)
                 if(l != nullptr)
@@ -76,6 +125,8 @@ namespace hipblaslt_bench
                 static_cast<void>(hipblasLtMatmulPreferenceDestroy(pref));
             if(mm != nullptr)
                 static_cast<void>(hipblasLtMatmulDescDestroy(mm));
+            if(plainMm != nullptr)
+                static_cast<void>(hipblasLtMatmulDescDestroy(plainMm));
             if(fused != nullptr)
                 static_cast<void>(hipblasLtFusedEpilogueDestroy(fused));
 
@@ -85,6 +136,9 @@ namespace hipblaslt_bench
             static_cast<void>(hipFree(dD));
             for(void* p : dRecv)
                 static_cast<void>(hipFree(p));
+            static_cast<void>(hipFree(dGather));
+            static_cast<void>(hipFree(dRefB));
+            static_cast<void>(hipFree(dRefD));
             static_cast<void>(hipFree(workspace));
 
             ownedQueues.clear();
@@ -123,8 +177,115 @@ namespace hipblaslt_bench
         return arg.a2a_extent / arg.a2a_world;
     }
 
+    // Integers in [-2, 2], a pure function of (rank, launch).
+    inline std::vector<hipblasLtBfloat16>
+        a2a_gemm_values(size_t count, uint32_t rank, int64_t launchIndex)
+    {
+        std::vector<hipblasLtBfloat16> values(count);
+        uint64_t state = (uint64_t(rank) + 1) * 0x9E3779B97F4A7C15ull + uint64_t(launchIndex);
+        for(hipblasLtBfloat16& v : values)
+        {
+            state = state * 6364136223846793005ull + 1442695040888963407ull;
+            v     = hipblasLtBfloat16(float(int((state >> 33) % 5) - 2));
+        }
+        return values;
+    }
+
+    // Rank `rank`'s B for launch `launchIndex`, laid out [destination, token, k].
+    inline std::vector<hipblasLtBfloat16>
+        a2a_gemm_b(const Arguments& arg, uint32_t rank, int64_t launchIndex)
+    {
+        return a2a_gemm_values(size_t(arg.K[0]) * arg.N[0], rank, launchIndex);
+    }
+
+    // Writes this rank's B for the launch and poisons the gather buffer.
+    inline bool a2a_gemm_write_input(const LauncherEnv& env,
+                                     const Arguments&   arg,
+                                     RankResources&     res,
+                                     int64_t            launchIndex)
+    {
+        const std::vector<hipblasLtBfloat16> b = a2a_gemm_b(arg, env.rank, launchIndex);
+        CHECK_HIP_RC(hipMemcpy(res.dB, b.data(), b.size() * sizeof(b[0]), hipMemcpyHostToDevice));
+        CHECK_HIP_RC(hipMemset(res.dGather, 0xC7, b.size() * sizeof(b[0])));
+        return true;
+    }
+
+    // D must equal a plain GEMM of A with the gathered B: K block s of the
+    // gathered B is block `rank` of rank s's B.
+    inline bool a2a_gemm_check(const LauncherEnv& env,
+                               const Arguments&   arg,
+                               RankResources&     res,
+                               int64_t            launchIndex)
+    {
+        const size_t world = arg.a2a_world, n = arg.N[0], k = arg.K[0], kLocal = k / world;
+        std::vector<hipblasLtBfloat16> gathered(k * n);
+        for(uint32_t s = 0; s < world; ++s)
+        {
+            const std::vector<hipblasLtBfloat16> peer = a2a_gemm_b(arg, s, launchIndex);
+            for(size_t t = 0; t < n; ++t)
+                std::memcpy(gathered.data() + t * k + s * kLocal,
+                            peer.data() + (size_t(env.rank) * n + t) * kLocal,
+                            kLocal * sizeof(hipblasLtBfloat16));
+        }
+        CHECK_HIP_RC(hipMemcpy(res.dRefB,
+                               gathered.data(),
+                               gathered.size() * sizeof(hipblasLtBfloat16),
+                               hipMemcpyHostToDevice));
+
+        const float alpha = 1.0f, beta = 0.0f;
+        CHECK_LT_RC(hipblasLtMatmul(res.handle,
+                                    res.plainMm,
+                                    &alpha,
+                                    res.dA,
+                                    res.lay[0],
+                                    res.dRefB,
+                                    res.lay[1],
+                                    &beta,
+                                    res.dRefD,
+                                    res.lay[2],
+                                    res.dRefD,
+                                    res.lay[3],
+                                    &res.plainHeur.algo,
+                                    res.workspace,
+                                    kWorkspaceSize,
+                                    res.stream));
+        CHECK_HIP_RC(hipStreamSynchronize(res.stream));
+
+        const size_t                   count = size_t(arg.M[0]) * n;
+        std::vector<hipblasLtBfloat16> fused(count), reference(count);
+        CHECK_HIP_RC(
+            hipMemcpy(fused.data(), res.dD, count * sizeof(fused[0]), hipMemcpyDeviceToHost));
+        CHECK_HIP_RC(hipMemcpy(
+            reference.data(), res.dRefD, count * sizeof(reference[0]), hipMemcpyDeviceToHost));
+
+        size_t mismatches = 0, nonzero = 0;
+        for(size_t i = 0; i < count; ++i)
+        {
+            mismatches += std::memcmp(&fused[i], &reference[i], sizeof(fused[i])) != 0;
+            nonzero += float(reference[i]) != 0.0f;
+        }
+        if(nonzero == 0)
+        {
+            hipblaslt_cerr << "error: rank " << env.rank << " reference D is all zero\n";
+            return false;
+        }
+        if(mismatches != 0)
+            hipblaslt_cerr << "error: rank " << env.rank << " launch " << launchIndex << ": "
+                           << mismatches << " of " << count << " D elements differ\n";
+        return mismatches == 0;
+    }
+
     inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
+        if(res.collective == Collective::A2AGemm)
+        {
+            const std::vector<hipblasLtBfloat16> a
+                = a2a_gemm_values(size_t(arg.K[0]) * arg.M[0], env.rank, -1);
+            CHECK_HIP_RC(
+                hipMemcpy(res.dA, a.data(), a.size() * sizeof(a[0]), hipMemcpyHostToDevice));
+            return a2a_gemm_write_input(env, arg, res, 0);
+        }
+
         std::vector<hipblasLtBfloat16> hostA(size_t(arg.K[0]) * arg.M[0]);
         std::vector<hipblasLtBfloat16> hostB(size_t(arg.K[0]) * arg.N[0]);
 
@@ -234,10 +395,19 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipMalloc(&res.dC, bytesD));
         CHECK_HIP_RC(hipMalloc(&res.dD, bytesD));
         CHECK_HIP_RC(hipMalloc(&res.workspace, kWorkspaceSize));
-        for(void*& p : res.dRecv)
+        if(res.collective == Collective::A2AGemm)
         {
-            CHECK_HIP_RC(hipMalloc(&p, bytesRecv));
-            CHECK_HIP_RC(hipMemset(p, 0, bytesRecv));
+            CHECK_HIP_RC(hipMalloc(&res.dGather, bytesB));
+            CHECK_HIP_RC(hipMalloc(&res.dRefB, bytesB));
+            CHECK_HIP_RC(hipMalloc(&res.dRefD, bytesD));
+        }
+        else
+        {
+            for(void*& p : res.dRecv)
+            {
+                CHECK_HIP_RC(hipMalloc(&p, bytesRecv));
+                CHECK_HIP_RC(hipMemset(p, 0, bytesRecv));
+            }
         }
 
         try
@@ -281,23 +451,50 @@ namespace hipblaslt_bench
                                            rendezvous_allgather_trampoline,
                                            res.rendezvous));
 
-        for(uint32_t s = 0; s < kRecvSlices; ++s)
-            if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv[s], res.recvPtrs[s]))
+        const bool a2aGemm = res.collective == Collective::A2AGemm;
+        if(a2aGemm)
+        {
+            if(!exchange_ipc_pointers(env, *res.rendezvous, res.dB, res.peerB))
                 return false;
+        }
+        else
+        {
+            for(uint32_t s = 0; s < kRecvSlices; ++s)
+                if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv[s], res.recvPtrs[s]))
+                    return false;
+        }
 
         CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
-        CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused,
-                                              HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+        if(a2aGemm)
+        {
+            CHECK_LT_RC(
+                hipblasLtFusedPrologueAdd(res.fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX));
+            CHECK_LT_RC(
+                hipblasLtFusedEpilogueSetAttribute(res.fused,
+                                                   HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
+                                                   res.peerB,
+                                                   arg.a2a_world * sizeof(res.peerB[0])));
+            CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
+                res.fused,
+                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER,
+                &res.dGather,
+                sizeof(res.dGather)));
+        }
+        else
+        {
+            CHECK_LT_RC(
+                hipblasLtFusedEpilogueAdd(res.fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+            CHECK_LT_RC(
+                hipblasLtFusedEpilogueSetAttribute(res.fused,
+                                                   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
+                                                   res.recvPtrs[0],
+                                                   arg.a2a_world * sizeof(res.recvPtrs[0][0])));
+        }
         CHECK_LT_RC(
             hipblasLtFusedEpilogueSetAttribute(res.fused,
                                                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
                                                res.queues,
                                                arg.a2a_world * sizeof(res.queues[0])));
-        CHECK_LT_RC(
-            hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                               HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                               res.recvPtrs[0],
-                                               arg.a2a_world * sizeof(res.recvPtrs[0][0])));
         CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
             res.fused,
             HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
@@ -325,8 +522,11 @@ namespace hipblaslt_bench
             res.mm, HIPBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT)));
         CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
             res.mm, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN)));
-        CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
-            res.mm, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &res.fused, sizeof(res.fused)));
+        CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(res.mm,
+                                                    a2aGemm ? HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE
+                                                            : HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
+                                                    &res.fused,
+                                                    sizeof(res.fused)));
 
         CHECK_LT_RC(hipblasLtMatmulPreferenceCreate(&res.pref));
         CHECK_LT_RC(hipblasLtMatmulPreferenceSetAttribute(
@@ -334,6 +534,29 @@ namespace hipblaslt_bench
             HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
             &kWorkspaceSize,
             sizeof(kWorkspaceSize)));
+
+        if(a2aGemm)
+        {
+            CHECK_LT_RC(hipblasLtMatmulDescCreate(&res.plainMm, HIPBLAS_COMPUTE_32F, HIP_R_32F));
+            CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
+                res.plainMm, HIPBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT)));
+            int plainCount = 0;
+            CHECK_LT_RC(hipblasLtMatmulAlgoGetHeuristic(res.handle,
+                                                        res.plainMm,
+                                                        res.lay[0],
+                                                        res.lay[1],
+                                                        res.lay[2],
+                                                        res.lay[3],
+                                                        res.pref,
+                                                        1,
+                                                        &res.plainHeur,
+                                                        &plainCount));
+            if(plainCount == 0)
+            {
+                hipblaslt_cerr << "error: no plain GEMM solution for the reference\n";
+                return false;
+            }
+        }
 
         return fill_operands(env, arg, res);
     }
