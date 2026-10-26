@@ -812,10 +812,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return singleStageLoop() && waitAlu_ && isGlobalPrefetch(*node->inst) &&
                waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
     }
+    // A queued WMMA with no source-data wait: only such a WMMA can hide a held memory op.
+    bool wmmaIssuableNow() const {
+        for (DAGNode* w : wmmaQueue)
+            if (getMaxSrcDataWait(w) <= 0) return true;
+        return false;
+    }
     // A prefetch or VMEM load no level placed (no prefetch lead) whose va_vdst the WMMAs still
     // ready to issue would hide: it waits for them, as far as the scoreboard needs and no further.
     bool unplacedMemWaitsOut(const DAGNode* node) const {
-        if (!waitAlu_ || wmmaQueue.empty()) return false;
+        if (!waitAlu_ || !wmmaIssuableNow()) return false;
         const StinkyInstruction& inst = *node->inst;
         if (!isGlobalPrefetch(inst) && !isBufferMemLoad(inst) && !isGlobalMemLoad(inst))
             return false;
