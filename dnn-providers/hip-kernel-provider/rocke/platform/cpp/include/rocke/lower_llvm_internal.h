@@ -101,8 +101,8 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
- * different decl text. */
+/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): new keys and
+ * keys with different decl text. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
