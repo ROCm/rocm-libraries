@@ -4,7 +4,7 @@ Source: [`conv_direct_nongrouped.py`](conv_direct_nongrouped.py) —
 `DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`,
 `nongrouped_specs`, `nongrouped_knobs`, `tile_w_candidates`.
 
-C++ engine twin: `platform/cpp/instances/common/conv_direct_nongrouped.cpp`
+C++ engine twin: `library/cpp/instances/common/conv_direct_nongrouped.cpp`
 (public header `rocke/instance_conv_direct_nongrouped.h`), byte-identical `.ll`.
 
 ## Why a separate family
@@ -310,13 +310,13 @@ heuristic, not a validity rule: the per-shape
 |------|----------------|---------|
 | C++ ↔ Python byte-identity | the C++ port emits identical `.ll` for 15 configs covering every atom, dtype, stride, filter size, partial tile, uneven staging pass, DB/SB, swizzle on/off, iglp, waves_per_eu, gfx942/gfx950 | `python platform/tools/check_byte_identity.py --only conv_direct_grouped` (also with `ROCKE_LLVM_FLAVOR=llvm22`) |
 | Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 42+ (dilated: 63+) | `tests/parity/conv_direct_grouped_emit.{py,c}` |
-| IR golden | Python lowering is byte-stable (7 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
+| IR golden | Python lowering is byte-stable (7 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `tests/test_conv_ir_golden.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16; includes one binary launched on four unrelated shapes | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |
 | AOT cache | runtime channels, width filtering, `groups == 1` only, plans pack against the signature | `pytest tests/test_direct_kernel_cache.py` |
 
-`rocke.core.backend.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
-reaches the C++ builder directly through the `rocke_engine.conv_direct_nongrouped_*`
+`kernels.conv.engine_bridge.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
+reaches the C++ builder directly through the `rocke_library_engine.conv_direct_nongrouped_*`
 binding.
 
 When changing the builder, change `conv_direct_nongrouped.cpp` in the same change and

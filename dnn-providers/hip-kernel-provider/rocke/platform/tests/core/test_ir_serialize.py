@@ -90,16 +90,18 @@ def _build_corpus():
 
     kernels["elementwise"] = build_elementwise(ElementwiseSpec(op="add"))
 
-    from kernels.common.conv_implicit_gemm import (
-        ConvProblem,
-        ImplicitGemmConvSpec,
-        build_implicit_gemm_conv,
+    # A padded, windowed NHWC kernel on buffer resources. The library's conv
+    # specimen round-trips in library/tests/test_conv_platform_regressions.py.
+    from rocke.instances.common.pooling import (
+        Pooling2DSpec,
+        PoolingProblem,
+        build_pooling2d,
     )
 
-    kernels["conv_implicit_gemm"] = build_implicit_gemm_conv(
-        ImplicitGemmConvSpec(
-            problem=ConvProblem(N=1, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            epilogue="cshuffle",
+    kernels["pooling2d"] = build_pooling2d(
+        Pooling2DSpec(
+            problem=PoolingProblem(N=1, H=14, W=14, C=64, Y=3, X=3, pH=1, pW=1),
+            vec=4,
         )
     )
 

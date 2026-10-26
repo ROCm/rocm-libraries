@@ -39,7 +39,7 @@ def _old_add(a, b):  # conv_args, conv_direct_grouped, dgrad, wgrad reduce
     return (a + b - 1) // b
 
 
-def _old_add_int(a, b):  # helpers/split_k.py
+def _old_add_int(a, b):  # helpers/split_k.py, kernels/common/conv_split_k.py
     return (int(a) + int(b) - 1) // int(b)
 
 
@@ -204,6 +204,7 @@ _GEMM = [
 
 
 def _snap_split_k():
+    from kernels.common import conv_split_k as csk
     from rocke.helpers import split_k as sk
 
     rows = []
@@ -214,7 +215,7 @@ def _snap_split_k():
             )
         )
         rows.append(
-            sk.select_split_k_wgrad(
+            csk.select_split_k_wgrad(
                 wg_M=M, wg_N=N, wg_K=K, tile_m=tm, tile_n=tn, tile_k=tk, groups=batch
             )
         )
@@ -322,6 +323,7 @@ def test_streamk_sweep_has_streamk_ctas():
             {"ceil_div": _old_add},
         ),
         ("split_k", "rocke.helpers.split_k", {"ceil_div": _old_add_int}),
+        ("split_k", "kernels.common.conv_split_k", {"ceil_div": _old_add_int}),
         (
             "streamk",
             "rocke.helpers.streamk",
@@ -354,7 +356,8 @@ def test_split_k_keeps_int_coercion_of_its_inputs(wgrad):
     the ceiling, as the removed private copy did: whole ``float`` and
     ``numpy`` values there give the integer result (no ``TypeError``)."""
     np = pytest.importorskip("numpy")
-    from rocke.helpers.split_k import select_split_k, select_split_k_wgrad
+    from kernels.common.conv_split_k import select_split_k_wgrad
+    from rocke.helpers.split_k import select_split_k
 
     if wgrad:
         fn, mn, rest = select_split_k_wgrad, ("wg_M", "wg_N"), {"wg_K": 1024}

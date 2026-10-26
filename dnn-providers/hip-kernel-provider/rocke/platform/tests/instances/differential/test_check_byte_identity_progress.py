@@ -30,6 +30,9 @@ def test_differential_gate_streams_unbuffered_progress(
         calls.append((command, kwargs))
         if command[:2] == ["cmake", "--build"]:
             (tmp_path / "librocke_core.a").touch()
+            # Library families link their own archive (library/cpp) when present.
+            if "rocke_library_core" in command:
+                (tmp_path / "librocke_library.a").touch()
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(module.subprocess, "run", run)

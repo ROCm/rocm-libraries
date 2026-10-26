@@ -1,7 +1,12 @@
 # Cpp L5 golden anchor
 
 `llvm_gfx_all.json` is the **absolute regression anchor** for the C engine's
-emitted output. It records, per emit mode, per family, per sampled config, the
+emitted output. It anchors the families whose emitters live in
+`platform/tests/instances/parity/`; families discovered in
+`library/tests/parity/` are anchored in
+`library/tests/parity/golden/llvm_gfx_all.json`, in the same format. `run_diff.py`
+routes each family to the file beside its emitters, checks both, and fails if a
+family is blessed in both. It records, per emit mode, per family, per sampled config, the
 canonical reference sha256:
 
 - `"ll"` — sha of the lowered LLVM IR text (the Python reference, which equals
@@ -44,7 +49,8 @@ If a diff is expected (you deliberately changed codegen), re-record:
     python3 ../run_diff.py --mode ll              --archive <librocke_core.a> --record-golden
     python3 ../run_diff.py --mode ir --canonical  --archive <librocke_core.a> --record-golden
 
-`--record-golden` overwrites the matching top-level key in this file. It records
+`--record-golden` overwrites the matching top-level key in each golden file
+(with `--only`, just the families that ran). It records
 the Python reference shas and will note (but not block on) any C-vs-Python
 DRIFT. Commit the regenerated `llvm_gfx_all.json` alongside the code change that
 justifies it, and call out the re-bless in review.

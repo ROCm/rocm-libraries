@@ -113,9 +113,9 @@ class TestDgradWmmaSpec(unittest.TestCase):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a few rejected specs (the byte-identity
         gate only covers the IR of specs both engines build)."""
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import DGRAD_WMMA_KNOBS
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         specs = []
         for wc, wp, tc, tp, tw, tn, ck, st, pf in DGRAD_WMMA_KNOBS:
@@ -156,8 +156,8 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for knobs in (dict(waves_c=0), dict(tiles_c=0), dict(waves_p=0)):
             sd = conv_direct_dgrad_wmma_spec_to_dict(

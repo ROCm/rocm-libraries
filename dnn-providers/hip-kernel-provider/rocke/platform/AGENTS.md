@@ -349,7 +349,8 @@ invariants.
 - New kernels must become reusable spec-driven builders under `instances/`, not
   one-off scripts.
 - Optimization work must leave a replayable case study in the relevant
-  `examples/<arch>/<workload>/` folder.
+  `examples/<arch>/<workload>/` folder (`library/builders/<arch>/<workload>/`
+  for a library family).
 - General lessons from an optimization must be promoted into
   `dsl_docs/optimization/` as a skill, lever, or runbook update.
 - Reusable kernels must be wired into registry/test/byte-identity coverage before
@@ -458,6 +459,7 @@ dual-engine vs Python-only split.
    - Prevents a class of silent bugs if duplicated (lane maps, barriers, pipelining)
    - Cuts instance authoring to a spec + callback skeleton (target: 60–80 line kernels)
 3. If it emits SSA: plan Python + C++ mirror + byte-identity in the same PR
+   (a library family's mirror lives in `library/cpp/`, not `cpp/`)
 
 ### Keep in instances when ANY of:
 
