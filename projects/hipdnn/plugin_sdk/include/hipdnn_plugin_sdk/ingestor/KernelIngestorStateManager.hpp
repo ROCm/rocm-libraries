@@ -805,12 +805,7 @@ private:
                 };
                 // A multi-launch kernel keeps no `source`: every launch entry answers for
                 // itself, and one this build cannot adapt costs the whole kernel.
-                if(kernel.sources.empty() ? !isAdaptable(kernel.source)
-                                          : !std::all_of(kernel.sources.begin(),
-                                                         kernel.sources.end(),
-                                                         [&](const auto& launch) {
-                                                             return isAdaptable(launch.second);
-                                                         }))
+                if(!allLaunchSources(kernel, isAdaptable))
                 {
                     // Dropped, not thrown: an unadaptable kernel costs only itself, so its
                     // pack keeps serving whichever siblings this build can dispatch.
