@@ -3,7 +3,7 @@
 
 import pytest
 
-from Tensile.SolutionStructs.Validators.Subtile import (
+from tensilelite.SolutionStructs.Validators.Subtile import (
     _SUBTILE_STACK_FULL_LINE,
     _SUBTILE_STACK_SIZES,
     _subtileStackForTile,

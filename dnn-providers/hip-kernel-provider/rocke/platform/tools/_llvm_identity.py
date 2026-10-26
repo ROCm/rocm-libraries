@@ -21,15 +21,21 @@ import re
 import subprocess
 
 
-def clang_identity(clang: str) -> str:
-    """The first line of `clang --version`, or `(unknown)`.
+def tool_identity(exe: str) -> str:
+    """The first line of `<exe> --version`, or `(unknown)`.
+
+    Not clang-specific: `opt` must introduce itself too, since it measures the
+    flavor axis while clang measures the arch axis, and taking them from
+    different installs would file one vintage's answers under the other's name.
+    Both banners put the version on the first line (`AMD clang version
+    22.0.0git (...)`, `AMD LLVM version 22.0.0git`).
 
     Never raises: a tool that cannot introduce itself is a fact to record, not
     a reason to abort a sweep that has not started yet.
     """
     try:
         proc = subprocess.run(
-            [clang, "--version"], capture_output=True, text=True, check=False
+            [exe, "--version"], capture_output=True, text=True, check=False
         )
         return (proc.stdout or "").strip().splitlines()[0][:200]
     except (OSError, IndexError):
@@ -37,12 +43,16 @@ def clang_identity(clang: str) -> str:
 
 
 def flavor_of_clang(identity: str) -> str | None:
-    """Best-effort LLVM major from a `clang --version` line, as a flavor string.
+    """Best-effort LLVM major from a `--version` line, as a flavor string.
+
+    Accepts either banner this tree asks for: clang says `clang version N`,
+    `opt` says `LLVM version N`. One regex rather than two, so the two tools
+    cannot appear to disagree merely from being parsed differently.
 
     `None` means the banner did not carry a version we recognise -- which must
     read as "unknown", never as "mismatch". A vendor is free to reword this
     line, and a caller that treated an unparseable banner as disagreement would
     turn a cosmetic change upstream into a red gate everywhere.
     """
-    m = re.search(r"clang version (\d+)", identity)
+    m = re.search(r"(?:clang|LLVM) version (\d+)", identity)
     return f"llvm{m.group(1)}" if m else None

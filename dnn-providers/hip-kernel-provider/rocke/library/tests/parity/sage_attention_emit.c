@@ -3,7 +3,7 @@
  *
  * tests/parity/sage_attention_emit.c -- C-side emitter for the Sage attention
  * forward (instance_sage_attention) parity harness. Selects one of the sampled
- * configs by argv[1] (the config index 0..5), builds rocke_sage_attention_spec_t
+ * configs by argv[1] (the config index 0..6), builds rocke_sage_attention_spec_t
  * identically to the Python emitter sage_attention_emit.py, builds + lowers via
  * rocke_sage_attention_lower_to_llvm (arch gfx950, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
@@ -165,6 +165,28 @@ static int make_spec(int idx, rocke_sage_attention_spec_t* spec)
         spec->seqlen_q = 32;
         spec->seqlen_k = 128;
         break;
+    case 6: /* scale blocks of 48 positions: position -> scale-block divides by 48 */
+        shape = rocke_fmha_shape_make(64, 8, 8, 16, 64);
+        common = rocke_fmha_common_spec_default(shape);
+        common.dtype = "f16";
+        common.mask_mode = ROCKE_FMHA_MASK_NONE;
+        qs.layout = ROCKE_QK_SCALE_PER_BLOCK;
+        qs.scale_block = 48;
+        qs.stride_batch = 128;
+        qs.stride_head = 8;
+        qs.stride_block = 1;
+        ks.layout = ROCKE_QK_SCALE_PER_BLOCK;
+        ks.scale_block = 48;
+        ks.stride_batch = 128;
+        ks.stride_head = 8;
+        ks.stride_block = 1;
+        spec->common = common;
+        spec->quant_mode = ROCKE_SAGE_QUANT_FP16_BF16;
+        spec->q_scale = qs;
+        spec->k_scale = ks;
+        spec->seqlen_q = 96;
+        spec->seqlen_k = 144;
+        break;
     default:
         return -1;
     }
@@ -175,7 +197,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5> [mode]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..6> [mode]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

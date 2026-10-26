@@ -19,6 +19,8 @@
  */
 #include "rocke/ir_import.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -444,7 +446,10 @@ static jval_t* jp_value(jparser_t* jp)
         return jp_object(jp);
     if(c == '[')
         return jp_array(jp);
-    if(c == '-' || (c >= '0' && c <= '9'))
+    /* Python's json.dumps spells IEEE non-finite doubles as NaN and
+     * Infinity. Float attrs are doubles and must preserve those values, so
+     * accept the producer's spellings through strtod as well as JSON numbers. */
+    if(c == '-' || c == 'N' || c == 'I' || (c >= '0' && c <= '9'))
         return jp_number(jp);
     if(jp_lit(jp, "true"))
     {
@@ -692,6 +697,8 @@ static void rename_value(importer_t* im, rocke_value_t* v, const char* exported_
         v->name = copy;
 }
 
+static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out);
+
 /* Build a rocke_type_t from a JSON type node: scalar -> name string; composite
  * -> {"kind": ...}. */
 static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
@@ -722,7 +729,15 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
             jval_t* cnt = jobj_get(t, "count");
             if(!elem || !cnt || cnt->kind != J_NUM)
                 return im->failed ? nullptr : (imp_fail(im, "bad vector type"), nullptr);
-            return rocke_vector_type(im->b, elem, (int)cnt->num);
+            int64_t count;
+            if(!import_int_value(im, "vector count", cnt, &count))
+                return NULL;
+            if(count < INT_MIN || count > INT_MAX)
+            {
+                imp_fail(im, "vector count is outside the int range");
+                return NULL;
+            }
+            return rocke_vector_type(im->b, elem, (int)count);
         }
         if(strcmp(kind, "ptr") == 0)
         {
@@ -746,7 +761,19 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
                 return NULL;
             }
             for(int i = 0; i < rank; i++)
-                dims[i] = (int)shp->arr[i]->num;
+            {
+                int64_t dim;
+                char context[64];
+                snprintf(context, sizeof context, "smem shape item %d", i);
+                if(!import_int_value(im, context, shp->arr[i], &dim))
+                    return NULL;
+                if(dim < INT_MIN || dim > INT_MAX)
+                {
+                    imp_fail(im, "%s is outside the int range", context);
+                    return NULL;
+                }
+                dims[i] = (int)dim;
+            }
             /* exclusive is reconstructed from the op attr in import_op (the
              * type node, like the canonical type name, omits it). */
             return rocke_smem_type(im->b, elem, dims, rank, 0);
@@ -756,6 +783,23 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
     }
     imp_fail(im, "bad type node");
     return NULL;
+}
+
+static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out)
+{
+    /* JSON numbers are doubles in this parser. Stay in the safe-integer range
+     * and validate before casting: larger adjacent integer spellings can round
+     * to the same double, while non-finite and out-of-range conversions are
+     * undefined behavior. */
+    if(!v || v->kind != J_NUM || !isfinite(v->num)
+       || !(v->num >= -9007199254740991.0 && v->num <= 9007199254740991.0)
+       || v->num != (double)(int64_t)v->num)
+    {
+        imp_fail(im, "%s is not an integer", context);
+        return false;
+    }
+    *out = (int64_t)v->num;
+    return true;
 }
 
 /* Populate a rocke_attr_map_t from a JSON typed-attr object (keys -> {"t","v"}).
@@ -783,7 +827,13 @@ static void import_attrs(importer_t* im, const jval_t* attrs, rocke_attr_map_t* 
             return;
         }
         if(strcmp(t, "i") == 0)
-            rocke_attr_set_int(im->b, m, key, (int64_t)v->num);
+        {
+            int64_t n;
+            char context[320];
+            snprintf(context, sizeof context, "attr '%s' value", key);
+            if(import_int_value(im, context, v, &n))
+                rocke_attr_set_int(im->b, m, key, n);
+        }
         else if(strcmp(t, "f") == 0)
             rocke_attr_set_float(im->b, m, key, v->num);
         else if(strcmp(t, "b") == 0)
@@ -1218,7 +1268,15 @@ static void import_params(importer_t* im, const jval_t* params)
                 }
                 else if(strcmp(key, "align") == 0)
                 {
-                    opts.align = (int)v->num;
+                    int64_t align;
+                    if(!import_int_value(im, "param align", v, &align) || align < INT_MIN
+                       || align > INT_MAX)
+                    {
+                        if(!im->failed)
+                            imp_fail(im, "param align is outside the int range");
+                        return;
+                    }
+                    opts.align = (int)align;
                     opts.align_set = true;
                 }
                 else if(strcmp(key, "addr_space") == 0)
@@ -1271,14 +1329,10 @@ static void
             imp_fail(im, "kernel attr '%s': item %d is not a bare int", key, i);
             return;
         }
-        /* Range test first: the cast is undefined for out-of-range doubles. */
-        if(!(n->num >= -9007199254740992.0 && n->num <= 9007199254740992.0)
-           || n->num != (double)(int64_t)n->num)
-        {
-            imp_fail(im, "kernel attr '%s': item %d is not an integer", key, i);
+        char context[320];
+        snprintf(context, sizeof context, "kernel attr '%s': item %d", key, i);
+        if(!import_int_value(im, context, n, &ints[i]))
             return;
-        }
-        ints[i] = (int64_t)n->num;
     }
     rocke_attr_set_int_list(im->b, m, key, ints, v->arr_len);
 }
@@ -1318,7 +1372,13 @@ static void import_kernel_attrs(importer_t* im, const jval_t* attrs)
         if(!t || !v)
             continue;
         if(strcmp(t, "i") == 0)
-            rocke_attr_set_int(im->b, &k->attrs, key, (int64_t)v->num);
+        {
+            int64_t n;
+            char context[320];
+            snprintf(context, sizeof context, "kernel attr '%s' value", key);
+            if(import_int_value(im, context, v, &n))
+                rocke_attr_set_int(im->b, &k->attrs, key, n);
+        }
         else if(strcmp(t, "f") == 0)
             rocke_attr_set_float(im->b, &k->attrs, key, v->num);
         else if(strcmp(t, "b") == 0)

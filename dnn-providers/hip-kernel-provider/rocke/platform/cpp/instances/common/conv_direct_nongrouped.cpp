@@ -3,7 +3,8 @@
 /*
  * conv_direct_nongrouped.cpp -- C++ engine port of build_direct_conv_nongrouped
  * (library/kernels/common/conv_direct_nongrouped.py): the non-grouped (groups == 1)
- * NHWC direct convolution with an LDS-staged, halo-inclusive activation tile.
+ * NHWC direct convolution with an LDS-staged, halo-inclusive activation tile,
+ * plus its grouped (group-merge) mode.
  *
  * BYTE-IDENTITY CONTRACT. Every IR op (including each arith.constant) is
  * emitted in exactly the order the Python builder emits it. Python evaluates
@@ -20,6 +21,7 @@
  *     (prologue, grid decode, staging metadata, read bases, channel loop,
  *     epilogue) sharing one file-local context struct
  *   - the _new / lower_to_llvm convenience entries
+ *   - the split-C reduction (DirectSplitReduceSpec): spec, builder, entries
  */
 #include "rocke/instance_conv_direct_nongrouped.h"
 
@@ -47,6 +49,10 @@
  * predication is folded into the base offset, and a buffer access past
  * num_records is dropped (a load returns zero). */
 #define ROCKE_DCONV_NONGROUPED_OOB_BASE 0x7F000000
+
+/* Output elements per thread of the split-C reduction (Python _REDUCE_VEC): one
+ * dwordx4 store of 16-bit outputs, read as two dwordx4 fp32 loads per slab. */
+#define ROCKE_DCONV_SPLIT_REDUCE_VEC 8
 
 /* ===================================================================== *
  *  Atom table  (Python _ATOMS: name -> (tile, K, frag))
@@ -145,6 +151,9 @@ rocke_direct_conv_nongrouped_spec_t rocke_direct_conv_nongrouped_spec_default(vo
     spec.double_buffer = false;
     spec.iglp = ROCKE_DCONV_NONGROUPED_IGLP_NONE;
     spec.waves_per_eu = ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE;
+    spec.split_c = 1;
+    spec.grouped = false;
+    spec.group_merge = 1;
     return spec;
 }
 
@@ -185,6 +194,41 @@ int rocke_direct_conv_nongrouped_acc_vgprs(const rocke_direct_conv_nongrouped_sp
     return m_tiles_per_wave * n_tiles_per_wave * acc_per_lane;
 }
 
+/* merged_c / merged_k: the input channels one workgroup reduces over and the
+ * output channels its channel tiles span (cpg / kpg x group_merge when grouped). */
+static int nongrouped_merged_c(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    return spec->problem.cpg * (spec->grouped ? spec->group_merge : 1);
+}
+
+static int nongrouped_merged_k(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    return spec->problem.kpg * (spec->grouped ? spec->group_merge : 1);
+}
+
+/* w_vec: channels per weight staging load. A merged block's fragment can
+ * straddle two groups when cpg is 4, so it is loaded (and masked) in halves of
+ * 4 channels. Returns 0 for an unknown atom. */
+static int nongrouped_w_vec(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    const rocke_dconv_nongrouped_atom_t* at = nongrouped_atom(spec->atom);
+    if(spec->grouped && spec->group_merge > 1)
+    {
+        return 4;
+    }
+    return at != NULL ? at->frag : 0;
+}
+
+/* Merged groups per image (the n_mg grid factor); 1 for the dense kernel. */
+static int nongrouped_n_mg(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    if(!spec->grouped || spec->group_merge < 1)
+    {
+        return 1;
+    }
+    return spec->problem.groups / spec->group_merge;
+}
+
 static void nongrouped_tile_counts(const rocke_direct_conv_nongrouped_spec_t* spec,
                                    int* n_wt,
                                    int* n_ht,
@@ -193,16 +237,28 @@ static void nongrouped_tile_counts(const rocke_direct_conv_nongrouped_spec_t* sp
     const rocke_direct_conv_problem_t* p = &spec->problem;
     *n_wt = (nongrouped_wo(p) + spec->tile_w - 1) / spec->tile_w;
     *n_ht = (nongrouped_ho(p) + spec->tile_h - 1) / spec->tile_h;
-    *n_kt = (p->kpg + spec->tile_k - 1) / spec->tile_k;
+    *n_kt = (nongrouped_merged_k(spec) + spec->tile_k - 1) / spec->tile_k;
 }
 
 void rocke_direct_conv_nongrouped_grid(const rocke_direct_conv_nongrouped_spec_t* spec, int grid[3])
 {
     int n_wt, n_ht, n_kt;
     nongrouped_tile_counts(spec, &n_wt, &n_ht, &n_kt);
-    grid[0] = n_wt * n_ht * spec->problem.N * n_kt;
+    grid[0] = n_wt * n_ht * spec->problem.N * nongrouped_n_mg(spec) * n_kt * spec->split_c;
     grid[1] = 1;
     grid[2] = 1;
+}
+
+long long
+    rocke_direct_conv_nongrouped_workspace_bytes(const rocke_direct_conv_nongrouped_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->split_c == 1)
+    {
+        return 0;
+    }
+    return 4LL * spec->split_c * p->N * nongrouped_ho(p) * nongrouped_wo(p)
+           * ((long long)p->groups * p->kpg);
 }
 
 /* ===================================================================== *
@@ -219,8 +275,10 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     char g_buf[24];
     char iglp_buf[24];
     char we_buf[24];
+    char sc_buf[24];
+    char grp_buf[24];
     char d_buf[32];
-    const char* parts[11];
+    const char* parts[13];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -252,6 +310,16 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     {
         snprintf(we_buf, sizeof(we_buf), "we%d", spec->waves_per_eu);
     }
+    sc_buf[0] = '\0';
+    if(spec->split_c > 1)
+    {
+        snprintf(sc_buf, sizeof(sc_buf), "sc%d", spec->split_c);
+    }
+    grp_buf[0] = '\0';
+    if(spec->grouped)
+    {
+        snprintf(grp_buf, sizeof(grp_buf), "grp%d", spec->group_merge);
+    }
     /* f"d{dil_h}x{dil_w}" only for a dilated problem: undilated names are unchanged. */
     d_buf[0] = '\0';
     if(spec->problem.dil_h != 1 || spec->problem.dil_w != 1)
@@ -268,8 +336,10 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     parts[7] = spec->double_buffer ? "db" : "";
     parts[8] = iglp_buf;
     parts[9] = we_buf;
-    parts[10] = nongrouped_is_bf16(spec) ? "bf16" : "";
-    return rocke_kernel_name_join(spec->name, parts, 11, NULL, NULL, 0, out, out_cap, NULL);
+    parts[10] = sc_buf;
+    parts[11] = grp_buf;
+    parts[12] = nongrouped_is_bf16(spec) ? "bf16" : "";
+    return rocke_kernel_name_join(spec->name, parts, 13, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -281,7 +351,7 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     const rocke_direct_conv_problem_t* p;
     const rocke_dconv_nongrouped_atom_t* at;
     char msg[ROCKE_ERR_MSG_CAP];
-    int t;
+    int t, merged_c, merged_k;
 
     if(spec == NULL)
     {
@@ -303,11 +373,25 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         NONGROUPED_REJECT("DirectNongroupedConvSpec: unsupported dtype '%s'",
                           nongrouped_dtype(spec));
     }
-    if(p->groups != 1)
+    if(!spec->grouped && p->groups != 1)
     {
         NONGROUPED_REJECT("DirectNongroupedConvSpec is the groups==1 family (got groups=%d); "
                           "use conv_direct_grouped for grouped shapes",
                           p->groups);
+    }
+    if(spec->grouped && p->groups < 1)
+    {
+        NONGROUPED_REJECT("grouped=True needs groups >= 1 (got groups=%d)", p->groups);
+    }
+    /* Python's `%` floors; a nonzero remainder is nonzero in either convention. */
+    if(spec->grouped && (spec->group_merge < 1 || p->groups % spec->group_merge != 0))
+    {
+        NONGROUPED_REJECT(
+            "group_merge %d must be positive and divide groups %d", spec->group_merge, p->groups);
+    }
+    if(!spec->grouped && spec->group_merge != 1)
+    {
+        NONGROUPED_REJECT("group_merge %d needs grouped=True", spec->group_merge);
     }
     at = nongrouped_atom(spec->atom);
     if(at == NULL)
@@ -356,18 +440,26 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     {
         NONGROUPED_REJECT("ck %d not divisible by %d", spec->ck, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
     }
-    if(p->cpg % spec->ck != 0)
+    merged_c = nongrouped_merged_c(spec);
+    merged_k = nongrouped_merged_k(spec);
+    if(merged_c % spec->ck != 0)
     {
-        NONGROUPED_REJECT("C %d not divisible by ck %d", p->cpg, spec->ck);
+        NONGROUPED_REJECT("C %d not divisible by ck %d", merged_c, spec->ck);
     }
-    if(p->kpg % t != 0)
+    if(merged_k % t != 0)
     {
-        NONGROUPED_REJECT("K %d must be a multiple of %d (got %d)", p->kpg, t, p->kpg);
+        NONGROUPED_REJECT("K %d must be a multiple of %d (got %d)", merged_k, t, merged_k);
     }
-    if(p->cpg % ROCKE_DCONV_NONGROUPED_X_LOAD_VEC != 0)
+    if(merged_c % ROCKE_DCONV_NONGROUPED_X_LOAD_VEC != 0)
     {
         NONGROUPED_REJECT(
-            "C %d must be a multiple of %d", p->cpg, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+            "C %d must be a multiple of %d", merged_c, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC);
+    }
+    if(spec->grouped && p->cpg % nongrouped_w_vec(spec) != 0)
+    {
+        NONGROUPED_REJECT("cpg %d must be a multiple of the %d-channel weight load",
+                          p->cpg,
+                          nongrouped_w_vec(spec));
     }
     if(rocke_direct_conv_nongrouped_threads_per_block(spec) > 1024)
     {
@@ -407,7 +499,7 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         int n_wt, n_ht, n_kt;
         long long grid_x;
         nongrouped_tile_counts(spec, &n_wt, &n_ht, &n_kt);
-        grid_x = (long long)n_wt * n_ht * p->N * n_kt;
+        grid_x = (long long)n_wt * n_ht * p->N * nongrouped_n_mg(spec) * n_kt * spec->split_c;
         if(grid_x > INT32_MAX)
         {
             NONGROUPED_REJECT("flattened grid of %lld workgroups exceeds %d: grow the tile or "
@@ -420,9 +512,11 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         /* Masked staging loads and epilogue stores go to OOB_BASE and rely on
          * it being past num_records; a larger tensor would hand the loads real
          * data and take the stores. */
-        long long a_bytes = 2LL * p->N * p->H * p->W * p->cpg;
-        long long b_bytes = 2LL * p->kpg * p->KH * p->KW * p->cpg;
-        long long d_bytes = 2LL * p->N * nongrouped_ho(p) * nongrouped_wo(p) * p->kpg;
+        long long total_c = (long long)p->groups * p->cpg;
+        long long total_k = (long long)p->groups * p->kpg;
+        long long a_bytes = 2LL * p->N * p->H * p->W * total_c;
+        long long b_bytes = 2LL * total_k * p->KH * p->KW * p->cpg;
+        long long d_bytes = 2LL * p->N * nongrouped_ho(p) * nongrouped_wo(p) * total_k;
         long long biggest = a_bytes > b_bytes ? a_bytes : b_bytes;
         biggest = d_bytes > biggest ? d_bytes : biggest;
         if(biggest > ROCKE_DCONV_NONGROUPED_OOB_BASE)
@@ -435,12 +529,34 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
                               d_bytes);
         }
         /* The last prefetch runs one chunk (two when double-buffered) past C. */
-        if((long long)ROCKE_DCONV_NONGROUPED_OOB_BASE + 2LL * (p->cpg + spec->ck) > INT32_MAX)
+        if((long long)ROCKE_DCONV_NONGROUPED_OOB_BASE + 2LL * (total_c + spec->ck) > INT32_MAX)
         {
             NONGROUPED_REJECT("C %d too large: the masked-load offset plus the channel offset "
                               "would overflow i32",
                               p->cpg);
         }
+    }
+    if(spec->split_c < 1)
+    {
+        NONGROUPED_REJECT("split_c must be >= 1 (got %d)", spec->split_c);
+    }
+    if(merged_c / spec->ck < spec->split_c)
+    {
+        /* Every split owns at least one whole chunk: the channel loop assumes
+         * it runs at least once. */
+        NONGROUPED_REJECT("C %d has %d chunks of ck=%d, fewer than split_c=%d",
+                          merged_c,
+                          merged_c / spec->ck,
+                          spec->ck,
+                          spec->split_c);
+    }
+    if(rocke_direct_conv_nongrouped_workspace_bytes(spec) > ROCKE_DCONV_NONGROUPED_OOB_BASE)
+    {
+        NONGROUPED_REJECT(
+            "split_c=%d workspace of %lld B exceeds the %#x-byte masked-access offset",
+            spec->split_c,
+            rocke_direct_conv_nongrouped_workspace_bytes(spec),
+            ROCKE_DCONV_NONGROUPED_OOB_BASE);
     }
     if(rocke_direct_conv_nongrouped_acc_vgprs(spec) > 256)
     {
@@ -547,10 +663,21 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
 namespace
 {
 
+/* One W_VEC-channel piece of a merged (group_merge > 1) weight fragment. */
+struct nongrouped_w_piece
+{
+    rocke_value_t* elems; /* element offset of the piece's first channel at chunk 0 */
+    rocke_value_t* c_rel; /* its channel relative to k_out's group span             */
+};
+
 struct nongrouped_stage_meta
 {
     rocke_value_t* base; /* global byte offset base (chunk offset added per iter) */
     rocke_value_t* lds_idx; /* LDS half index of this thread's slot                 */
+    /* Merged-group weights only (base unused): the slot's k_out < K_M mask and
+     * the per-piece offsets, masked per chunk in issue_stage_loads. */
+    rocke_value_t* valid;
+    std::vector<nongrouped_w_piece> pieces;
 };
 
 struct nongrouped_ctx
@@ -570,11 +697,17 @@ struct nongrouped_ctx
     int X_CV, X_VECS, X_PASSES, W_SLOTS, W_PASSES;
     int x_stage, w_stage, x_dump, w_dump;
     bool DB;
+    int SPLIT; /* spec->split_c */
+    bool GROUPED; /* spec->grouped */
+    int GM; /* spec->group_merge */
+    int W_VEC; /* channels per weight staging load (Python spec.w_vec) */
 
-    /* The AOT kernarg block. groups == 1, so p_total_c / p_total_k (C / K
-     * below) are the full channel counts. */
+    /* The AOT kernarg block. C / K are p_total_c / p_total_k. Dense: C_M, K_M
+     * and C_W alias them. Grouped: C_M / K_M are the merged block's channel
+     * counts a workgroup reduces / produces and C_W (= cpg) the weight row. */
     rocke_dconv_params_t params;
     rocke_value_t *C, *K;
+    rocke_value_t *cpg_v, *kpg_v, *C_M, *K_M, *C_W; /* cpg_v / kpg_v NULL when dense */
 
     /* SSA values. */
     rocke_value_t *c0, *c1, *c_half, *oob_base;
@@ -582,6 +715,10 @@ struct nongrouped_ctx
     rocke_value_t *X_smem, *W_smem;
     rocke_value_t *tid, *lane, *wave_id, *wave_m, *wave_n, *lane_lo, *lane_hi;
     rocke_value_t *k_tile, *cell, *n_img, *out_h0, *out_w0, *k_base, *in_h0, *in_w0;
+    rocke_value_t* split; /* this workgroup's split; NULL when SPLIT == 1 */
+    /* Channel offsets of the block's merged group in X (and D) and K; NULL
+     * when dense. */
+    rocke_value_t *a_ch_base, *k_glob_base;
     rocke_value_t *x_read_base, *w_read_base;
 
     std::vector<nongrouped_stage_meta> x_meta;
@@ -666,6 +803,10 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.X_PASSES = (c.X_VECS + c.THREADS - 1) / c.THREADS;
     c.W_SLOTS = c.KH * c.KW * c.M_TILES * c.KATOMS * c.WAVE;
     c.W_PASSES = (c.W_SLOTS + c.THREADS - 1) / c.THREADS;
+    c.SPLIT = spec->split_c;
+    c.GROUPED = spec->grouped;
+    c.GM = spec->group_merge;
+    c.W_VEC = (c.GROUPED && c.GM > 1) ? 4 : c.FRAG;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.THREADS);
     if(spec->waves_per_eu != ROCKE_DCONV_NONGROUPED_WAVES_PER_EU_NONE)
@@ -680,6 +821,35 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     }
     c.C = c.params.p_total_c;
     c.K = c.params.p_total_k;
+    if(c.GROUPED)
+    {
+        /* Per-group channel counts, and the merged block's: C_W is the weight
+         * row length, C_M / K_M the channels a workgroup reduces / produces. */
+        rocke_value_t* k;
+        c.cpg_v = rocke_b_div(b, c.C, c.params.p_groups);
+        c.kpg_v = rocke_b_div(b, c.K, c.params.p_groups);
+        c.C_M = c.cpg_v;
+        if(c.GM > 1)
+        {
+            k = nongrouped_c(c, c.GM);
+            c.C_M = rocke_b_mul(b, c.cpg_v, k);
+        }
+        c.K_M = c.kpg_v;
+        if(c.GM > 1)
+        {
+            k = nongrouped_c(c, c.GM);
+            c.K_M = rocke_b_mul(b, c.kpg_v, k);
+        }
+        c.C_W = c.cpg_v;
+    }
+    else
+    {
+        c.cpg_v = NULL;
+        c.kpg_v = NULL;
+        c.C_M = c.C;
+        c.K_M = c.K;
+        c.C_W = c.C;
+    }
 
     c.c0 = nongrouped_c(c, 0);
     c.c1 = nongrouped_c(c, 1);
@@ -737,7 +907,8 @@ void nongrouped_grid_decode(nongrouped_ctx& c)
 {
     rocke_ir_builder_t* b = c.b;
     const rocke_direct_conv_nongrouped_spec_t* spec = c.spec;
-    rocke_value_t *wgid, *k, *t, *n_wt, *n_ht, *n_kt, *n_hw, *n_cells, *st, *w_tile, *h_tile;
+    rocke_value_t *wgid, *k, *t, *n_wt, *n_ht, *n_kt, *n_hw, *n_cells, *n_cols, *st, *w_tile,
+        *h_tile, *n_mg = NULL;
 
     k = nongrouped_c(c, c.TW - 1);
     t = rocke_b_add(b, c.params.p_Wo, k);
@@ -748,11 +919,32 @@ void nongrouped_grid_decode(nongrouped_ctx& c)
     k = nongrouped_c(c, c.TH);
     n_ht = rocke_b_div(b, t, k);
     k = nongrouped_c(c, c.TK - 1);
-    t = rocke_b_add(b, c.K, k);
+    t = rocke_b_add(b, c.K_M, k);
     k = nongrouped_c(c, c.TK);
     n_kt = rocke_b_div(b, t, k);
     n_hw = rocke_b_mul(b, n_wt, n_ht);
     n_cells = rocke_b_mul(b, n_hw, c.params.p_N);
+    if(c.GROUPED)
+    {
+        /* Merged group innermost on the cell axis: (n * n_hw + st) * n_mg + mg.
+         * The groups of one pixel tile share every cache line of its input
+         * pixels, so they run back to back and each line is fetched once. */
+        n_mg = c.params.p_groups;
+        if(c.GM > 1)
+        {
+            k = nongrouped_c(c, c.GM);
+            n_mg = rocke_b_div(b, c.params.p_groups, k);
+        }
+        n_cells = rocke_b_mul(b, n_cells, n_mg);
+    }
+    /* A split kernel's cell axis is split-major: split * n_cells + cell, so the
+     * swizzle treats the splits as more spatial cells of the same grid. */
+    n_cols = n_cells;
+    if(c.SPLIT > 1)
+    {
+        k = nongrouped_c(c, c.SPLIT);
+        n_cols = rocke_b_mul(b, n_cells, k);
+    }
 
     wgid = rocke_b_block_id_x(b);
     if(spec->chiplet_swizzle)
@@ -760,7 +952,7 @@ void nongrouped_grid_decode(nongrouped_ctx& c)
         /* A swizzle_wgm above the runtime channel-tile count needs no clamp:
          * the swizzle sizes its last group as min(wgm, tiles left). */
         rocke_super_tile_swizzle_result_t sw = rocke_chiplet_aware_super_tile_dynamic(
-            b, wgid, n_kt, n_cells, spec->swizzle_wgm, spec->num_xcds, spec->chiplet_chunk);
+            b, wgid, n_kt, n_cols, spec->swizzle_wgm, spec->num_xcds, spec->chiplet_chunk);
         c.k_tile = sw.row;
         c.cell = sw.col;
     }
@@ -769,7 +961,23 @@ void nongrouped_grid_decode(nongrouped_ctx& c)
         c.k_tile = rocke_b_mod(b, wgid, n_kt);
         c.cell = rocke_b_div(b, wgid, n_kt);
     }
+    c.split = NULL;
+    if(c.SPLIT > 1)
+    {
+        c.split = rocke_b_div(b, c.cell, n_cells);
+        c.cell = rocke_b_mod(b, c.cell, n_cells);
+    }
 
+    c.a_ch_base = NULL;
+    c.k_glob_base = NULL;
+    if(c.GROUPED)
+    {
+        rocke_value_t* mg = rocke_b_mod(b, c.cell, n_mg);
+        c.cell = rocke_b_div(b, c.cell, n_mg);
+        /* Channel offsets of the block's merged group in X (and D) and K. */
+        c.a_ch_base = rocke_b_mul(b, mg, c.C_M);
+        c.k_glob_base = rocke_b_mul(b, mg, c.K_M);
+    }
     c.n_img = rocke_b_div(b, c.cell, n_hw);
     st = rocke_b_mod(b, c.cell, n_hw);
     w_tile = rocke_b_mod(b, st, n_wt);
@@ -802,6 +1010,10 @@ void nongrouped_x_pass_meta(nongrouped_ctx& c)
     int j;
 
     img_base = rocke_b_mul(b, c.n_img, c.params.p_A_stride_n);
+    if(c.GROUPED)
+    {
+        img_base = rocke_b_add(b, img_base, c.a_ch_base);
+    }
     for(j = 0; j < c.X_PASSES; ++j)
     {
         rocke_value_t *v, *cv, *pos, *ih_l, *iw_l, *ih, *iw;
@@ -857,7 +1069,7 @@ void nongrouped_x_pass_meta(nongrouped_ctx& c)
         }
         t0 = rocke_b_mul(b, elems, c.c_half);
         base = rocke_b_select(b, valid, t0, c.oob_base);
-        c.x_meta.push_back({base, lds_idx});
+        c.x_meta.push_back({base, lds_idx, NULL, {}});
     }
 }
 
@@ -907,12 +1119,57 @@ void nongrouped_w_pass_meta(nongrouped_ctx& c)
         t1 = rocke_b_mul(b, t1, k);
         c_in_chunk = rocke_b_add(b, t0, t1);
 
-        valid = rocke_b_cmp_lt(b, k_out, c.K);
+        valid = rocke_b_cmp_lt(b, k_out, c.K_M);
         if(c.W_SLOTS % c.THREADS != 0)
         {
             k = nongrouped_c(c, c.W_SLOTS);
             in_tile = rocke_b_cmp_lt(b, g, k);
             valid = rocke_b_land(b, valid, in_tile);
+        }
+        if(c.GROUPED && c.GM > 1)
+        {
+            /* Block-diagonal weights: k_out's group owns merged channels
+             * [grp_k*cpg, (grp_k+1)*cpg). Each W_VEC-channel piece of the
+             * fragment is loaded from its own offset relative to that span,
+             * and masked per chunk (see issue_stage_loads). */
+            nongrouped_stage_meta m;
+            rocke_value_t *grp_k, *k_glob, *c_rel0;
+            int h;
+            grp_k = rocke_b_div(b, k_out, c.kpg_v);
+            k_glob = rocke_b_add(b, k_out, c.k_glob_base);
+            k = nongrouped_c(c, c.KH);
+            krs_h = rocke_b_mul(b, k_glob, k);
+            krs_hr = rocke_b_add(b, krs_h, r);
+            k = nongrouped_c(c, c.KW);
+            krs_w = rocke_b_mul(b, krs_hr, k);
+            krs = rocke_b_add(b, krs_w, s);
+            t0 = rocke_b_mul(b, grp_k, c.cpg_v);
+            c_rel0 = rocke_b_sub(b, c_in_chunk, t0);
+            for(h = 0; h < c.FRAG / c.W_VEC; ++h)
+            {
+                nongrouped_w_piece pc;
+                k = nongrouped_c(c, (int64_t)h * c.W_VEC);
+                pc.c_rel = rocke_b_add(b, c_rel0, k);
+                t0 = rocke_b_mul(b, krs, c.C_W);
+                pc.elems = rocke_b_add(b, t0, pc.c_rel);
+                m.pieces.push_back(pc);
+            }
+            k = nongrouped_c(c, c.FRAG);
+            lds_idx = rocke_b_mul(b, g, k);
+            if(in_tile != NULL)
+            {
+                k = nongrouped_c(c, c.w_dump);
+                lds_idx = rocke_b_select(b, in_tile, lds_idx, k);
+            }
+            m.base = NULL;
+            m.lds_idx = lds_idx;
+            m.valid = valid;
+            c.w_meta.push_back(m);
+            continue;
+        }
+        if(c.GROUPED)
+        {
+            k_out = rocke_b_add(b, k_out, c.k_glob_base);
         }
 
         /* base = ((k_out*KH + r)*KW + s)*C + c_in_chunk (KRSC) */
@@ -922,7 +1179,7 @@ void nongrouped_w_pass_meta(nongrouped_ctx& c)
         k = nongrouped_c(c, c.KW);
         krs_w = rocke_b_mul(b, krs_hr, k);
         krs = rocke_b_add(b, krs_w, s);
-        t0 = rocke_b_mul(b, krs, c.C);
+        t0 = rocke_b_mul(b, krs, c.C_W);
         elems = rocke_b_add(b, t0, c_in_chunk);
         k = nongrouped_c(c, c.FRAG);
         lds_idx = rocke_b_mul(b, g, k);
@@ -933,7 +1190,7 @@ void nongrouped_w_pass_meta(nongrouped_ctx& c)
         }
         t0 = rocke_b_mul(b, elems, c.c_half);
         base = rocke_b_select(b, valid, t0, c.oob_base);
-        c.w_meta.push_back({base, lds_idx});
+        c.w_meta.push_back({base, lds_idx, NULL, {}});
     }
 }
 
@@ -949,6 +1206,33 @@ void nongrouped_issue_stage_loads(nongrouped_ctx& c,
     {
         rocke_value_t* voff = rocke_b_add(c.b, m.base, c_off);
         xs.push_back(nongrouped_buf_load(c, c.a_rsrc, voff, ROCKE_DCONV_NONGROUPED_X_LOAD_VEC / 2));
+    }
+    if(c.GROUPED && c.GM > 1)
+    {
+        /* Merged channel of the chunk's first element; a piece belongs to
+         * k_out's group iff its relative channel lands in [0, cpg). */
+        rocke_ir_builder_t* b = c.b;
+        rocke_value_t* c_el = rocke_b_div(b, c_off, c.c_half);
+        for(const nongrouped_stage_meta& m : c.w_meta)
+        {
+            rocke_value_t* v = NULL;
+            for(const nongrouped_w_piece& pc : m.pieces)
+            {
+                rocke_value_t *rel, *ge, *lt, *ok, *t, *off, *part;
+                rel = rocke_b_add(b, pc.c_rel, c_el);
+                ge = rocke_b_cmp_ge(b, rel, c.c0);
+                lt = rocke_b_cmp_lt(b, rel, c.cpg_v);
+                ok = rocke_b_land(b, ge, lt);
+                ok = rocke_b_land(b, m.valid, ok);
+                t = rocke_b_add(b, pc.elems, c_el);
+                t = rocke_b_mul(b, t, c.c_half);
+                off = rocke_b_select(b, ok, t, c.oob_base);
+                part = nongrouped_buf_load(c, c.b_rsrc, off, c.W_VEC / 2);
+                v = (v == NULL) ? part : rocke_b_vec_concat(b, v, part);
+            }
+            ws.push_back(v);
+        }
+        return;
     }
     for(const nongrouped_stage_meta& m : c.w_meta)
     {
@@ -1104,6 +1388,7 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
     rocke_value_t* zero_acc;
     rocke_value_t* c_ck_bytes;
     rocke_value_t* hi;
+    rocke_value_t *chunk_lo = NULL, *chunk_hi = NULL, *c_start = NULL;
     std::vector<rocke_value_t*> xs0, ws0;
     std::vector<rocke_iter_arg_t> iter_args;
     std::vector<std::string> names;
@@ -1114,12 +1399,36 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
     zero_acc = rocke_b_zero_vec_f32(b, c.ACC);
 
     c_ck_bytes = nongrouped_c(c, (int64_t)c.CK * 2);
-    nongrouped_issue_stage_loads(c, c.c0, xs0, ws0);
+    if(c.SPLIT > 1)
+    {
+        /* Split `split` owns chunks [split*T/S, (split+1)*T/S) of the T chunks
+         * of C; validate() keeps T >= S, so every split owns one. */
+        rocke_value_t *k, *t, *t_chunks, *c_split;
+        k = nongrouped_c(c, c.CK);
+        t_chunks = rocke_b_div(b, c.C_M, k);
+        c_split = nongrouped_c(c, c.SPLIT);
+        t = rocke_b_mul(b, c.split, t_chunks);
+        chunk_lo = rocke_b_div(b, t, c_split);
+        t = rocke_b_add(b, c.split, c.c1);
+        t = rocke_b_mul(b, t, t_chunks);
+        chunk_hi = rocke_b_div(b, t, c_split);
+        c_start = rocke_b_mul(b, chunk_lo, c_ck_bytes);
+        nongrouped_issue_stage_loads(c, c_start, xs0, ws0);
+    }
+    else
+    {
+        nongrouped_issue_stage_loads(c, c.c0, xs0, ws0);
+    }
     if(c.DB)
     {
         /* Prologue: publish chunk 0 into buffer 0 and have chunk 1 in flight. */
+        rocke_value_t* nxt = c_ck_bytes;
         nongrouped_commit_stage(c, xs0, ws0, NULL, NULL);
-        nongrouped_issue_stage_loads(c, c_ck_bytes, xs0, ws0);
+        if(c.SPLIT > 1)
+        {
+            nxt = rocke_b_add(b, c_start, c_ck_bytes);
+        }
+        nongrouped_issue_stage_loads(c, nxt, xs0, ws0);
     }
 
     for(i = 0; i < n_acc; ++i)
@@ -1151,8 +1460,15 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
      * positive whole number of chunks, so the clamp never changes it; it lets
      * LLVM prove the loop runs, without which it keeps a zero-trip guard and
      * schedules the prefetch loads late. */
-    hi = nongrouped_c(c, c.CK);
-    hi = rocke_b_div(b, c.C, hi);
+    if(c.SPLIT > 1)
+    {
+        hi = rocke_b_sub(b, chunk_hi, chunk_lo);
+    }
+    else
+    {
+        hi = nongrouped_c(c, c.CK);
+        hi = rocke_b_div(b, c.C_M, hi);
+    }
     hi = rocke_b_smax(b, hi, c.c1);
     loop = rocke_b_scf_for_iter(
         b, c.c0, hi, c.c1, iter_args.data(), (int)iter_args.size(), "c_iter", false, false);
@@ -1197,6 +1513,10 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
             k = nongrouped_c(c, 2);
             t = rocke_b_add(b, loop.iv, k);
             c_off = rocke_b_mul(b, t, c_ck_bytes);
+            if(c.SPLIT > 1)
+            {
+                c_off = rocke_b_add(b, c_off, c_start);
+            }
             nongrouped_issue_stage_loads(c, c_off, xs_n, ws_n);
             xb = rocke_b_add(b, c.x_read_base, cur_x);
             wb = rocke_b_add(b, c.w_read_base, cur_w);
@@ -1210,6 +1530,10 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
             rocke_b_sync(b);
             t = rocke_b_add(b, loop.iv, c.c1);
             c_off = rocke_b_mul(b, t, c_ck_bytes);
+            if(c.SPLIT > 1)
+            {
+                c_off = rocke_b_add(b, c_off, c_start);
+            }
             nongrouped_issue_stage_loads(c, c_off, xs_n, ws_n);
             nongrouped_emit_mfmas(c, accs, c.x_read_base, c.w_read_base);
         }
@@ -1232,8 +1556,9 @@ std::vector<rocke_value_t*> nongrouped_channel_loop(nongrouped_ctx& c)
 void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& accs_out)
 {
     rocke_ir_builder_t* b = c.b;
-    rocke_value_t *k, *t0, *t1, *k_lane_base, *row_base, *img_out_base;
+    rocke_value_t *k, *t0, *t1, *k_lane_base, *row_base, *img_out_base, *c_f32 = NULL;
     const rocke_dconv_params_t* prm = &c.params;
+    const bool split = c.SPLIT > 1;
     int mt, row, cb, q, jj;
 
     /* Slot i -> row = (i//4)*(AT//4) + lane_hi*4 + (i%4), col = lane_lo.
@@ -1247,7 +1572,18 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
     k = nongrouped_c(c, c.ROWS_W);
     t0 = rocke_b_mul(b, c.wave_n, k);
     row_base = rocke_b_add(b, c.out_h0, t0);
-    img_out_base = rocke_b_mul(b, c.n_img, prm->p_D_stride_n);
+    if(split)
+    {
+        /* D is the fp32 workspace: slab `split` of a packed
+         * [split_c, N, Ho, Wo, K] array, whatever the output's strides. */
+        t0 = rocke_b_mul(b, c.split, prm->p_N);
+        img_out_base = rocke_b_add(b, t0, c.n_img);
+        c_f32 = nongrouped_c(c, 4);
+    }
+    else
+    {
+        img_out_base = rocke_b_mul(b, c.n_img, prm->p_D_stride_n);
+    }
 
     for(mt = 0; mt < c.MT_W; ++mt)
     {
@@ -1260,8 +1596,17 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
             k = nongrouped_c(c, row);
             out_h = rocke_b_add(b, row_base, k);
             h_ok = rocke_b_cmp_lt(b, out_h, prm->p_Ho);
-            t0 = rocke_b_mul(b, out_h, prm->p_D_stride_ho);
-            row_off = rocke_b_add(b, img_out_base, t0);
+            if(split)
+            {
+                t0 = rocke_b_mul(b, img_out_base, prm->p_Ho);
+                t0 = rocke_b_add(b, t0, out_h);
+                row_off = rocke_b_mul(b, t0, prm->p_Wo);
+            }
+            else
+            {
+                t0 = rocke_b_mul(b, out_h, prm->p_D_stride_ho);
+                row_off = rocke_b_add(b, img_out_base, t0);
+            }
             for(cb = 0; cb < c.NCB; ++cb)
             {
                 int nt = row * c.NCB + cb;
@@ -1273,8 +1618,16 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
                 out_w = rocke_b_add(b, t0, c.lane_lo);
                 t0 = rocke_b_cmp_lt(b, out_w, prm->p_Wo);
                 hw_ok = rocke_b_land(b, h_ok, t0);
-                t0 = rocke_b_mul(b, out_w, prm->p_D_stride_wo);
-                base_off = rocke_b_add(b, row_off, t0);
+                if(split)
+                {
+                    t0 = rocke_b_add(b, row_off, out_w);
+                    base_off = rocke_b_mul(b, t0, c.K);
+                }
+                else
+                {
+                    t0 = rocke_b_mul(b, out_w, prm->p_D_stride_wo);
+                    base_off = rocke_b_add(b, row_off, t0);
+                }
                 for(q = 0; q < c.QUADS; ++q)
                 {
                     rocke_value_t *k_out, *valid, *d_off, *safe, *quad, *narrow;
@@ -1282,8 +1635,28 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
 
                     k = nongrouped_c(c, (int64_t)q * (c.AT / 4));
                     k_out = rocke_b_add(b, k_mt, k);
-                    t0 = rocke_b_cmp_lt(b, k_out, c.K);
+                    t0 = rocke_b_cmp_lt(b, k_out, c.K_M);
                     valid = rocke_b_land(b, hw_ok, t0);
+                    /* Output channel index = local (bounded by the merged K)
+                     * + the merged group's base. */
+                    if(c.GROUPED)
+                    {
+                        k_out = rocke_b_add(b, k_out, c.k_glob_base);
+                    }
+                    if(split)
+                    {
+                        rocke_value_t* ws_off;
+                        t0 = rocke_b_add(b, base_off, k_out);
+                        ws_off = rocke_b_mul(b, t0, c_f32);
+                        safe = rocke_b_select(b, valid, ws_off, c.oob_base);
+                        for(jj = 0; jj < 4; ++jj)
+                        {
+                            comps[jj] = rocke_b_vec_extract(b, acc, 4 * q + jj);
+                        }
+                        quad = rocke_b_vec_pack(b, comps, 4, rocke_f32());
+                        rocke_b_buffer_store_vN_f32(b, c.d_rsrc, safe, c.c0, quad, 4);
+                        continue;
+                    }
                     t0 = rocke_b_add(b, base_off, k_out);
                     d_off = rocke_b_mul(b, t0, c.c_half);
                     /* Same sentinel as the staging loads: validate() keeps D at
@@ -1423,6 +1796,303 @@ rocke_status_t
         st = rocke_ir_builder_status(&b);
         nongrouped_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_nongrouped failed");
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
+    }
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+/* ===================================================================== *
+ *  Split-C reduction  (Python DirectSplitReduceSpec /
+ *  build_direct_conv_split_reduce)
+ * ===================================================================== */
+
+static const char* split_reduce_dtype(const rocke_direct_conv_split_reduce_spec_t* spec)
+{
+    return spec->dtype ? spec->dtype : "fp16";
+}
+
+static bool split_reduce_is_bf16(const rocke_direct_conv_split_reduce_spec_t* spec)
+{
+    return strcmp(split_reduce_dtype(spec), "bf16") == 0;
+}
+
+rocke_direct_conv_split_reduce_spec_t rocke_direct_conv_split_reduce_spec_default(void)
+{
+    rocke_direct_conv_split_reduce_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.dtype = "fp16";
+    spec.split_c = 2;
+    spec.threads = 256;
+    spec.name = "direct_conv_split_reduce";
+    return spec;
+}
+
+rocke_status_t rocke_direct_conv_split_reduce_kernel_name(
+    const rocke_direct_conv_split_reduce_spec_t* spec, char* out, size_t out_cap)
+{
+    char sc_buf[24];
+    char b_buf[24];
+    const char* parts[3];
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    snprintf(sc_buf, sizeof(sc_buf), "sc%d", spec->split_c);
+    snprintf(b_buf, sizeof(b_buf), "b%d", spec->threads);
+    parts[0] = sc_buf;
+    parts[1] = b_buf;
+    parts[2] = split_reduce_is_bf16(spec) ? "bf16" : "";
+    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_conv_split_reduce_validate(
+    const rocke_direct_conv_split_reduce_spec_t* spec, char* reason, size_t reason_cap)
+{
+    char msg[ROCKE_ERR_MSG_CAP];
+
+    if(spec == NULL)
+    {
+        nongrouped_set_reason(reason, reason_cap, "null spec");
+        return ROCKE_ERR_VALUE;
+    }
+    if(strcmp(split_reduce_dtype(spec), "fp16") != 0
+       && strcmp(split_reduce_dtype(spec), "bf16") != 0)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "DirectSplitReduceSpec: unsupported dtype '%s'",
+                 split_reduce_dtype(spec));
+        nongrouped_set_reason(reason, reason_cap, msg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->split_c < 2)
+    {
+        snprintf(msg, sizeof(msg), "split_c must be >= 2 (got %d)", spec->split_c);
+        nongrouped_set_reason(reason, reason_cap, msg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->threads <= 0 || spec->threads % 64 != 0 || spec->threads > 1024)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "threads must be a positive multiple of 64 up to 1024 (got %d)",
+                 spec->threads);
+        nongrouped_set_reason(reason, reason_cap, msg);
+        return ROCKE_ERR_VALUE;
+    }
+    nongrouped_set_reason(reason, reason_cap, "ok");
+    return ROCKE_OK;
+}
+
+void rocke_direct_conv_split_reduce_grid(const rocke_direct_conv_split_reduce_spec_t* spec,
+                                         const rocke_direct_conv_problem_t* problem,
+                                         int grid[3])
+{
+    long long per_block = (long long)spec->threads * ROCKE_DCONV_SPLIT_REDUCE_VEC;
+    long long total = (long long)problem->N * nongrouped_ho(problem) * nongrouped_wo(problem)
+                      * ((long long)problem->groups * problem->kpg);
+    grid[0] = (int)((total + per_block - 1) / per_block);
+    grid[1] = 1;
+    grid[2] = 1;
+}
+
+rocke_kernel_def_t* rocke_build_direct_conv_split_reduce(
+    rocke_ir_builder_t* b, const rocke_direct_conv_split_reduce_spec_t* spec, const char* arch)
+{
+    char reason[ROCKE_ERR_MSG_CAP];
+    const rocke_type_t* io_type;
+    rocke_dconv_params_t params;
+    rocke_value_t *K, *c0, *oob_base, *ws_rsrc, *d_rsrc, *k, *t, *gid, *elem, *hw, *total, *valid;
+    rocke_value_t *slab_bytes, *elem_bytes, *ws_off, *ws_off_hi, *sum_lo = NULL, *sum_hi = NULL;
+    rocke_value_t *pix, *kk, *n, *rem, *ho, *wo, *t0, *t1, *d_elems, *d_off, *out;
+    bool bf16;
+    int s;
+
+    /* The kernel uses no arch-specific instruction; arch is accepted for the
+     * builder-table signature. */
+    (void)arch;
+    if(b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if(rocke_direct_conv_split_reduce_validate(spec, reason, sizeof reason) != ROCKE_OK)
+    {
+        if(b->status == ROCKE_OK)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err, sizeof b->err, "%.*s", (int)(sizeof b->err - 1), reason);
+        }
+        return NULL;
+    }
+    io_type = rocke_b_io_ir_type(b, split_reduce_dtype(spec));
+    if(io_type == NULL)
+    {
+        return NULL;
+    }
+    bf16 = split_reduce_is_bf16(spec);
+
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->threads);
+    rocke_dconv_emit_params(b, &params, "fwd", io_type);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return NULL;
+    }
+    K = params.p_total_k;
+
+    c0 = rocke_b_const_i32(b, 0);
+    oob_base = rocke_b_const_i32(b, ROCKE_DCONV_NONGROUPED_OOB_BASE);
+    ws_rsrc = rocke_b_buffer_rsrc(b, params.A, params.A_bytes);
+    d_rsrc = rocke_b_buffer_rsrc(b, params.D, params.D_bytes);
+
+    t = rocke_b_block_id_x(b);
+    k = rocke_b_const_i32(b, spec->threads);
+    t = rocke_b_mul(b, t, k);
+    t0 = rocke_b_thread_id_x(b);
+    gid = rocke_b_add(b, t, t0);
+    k = rocke_b_const_i32(b, ROCKE_DCONV_SPLIT_REDUCE_VEC);
+    elem = rocke_b_mul(b, gid, k);
+    hw = rocke_b_mul(b, params.p_Ho, params.p_Wo);
+    t = rocke_b_mul(b, params.p_N, hw);
+    total = rocke_b_mul(b, t, K);
+    valid = rocke_b_cmp_lt(b, elem, total);
+
+    /* The fp32 slabs are packed; elem indexes one of them directly. */
+    k = rocke_b_const_i32(b, 4);
+    slab_bytes = rocke_b_mul(b, total, k);
+    k = rocke_b_const_i32(b, 4);
+    elem_bytes = rocke_b_mul(b, elem, k);
+    ws_off = rocke_b_select(b, valid, elem_bytes, oob_base);
+    k = rocke_b_const_i32(b, 16);
+    t = rocke_b_add(b, elem_bytes, k);
+    ws_off_hi = rocke_b_select(b, valid, t, oob_base);
+    /* The slab offset goes in soffset, summed by the hardware after the
+     * select: added to OOB_BASE in IR it would pass INT32_MAX once a slab
+     * nears 16 MiB. All loads first, then the adds: the slabs' loads are
+     * independent, so issuing them back to back overlaps their latencies. */
+    {
+        std::vector<rocke_value_t*> los, his;
+        for(s = 0; s < spec->split_c; ++s)
+        {
+            rocke_value_t* soff = c0;
+            if(s != 0)
+            {
+                k = rocke_b_const_i32(b, s);
+                soff = rocke_b_mul(b, slab_bytes, k);
+            }
+            los.push_back(rocke_b_buffer_load_vN(b, ws_rsrc, ws_off, soff, rocke_f32(), 4));
+            his.push_back(rocke_b_buffer_load_vN(b, ws_rsrc, ws_off_hi, soff, rocke_f32(), 4));
+        }
+        sum_lo = los[0];
+        sum_hi = his[0];
+        for(s = 1; s < spec->split_c; ++s)
+        {
+            sum_lo = rocke_b_fadd(b, sum_lo, los[(size_t)s]);
+            sum_hi = rocke_b_fadd(b, sum_hi, his[(size_t)s]);
+        }
+    }
+
+    /* Packed element -> (n, ho, wo, k) -> strided output offset. */
+    pix = rocke_b_div(b, elem, K);
+    kk = rocke_b_mod(b, elem, K);
+    n = rocke_b_div(b, pix, hw);
+    rem = rocke_b_mod(b, pix, hw);
+    ho = rocke_b_div(b, rem, params.p_Wo);
+    wo = rocke_b_mod(b, rem, params.p_Wo);
+    t0 = rocke_b_mul(b, n, params.p_D_stride_n);
+    t1 = rocke_b_mul(b, ho, params.p_D_stride_ho);
+    t0 = rocke_b_add(b, t0, t1);
+    t1 = rocke_b_mul(b, wo, params.p_D_stride_wo);
+    t1 = rocke_b_add(b, t1, kk);
+    d_elems = rocke_b_add(b, t0, t1);
+    k = rocke_b_const_i32(b, 2);
+    t = rocke_b_mul(b, d_elems, k);
+    d_off = rocke_b_select(b, valid, t, oob_base);
+    t = rocke_b_vec_concat(b, sum_lo, sum_hi);
+    if(bf16)
+    {
+        out = rocke_b_vec_trunc_f32_to_bf16(b, t);
+        rocke_b_buffer_store_vN_bf16(b, d_rsrc, d_off, c0, out, 4);
+    }
+    else
+    {
+        out = rocke_b_vec_trunc_f32_to_f16(b, t);
+        rocke_b_buffer_store_vN_f16(b, d_rsrc, d_off, c0, out, 4);
+    }
+    return rocke_ir_builder_ok(b) ? b->kernel : NULL;
+}
+
+rocke_kernel_def_t* rocke_build_direct_conv_split_reduce_new(
+    rocke_ir_builder_t* b, const rocke_direct_conv_split_reduce_spec_t* spec, const char* arch)
+{
+    if(b != NULL)
+    {
+        /* Zero first, so every early return below leaves a builder the caller
+         * can safely query and rocke_ir_builder_free(). */
+        memset(b, 0, sizeof(*b));
+    }
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char name[512];
+        if(b == NULL)
+        {
+            return NULL;
+        }
+        if(spec == NULL)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_conv_split_reduce: null spec");
+            return NULL;
+        }
+        if(rocke_direct_conv_split_reduce_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            rocke_i_set_err_msg(
+                b, ROCKE_ERR_VALUE, "build_direct_conv_split_reduce: kernel name does not fit");
+            return NULL;
+        }
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        return rocke_build_direct_conv_split_reduce(b, spec, arch);
+    });
+}
+
+rocke_status_t
+    rocke_direct_conv_split_reduce_lower_to_llvm(const rocke_direct_conv_split_reduce_spec_t* spec,
+                                                 const char* arch,
+                                                 rocke_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap)
+{
+    rocke_ir_builder_t b = {};
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
+
+    if(out_ll != NULL)
+    {
+        *out_ll = NULL;
+    }
+    if(spec == NULL || out_ll == NULL)
+    {
+        nongrouped_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    kernel = rocke_build_direct_conv_split_reduce_new(&b, spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        nongrouped_set_err(err,
+                           err_cap,
+                           (m != NULL && m[0] != '\0') ? m
+                                                       : "build_direct_conv_split_reduce failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }

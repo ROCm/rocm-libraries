@@ -131,7 +131,7 @@ def _supportedComponent(component: str, targets: List[str]) -> bool:
 
 def supportedCCompiler(compiler: str) -> bool:
     """
-    Determine if a C compiler/assembler is supported by Tensile.
+    Determine if a C compiler/assembler is supported by TensileLite.
 
     Args:
         compiler: The name of a compiler to test for support.
@@ -144,7 +144,7 @@ def supportedCCompiler(compiler: str) -> bool:
 
 def supportedCxxCompiler(compiler: str) -> bool:
     """
-    Determine if a C++/HIP compiler/assembler is supported by Tensile.
+    Determine if a C++/HIP compiler/assembler is supported by TensileLite.
 
     Args:
         compiler: The name of a compiler to test for support.
@@ -157,7 +157,7 @@ def supportedCxxCompiler(compiler: str) -> bool:
 
 def supportedOffloadBundler(bundler: str) -> bool:
     """
-    Determine if an offload bundler is supported by Tensile.
+    Determine if an offload bundler is supported by TensileLite.
 
     Args:
         bundler: The name of an offload bundler to test for support.
@@ -168,10 +168,9 @@ def supportedOffloadBundler(bundler: str) -> bool:
     return _supportedComponent(bundler, ["clang-offload-bundler"])
 
 
-
 def supportedDeviceEnumerator(enumerator: str) -> bool:
     """
-    Determine if a device enumerator is supported by Tensile.
+    Determine if a device enumerator is supported by TensileLite.
 
     Args:
         enumerator: The name of a device enumerator to test for support.

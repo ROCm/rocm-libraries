@@ -240,6 +240,11 @@ static rocke_value_t* rocke_ew_apply_unary(rocke_ir_builder_t* b, rocke_value_t*
     }
     if(rocke_ew_streq(op, "abs"))
     {
+        /* f64: one sign-bit clear (llvm.fabs.f64) instead of max(x, -x). */
+        if(strcmp(x->type->name, "f64") == 0)
+        {
+            return rocke_b_fabs(b, x);
+        }
         return rocke_b_fmax(b, x, rocke_b_fneg(b, x));
     }
     if(rocke_ew_streq(op, "relu"))

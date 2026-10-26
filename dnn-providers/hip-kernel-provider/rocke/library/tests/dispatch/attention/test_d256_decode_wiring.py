@@ -107,7 +107,12 @@ class TestD256DecodeSupportGates(unittest.TestCase):
         # Prefill (seqlen_q>1) routes to 2d, not 3d — d256_decode must refuse.
         with _PinnedArch("gfx950"):
             req = _gfx950_d256_decode(
-                batch=2, nhead_q=16, nhead_k=2, seqlen_q=512, seqlen_k=512
+                batch=2,
+                nhead_q=16,
+                nhead_k=2,
+                seqlen_q=512,
+                seqlen_k=512,
+                mask_type=2,
             )
             ok, why = self._candidate().admits(req)
             self.assertFalse(ok)
@@ -129,7 +134,8 @@ class TestD256DecodeSupportGates(unittest.TestCase):
         with _PinnedArch("gfx950"):
             ok, why = self._candidate().admits(_gfx950_d256_decode(sliding_window=64))
             self.assertFalse(ok)
-            self.assertIn("cannot serve features ['sliding_window']", why)
+            # NO_MASK + a window is a (non-causal) band on gfx950.
+            self.assertIn("cannot serve features ['band', 'sliding_window']", why)
 
     def test_rejects_sinks(self):
         with _PinnedArch("gfx950"):

@@ -13,7 +13,7 @@ import copy
 import hashlib
 import json
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # --------------------------------------------------------------------------
 # Field policy constants
@@ -41,6 +41,86 @@ DTYPE_TOKEN = {
 }
 
 LAYOUT_BY_RANK = {4: ("nchw", "nhwc"), 5: ("ncdhw", "ndhwc"), 3: ("ncl", "nlc")}
+
+
+# --------------------------------------------------------------------------
+# Capture layout (Hop A output)
+# --------------------------------------------------------------------------
+
+
+def capture_suite_case(graph_path, capture_dir=None, suite=None):
+    """``(suite, case)`` for a graph in the capture layout, or None if it is not.
+
+    ``--capture-bundles`` writes ``<capture_dir>/<suite>/<case>/<case>.json``,
+    where the suite may contain ``/`` (``Smoke/IntegrationGpuConvFp32``) and is
+    also recorded as the sidecar's ``operation``. With ``capture_dir``, the
+    suite is the path between it and the case directory. Without one, nothing
+    says where the suite starts, so ``suite`` (the sidecar's ``operation``) is
+    accepted only if the path ends in it. The suite is always ``/``-separated,
+    so the reference_source built from it is the same on every platform.
+    """
+    if capture_dir is None:
+        graph_path = graph_path.resolve()
+    case_dir = graph_path.parent
+    case = case_dir.name
+    if graph_path.name.endswith(".meta.json") or graph_path.stem != case:
+        return None
+    if capture_dir is not None:
+        return case_dir.parent.relative_to(capture_dir).as_posix(), case
+    if not isinstance(suite, str) or not suite:
+        return None
+    suite_parts = PurePosixPath(suite).parts
+    if not suite_parts or case_dir.parent.parts[-len(suite_parts) :] != suite_parts:
+        return None
+    return suite, case
+
+
+def tier_for_suite(suite: str) -> str:
+    """The tier folder for a capture suite: ``TIER_MAP`` of its first component."""
+    parts = PurePosixPath(suite).parts
+    return TIER_MAP.get(parts[0], "quick") if parts else "quick"
+
+
+def capture_reference_source(suite: str, case: str) -> str:
+    """The ``reference_source`` that joins a bundle case to its C++ test."""
+    return f"c++ integration suite: {suite}.{case}"
+
+
+def inputs_error(inputs):
+    """Why ``inputs`` can't be remapped (a UID-keyed object), or None if it can."""
+    if not isinstance(inputs, dict):
+        return f"inputs: expected a JSON object, got {type(inputs).__name__}"
+    for k in inputs:
+        try:
+            int(k)
+        except ValueError:
+            return f"inputs: key {k!r} is not a tensor UID"
+    return None
+
+
+def read_capture_sidecar(graph_path):
+    """Load the ``<stem>.meta.json`` that ``--capture-bundles`` writes beside a graph.
+
+    Returns ``(path, meta, error)``. ``meta`` is None when the sidecar is absent
+    (a hand-authored graph) or unusable, and ``error`` is set only in the
+    unusable case, saying why. An ``inputs`` that :func:`remap_meta_inputs`
+    cannot remap counts as unusable.
+    """
+    path = graph_path.with_suffix(".meta.json")
+    if not path.exists():
+        return path, None, None
+    try:
+        with open(path) as f:
+            meta = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return path, None, str(e)
+    if not isinstance(meta, dict):
+        return path, None, f"expected a JSON object, got {type(meta).__name__}"
+    if "inputs" in meta:
+        err = inputs_error(meta["inputs"])
+        if err is not None:
+            return path, None, err
+    return path, meta, None
 
 
 # --------------------------------------------------------------------------

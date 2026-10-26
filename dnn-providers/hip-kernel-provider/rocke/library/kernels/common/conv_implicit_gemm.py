@@ -547,11 +547,9 @@ def fwd_group_merge_available(
             f"index to ride alongside a real channel index on both N and K, "
             f"which is not covered, so it is gated off."
         )
-    if spec.wave_size != 64:
-        return False, (
-            f"group_merge is MFMA-only (wave_size 64); got wave_size="
-            f"{spec.wave_size}"
-        )
+    # No wave-size term: the merge lives in the A/B addressing, the diagonal
+    # mask on the B load and the epilogue's N bound, none of which depend on
+    # the MMA family, so MFMA (wave64) and WMMA (wave32) build it alike.
     if spec.async_dma:
         return False, (
             "group_merge is incompatible with async_dma=True: AsyncTileLoader "
@@ -639,6 +637,46 @@ def is_valid_spec_for_problem(
         )
 
     return True, "ok"
+
+
+def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
+    """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
+
+    ``a_b_bytes`` is one A/B staging copy, doubled in ``total`` when
+    ``double``; ``c_bytes`` is the cshuffle C tile. Shared by
+    :func:`is_valid_spec` and the AOT grid's per-arch LDS budget.
+    """
+    # LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
+    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
+    _lds_layout = spec.effective_lds_layout()
+    _a_shape = _lds_layout.storage_shape(spec.tile_m)
+    _b_shape = _lds_layout.storage_shape(spec.tile_n)
+    _ab_bytes = (
+        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
+    ) * _ab_dtype_bytes
+    # Only async_dma and unroll_k reach a K-loop that actually alternates between
+    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
+    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
+    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
+    # scheduling hints -- so charging it for a second A/B tile rejected specs for
+    # LDS the kernel never allocates.
+    _double = spec.async_dma or spec.unroll_k
+    _ab_lds = _ab_bytes * (2 if _double else 1)
+    # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
+    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
+    _c_lds = (
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+    )
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    # wavelet also forces additive: A/B stay live across the whole scf_if_else
+    # body (both branches reference them), so the liveness packer cannot alias
+    # C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
+    return _total_lds, _ab_bytes, _c_lds, _double
 
 
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -732,36 +770,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
-    # LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
-    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
-    _lds_layout = spec.effective_lds_layout()
-    _a_shape = _lds_layout.storage_shape(spec.tile_m)
-    _b_shape = _lds_layout.storage_shape(spec.tile_n)
-    _ab_bytes = (
-        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
-    ) * _ab_dtype_bytes
-    # Only async_dma and unroll_k reach a K-loop that actually alternates between
-    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
-    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
-    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
-    # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates.
-    _double = spec.async_dma or spec.unroll_k
-    _ab_lds = _ab_bytes * (2 if _double else 1)
-    # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
-    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
-    _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
-    )
-    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
-    # bytes, so the LDS budget must be computed per case:
-    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
-    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
-    # wavelet also forces additive: A/B stay live across the whole scf_if_else
-    # body (both branches reference them), so the liveness packer cannot alias
-    # C onto the A/B region even when cshuffle_no_alias=False.
-    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
-    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
+    _total_lds, _ab_bytes, _c_lds, _double = implicit_gemm_lds_bytes(spec)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "

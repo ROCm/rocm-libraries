@@ -182,11 +182,13 @@ AllocationVerificationResult verifyAllocation(const Function& function,
         // live-in that kept its hint still occupies the register, and a mobile
         // value assigned the same unit over an overlapping range is illegal.
         if (constraints.isPinned(id)) {
+            const char* reason = constraints.pinReason(id);
+            const char* label = reason != nullptr ? reason : "a function live-in";
             const std::optional<RegKey> hint = constraints.hintFor(id);
             if (!hint.has_value()) {
-                error(where + " is a function live-in but has no physical register recorded");
+                error(where + " is " + label + " but has no physical register recorded");
             } else if (physical != *hint) {
-                error(where + " is a function live-in and must keep " + regKeyToString(*hint) +
+                error(where + " is " + label + " and must keep " + regKeyToString(*hint) +
                       " but is assigned " + regKeyToString(physical));
             }
         } else if (const char* reason = context.scope.immobileReason(id)) {

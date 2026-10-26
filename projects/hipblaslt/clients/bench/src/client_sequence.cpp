@@ -32,32 +32,10 @@
 
 #include <llvm/ObjectYAML/YAML.h>
 
-#include "benchmark_timing.hpp"
+#include "candidate_search.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
 #include "utility.hpp"
-
-extern "C" __global__ void flush_icache()
-{
-    asm __volatile__("s_icache_inv \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t" ::
-                         :);
-}
 
 class Layer
 {
@@ -582,7 +560,7 @@ int main(int argc, char** argv)
     // Get device information
     hipDeviceProp_t deviceProps;
     CHECK_HIP_ERROR(hipGetDeviceProperties(&deviceProps, 0));
-    int32_t gpu_block3 = deviceProps.multiProcessorCount * 60;
+    int32_t gpu_block3 = hipblaslt_bench::flush_icache_grid(deviceProps);
 
     for(int b = 0; b < block_count; b++)
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
@@ -610,7 +588,7 @@ int main(int argc, char** argv)
                 static_cast<void>((*layer[gemmIdx].gemms)[b].run(stream));
                 break;
             case Layer::TYPE::FLUSH:
-                hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                hipblaslt_bench::launch_flush_icache(gpu_block3, stream);
                 break;
             default:
                 break;
@@ -653,10 +631,11 @@ int main(int argc, char** argv)
         timing.samples   = 1;
         timing.hot_iters = iters;
     }
-    else
+    else if(!hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
+                launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing))
     {
-        hipblaslt_bench::run_measurement(
-            launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
+        hipblaslt_cerr << "error: the layer sequence could not be timed" << std::endl;
+        return 1;
     }
 
     std::cout << "Time: " << timing.median_us << std::endl;
