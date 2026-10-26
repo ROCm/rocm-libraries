@@ -289,14 +289,18 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     selection, shipped, tmp_path_factory, capsys
 ):
     """Generated with the shipped ids reused, every descriptor is the shipped one byte
-    for byte."""
+    for byte. A shipped KDP's informational ``provenance.generated_from`` names the
+    commit it came from, so the render restates it rather than derive it here."""
     shipped_dir, shipped_kdp, shipped_kmd = shipped
+    stamp = json.loads(shipped_kdp.read_text())["provenance"].get("generated_from")
     out = tmp_path_factory.mktemp("g2")
     generator = IngestorGenerator(_ROOT / "templates")
     generator.render(
         selection,
         out,
-        resolution=resolve_ids(selection, out, ids_from=shipped_dir),
+        resolution=resolve_ids(
+            selection, out, ids_from=shipped_dir, generated_from=stamp
+        ),
     )
     descriptors = out / selection.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
@@ -522,7 +526,8 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 ):
     """The same check on the bytes that ship, which can name a spec field the
     registry has since renamed."""
-    kdp = json.loads(shipped[0].read_text())
+    _, shipped_kdp, _ = shipped
+    kdp = json.loads(shipped_kdp.read_text())
     specs = [
         (
             k["name"],
