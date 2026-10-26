@@ -3,6 +3,11 @@
 
 include(HostNumericsTestDependencies)
 include(GoogleTest)
+
+add_executable(hostnumerics-layout-assignment-test layout_assignment_test.cpp)
+target_link_libraries(hostnumerics-layout-assignment-test PRIVATE roc::hostnumerics-core)
+add_test(NAME hostnumerics-layout-assignment-test COMMAND hostnumerics-layout-assignment-test)
+
 include(HostNumericsExpectedParity)
 
 set(HOSTNUMERICS_TEST_GTEST_SOURCE_DIR "${googletest_SOURCE_DIR}" PARENT_SCOPE)

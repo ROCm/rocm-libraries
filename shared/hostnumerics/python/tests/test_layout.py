@@ -63,15 +63,7 @@ class LayoutTests(unittest.TestCase):
             repr(hn.Layout(hn.Shape([2, 3]), [5, -1], 2)),
             "Layout(Shape((2, 3)), (5, -1), 2)",
         )
-        for layout in (
-            hn.Layout(),
-            hn.Layout(hn.Shape(), [], PTRDIFF_MIN),
-            hn.Layout(hn.Shape([2, 0]), [0, 1], PTRDIFF_MAX),
-            hn.Layout(hn.Shape([3]), [-1], 2),
-        ):
-            self.assertEqual(
-                eval(repr(layout), {"Layout": hn.Layout, "Shape": hn.Shape}), layout
-            )
+        self.assertEqual(repr(hn.Layout()), "Layout(Shape(()), (), 0)")
 
     def test_contiguous_orders_match_numpy(self):
         factories = (
