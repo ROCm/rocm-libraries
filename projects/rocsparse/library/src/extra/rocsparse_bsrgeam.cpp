@@ -217,10 +217,6 @@ namespace rocsparse
                 idx_base_A,
                 idx_base_B,
                 idx_base_C);
-
-            // The device function leaves its last reads of its shared table/data unfenced
-            // against the next iteration's first store. Fence them here.
-            __syncthreads();
         }
     }
 
