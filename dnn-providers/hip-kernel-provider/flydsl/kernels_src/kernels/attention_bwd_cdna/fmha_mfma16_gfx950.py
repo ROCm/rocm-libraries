@@ -5,9 +5,8 @@
 """The 16-rows-per-wave MFMA family: lane maps, addressing, operand shapes.
 
 **Published B3.5 probe result.** Shared by the dK/dV and dQ backward kernels so
-the map is derived once; `tooling/probe_tr16_lanemap_gfx950.py` is what
-measured everything here, and it is the thing to re-run if any of it is
-doubted.
+the map is derived once, from an end-to-end device probe of the transpose
+read; re-measure with a probe of that shape if any of it is doubted.
 
 --- The question this answers ----------------------------------------------
 

@@ -35,7 +35,7 @@ except ModuleNotFoundError:  # generator: no flydsl, no kernel root
     dualwave = flyc_polyfill
 else:
     # Both definitions exist, so the copy's claim to be verbatim is checkable
-    # here and nowhere else. `fields()` names/types/order, all 78 of them --
+    # here and nowhere else. `fields()` names/types/order, all 79 of them --
     # for this class that is a total check, not a sample. This call is why the
     # check lives on the gfx950 path rather than in `flyc_polyfill`'s own
     # module scope: gfx1201 aliases `flyc_polyfill` wholesale but never touches

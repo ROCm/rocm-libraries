@@ -18,7 +18,7 @@ The deliberate additions (each normalized source diff against the sweep shows th
 - Kernels: `fmha_bwd_prep_gfx950`, `fmha_bwd_dkdv_gfx950`, `fmha_bwd_dkdv_m16_gfx950`, `fmha_bwd_dq_gfx950`, `fmha_bwd_dq_m16_gfx950`, `fmha_bwd_merged_gfx950`, `fmha_bwd_dbias_reduce_gfx950`, `fmha_bwd_dsink_reduce_gfx950`.
 - fp32 kernels (prep, dK/dV, dQ, dBias reduce only): `fmha_bwd_prep_f32_gfx950`, `fmha_bwd_dkdv_f32_gfx950`, `fmha_bwd_dq_f32_gfx950`, `fmha_bwd_dbias_reduce_f32_gfx950`, on the native f32 MFMA core `fmha_f32_common_gfx950`, `fmha_f32_dsplit_gfx950`, `fmha_f32_perwave_gfx950`.
 - Tuning and traits: `fmha_tuning_gfx950`, `fmha_tuning_bwd_dkdv_gfx950`, `fmha_tuning_bwd_dq_gfx950`, `fmha_tuning_bwd_dkdv_f32_gfx950`, `fmha_tuning_bwd_dq_f32_gfx950`, `fmha_traits_gfx950`.
-- Shared: `fmha_common_gfx1201`, `fmha_abi_gfx1201`, `fmha_dualwave_gfx950`, `fmha_wide_gfx950`, `fmha_mfma16_gfx950`, `philox`, `flyc_polyfill`, `gfx950_standalone`.
+- Shared: `fmha_common_gfx1201`, `fmha_abi_gfx1201`, `fmha_dualwave_gfx950`, `fmha_mfma16_gfx950`, `philox`, `flyc_polyfill`, `gfx950_standalone`.
 
 ## `flash_attn_utils`
 
@@ -26,4 +26,4 @@ The deliberate additions (each normalized source diff against the sweep shows th
 
 ## Build nondeterminism
 
-LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. `tests/data/sdpa_bwd_known_flaky.csv` lists the 22 `dq` causal specs that were nondeterministic in the sweep (a `source` column says how: `bimodal`, `rmir-retry`, `attempts`). Five of them are bimodal: `1a114be37069`, `4691c39657a8`, `5f6f40c7b88a`, `065be7bccb37`, `d86ab8bde882`. A shipped object is pinned by hash; it is not rebuilt blindly.
+LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. `tests/data/sdpa_bwd_known_flaky.csv` lists the 31 `dq` specs that were nondeterministic in the sweep (a `source` column says how: `bimodal`, `rmir-retry`, `attempts`, `known-nondet`, `t2-fp32`, `fp32-dq-combined`, joined by `+` where several apply). Five of them carry `bimodal`: `1a114be37069`, `4691c39657a8`, `5f6f40c7b88a`, `065be7bccb37`, `d86ab8bde882`. A shipped object is pinned by hash; it is not rebuilt blindly.

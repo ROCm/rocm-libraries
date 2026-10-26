@@ -1,5 +1,5 @@
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
-"""Merged backward for gfx950: dK/dV and dQ (and dB) in ONE launch, no prep, no atomics (mechanism M2 of merged-kernel-scope.md).
+"""Merged backward for gfx950: dK/dV and dQ (and dB) in ONE launch, no prep, no atomics.
 
     grid = (n_kv + n_q, 1, 1)   n_kv = Hk * ceil(Sk / BLOCK_KV) * B   dK/dV workgroups (one per KV block, KV head, batch)
                                 n_q  = Hq * ceil(Sq / BLOCK_M)  * B   dQ workgroups (one per Q block, Q head, batch)
@@ -35,13 +35,13 @@ only: the module-wide target flags and the merged kernel's LLVM options still ap
 Causal / window: each role runs its split causal body (window and bottom-right resolution are runtime wire values, as in the split kernels).
 `gqa_pack` (dK/dV knob, 16-row family; causal, window and dropout included): the dK/dV role walks the packed (group, q) row axis; its in-kernel Delta reads O at
 the packed row's (head, q) address.
-First cut: dense layout (varlen decode is shared but untested), 32-row dQ family, padded_head off, rt axes off.
+Scope: dense and varlen layouts (the decode is shared with the split kernels), padded_head builds, the 32-row dQ family; `xcd_swizzle`,
+`lpt_tile_order` with causal, and roles that differ in `daz` are refused by the builder.
 """
 
 import contextlib
 from types import SimpleNamespace as _WireArgs
 
-from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi
 from kernels.attention_bwd_cdna import (
     fmha_bwd_dbias_reduce_gfx950 as dbias_reduce_module,
 )
@@ -49,10 +49,10 @@ from kernels.attention_bwd_cdna import fmha_bwd_dkdv_gfx950 as dkdv
 from kernels.attention_bwd_cdna import fmha_bwd_dkdv_m16_gfx950 as m16
 from kernels.attention_bwd_cdna import fmha_bwd_dq_gfx950 as dq
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import philox
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     _fmul,
     _slab_span_elems,
-    wire_ptr,
     wire_view,
 )
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
@@ -71,7 +71,6 @@ __all__ = ["KERNEL_NAME", "ROLE_ORDERS", "build_fmha_bwd_merged_gfx950_module_pr
 KERNEL_NAME = "fmha_bwd_merged_gfx950_kernel"
 ROLE_ORDERS = ("concat", "lpt")
 _COMPILE_HINTS = dkdv._COMPILE_HINTS
-_COMPILED = {}
 _SCRATCH_SCOPE = "lds_dscr"  # alias scope of the Delta scratch: disjoint from the four staging scopes
 _NEG_INF_BITS = -8388608  # 0xFF800000
 
@@ -424,9 +423,27 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         raise ValueError("the roles must agree on dtype, bias and dropout")
     if dbias_reduce and not (kt.BIAS_TYPE and qt.STORE_DB):
         raise ValueError("dbias_reduce: a bias build whose dQ role stores dB only")
+    # Each role's context decodes its (head, block, batch) from a proxy that replaces only `gpu.block_idx`; `gpu.grid_dim` is the
+    # merged launch grid (total, 1, 1), which the swizzled / LPT-reversed block decodes below would read.
+    for t, role in ((kt, "dK/dV"), (qt, "dQ")):
+        if t.XCD_SWIZZLE:
+            raise NotImplementedError(
+                f"merged {role} role: xcd_swizzle reads gpu.grid_dim of the role's own grid"
+            )
+        if t.LPT_TILE_ORDER and t.CAUSAL:
+            raise NotImplementedError(
+                f"merged {role} role: causal lpt_tile_order reads gpu.grid_dim of the role's own grid"
+            )
+    if kt.DAZ != qt.DAZ:
+        raise ValueError(
+            f"the roles must agree on daz: dK/dV {kt.DAZ}, dQ {qt.DAZ} (one function attribute set covers both)"
+        )
+    if kt.ENABLE_DROPOUT and philox.default_width("gfx950") != 32:
+        raise ValueError(
+            "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
+        )
     BLOCK_SIZE = kt.BLOCK_SIZE
     WPE = min(kt.WAVES_PER_EU, qt.WAVES_PER_EU)
-    BUILD_SM_SCALE = dk_meta.sm_scale
     ELEM_BYTES = kt.BF16_BYTES
     DK_ELEMS = kt.LDS_STREAM_TOTAL_SIZE + kt.NUM_WAVES * kt.BLOCK_Q * 4 // ELEM_BYTES
     DQ_ELEMS = qt.LDS_KV_TOTAL_SIZE + qt.BIAS_LDS_BYTES // ELEM_BYTES
@@ -877,7 +894,7 @@ def build_fmha_bwd_merged_gfx950_module_primary(
 
     def _launch(*args, **kwargs):
         raise NotImplementedError(
-            "launch through the harness (h/arms_flydsl.py): the merged kernel takes named arguments"
+            "launch through the jit entry point (`_launch.jit`): the merged kernel takes named arguments"
         )
 
     _launch.traits = (kt, qt)

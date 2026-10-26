@@ -167,7 +167,7 @@ def build_fmha_bwd_dbias_reduce_f32_gfx950_module_primary(dtype_str):
             if valid:
                 fx.ptr_store(res, out_p + fx.Int64(out_row))
         else:
-            # element-wise: 8 independent fp32 accumulators, columns masked at Sk
+            # element-wise: 4 independent fp32 accumulators, columns masked at Sk
             sk = fx.Index(seqlen_k)
             init_args = [fx.Float32(0.0) for _ in range_constexpr(VEC)]
             for ib, b_args in range(

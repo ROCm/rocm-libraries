@@ -2,15 +2,15 @@
 """Shared core of the native-f32-MFMA SDPA backward family (gfx950): lane maps, 4-byte LDS tile layout, MFMA issue, 4-byte global addressing.
 
 Used by `fmha_f32_perwave_gfx950` and `fmha_f32_dsplit_gfx950` (the two operand layers) and by the fp32 dK/dV and dQ kernels built on them.
-Softmax (`ParitySoftmaxHelper`), Philox, varlen decode, window and causal-region helpers are re-exported read-only from the existing modules.
+`Philox` is re-exported from `philox`.
 
 --- MFMA lane maps (wave64, one fp32 register per lane for A and for B) -----
 
   16x16x4   v_mfma_f32_16x16x4_f32   A[m = l%16][k = l//16]   B[k = l//16][n = l%16]   acc i of lane l = D[4 (l//16) + i][l % 16]
   32x32x2   v_mfma_f32_32x32x2_f32   A[m = l%32][k = l//32]   B[k = l//32][n = l%32]   acc i of lane l = D[8 (i//4) + 4 (l//32) + i%4][l % 32]
 
-GPU-verified (job JL: 0/64 mismatches for both shapes); `tools/fp32_mfma_emulation.py` is the host model of the same maps and
-`tools/fp32_core_check.py` checks this module against it.
+Both maps are verified on hardware (0 of 64 lanes mismatch for each shape); a host model of the same maps (`fp32_mfma_emulation`) is the
+reference the host check of this module (`fp32_core_check`) runs the emitters against.
 
 --- LDS tiles ----------------------------------------------------------------
 
@@ -45,7 +45,7 @@ the head dim) is described by a `ColMask` and handled as follows:
 
 --- Backends -----------------------------------------------------------------
 
-Every emitter takes an `ops` object. `DeviceOps` emits FlyDSL; `tools/fp32_core_check.py` supplies a host `ops` that runs the same emitters on numpy
+Every emitter takes an `ops` object. `DeviceOps` emits FlyDSL; the host check (`fp32_core_check`) supplies a host `ops` that runs the same emitters on numpy
 lane arrays over the fp32-MFMA emulation, which is how the emitters are checked without a GPU. `ops` offers: `i64`, `imin`, `sel`, `zero`,
 `elem`, `vec`, `vadd`, `lds_ld(off, n)`, `lds_st(off, v, pred)`, `dma(name, goff, lds_off, pred)`, `dma_bounded(name, base, off, lds_off, span, pred)`, `ldg(name, goff, n)`, `stg(name, goff, v, pred)`,
 `mfma16`, `mfma32`, `sync`, `wait_dma`, `barrier`. `n` is 1 (fp32), 4 or 16 (vector of fp32).
@@ -54,41 +54,13 @@ lane arrays over the fp32-MFMA emulation, which is how the emitters are checked 
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from kernels.attention_bwd_cdna.fmha_common_gfx1201 import (  # noqa: E402,F401  read-only shared helpers
-    WINDOW_BOTRIGHT,
-    WINDOW_TOPLEFT,
-    CausalRegions,
-    FastMath,
-    MaskedAxis,
-    cond_load,
-    decode_addressing,
-    decompose_causal_regions,
-    lse_row_addressing,
-    lse_row_step_per_head,
-    lse_token_pitch,
-    make_addr_pair,
-    philox_offset_base,
-    philox_report,
-    philox_seed_value,
-    resolve_window,
-    seqinfo_addr,
-)
-from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
-    ParitySoftmaxHelper,
-)  # noqa: E402,F401
 from kernels.attention_bwd_cdna.gfx950_standalone import (
     buffer_ops,
     dualwave,
 )  # noqa: E402
-from kernels.attention_bwd_cdna.philox import (  # noqa: E402,F401
+from kernels.attention_bwd_cdna.philox import (
     Philox,
-    default_width,
-    dropout_threshold,
-    keep_mask,
-    philox_4x,
-    philox_u32,
-    to_uniform_f32,
-)
+)  # noqa: E402,F401  re-exported for the kernels
 
 import flydsl.expr as fx  # noqa: E402
 from flydsl._mlir import ir  # noqa: E402
@@ -374,6 +346,41 @@ def slab_span(ops, rows, stride_seq, hdim):
     r = ops.i64(rows)
     span = (r - 1) * ops.i64(stride_seq) + (ops.i64(hdim) + 7) // 8 * 8
     return ops.sel(r > 0, span, ops.i64(0))
+
+
+# A bounded buffer DMA describes its slab by `num_records` = 4 `slab_span` bytes and addresses a lane by the byte offset `4 off`: both are 32-bit fields,
+# so a slab of 2^30 elements or more (4 GiB) cannot be described and its staged rows would read wrong. Exact objects stage through 64-bit pointers.
+SLAB_SPAN_LIMIT = 1 << 30
+
+
+def check_slab_span(name, rows, stride_seq, hdim):
+    """Refuse a (batch, head) slab of a padded object whose `slab_span` reaches `SLAB_SPAN_LIMIT` elements (host-side, plain ints)."""
+    span = (rows - 1) * stride_seq + (hdim + 7) // 8 * 8 if rows > 0 else 0
+    if span >= SLAB_SPAN_LIMIT:
+        raise ValueError(
+            f"{name}: a (batch, head) slab of {rows} rows x row stride {stride_seq} elements spans {span} elements; "
+            f"a padded fp32 object describes a slab with 32-bit byte fields and supports fewer than {SLAB_SPAN_LIMIT}"
+        )
+
+
+def check_head_dim_floor(name, hdim, floor):
+    """Refuse a launch whose real head dim `hdim` is not above the `floor` the object was built on: whole panels under the floor skip the read-side mask."""
+    if floor and hdim <= floor:
+        raise ValueError(
+            f"{name}={hdim} is at or below this object's hdim_qk_floor {floor}: the object skips the column mask under it"
+        )
+
+
+def launch_ints(jit_function, args, kwargs):
+    """The plain-int launch values of a call to `jit_function` (name -> int); pointers, floats and traced values are left out."""
+    import inspect
+
+    names = list(inspect.signature(jit_function.func).parameters)
+    bound = dict(zip(names, args))
+    bound.update(kwargs)
+    return {
+        k: v for k, v in bound.items() if isinstance(v, int) and not isinstance(v, bool)
+    }
 
 
 def mask_a(ops, a_v4, p_first, c, g, mask):

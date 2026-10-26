@@ -4,10 +4,9 @@
 
 """dK / dV for gfx950 -- AOTriton's `bwd_kernel_dk_dv` on the dualwave helpers.
 
-B1 + B3 of `sdpa-bwd-plan-gfx950.md`: dense, non-causal, MHA, bf16, over the
-forward's whole head_dim ladder with the 8xD input contract and padded heads.
-The contract is `sdpa-bwd-contract-gfx950.md` and its B3 addendum; read those
-first.
+Dense and varlen, causal and windowed, MHA and GQA, with dropout and bias, in
+bf16 and f16, over the forward's whole head_dim ladder with the 8xD input
+contract and padded heads.
 
 --- The whole design in one paragraph --------------------------------------
 
@@ -41,7 +40,8 @@ forward stages V as `[token][d]` and reads it back through
 q-contracted GEMMs want from a `[q_row][d]` tile. So both streamed tiles are
 staged in the *V* LDS shape and read two ways: `ds_read_b128` for the
 row-major operand and the transpose path for the column-major one. Deriving a
-second lane map was the alternative, and contract section 3 says not to.
+second lane map was the alternative; reusing the validated one leaves a single
+lane map to maintain.
 
 --- What binds at the wide rungs, and what does not -------------------------
 
@@ -52,7 +52,7 @@ LDS ever costs, and `_with_buffers` spends it while it can afford to.
 
 **Registers do bind**, because a wave holds two accumulators of `d/2` VGPRs
 each on top of `d/4` of resident K and `d/4` of V. Two levers answer it, in
-the addendum's order: `(num_waves, waves_per_eu)` as a pair, which is free and
+the order they were found: `(num_waves, waves_per_eu)` as a pair, which is free and
 decided head_dim 128; and then `DKV_SHARDS`, which divides the accumulator
 pair across waves that write disjoint D columns -- no cross-wave reduction, no
 extra barrier, at the price of every shard recomputing S and dP.
@@ -77,14 +77,14 @@ staged row past the end reads **zero**; K and V at `seqlen_kv`, and dK/dV
 stores past it are dropped by the same bound. A padding q row therefore gets
 `S = 0` and `LSE = 0` (also out of its buffer), hence `P = exp2(0) = 1` -- and
 contributes `1 * dO = 0` to dV and `dS * Q = 0` to dK. Finite, exact, and no
-`scf.if` anywhere near a transpose read, which contract section 3 warns is
-undefined under a divergent EXEC.
+`scf.if` anywhere near a transpose read, which is undefined under a divergent
+EXEC.
 
---- Phase status -----------------------------------------------------------
+--- Scope ------------------------------------------------------------------
 
-Causal and windows (B4), varlen (B5), dropout (B6), the bias *input* and GQA
-(B7) are all implemented. Only `paged` is refused, by name in
-`BwdDkDvKnobs.resolve`; there is no half-implemented arm anywhere below.
+Causal and windows, varlen, dropout, the bias *input* and GQA are all
+implemented; there is no half-implemented arm anywhere below. `paged` is not a
+knob of this kernel.
 
 GQA is a group *fold*, not a second program: one workgroup owns a KV head and
 walks the query heads of its group, and the dK/dV accumulators -- zeroed once,
@@ -116,11 +116,10 @@ L, D, ...)` and `bwd_kernel_dk_dv(Q, K, V, B, sm_scale, DO, DK, DV, L, D, ...)`
 to re-derive the mapping, and neither does anyone eventually dispatching the
 compiled hsaco directly.
 
-`b` sat in the forward-input group for six phases before any build read it, so
-that adding bias would not move the wire format -- and in B7 it did not. It was
-initially placed after `delta`, at the end, which is where an unused argument
-naturally lands and is exactly why the grouping is written down rather than
-left to accrete.
+`b` sits in the forward-input group although the first builds never read it, so
+adding bias did not move the wire format. After `delta`, at the end, is where an
+unused argument naturally lands, which is why the grouping is written down
+rather than left to accrete.
 """
 
 import weakref
@@ -151,8 +150,10 @@ from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_gfx950 import (
     BwdDkDvInputMetadata,
     bwd_dkdv_knobs,
+    check_launch_limits,
 )
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
+from kernels.attention_bwd_cdna import philox
 from kernels.attention_bwd_cdna.philox import Philox, keep_mask
 
 import flydsl.compiler as flyc
@@ -207,8 +208,8 @@ _COMPILE_HINTS = {
 # is the MFMA accumulator's row map, and grouping it into runs gives four spans
 # of four. So one `buffer_load` of 4 f32 covers one span of LSE (or delta) rows
 # exactly, and the row set a lane needs is 4 loads per accumulator half. The
-# forward derives the same runs for its bias reads; deriving them once is
-# contract section 4's rule, and this is the second consumer that proves it.
+# forward derives the same runs for its bias reads; deriving them once keeps the
+# two consumers in step.
 _ROW_RUNS = _score_column_runs(False)
 
 # The same runs flattened: `_ROW_THRESHOLDS[r]` is the q row accumulator element
@@ -295,8 +296,8 @@ def quad_transpose(words, upper, odd, xor, select):
     `upper` / `odd` are the lane's bits 1 / 0 within its quad. `xor(x, ctrl)`
     reads `x` from lane `lane ^ k` of the quad (`ctrl` is `_DPP_QUAD_XOR2` for
     `k = 2` then `_DPP_QUAD_XOR1` for `k = 1`) and `select(pred, a, b)` is `a`
-    where `pred` holds, `b` elsewhere; both are injected so the host-level
-    oracle (`tools/philox_keep_check.py`) runs this same function.
+    where `pred` holds, `b` elsewhere; both are injected so a host-level oracle
+    can run this same function.
     """
 
     def swap(lo, hi, pred, ctrl):
@@ -485,19 +486,17 @@ class BwdDkDvKernelContext(ParityKernelContext):
     """Parity context whose resident tensor is K/V and whose stream is Q/dO.
 
     Inherits the BHSD stride ABI, the runtime head counts, the varlen decode
-    (pinned dense until B5) and the philox prologue (inert until B6) by
-    subclassing rather than porting, per contract section 2.
+    and the philox prologue by subclassing rather than porting.
 
     Six things move, and they are all descriptors, bounds or indices:
 
     - `strides` carries **18** slots: Q, K, V, dO, dK, dV. Only the first nine
       go to the base class, which is all it addresses; dO, dK and dV are held
       here under their own names, with `stride_do_*`, `stride_dk_*` and
-      `stride_dv_*`. **There is no `O` here.** dK used to be handed to the
-      base's `O` slot so `o_div` would describe it, which made `stride_o_*`
-      the strides of whichever tensor happened to be in the slot; this kernel
-      writes dK and dV, both KV-row-shaped, and builds `dk_div` and `dv_div`
-      for them directly.
+      `stride_dv_*`. **There is no `O` here.** Handing dK to the base's `O`
+      slot would make `stride_o_*` the strides of whichever tensor happened
+      to be in the slot; this kernel writes dK and dV, both KV-row-shaped,
+      and builds `dk_div` and `dv_div` for them directly.
     - The staging machinery's K slot carries Q and its V slot carries dO.
     - Both staged tiles are V-shaped, so the LDS bases and the row-major read
       base are recomputed against `STREAM_LINE_STRIDE`.
@@ -580,10 +579,9 @@ class BwdDkDvKernelContext(ParityKernelContext):
         self.stream_row_read_base = _stream_row_read_base(
             traits, self.lane_mod_32, self.lane_div_32
         )
-        # The column-major base is the forward's V one *unchanged*, which is
-        # the whole of contract section 3: the tile is V-shaped and the read is
-        # the same instruction sequence, so the validated lane map carries over
-        # rather than being re-derived.
+        # The column-major base is the forward's V one *unchanged*: the tile is
+        # V-shaped and the read is the same instruction sequence, so the
+        # validated lane map carries over rather than being re-derived.
         col_base = self.v_lds_read_base_per_lane
         if const_expr(traits.DKV_SHARDS > 1):
             # The shard's D offset folds into the base rather than being added
@@ -591,8 +589,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
             # and `shard_id` is `wave_id % SHARDS`. `_v_dc_offset` splits as
             # `_v_dc_offset(a + i) = (a // PER_BAND) * PAIR + _v_dc_offset(i)`
             # whenever `a` is a multiple of `D_CHUNKS_PER_BAND`, which
-            # `make_traits` enforces for a shard's first chunk. The forward's
-            # `WideKvLdsToVgprLoader.load_v_shard` folds it the same way.
+            # `make_traits` enforces for a shard's first chunk.
             per_band = traits.D_CHUNKS_PER_BAND
             col_base = col_base + self.dkv_shard_id * (
                 (traits.D_CHUNKS_PER_SHARD // per_band)
@@ -633,7 +630,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
             # row block -- `wave_id // SHARDS` does, and the remainder picks
             # which D columns of dK/dV the wave owns. The base class set
             # `wave_q_offset` from the raw wave id; this is the same correction
-            # `WideKernelContext` makes for `VO_SHARDS`.
+            # the forward's sharded context makes for `VO_SHARDS`.
             self.dkv_shard_id = self.wave_id % traits.DKV_SHARDS
             self.wave_q_offset = (
                 self.wave_id // traits.DKV_SHARDS
@@ -717,8 +714,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
         `seqlen_kv` rows, so a dead block reads zeros and its stores are
         dropped -- but it is a lot of wasted work at a ragged batch. The
         predicate is workgroup-uniform, so the branch is scalar and EXEC stays
-        all 1s across the transpose reads inside it; `check_exec_hazard` is
-        what keeps that true.
+        all 1s across the transpose reads inside it.
         """
         return self.kv_start < self.seqlen_kv_v
 
@@ -755,7 +751,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # (batch 0, large row offset) and K is batched (batch z, no row offset)
         # in the same call. Four of the five modes agree, so reusing Q's index
         # for K reads batch 0 of the cache for every sequence and only that one
-        # mode exposes it. P4 paid for this once.
+        # mode exposes it.
         self.q_row_off = self.varlen_q_row_off
         self.kv_row_off = self.varlen_kv_row_off
         # The staged tiles address from token 0 of the slab; the tile offset
@@ -882,11 +878,9 @@ class BwdDkDvKernelContext(ParityKernelContext):
         **This split is a scalar-pressure change and nothing more. Read the last
         paragraph before you attribute any correctness property to it.**
 
-        LOCAL DIVERGENCE FROM UPSTREAM: upstream did not import this hoist, and
-        attacks the same liveness from the addressing side instead. Whether it
-        still pays on top of that is UNMEASURED -- `flyc/devtools/` holds the
-        A/B harness that settles it. Retire this if an A/B on an idle gfx950
-        shows it inert.
+        The hoist is measured against the unhoisted form below. Whether it still
+        pays on top of attacking the same liveness from the addressing side is
+        not measured; retire it if an A/B on an idle gfx950 shows it inert.
 
         `bind_q_head` runs inside the GQA loop, whose trip count is a runtime
         value and so cannot fold away, which means every value it reads is live
@@ -913,9 +907,8 @@ class BwdDkDvKernelContext(ParityKernelContext):
         (`amdgpu-spill-sgpr-to-vgpr=false`, which flags an identical 28) and
         both existing `_COMPILE_HINTS` flags, and 19 builds are flagged under
         every setting tried. So spill pressure is not the control variable and
-        this file cannot reach the bug. See
-        `flydsl-issue-gfx950-lost-sgpr-copy-REPRO.md` for the ISA and the
-        wheel-only reproducer; only a backend fix closes it.
+        this file cannot reach the bug. ROCm/FlyDSL#1087 tracks it, with the
+        ISA and a wheel-only reproducer; only a backend fix closes it.
         """
         elem_bytes = fx.Index(self.traits.BF16_BYTES)
         head0 = self.gqa_q_head_base
@@ -951,7 +944,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # with**. Both are always compact -- their strides are a function of
         # VarlenBits, the head count and the token pitch rather than a free
         # variable -- so re-deriving the layout here would be a second source
-        # of truth for one fact (varlen plan section 4.2). `lse_tokens_i32` is
+        # of truth for one fact. `lse_tokens_i32` is
         # `lse_token_pitch`'s answer, which is `max_seqlen_q` for a batched
         # layout and the batch total for a stacked one.
         #
@@ -1036,7 +1029,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
         derivation from the strides -- see `_init_q_head_invariants` for what
         that difference buys, which is scalar pressure and only that. At
         `num_kv_heads == num_heads` the group is one head wide, the loop runs
-        once, `g` is 0, and every value here is what it was before B7.
+        once and `g` is 0.
         """
         self.q_head_idx = self.gqa_q_head_base + g
 
@@ -1176,12 +1169,11 @@ class BwdDkDvKernelContext(ParityKernelContext):
         the live range to nothing.
 
         **Under causal the walk does not start at tile 0**, and that is the
-        whole of the tile cut. P3 found four literal-zero tile bases in the
-        forward; `split_t0` is the one knob the prologue and the loop both read,
-        so there is one place to get it right.
+        whole of the tile cut. A literal-zero tile base in the prologue or the
+        loop would leave the cut inert; `split_t0` is the one knob both read, so
+        there is one place to get it right.
         """
         traits = self.traits
-        self.kv_tile_size = traits.BLOCK_Q
         if const_expr(not traits.CAUSAL):
             self.window_left_i32 = None
             self.causal_lo_i32 = None
@@ -1197,7 +1189,7 @@ class BwdDkDvKernelContext(ParityKernelContext):
             self.split_t_end = tiles
         else:
             # **The sentinels resolve on the device**, against this sequence's
-            # own lengths, because under varlen (B5) they differ per sequence.
+            # own lengths, because under varlen they differ per sequence.
             # A non-window build forwards `WINDOW_BOTRIGHT` for both, so the
             # left bound comes back as `seqlen_q` -- unbounded -- and every
             # left-bound comparison below is `const_expr`-ed away regardless.
@@ -1483,8 +1475,8 @@ class BwdDkDvGemmHelper(ParityGemmHelper):
     Both are `sum_k mfma(A_k, B_k, acc)`; they differ only in what indexes `k`
     and whether the accumulator is fresh. Naming them for the axis they
     contract rather than for the tensors keeps `S` and `dP` -- and `dV` and
-    `dK` -- one piece of code each instead of two, which contract section 4
-    asks for and which is what stops a transcription drifting.
+    `dK` -- one piece of code each instead of two, which is what stops a
+    transcription drifting.
     """
 
     def contract_d(self, read_a, b_packs):
@@ -1541,15 +1533,14 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         apart**, so the wide load does not apply and it is sixteen scalars
         instead.
 
-        **The choice is made at runtime, and it has to be.** `lse_layout_th`
-        used to select this at build time, with `_args` rejecting a call whose
-        `VarlenBits` disagreed. `lse_row_addressing` decodes the layout from
-        those bits at *runtime*, so `base` and `pitch` were already right for
-        either -- and this method then ignored `pitch` and loaded contiguously.
-        A build compiled `lse_layout_th=False` and handed TH bits read the
-        wrong elements, silently, and the only thing stopping it was a
-        host-side wrapper that AOTriton's C++ launcher never calls. Measured by
-        bypassing that wrapper, packed varlen, two sequences, head_dim 64:
+        **The choice is made at runtime, and it has to be.** `lse_row_addressing`
+        decodes the layout from `VarlenBits` at *runtime*, so `base` and `pitch`
+        are right for either layout; a build that fixed the arm at build time
+        and was handed the other layout's bits read the wrong elements,
+        silently, and a host-side wrapper is no defence because AOTriton's C++
+        launcher never calls it. Measured by bypassing such a wrapper, packed
+        varlen, two sequences, head_dim 64 (columns are the build's layout and
+        the bits' layout):
 
             num_head_q    build=HT/bits=HT   build=TH/bits=TH   build=HT/bits=TH
                  4            2.36e-03           2.36e-03          3.34e-01
@@ -1654,7 +1645,7 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         """`P = exp2(qk_scale * S + bias*log2e - log2(e) * LSE)`, element by element.
 
         Q is **not** pre-scaled, which is the one place this departs from the
-        forward, and B2 measured what it costs to get wrong: folding
+        forward, and the cost of getting it wrong is measured: folding
         `sm_scale * log2e` into Q and rounding to bf16 puts the error in the
         exponent, taking the error ratio from 1.29 at `sm_scale = 0.05` to 10.9
         at 1.0. `O` is a normalised average and absorbs it; `dS` is not and does
@@ -1787,8 +1778,7 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         **No transpose read is inside this region**, and that is a correctness
         requirement rather than tidiness (CDNA4 section 11.4: EXEC must be all
         1s across `ds_read_b64_tr_b16`). The q-contracted GEMMs run in their own
-        loop after the softmax; see `tooling/check_exec_hazard_gfx950.py`, which
-        scans the ISA for a transpose read under a narrowed EXEC.
+        loop after the softmax, so a narrowed EXEC never reaches a transpose read.
         """
         traits = self.traits
         ctx = self.ctx_ref
@@ -1885,8 +1875,7 @@ class BwdDkDvStoreHelper(dualwave.DualwaveStoreHelper):
 
         **Address the chunk from its global column, not its local one.** Under
         sharding `dc` restarts at 0 while the columns it addresses do not, and
-        the forward's wide body records what happens if the padded-head
-        suppression is derived from the local index: the descriptor spans the
+        a padded-head suppression derived from the local index goes wrong: the descriptor spans the
         whole tensor rather than one row, so a store past the row pitch lands
         in the *next row* and corrupts it -- head_dim 300 came out at 0.58
         absolute error, finite and with no fault.
@@ -1931,11 +1920,10 @@ class BwdDkDvStoreHelper(dualwave.DualwaveStoreHelper):
 class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
     """One streamed q tile: four GEMMs, one softmax, two barriers.
 
-    A helper object rather than a nested `def`, for the reason
-    `fmha_wide_gfx950.make_wide_body` gives: the loop this is called from uses
-    the `range(..., init=[...])` / `yield` protocol, which only exists after
-    the AST rewrite, so the body has to stay inside the traced function while
-    the code it calls stays out of it.
+    A helper object rather than a nested `def`, because the loop this is called
+    from uses the `range(..., init=[...])` / `yield` protocol, which only exists
+    after the AST rewrite, so the body has to stay inside the traced function
+    while the code it calls stays out of it.
     """
 
     def __init__(
@@ -2052,7 +2040,7 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                 for h in group
             }
             neg_lse2 = {h: self.load_neg_lse2(tile_base, h) for h in group}
-            # B7. The bias is read per accumulator element and folded into the
+            # The bias is read per accumulator element and folded into the
             # exponent, so it lands before `P` exists and therefore before
             # everything downstream. There is no runtime "does this tile need
             # one" guard: a bias build reads a bias for every live tile by
@@ -2077,7 +2065,7 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                 h: self.load_delta(tile_idx, tile_base, h, do_base, do_scope)
                 for h in group
             }
-            # **After the row sum, before the accumulation** -- P6's ordering.
+            # **After the row sum, before the accumulation.**
             # The softmax denominator is the *undropped* sum, and it is already
             # baked into the LSE the forward wrote, so dropout applies here and
             # nowhere earlier. It composes with the causal mask because that
@@ -2143,9 +2131,12 @@ DKDV_PARTS = DkDvParts()
 
 
 def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
-    """Build the dK/dV kernel for a resolved (meta, knobs) pair."""
-    """`runtime_axes` ⊆ {"padded", "dropout"}: that axis becomes a launch-uniform branch on `rt_flags` (bit0 padded, bit1 dropout)
-    that selects one of two whole bodies (both axes: four whole bodies, nested); geometry and schedule come from `knobs` unchanged."""
+    """Build the dK/dV kernel for a resolved (meta, knobs) pair.
+
+    `runtime_axes` ⊆ {"padded", "dropout"}: that axis becomes a launch-uniform branch on `rt_flags` (bit0 padded, bit1 dropout)
+    that selects one of two whole bodies (both axes: four whole bodies, nested); geometry and schedule come from `knobs` unchanged.
+    A runtime dropout axis needs a build whose traits enable dropout (it is the Philox state the dropout arm reads).
+    """
     runtime_axes = frozenset(runtime_axes)
     assert runtime_axes <= {"padded", "dropout"}, runtime_axes
     if knobs.block_dmodel is None:
@@ -2153,6 +2144,13 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             "knobs must be resolved: call `bwd_dkdv_knobs(arch, ...).resolve(meta)` first"
         )
     traits = knobs.build_traits(meta)
+    assert (
+        traits.ENABLE_DROPOUT or "dropout" not in runtime_axes
+    ), "runtime_axes={'dropout'} needs a build with dropout enabled (meta.dropout=True): the Philox state is built only then"
+    if traits.ENABLE_DROPOUT and philox.default_width("gfx950") != 32:
+        raise ValueError(
+            "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
+        )
     BLOCK_DMODEL = knobs.block_dmodel
     PADDED_HEAD = knobs.padded_head
     # D columns at or below this are guaranteed real, so the streamed masks can
@@ -2164,11 +2162,11 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     # Which MFMA family this build is. See `fmha_bwd_dkdv_m16_gfx950`.
     M16 = traits.MFMA_ROWS == 16
     # `(T, H)` logsumexp/delta. See `BwdDkDvInputMetadata.lse_layout_th`.
-    # `lse_layout_th` no longer reaches the emitted code: the row read decodes
-    # the layout at runtime and a varlen build carries both arms. It stays in
-    # the cache key so a caller who does pass it still gets a distinct entry
-    # rather than a silently shared one, and stays in the metadata so the
-    # signature does not move; nothing else reads it.
+    # `lse_layout_th` does not reach the emitted code: the row read decodes
+    # the layout at runtime and a varlen build carries both arms. It is in
+    # the cache key so a caller who does pass it gets a distinct entry
+    # rather than a silently shared one, and in the metadata so the
+    # signature is stable; nothing else reads it.
     LSE_TH = bool(meta.lse_layout_th)
     # One knob for the whole register-against-ILP trade; see
     # `BwdDkDvTileBody._row_reader` and `_with_register_pressure`.
@@ -2184,7 +2182,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     # cannot collide in the JIT disk cache. `traits_cache_key` is every trait
     # field rather than `traits.cache_tag`'s subset; see there for what the
     # subset was silently getting wrong. It subsumes `NBUF` and `MFMA_ROWS`,
-    # which this tag used to name and which are both `traits.` reads.
+    # which are both `traits.` reads.
     # `TIGHT_REGISTERS` (a knob) and `LSE_TH` (from `meta`) reach the kernel
     # without passing through the traits, so they stay.
     _cache_tag = (
@@ -2438,7 +2436,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 """K/V resident, Q/dO streaming, two tiles per iteration.
 
                 **The GQA group is the outer loop and the accumulators live across
-                it**, which is the whole of B7's reduction: several query heads
+                it**, which is the whole of the group reduction: several query heads
                 reduce into this KV head, and their partial sums never leave f32
                 registers. It costs no extra accumulator -- the fold lengthens the
                 live range of the ones that were already carried, it does not add a
@@ -2446,8 +2444,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 atomic appear anywhere here.
 
                 At `num_kv_heads == num_heads` the group is one head wide, the
-                outer loop runs once, and every instruction inside it is what it
-                was before B7.
+                outer loop runs once and emits no loop at all.
                 """
                 v_k = resident.load_resident("k", hdim_qk)
                 v_v = resident.load_resident("v", hdim_vo)
@@ -2457,24 +2454,19 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     init_args.append(zero_acc)
                 group_results = init_args
 
-                # **The trip count is the argument's, not the build's** -- the one
-                # place this vendored copy departs from upstream.
-                #
-                # Upstream reads `traits.GQA_GROUP_SIZE`, because it compiles a
-                # kernel per head-count pair: a bound of `[0, 1)` is a
-                # single-iteration `scf.for` the canonicaliser promotes away, so an
-                # MHA build emits the pre-B7 body with no outer loop at all, and
-                # `_args` rejects a launch whose runtime counts disagree with the
-                # build.
+                # **The trip count is the argument's, not the build's.** A bound read
+                # from `traits.GQA_GROUP_SIZE` would be a single-iteration `scf.for`
+                # the canonicaliser promotes away at MHA, which is right only when a
+                # kernel is compiled per head-count pair and `_args` rejects a launch
+                # whose runtime counts disagree with the build.
                 #
                 # AOTriton has neither half of that. `num_head_q` and `num_head_k`
-                # are kernel arguments, not functional axes, so `flyc_bwd_dkdv.py`
-                # passes `num_heads=1` with no `num_kv_heads` and every compiled
+                # are kernel arguments, not functional axes, so every compiled
                 # kernel carries `GQA_GROUP_SIZE == 1`; and `_args` is a host-side
                 # launch wrapper the C++ launcher never calls, so nothing catches
-                # the disagreement. The build-time bound therefore folds the loop
-                # away and each workgroup sums only the *first* query head of its
-                # group -- dK and dV short by the rest of the group, dQ untouched
+                # the disagreement. A build-time bound would fold the loop
+                # away and each workgroup would sum only the *first* query head of
+                # its group -- dK and dV short by the rest of the group, dQ untouched
                 # (it is one program per query head and never folds).
                 #
                 # Runtime is what the rest of the parity path already assumes:
@@ -2522,9 +2514,9 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     # it: 0.2-0.4% at group 8, once per head against a whole q
                     # walk. A wrong guess here costs a silently zeroed q tile.
                     #
-                    # Upstream guards this on `const_expr(traits.GQA_GROUP_SIZE >
-                    # 1)`, because at group size 1 there is no previous head at all
-                    # -- and that guard is not cosmetic: left unconditional it
+                    # A build-time guard on `const_expr(traits.GQA_GROUP_SIZE > 1)`
+                    # would skip it at group size 1, where there is no previous head
+                    # at all -- and a guard is not cosmetic: left unconditional it
                     # measured **1.5% at head_dim 64**, where the kernel is
                     # shortest and a fixed prologue cost shows most. Every wider
                     # rung was within noise, which is exactly the shape of a
@@ -2535,7 +2527,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     # group size to fold against. So it becomes the *exact*
                     # condition rather than a conservative approximation of it --
                     # "is there a previous head", `g != 0`, which is true one
-                    # iteration less often than the trait test was and skips the
+                    # iteration less often than the trait test would be and skips the
                     # drain on MHA the same way. `_stagger_extra_barrier_if_one`
                     # in `flash_attn_utils.py` is the same shape, an `scf.if` on a
                     # runtime scalar around `sched_barrier` + `s_barrier`.
@@ -2564,10 +2556,10 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     # the body `NUM_STREAM_BUFFERS` tiles earlier, so this is the
                     # only staging whose latency is not covered by compute.
                     # `t0`, not a literal 0. Under causal the walk starts at the
-                    # window's first live tile, and P3 found four prologues in the
-                    # forward that assumed otherwise -- the answer stays right (a
-                    # dead tile masks to nothing) while the tile cut goes inert,
-                    # which only a timing assertion catches. The walk is the same
+                    # window's first live tile, and a prologue that assumed
+                    # otherwise would stay right (a dead tile masks to nothing)
+                    # while the tile cut goes inert, which only a timing
+                    # assertion catches. The walk is the same
                     # for every head of the group: `t0`/`t_end` come from the KV
                     # block and the mask, neither of which the query head moves.
                     for b in range_constexpr(NBUF):
@@ -2617,8 +2609,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
 
             # A workgroup whose KV block is past *this* sequence's keys. Scalar
             # branch (the predicate is workgroup-uniform), so EXEC is untouched
-            # across the transpose reads inside -- which is not optional; see
-            # `tooling/check_exec_hazard_gfx950.py`.
+            # across the transpose reads inside, which requires EXEC all 1s.
             # **One runtime branch, outside the tile loop, picking a whole body.**
             # `lse_row_addressing` decodes the logsumexp layout from `VarlenBits`
             # at runtime, so the kernel must serve either -- and putting the choice
@@ -2626,17 +2617,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             # an `scf.if` there is a scheduling barrier the row loads cannot be
             # hoisted across (0.67x at head_dim 64, measured; the docstring on
             # `BwdDkDvSoftmaxHelper.load_row_values` has the table). Here each arm
-            # is exactly the specialised code it was before, at the price of
+            # is exactly the specialised code, at the price of
             # emitting the body twice.
             #
             # `pitch != 1` rather than the bits: one decode, no second reading, and
             # it is the sharper test -- at `num_head_q == 1` the two layouts
             # coincide and the wide arm is correct for both.
-            # **A build without varlen has no bits and cannot be TH.** `_args`
-            # refuses a varlen descriptor on such a build, so `varlen_bits` is 0,
-            # the layout is `_HT` and the pitch is 1 -- there is nothing to choose.
-            # Gating on the trait here keeps every dense build byte-identical to
-            # what it was, and confines the cost of this fix to the builds that can
+            # **A build without the varlen decode has no bits and cannot be TH**:
+            # `varlen_bits` is 0, the layout is `_HT` and the pitch is 1, so there
+            # is nothing to choose. Gating on the trait keeps such a build to one
+            # body and confines the cost of the two arms to the builds that can
             # actually be handed the other layout.
             lse_strided = ctx.lse_pitch != fx.Index(1)
             active = ctx.active
@@ -2978,11 +2968,11 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             # spreading distinct work. Same conclusion as the forward's, for a
             # different reason.
             #
-            # **The head is the KV head, which is what B7 changed.** Under GQA
+            # **The head is the KV head.** Under GQA
             # the workgroup walks the group internally, so the grid shrinks by
             # the group size and each workgroup does that much more work --
             # total work unchanged, parallelism divided. At MHA the two counts
-            # are equal and this is the pre-B7 grid exactly.
+            # are equal and the grid is one workgroup per head and KV block.
             grid=(fx.Index(num_head_k), num_kv_blocks, bs_idx),
             block=(traits.BLOCK_SIZE, 1, 1),
             stream=stream,
@@ -3156,7 +3146,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 raise ValueError(
                     f"{name} must have Q's dtype ({Q.dtype}), got {t.dtype}"
                 )
-        # **B8: the tensors must match what the build was compiled for.** Both
+        # **The tensors must match what the build was compiled for.** Both
         # dtypes are two bytes, so every descriptor, stride and LDS offset is
         # identical between them and a mismatch changes nothing about the
         # addressing -- it is only the *bit interpretation* of the operands and
@@ -3185,25 +3175,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             raise ValueError(
                 f"logsumexp must be ({int(batch_size) * num_head_q}, {seqlen_q}); got {tuple(LSE.shape)}"
             )
-        # Upstream also rejects a varlen descriptor on a build compiled without
-        # the decode. There is no such build here -- `make_traits` pins
-        # `VARLEN=True` because the decode is unconditional (71ba6511) -- so
-        # that check could never fire and is not carried.
-        # **No layout check any more, and its removal is the fix.** This used
-        # to reject a call whose `VarlenBits` disagreed with `lse_layout_th`,
-        # because the kernel's row read was specialised at build time and would
-        # otherwise read the wrong elements. That made a host-side wrapper the
-        # only thing standing between a wrong number and a caller who does not
-        # go through it -- AOTriton launches from C++ and never calls `_args`,
-        # and its whole TH varlen backward was wrong. The kernel now decodes
-        # the layout at runtime and serves either, so there is nothing left to
-        # reject; `lse_layout_th` survives as a build hint with no effect on
-        # correctness.
-        # **No "requires a descriptor" check.** It used to raise here, on the
-        # grounds that a caller who asked for a varlen build and passed no
-        # descriptor probably thought a ragged batch was being honoured. That
-        # reasoning inverts once `varlen` defaults on: the caller who passes
-        # nothing is now the ordinary *dense* caller, and they must be served.
+        # There is no build without the varlen decode: `make_traits` pins
+        # `VARLEN=True` because the decode is unconditional, so a varlen
+        # descriptor is never refused on that ground.
+        # **There is no layout check.** The kernel decodes the logsumexp layout
+        # from `VarlenBits` at runtime and serves either, so no call can disagree
+        # with the build; a host-side check would in any case be no defence,
+        # because AOTriton launches from C++ and never calls `_args`.
+        # `lse_layout_th` is a build hint with no effect on correctness.
+        # **There is no "requires a descriptor" check.** A caller who passes
+        # nothing is the ordinary *dense* caller, and must be served.
         # They are, exactly: `varlen_args` gives `bits == 0`, and at zero bits
         # `decode_addressing` returns `(max_seqlen, 0, z)` -- dense addressing
         # -- with every array read behind a real branch, so the null `seqinfo`
@@ -3238,7 +3219,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 "this build was not compiled for dropout; pass dropout=True in BwdDkDvInputMetadata"
             )
 
-        # B7. Checked both ways, because both silent failures return the right
+        # Checked both ways, because both silent failures return the right
         # shape: a bias build handed nothing would read whatever tensor filled
         # the slot, and a plain build handed a bias would return dense
         # attention's gradient to a caller who believes the bias was applied.
@@ -3288,6 +3269,32 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 raise ValueError(
                     f"bias must have Q's dtype ({Q.dtype}), got {bias.dtype}"
                 )
+        # The kernel's addressing is 32-bit per slab and per packed-row split;
+        # past those limits a suppressed store lands on real data. AOTriton's
+        # launcher does not run this function, so the same limits are the
+        # caller's to honour there (see `check_launch_limits`).
+        check_launch_limits(
+            elem_bytes=traits.BF16_BYTES,
+            block_q=traits.BLOCK_Q,
+            gqa_pack=GQA_PACK,
+            group=num_head_q // num_head_k,
+            seqlen_q=_vl[
+                5
+            ],  # the longest sequences the kernel reads: max_seqlen_q / max_seqlen_k of a varlen call, seqlen_q / seqlen_k of a dense one
+            seqlen_k=_vl[6],
+            strides={
+                n: (t.stride(1), t.stride(2))
+                for n, t in (
+                    ("Q", Q),
+                    ("K", K),
+                    ("V", V),
+                    ("DO", DO),
+                    ("DK", DK),
+                    ("DV", DV),
+                )
+            },
+            bias=(bias.stride(1), bias.stride(2)) if bias is not None else None,
+        )
         # The sentinel is a real tensor whose contents are never read: every
         # use is behind `const_expr(traits.BIAS_TYPE)`, so a build without bias
         # emits no load at all. That is what makes `bias=None` bitwise
@@ -3298,62 +3305,70 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         )
 
         return (
-            # Nine pointers, not nine tensors. LSE and Delta are pinned to f32
-            # rather than read off the tensor: both are required and both are
-            # already checked f32 by `abi.row_tensor_arg`, so naming the type
-            # here keeps the slot's type a property of the ABI rather than of
-            # the call.
-            wire_ptr(Q),
-            wire_ptr(K),
-            wire_ptr(V),
-            wire_ptr(bias_t),
-            wire_ptr(DO),
-            wire_ptr(DK),
-            wire_ptr(DV),
-            wire_ptr(LSE, fx.Float32),
-            wire_ptr(Delta, fx.Float32),
-            int(batch_size),
-            _vl[1],
-            _vl[2],
-            _vl[3],
-            _vl[4],
-            _vl[0],
-            int(num_seqlens),
-            *_vl[5:],  # max_seqlen_q, max_seqlen_k -- the decode's MAX fallback
-            *_resolve_window_args(window),
-            _dp[0],
-            _dp[1],
-            _dp[2],
-            _dp[3],
-            _dp[4],
-            num_head_q,
-            num_head_k,
-            hdim_qk,
-            hdim_vo,
-            abi.resolve_scale(
-                Q,
-                scale if scale is not None else BUILD_SM_SCALE,
-                PADDED_HEAD,
-                1.0 / (BLOCK_DMODEL**0.5),
+            (
+                # Nine pointers, not nine tensors. LSE and Delta are pinned to f32
+                # rather than read off the tensor: both are required and both are
+                # already checked f32 by `abi.row_tensor_arg`, so naming the type
+                # here keeps the slot's type a property of the ABI rather than of
+                # the call.
+                wire_ptr(Q),
+                wire_ptr(K),
+                wire_ptr(V),
+                wire_ptr(bias_t),
+                wire_ptr(DO),
+                wire_ptr(DK),
+                wire_ptr(DV),
+                wire_ptr(LSE, fx.Float32),
+                wire_ptr(Delta, fx.Float32),
+                int(batch_size),
+                _vl[1],
+                _vl[2],
+                _vl[3],
+                _vl[4],
+                _vl[0],
+                int(num_seqlens),
+                *_vl[5:],  # max_seqlen_q, max_seqlen_k -- the decode's MAX fallback
+                *_resolve_window_args(window),
+                _dp[0],
+                _dp[1],
+                _dp[2],
+                _dp[3],
+                _dp[4],
+                num_head_q,
+                num_head_k,
+                hdim_qk,
+                hdim_vo,
+                abi.resolve_scale(
+                    Q,
+                    scale if scale is not None else BUILD_SM_SCALE,
+                    PADDED_HEAD,
+                    1.0 / (BLOCK_DMODEL**0.5),
+                ),
+                *st,
+                *bias_st,
+                int(hdim_qk != BLOCK_DMODEL or hdim_vo != BLOCK_DMODEL)
+                | (2 if dropout_p is not None else 0),
             ),
-            *st,
-            *bias_st,
-            int(hdim_qk != BLOCK_DMODEL or hdim_vo != BLOCK_DMODEL)
-            | (2 if dropout_p is not None else 0),
-        ), stream
+            stream,
+            _dp_keepalive,
+        )
 
     def _launch(*args, **kwargs):
-        packed, stream = _args(*args, **kwargs)
+        # `keepalive` holds the device tensors behind an int seed / offset: only their raw pointers reach the kernel,
+        # so they must stay referenced until the launch is enqueued.
+        packed, stream, keepalive = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
-            return abi.run_compiled(
+            result = abi.run_compiled(
                 _COMPILED,
                 launch_fmha_bwd_dkdv_gfx950,
                 *packed,
                 stream if stream is not None else fx.Stream(None),
             )
+        del keepalive
+        return result
 
     def _compile(*args, **kwargs):
-        packed, stream = _args(*args, **kwargs)
+        packed, stream, _keepalive = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
             return flyc.compile(launch_fmha_bwd_dkdv_gfx950, *packed, fx.Stream(stream))
 

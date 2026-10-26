@@ -394,7 +394,7 @@ class M16DqGemmHelper:
             out.append(acc)
         # The head_dim 96 workaround the 32-row family carries. Same producer
         # (the QK burst) and same near-zero cost; kept because the underlying
-        # defect is latent rather than fixed. See `sdpa_lore_gfx950.md`.
+        # defect is latent rather than fixed.
         dualwave._s_nop(1)
         return tuple(out)
 
@@ -777,7 +777,7 @@ def make_m16_dq_body(
     hdim_vo_floor,
     store_db,
 ):
-    """The traced 16-row body. A factory, for `make_wide_body`'s reason.
+    """The traced 16-row body. A factory, because of the AST rewrite:
 
     The `for ... init=[...]` / `yield` protocol only exists after the AST
     rewrite, so a module-level function called from the kernel is compiled by

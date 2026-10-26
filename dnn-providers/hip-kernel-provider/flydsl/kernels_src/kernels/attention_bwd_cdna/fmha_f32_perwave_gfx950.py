@@ -1,8 +1,8 @@
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 """Per-wave dK/dV operand layer of the native-f32-MFMA backward (gfx950).
 
-Schedule 'pw': each wave owns 16 KV rows and the **full** head dim d, so K, V, dK and dV are resident (d fp32 per lane each: `4 * d / 16`
-V4 registers... d/4 VGPR per tensor... see `fmha_f32_common_gfx950` for the lane maps); the workgroup of W waves owns 16 W KV rows and stages
+Schedule 'pw': each wave owns 16 KV rows and the **full** head dim d, so K, V, dK and dV are resident: `np = ceil(d / 16)` V4 registers per lane
+and tensor (d / 4 fp32: the lane's KV row `m`, columns `4 g .. 4 g + 3` of every 16-column panel; see `fmha_f32_common_gfx950` for the lane maps); the workgroup of W waves owns 16 W KV rows and stages
 one q tile (`block_q` = 16 or 32 rows) of Q and dO that all its waves read. No cross-wave exchange: S = Q K^T and dP = dO V^T are complete in
 the wave's accumulators.
 
@@ -16,7 +16,7 @@ Per-iteration phase order (the caller owns the loop, the softmax-recompute math 
     ops.barrier()               the next stage overwrites the tile
 
 LDS: two tensor tiles (Q, dO), each `panels * rb` chunks, chunk of (panel p, 16-row block s) = `p * rb + s`; `lds_bytes` = 2 tile_f * 4.
-Tiles of the family for which this layer is assigned: see `RP/parity/gaps/fp32/sp-n.md` "Schedule table" (12 of 18 (tile, geometry) pairs;
+The tiles for which this layer is assigned are the `'pw'` rows of `SCHEDULE_TABLE` in `fmha_tuning_bwd_dkdv_f32_gfx950` (12 of 18 (tile, geometry) pairs;
 t512 has no per-wave variant that qualifies).
 """
 
