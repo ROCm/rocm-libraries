@@ -196,14 +196,17 @@ def claim_solution_uid(solution: dict, seen: set[str]) -> str:
         ValueError: Propagated from :func:`generate_solution_id` on time overflow.
     """
     existing = solution.get("SolutionUID")
-    if isinstance(existing, str) and existing not in seen and existing != "0u0":
+    if isinstance(existing, str):
         try:
             decoded = decode_solution_uid(existing)
         except (TypeError, ValueError):
             decoded = 0
         if decoded != 0:
-            seen.add(existing)
-            return existing
+            canonical = encode_solution_uid(decoded)
+            if canonical not in seen:
+                solution["SolutionUID"] = canonical
+                seen.add(canonical)
+                return canonical
 
     for _ in range(100):
         uid = encode_solution_uid(generate_solution_id())
@@ -214,7 +217,7 @@ def claim_solution_uid(solution: dict, seen: set[str]) -> str:
     raise RuntimeError("could not draw a unique SolutionUID")
 
 
-_SOLUTION_UID_LINE = re.compile(r"^(\s*)(?:- )?SolutionUID:\s*(\S+)\s*$")
+_SOLUTION_UID_LINE = re.compile(r"^(\s*(?:- )?SolutionUID:\s*)(\S+)(\s*(?:#.*)?)$")
 
 
 def rewrite_colliding_solution_uids(paths: list[Path]) -> int:
@@ -245,26 +248,13 @@ def rewrite_colliding_solution_uids(paths: list[Path]) -> int:
             match = _SOLUTION_UID_LINE.match(line)
             if match is None:
                 continue
-            indent, value = match.group(1), match.group(2)
-            usable = value not in seen and value != "0u0"
-            if usable:
-                try:
-                    usable = decode_solution_uid(value) != 0
-                except (TypeError, ValueError):
-                    usable = False
-            if usable:
-                seen.add(value)
+            prefix, value, suffix = match.groups()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            replacement = claim_solution_uid({"SolutionUID": value}, seen)
+            if replacement == value:
                 continue
-            replacement = None
-            for _ in range(100):
-                candidate = encode_solution_uid(generate_solution_id())
-                if candidate not in seen and candidate != "0u0":
-                    replacement = candidate
-                    break
-            if replacement is None:
-                raise RuntimeError("could not draw a unique SolutionUID")
-            lines[index] = f"{indent}SolutionUID: {replacement}"
-            seen.add(replacement)
+            lines[index] = f"{prefix}{replacement}{suffix}"
             changed = True
             rewritten += 1
         if changed:

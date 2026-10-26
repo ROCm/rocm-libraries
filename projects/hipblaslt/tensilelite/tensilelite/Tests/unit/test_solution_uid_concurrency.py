@@ -260,6 +260,39 @@ def test_claim_solution_uid_keeps_unused_value() -> None:
     assert seen == {"0u5"}
 
 
+def test_claim_solution_uid_compares_decoded_identity(monkeypatch) -> None:
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    first = {"SolutionUID": "0U5"}
+    second = {"SolutionUID": "0u5"}
+    seen: set[str] = set()
+
+    assert claim_solution_uid(first, seen) == "0u5"
+    assert claim_solution_uid(second, seen) == "0u6"
+    assert read_solution_uid(first) != read_solution_uid(second)
+
+
+def test_rewrite_solution_uid_preserves_yaml_item_and_comment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        "Solutions:\n"
+        "- SolutionUID: 0u5 # first\n"
+        "  SolutionIndex: 0\n"
+        "- SolutionUID: 0U5 # duplicate\n"
+        "  SolutionIndex: 1\n",
+        encoding="utf-8",
+    )
+
+    assert rewrite_colliding_solution_uids([path]) == 1
+    assert path.read_text(encoding="utf-8") == (
+        "Solutions:\n"
+        "- SolutionUID: 0u5 # first\n"
+        "  SolutionIndex: 0\n"
+        "- SolutionUID: 0u6 # duplicate\n"
+        "  SolutionIndex: 1\n"
+    )
+
+
 def test_claim_solution_uid_regenerates_a_collision() -> None:
     """A UID already in ``seen`` is replaced.
 
