@@ -76,6 +76,7 @@ LOG_TAIL_BYTES = 32 * 1024
 HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
 ZERO_TESTS_MARKER = "Error: zero tests ran"
 NO_DEVICE_MARKER = "No HIP devices available"
+GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
 POLL_SECONDS = 0.05
 MAX_PRINTED_FINDINGS = 20
 
@@ -423,7 +424,8 @@ class Fuzz:
         """Fail fast when the binary cannot run at all (RFC 0023 7.4).
 
         Lists the tests of the binary on an empty bundle root with the run's own flags and no
-        filter. A healthy binary lists its compiled-in tests and exits 0; a bad
+        filter. A healthy binary lists its compiled-in tests and exits 0, or says "Error: zero tests
+        ran." and exits 1 when it has none to list (it got that far, so it is healthy); a bad
         ``--test-engine`` or ``--test-article``, a missing config or a crash at startup exits
         non-zero. Without this every batch would die the same way, be bisected down to single
         cases and be reported as ``load-crash`` with exit status 0.
@@ -435,7 +437,13 @@ class Fuzz:
         text = log_path.read_text(encoding="utf-8", errors="replace")
         if result.aborted:
             return
-        if result.hung or result.returncode != 0:
+        # "Error: zero tests ran." (exit 1) is the binary telling us it started, loaded the
+        # plugin and engine and registered nothing: an empty bundle root with no compiled-in
+        # tests, or a GTEST_FILTER in the environment. Startup is proven, so it is healthy.
+        started = result.returncode == 0 or (
+            result.returncode == 1 and ZERO_TESTS_MARKER in text
+        )
+        if result.hung or not started:
             what = "hung" if result.hung else f"exited with status {result.returncode}"
             raise DriverError(
                 f"the binary {what} when asked to list its tests with this run's flags, so no"
@@ -629,7 +637,8 @@ class Fuzz:
                     sp, s, "UNEXERCISED", "setup", "interrupted before the case ran"
                 )
             return
-        listed = parse_listing(listing_text)
+        # Nothing after the zero-tests diagnostic is a test name (it echoes the filter).
+        listed = parse_listing(listing_text.split(ZERO_TESTS_MARKER, 1)[0])
         # A listing that selects nothing makes the real binary print "Error: zero tests
         # ran." and exit 1 (main.cpp). That is "nothing registered", answered below per case
         # with the load message; only a hang, a signal or any other non-zero exit is a crash
@@ -749,7 +758,14 @@ class Fuzz:
         pattern = re.compile(
             r"(?<![A-Za-z0-9_])" + re.escape(sample.case_id) + r"(?![A-Za-z0-9_])"
         )
-        lines = [ln.strip() for ln in listing_text.splitlines() if pattern.search(ln)]
+        # Only what the binary printed before its zero-tests diagnostic can be a load
+        # message; the diagnostic itself echoes the whole --gtest_filter, case ids included.
+        text = listing_text.split(ZERO_TESTS_MARKER, 1)[0]
+        lines = [
+            ln.strip()
+            for ln in text.splitlines()
+            if pattern.search(ln) and not GTEST_FILTER_LINE.match(ln)
+        ]
         if lines:
             return " | ".join(lines[:3])[:400]
         return "absent from --gtest_list_tests (the harness skipped the case at load)"

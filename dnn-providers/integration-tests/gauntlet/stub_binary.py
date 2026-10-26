@@ -33,8 +33,12 @@ Behaviours: ``pass``, ``unclaimed_pass``, ``declined``, ``wrong``, ``unexercised
 ``PASS`` whose reason says whether ``probe_path`` exists when the case runs),
 ``load_skip`` (the case is not registered, so it is absent from ``--gtest_list_tests``),
 ``reg_crash`` (the process dies at registration, before any case starts) and
-``startup_fail`` (a top-level control key, not a per-case behaviour: every invocation exits 1 at
-startup, as a bad ``--test-engine`` does), ``run_start_crash`` (listing works; a run that selects the case dies before any case starts).
+``run_start_crash`` (listing works; a run that selects the case dies before any case starts).
+
+Top-level control keys, not per-case behaviours: ``startup_fail`` (every invocation exits 1 at
+startup, as a bad ``--test-engine`` does) and ``no_builtin`` (the binary has no compiled-in test,
+so a listing with no filter selects nothing and prints "Error: zero tests ran."), and
+``quiet_load`` (a case skipped at load logs nothing, as the real binary without HIPDNN_LOG_LEVEL).
 """
 
 import fnmatch
@@ -183,10 +187,13 @@ def main(argv):
             sys.stderr.flush()
             os._exit(134)
         if kind == "load_skip":
-            sys.stderr.write(
-                f"WARNING: skipping bundle {sweep}#{case_id}: stub load failure"
-                f" for case {case_id}\n"
-            )
+            if not control.get(
+                "quiet_load"
+            ):  # the real one logs only with HIPDNN_LOG_LEVEL
+                sys.stderr.write(
+                    f"WARNING: skipping bundle {sweep}#{case_id}: stub load failure"
+                    f" for case {case_id}\n"
+                )
             continue
         registered.append((suite, test, case_id, sweep, purpose, kind))
 
@@ -196,11 +203,15 @@ def main(argv):
 
     # Like the real binary, which has C++ tests compiled in: with a filter that selects
     # nothing at all it prints "Error: zero tests ran." and exits 1, listing or running.
-    builtin = gtest_matches(BUILTIN_TEST, opts["filter"])
+    builtin = not control.get("no_builtin") and gtest_matches(
+        BUILTIN_TEST, opts["filter"]
+    )
     if not selected and not builtin:
         if log:
             _log(log, argv, "list" if opts["list"] else "run", [])
-        sys.stderr.write("Error: zero tests ran.\n")
+        sys.stderr.write(
+            "Error: zero tests ran.\n" f"  gtest_filter:    {opts['filter']}\n"
+        )
         return 1
 
     if opts["list"]:

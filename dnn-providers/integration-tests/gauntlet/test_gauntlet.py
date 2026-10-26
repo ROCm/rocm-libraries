@@ -1573,3 +1573,23 @@ def test_the_freeze_command_is_quoted_and_independent_of_the_working_directory(r
     assert Path(graph).is_absolute() and Path(graph).exists()
     assert Path(bundle_dir).is_absolute() and Path(bundle_dir).is_dir()
     assert words[words.index("--tier") + 1] == "quick"
+
+
+def test_load_reason_falls_back_when_the_binary_logged_nothing_about_the_case(run):
+    # The real binary logs the skipped bundle only with HIPDNN_LOG_LEVEL set. What it always
+    # prints is the zero-tests diagnostic, which echoes the whole --gtest_filter, case id
+    # included; that line is not a load message.
+    run.control(cases={"s1000": "load_skip"}, quiet_load=True)
+    assert run.run("--samples", "1") == 0
+    [outcome] = run.outcome_list
+    assert outcome["outcome"] == "UNEXERCISED"
+    assert outcome["reason"] == (
+        "load: absent from --gtest_list_tests (the harness skipped the case at load)"
+    )
+    assert "gtest_filter" not in outcome["reason"]
+
+
+def test_preflight_accepts_a_binary_that_has_no_compiled_in_tests(run):
+    run.control(no_builtin=True)
+    assert run.run("--samples", "2", "--batch-size", "2") == 0
+    assert [o["outcome"] for o in run.outcome_list] == ["PASS", "PASS"]

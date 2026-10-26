@@ -272,10 +272,12 @@ samples. Spaces live in `gauntlet/spaces/` (`<Op>[.<Name>].space.json`); with no
 reports `DECLINED`, not a failure.
 
 Before the first batch the driver lists the binary's tests on an empty bundle root with
-the run's own flags. If that fails (a bad `--test-engine` or `--test-article`, a missing
-config, a crash at startup) or the binary reports that it found no HIP device, the driver
-prints the log tail and exits 2 without running a sample, instead of reporting every
-sample as a load crash.
+the run's own flags. A healthy binary lists its compiled-in tests (exit 0) or reports
+`Error: zero tests ran.` (exit 1), which also proves it started. If the listing fails any
+other way (a bad `--test-engine` or `--test-article`, a missing config, a crash at
+startup) or the binary reports that it found no HIP device, the driver prints the log
+tail and exits 2 without running a sample, instead of reporting every sample as a load
+crash.
 
 | Variable | Flag | Meaning | Default |
 |---|---|---|---|
