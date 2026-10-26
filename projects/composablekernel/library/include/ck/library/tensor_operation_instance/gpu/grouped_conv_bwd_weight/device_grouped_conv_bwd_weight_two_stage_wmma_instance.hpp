@@ -73,48 +73,45 @@ template <ck::index_t NDimSpatial,
           BlockGemmPipelineVersion PipelineVersion>
 using device_grouped_conv_bwd_weight_two_stage_nhwgc_wmma_c_shuffle_instances =
     decltype(::std::tuple_cat(
-        ::std::declval<
-            device_grouped_conv_bwd_weight_two_stage_nhwgc_wmma_c_shuffle_base_instances<
-                NDimSpatial,
-                ALayout,
-                BLayout,
-                ELayout,
-                DataType,
-                ConvSpec,
-                Scheduler,
-                PipelineVersion>>()
+        ::std::declval<device_grouped_conv_bwd_weight_two_stage_nhwgc_wmma_c_shuffle_base_instances<
+            NDimSpatial,
+            ALayout,
+            BLayout,
+            ELayout,
+            DataType,
+            ConvSpec,
+            Scheduler,
+            PipelineVersion>>()
 #if defined(CK_USE_GFX1250)
-        ,
+            ,
         ::std::declval<::std::conditional_t<
             ::std::is_same_v<DataType, BF16>,
             ::std::tuple<
                 // clang-format off
                 // Pack sixteen depthwise groups into a 16x144 block-diagonal GEMM tile.
                 DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    32,    16,   144,    32,    8,   16,   16,       1,       9,        S<4, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,              1,              1,              4,         0,        S<4, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              1,              4,         0,           1,           1,         S<1, 4, 1, 8>,                     1, Scheduler, PipelineVersion,        16>>,
-                // clang-format on
-            ::std::tuple<>>>()
-        ,
+            // clang-format on
+            ::std::tuple<>>>(),
         ::std::declval<::std::conditional_t<
             ::std::is_same_v<DataType, BF16> && ConvSpec == ConvBwdWeightDefault,
             ::std::tuple<
                 // Keep scalar dY loads for skinny K while vectorizing the input-channel axis.
                 // clang-format off
                 DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3< NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec, 128, 16, 128, 64, 8, 16, 16, 1, 2, S<8, 16, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 8, 0, S<8, 16, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 8, 8, 0, 1, 1, S<1, 8, 1, 16>, 4, Scheduler, PipelineVersion, 1>>,
-                // clang-format on
-            ::std::tuple<>>>()
-        ,
+            // clang-format on
+            ::std::tuple<>>>(),
         ::std::declval<::std::conditional_t<
-            ::std::is_same_v<DataType, BF16> && NDimSpatial == 2 &&
-                ConvSpec == ConvBwdWeightDefault,
+            ::std::is_same_v<DataType, BF16> &&
+                NDimSpatial == 2 && ConvSpec == ConvBwdWeightDefault,
             ::std::tuple<
                 // Nonoverlap RGB patches retain image/batch strides while vectorizing XC.
                 // clang-format off
                 DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3< NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec, 128, 128, 128, 32, 8, 16, 16, 8, 2, S<4, 32, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 4, 8, 1, S<4, 32, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 4, 8, 0, 1, 1, S<1, 16, 1, 8>, 1, Scheduler, PipelineVersion, 1, BF16, BF16, 1, 1, false, true>,
                 DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3< NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec, 128, 64, 64, 128, 8, 16, 16, 4, 1, S<16, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 8, 8, 0, S<16, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 1, Scheduler, PipelineVersion, 1, BF16, BF16, 1, 1, false, true>>,
-                // clang-format on
+            // clang-format on
             ::std::tuple<>>>()
 #endif
-        ));
+            ));
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation

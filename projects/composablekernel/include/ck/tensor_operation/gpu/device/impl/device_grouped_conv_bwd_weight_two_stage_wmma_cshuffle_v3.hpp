@@ -224,12 +224,12 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     using ConvToGemmTransformerV2 = std::conditional_t<
         UseNonOverlapPatchView,
         TransformConvBwdWeightToGemmNonOverlapPatch<NDimSpatial,
-                                                   MPerBlock,
-                                                   NPerBlock,
-                                                   ABK1Number,
-                                                   KPerBlock / ABK1Number,
-                                                   NumGroupsToMerge,
-                                                   ConvBackwardWeightSpecialization>,
+                                                    MPerBlock,
+                                                    NPerBlock,
+                                                    ABK1Number,
+                                                    KPerBlock / ABK1Number,
+                                                    NumGroupsToMerge,
+                                                    ConvBackwardWeightSpecialization>,
         TransformConvBwdWeightToGemmV2<NDimSpatial,
                                        MPerBlock,
                                        NPerBlock,
@@ -635,8 +635,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 // packed images and patches, including image and batch strides.
                 const auto is_packed = [](const auto& lengths, const auto& strides) {
                     constexpr long_index_t MaxElements = (long_index_t{1} << 30);
-                    if(lengths[0] != 1 || strides[2] != 1 || lengths[1] <= 0 ||
-                       lengths[2] <= 0)
+                    if(lengths[0] != 1 || strides[2] != 1 || lengths[1] <= 0 || lengths[2] <= 0)
                         return false;
                     long_index_t expected = lengths[2];
                     for(index_t i = 4; i >= 3; --i)
@@ -650,8 +649,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 };
                 is_nonoverlap_patch_ =
                     Conv_G_ == 1 && Conv_C_ == 3 && is_packed_weight_ &&
-                    a_g_n_k_wos_lengths[1] == Conv_N_ &&
-                    a_g_n_k_wos_lengths[2] == Conv_K_ &&
+                    a_g_n_k_wos_lengths[1] == Conv_N_ && a_g_n_k_wos_lengths[2] == Conv_K_ &&
                     is_packed(b_g_n_c_wis_lengths, b_g_n_c_wis_strides) &&
                     is_packed(a_g_n_k_wos_lengths, a_g_n_k_wos_strides) &&
                     reinterpret_cast<std::uintptr_t>(p_a_grid_) %
