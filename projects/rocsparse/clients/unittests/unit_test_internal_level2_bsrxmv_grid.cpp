@@ -37,6 +37,12 @@
 // launcher that ignores maxGridSize[0] launches the full grid and still passes,
 // so these cases cover the stride loops, not the clamp.
 //
+// REAL-LIMIT CASE: real_threshold_block_dim_32 leaves maxGridSize[0] alone and
+// runs 1024-thread blocks with mb just past (2^32 - 1) / 1024, so
+// get_grid_size_x clamps and the stride loop covers the last block rows.
+// Without the clamp the launch is invalid and y is not written. It needs about
+// 0.6 GB of device memory and skips when that is not available.
+//
 // ARCHITECTURE COVERAGE: rocsparse::bsrxmv_template_dispatch routes *every*
 // block_dim through bsrxmvn_general when handle->wavefront_size == 32, so on a
 // wave32 part these cases exercise the five grids in
@@ -608,6 +614,136 @@ TEST_F(BsrxmvGridClamp, double_block_dims_5_and_8_reach_the_templated_kernels)
             check_with_grid_x<double>(block_dim, rocsparse_direction_column, {}, grid_x);
             check_with_grid_x<double>(block_dim, rocsparse_direction_row, mask, grid_x);
             check_with_grid_x<double>(block_dim, rocsparse_direction_column, mask, grid_x);
+        }
+    }
+}
+
+// block_dim 32 runs 1024-thread blocks on every architecture
+// (bsrxmvn_general_kernel<1024, 32> on wave32, bsrxmvn_17_32_kernel<32> on
+// wave64), so get_grid_size_x clamps grid.x to (2^32 - 1) / 1024 blocks. mb is
+// 65 block rows past that. Every block row is empty except block rows 0,
+// grid_x and mb - 1, which hold one block each, so the alpha term is checked
+// on block rows inside and past the clamped grid; every other entry must be
+// beta * Y_INIT.
+TEST_F(BsrxmvGridClamp, real_threshold_block_dim_32)
+{
+    constexpr rocsparse_int block_dim = 32;
+    constexpr rocsparse_int bs        = block_dim * block_dim;
+    const rocsparse_int     grid_x    = static_cast<rocsparse_int>(((uint64_t(1) << 32) - 1) / bs);
+    const rocsparse_int     mb        = grid_x + 65;
+    const rocsparse_int     nb        = 1;
+    constexpr rocsparse_int nnzb      = 3;
+    const rocsparse_int     nz_rows[nnzb] = {0, grid_x, mb - 1};
+
+    const size_t y_size = static_cast<size_t>(mb) * block_dim;
+    const size_t need
+        = 2 * static_cast<size_t>(mb) * sizeof(rocsparse_int) + y_size * sizeof(float);
+    size_t free_bytes  = 0;
+    size_t total_bytes = 0;
+    if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * need)
+    {
+        GTEST_SKIP() << "Insufficient device memory: need about " << need << " bytes";
+    }
+
+    std::vector<rocsparse_int> h_row_ptr(static_cast<size_t>(mb));
+    std::vector<rocsparse_int> h_end_ptr(static_cast<size_t>(mb));
+    rocsparse_int              acc = 0;
+    rocsparse_int              nz  = 0;
+    for(rocsparse_int row = 0; row < mb; ++row)
+    {
+        h_row_ptr[static_cast<size_t>(row)] = acc;
+        if(nz < nnzb && row == nz_rows[nz])
+        {
+            ++acc;
+            ++nz;
+        }
+        h_end_ptr[static_cast<size_t>(row)] = acc;
+    }
+    ASSERT_EQ(acc, nnzb);
+
+    std::vector<rocsparse_int> h_col_ind(nnzb, 0);
+    std::vector<float>         h_val(static_cast<size_t>(nnzb) * bs);
+    for(rocsparse_int b = 0; b < nnzb; ++b)
+    {
+        for(rocsparse_int k = 0; k < bs; ++k)
+        {
+            h_val[static_cast<size_t>(b) * bs + k] = static_cast<float>(1 + (b + k) % 7);
+        }
+    }
+    std::vector<float> h_x(block_dim);
+    for(rocsparse_int c = 0; c < block_dim; ++c)
+    {
+        h_x[c] = static_cast<float>(1 + c % 5);
+    }
+
+    device_vector<rocsparse_int> d_row_ptr{h_row_ptr};
+    device_vector<rocsparse_int> d_end_ptr{h_end_ptr};
+    device_vector<rocsparse_int> d_col_ind{h_col_ind};
+    device_vector<float>         d_val{h_val};
+    device_vector<float>         d_x{h_x};
+    device_vector<float>         d_y{std::vector<float>(y_size, Y_INIT)};
+    if(d_row_ptr.ptr == nullptr || d_end_ptr.ptr == nullptr || d_col_ind.ptr == nullptr
+       || d_val.ptr == nullptr || d_x.ptr == nullptr || d_y.ptr == nullptr)
+    {
+        GTEST_SKIP() << "Insufficient device memory: allocation of about " << need
+                     << " bytes failed";
+    }
+
+    MatDescr    descr;
+    const float alpha = ALPHA;
+    const float beta  = BETA;
+    ASSERT_EQ(xbsrxmv(handle,
+                      rocsparse_direction_row,
+                      rocsparse_operation_none,
+                      0,
+                      mb,
+                      nb,
+                      nnzb,
+                      &alpha,
+                      descr.d,
+                      d_val,
+                      nullptr,
+                      d_row_ptr,
+                      d_end_ptr,
+                      d_col_ind,
+                      block_dim,
+                      d_x,
+                      &beta,
+                      d_y),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    const std::vector<float> got = to_host(d_y.ptr, d_y.n);
+    ASSERT_EQ(got.size(), y_size);
+
+    rocsparse_int next_nz = 0;
+    for(rocsparse_int row = 0; row < mb; ++row)
+    {
+        const bool nonzero = next_nz < nnzb && row == nz_rows[next_nz];
+        for(rocsparse_int r = 0; r < block_dim; ++r)
+        {
+            float want = BETA * Y_INIT;
+            if(nonzero)
+            {
+                float sum = 0.0f;
+                for(rocsparse_int c = 0; c < block_dim; ++c)
+                {
+                    sum += h_val[static_cast<size_t>(next_nz) * bs + r * block_dim + c] * h_x[c];
+                }
+                want = ALPHA * sum + BETA * Y_INIT;
+            }
+            const size_t idx = static_cast<size_t>(row) * block_dim + r;
+            if(got[idx] != want)
+            {
+                ADD_FAILURE() << "y[" << idx << "] (block row " << row << " of " << mb
+                              << ", grid.x clamps at " << grid_x << ") is " << got[idx] << ", want "
+                              << want;
+                return;
+            }
+        }
+        if(nonzero)
+        {
+            ++next_nz;
         }
     }
 }
