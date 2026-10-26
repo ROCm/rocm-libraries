@@ -107,7 +107,6 @@ class Layout {
    public:
     Layout() = default;
     Layout(const Layout&) = default;
-    Layout& operator=(const Layout&) = default;
 
     // Moving leaves the source as a scalar with zero offset.
     Layout(Layout&& other) noexcept
@@ -117,13 +116,12 @@ class Layout {
         other.m_strides.clear();
     }
 
-    Layout& operator=(Layout&& other) noexcept {
-        if (this != &other) {
-            m_shape = std::move(other.m_shape);
-            m_strides = std::move(other.m_strides);
-            m_offset = std::exchange(other.m_offset, 0);
-            other.m_strides.clear();
-        }
+    // Copy the metadata before replacing this value so an allocation failure
+    // cannot leave shape and strides with different ranks.
+    Layout& operator=(Layout other) noexcept {
+        m_shape = std::move(other.m_shape);
+        m_strides = std::move(other.m_strides);
+        m_offset = other.m_offset;
         return *this;
     }
 
