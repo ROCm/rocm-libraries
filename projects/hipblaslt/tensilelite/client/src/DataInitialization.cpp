@@ -126,7 +126,6 @@ namespace TensileLite
         {
             Data,
             MXScale,
-            Count,
         };
 
         roc::hostnumerics::ScalarType swizzleScalarType(rocisa::DataType  dataType,

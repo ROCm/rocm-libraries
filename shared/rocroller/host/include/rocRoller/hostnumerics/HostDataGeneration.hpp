@@ -30,7 +30,6 @@ namespace rocRoller::hostnumerics
         Zeros,
         TrigonometricFromFloat,
         NormalFromFloat,
-        Count,
     };
 
     struct DataInitialization
@@ -50,7 +49,6 @@ namespace rocRoller::hostnumerics
     {
         Unscaled,
         BlockScaled,
-        Count,
     };
 
     struct BlockScaleGeneration

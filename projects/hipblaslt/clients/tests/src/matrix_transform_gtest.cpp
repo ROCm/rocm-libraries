@@ -141,7 +141,6 @@ namespace
         {
             MatrixA = 0,
             MatrixB = 1,
-            Count,
         };
 
         void init(DType* buf, size_t len, InitializationSequence sequence)

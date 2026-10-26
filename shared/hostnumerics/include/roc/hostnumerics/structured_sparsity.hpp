@@ -17,7 +17,6 @@ namespace roc::hostnumerics {
 enum class StructuredSparsitySelection {
     Fixed,   // Uses fixedPositions for every group.
     Random,  // Selects a sorted set from the seed and group index.
-    Count,
 };
 
 // Describes logical N:M pruning along one tensor axis. Each groupSize-element

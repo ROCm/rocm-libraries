@@ -47,7 +47,6 @@ namespace hipblaslt::hostnumerics
             RealOnly,
             Replicated,
             Cartesian,
-            Count,
         };
 
         struct RandomIntegerRecipeConfiguration
@@ -537,8 +536,6 @@ namespace hipblaslt::hostnumerics
                     return GenerationRecipe::typeNegativeInfinity();
                 case OneSpecialValue::NaN:
                     return GenerationRecipe::typeNaN();
-                case OneSpecialValue::Count:
-                    break;
                 }
                 throw std::runtime_error("Unsupported hipBLASLt one-special value.");
             }();
