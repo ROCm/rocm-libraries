@@ -1324,7 +1324,12 @@ class TestGfx125V128Codegen(unittest.TestCase):
         for k in kernels:
             with self.subTest(kernel=k.name):
                 self.assertIn(
-                    k.F_pipeline.tag, ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa")
+                    k.F_pipeline.tag,
+                    (
+                        "qr_tdm_fp8_sched",
+                        "qr_tdm_fp8_sched_mgqa",
+                        "qr_tdm_fp8_sched_d1",
+                    ),
                 )
                 self.assertEqual(k.F_pipeline.F_vlayout, "row")
                 self.assertEqual(k.F_pipeline.F_qscale, "mx")
@@ -1366,6 +1371,32 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertLess(
                     api.index("QRKSVS_TDM_SCHED_FP8_MGQA"),
                     api.index("QRKSVS_TDM_SCHED_FP8,"),
+                )
+
+    def test_fp8_sched_d1_decode_instances(self):
+        # One-wavefront decode instances: batch only, M32 tiles, dispatched ahead of the fold.
+        for dtype, count in (("fp8bf16", 32), ("mxfp8bf16", 8)):
+            with self.subTest(dtype=dtype):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d64_{dtype}_*", 0, [64], "simplified"
+                )
+                d1 = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched_d1"]
+                self.assertEqual(len(d1), count)
+                for k in d1:
+                    self.assertEqual(k.F_mode, "batch")
+                    self.assertEqual((k.F_tile.F_bm0, k.F_tile.F_rm0), (32, 1))
+                    self.assertIn(
+                        "fmha_fwd_can_merge_head_groups(a, 32,",
+                        str(k.F_pipeline.F_constraint),
+                    )
+                    self.assertIn(
+                        "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
+                        k.render(),
+                    )
+                api = pool.render("test")
+                self.assertLess(
+                    api.index("QRKSVS_TDM_SCHED_FP8_D1"),
+                    api.index("QRKSVS_TDM_SCHED_FP8_MGQA"),
                 )
 
     def test_mxfp8bf16_mirrors_mxfp8(self):
@@ -1564,7 +1595,11 @@ class TestGfx125V128Codegen(unittest.TestCase):
                             self.assertEqual(
                                 len(sched),
                                 sum(
-                                    k.F_pipeline.tag != "qr_tdm_fp8_sched_mgqa"
+                                    k.F_pipeline.tag
+                                    not in (
+                                        "qr_tdm_fp8_sched_mgqa",
+                                        "qr_tdm_fp8_sched_d1",
+                                    )
                                     for k in kernels
                                 ),
                             )
@@ -1638,7 +1673,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         self.assertEqual(
                             len(sched),
                             sum(
-                                k.F_pipeline.tag != "qr_tdm_fp8_sched_mgqa"
+                                k.F_pipeline.tag
+                                not in ("qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
                                 for k in kernels
                             ),
                         )

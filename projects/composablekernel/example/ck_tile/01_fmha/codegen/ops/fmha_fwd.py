@@ -381,6 +381,7 @@ class FmhaFwdApiTrait:
             "qr_tdm_sched",
             "qr_tdm_fp8_sched",
             "qr_tdm_fp8_sched_mgqa",
+            "qr_tdm_fp8_sched_d1",
         ]:
             if self.spad == "t":
                 return "true"  # always support
@@ -429,6 +430,7 @@ class FmhaFwdApiTrait:
             "qr_tdm_sched",
             "qr_tdm_fp8_sched",
             "qr_tdm_fp8_sched_mgqa",
+            "qr_tdm_fp8_sched_d1",
         ]:
             if self.skpad == "t":
                 return "true"
@@ -457,6 +459,7 @@ class FmhaFwdApiTrait:
             "qr_tdm_sched",
             "qr_tdm_fp8_sched",
             "qr_tdm_fp8_sched_mgqa",
+            "qr_tdm_fp8_sched_d1",
         ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -486,6 +489,7 @@ class FmhaFwdApiTrait:
             "qr_tdm_sched",
             "qr_tdm_fp8_sched",
             "qr_tdm_fp8_sched_mgqa",
+            "qr_tdm_fp8_sched_d1",
         ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -644,8 +648,10 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
     )
 
 
-# Scheduled FP8 pipeline tags; mgqa folds the query heads of one KV head into the query rows.
-QR_TDM_SCHED_FP8_TAGS = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa")
+# Scheduled FP8 pipeline tags; mgqa folds the query heads of one KV head into the query rows,
+# d1 does so in one-wavefront workgroups of 32 rows.
+QR_TDM_SCHED_FP8_TAGS = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
+QR_TDM_SCHED_FP8_MERGED_TAGS = ("qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
 KVSCALE_ALIGN_PIPELINE_TAGS = ("qr_tdm", *QR_TDM_SCHED_FP8_TAGS)
 
 
@@ -863,7 +869,7 @@ class FmhaFwdKernel:
             return "fmha_fwd_create_kargs_and_grids"
 
     def render(self) -> str:
-        is_merged = self.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa"
+        is_merged = self.F_pipeline.tag in QR_TDM_SCHED_FP8_MERGED_TAGS
         body = type(self)._get_kernel_header(self.F_pipeline.tag) + type(
             self
         )._KERNEL_BODY_TEMPLATE.format(
@@ -1638,7 +1644,19 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             FmhaFwdTileSize(128, 128, 256, 256, 128, 256, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
         ),
     }  # fmt: skip
-    # Must match kFmhaTdmSchedFp8{,Bias,D256}BlockPerCu in the policy.
+    # One-wavefront decode tiles: 32 query rows, the per-wavefront shape of the tiles above.
+    _QR_TDM_SCHED_FP8_D1_TILES = {
+        (64, 64): (
+            FmhaFwdTileSize(32, 128, 64, 64, 128, 64, 1, 1, 1, 1, 1, 1, 16, 16, 64, 16, 16, 128, 2),
+        ),
+        (128, 128): (
+            FmhaFwdTileSize(32, 128, 128, 128, 128, 128, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 2),
+        ),
+        (256, 256): (
+            FmhaFwdTileSize(32, 128, 256, 256, 128, 256, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 1),
+        ),
+    }  # fmt: skip
+    # Must match kFmhaTdmSchedFp8{,Bias,D256,OneWave}BlockPerCu in the policy.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
     _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
@@ -1663,8 +1681,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     @classmethod
     def _with_qr_tdm_sched_fp8_tiles(cls, result: dict) -> dict:
         # Sched tiles may add head dims (FP8FP32 D64, D256); dispatch needs them ascending.
-        for hdims, tiles in cls._QR_TDM_SCHED_FP8_TILES.items():
-            result.setdefault(hdims, []).extend(copy.deepcopy(tiles))
+        for hdims, tiles in itertools.chain(
+            cls._QR_TDM_SCHED_FP8_TILES.items(), cls._QR_TDM_SCHED_FP8_D1_TILES.items()
+        ):
+            merged = result.setdefault(hdims, [])
+            merged.extend(copy.deepcopy(tiles))
+            merged.sort(key=lambda tile: tile.F_bm0)
         return dict(sorted(result.items()))
 
     @classmethod
@@ -1688,6 +1710,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ):
             return cls._QR_TDM_SCHED_FP8_D64_RESIDENT_BLOCKS
         return None
+
+    @classmethod
+    def is_tile_supported_by_qr_tdm_fp8_sched_d1(
+        cls, tile: FmhaFwdTileSize, hdim: int
+    ) -> bool:
+        return any(
+            tile.name == candidate.name
+            for candidate in cls._QR_TDM_SCHED_FP8_D1_TILES.get((hdim, tile.F_bn1), ())
+        )
 
     @classmethod
     def is_tile_supported_by_qr_tdm_fp8_sched(
@@ -1732,9 +1763,29 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             )
         return CppConstraint(expr)
 
+    # One-wavefront decode: head dims, scales and features generated, and launch-bound occupancy.
+    _QR_TDM_SCHED_FP8_D1_DIMS = ((64, 64), (128, 128), (256, 256))
+    _QR_TDM_SCHED_FP8_D1_QSCALES = ("no", "pertensor", "perhead", "blockscale", "mx")
+    _QR_TDM_SCHED_FP8_D1_LSE = ("f", "t")
+    _QR_TDM_SCHED_FP8_D1_SINK = ("f", "t")
+    _QR_TDM_SCHED_FP8_D1_OCCUPANCY = {64: 2, 128: 2, 256: 1}
+
+    # D1 is chosen whenever the merged rows fit its 32-row tile; there is no parallelism gate.
+    @classmethod
+    def qr_tdm_fp8_sched_d1_constraint(
+        cls, hdim: int, hdim_v: int, qscale: str, sink: str, lse: str
+    ) -> CppConstraint:
+        tile = cls._QR_TDM_SCHED_FP8_D1_TILES[(hdim, hdim_v)][0]
+        is_mx = "true" if qscale == "mx" else "false"
+        has_lse = "true" if lse == "t" else "false"
+        base = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)
+        return base & CppConstraint(
+            f"fmha_fwd_can_merge_head_groups(a, {tile.F_bm0}, {has_lse}, {is_mx}, true)"
+        )
+
     # Head dims and scales whose merged-GQA decode instances are generated.
     _QR_TDM_SCHED_FP8_MGQA_DIMS = ((64, 64), (128, 128), (256, 256))
-    _QR_TDM_SCHED_FP8_MGQA_QSCALES = ("no", "pertensor", "perhead", "blockscale")
+    _QR_TDM_SCHED_FP8_MGQA_QSCALES = ("no", "pertensor", "perhead", "blockscale", "mx")
 
     @classmethod
     def qr_tdm_fp8_sched_mgqa_constraint(
@@ -1759,16 +1810,28 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             is_fp8_sched_tile = cls.is_tile_supported_by_qr_tdm_fp8_sched(
                 kernel_ctx.tile, problem_ctx.hdim
             )
+            is_d1_tile = cls.is_tile_supported_by_qr_tdm_fp8_sched_d1(
+                kernel_ctx.tile, problem_ctx.hdim
+            )
             if kernel_ctx.pipeline.tag not in QR_TDM_SCHED_FP8_TAGS:
                 # Other FP8 pipelines keep their own tiles.
                 return not (
-                    problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8 and is_fp8_sched_tile
+                    problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
+                    and (is_fp8_sched_tile or is_d1_tile)
                 )
             if (
-                kernel_ctx.pipeline.tag == "qr_tdm_fp8_sched_mgqa"
+                kernel_ctx.pipeline.tag in QR_TDM_SCHED_FP8_MERGED_TAGS
                 and problem_ctx.mode != "batch"
             ):
                 return False
+            if kernel_ctx.pipeline.tag == "qr_tdm_fp8_sched_d1":
+                return (
+                    problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
+                    and is_d1_tile
+                    and kernel_ctx.pipeline.F_vlayout == "row"
+                    and kernel_ctx.tile.F_occupancy
+                    == cls._QR_TDM_SCHED_FP8_D1_OCCUPANCY[problem_ctx.hdim]
+                )
             return (
                 problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
                 and is_fp8_sched_tile
@@ -1952,10 +2015,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             }  # fmt: skip
             return cls._with_qr_tdm_sched_fp8_tiles(result)
         elif dtype in cls._DT_MXFP8:
-            return {
-                hdims: list(copy.deepcopy(tiles))
-                for hdims, tiles in cls._QR_TDM_SCHED_FP8_TILES.items()
-            }
+            return cls._with_qr_tdm_sched_fp8_tiles({})
         elif dtype in cls._DT_FP8FP32:
             result = {
                 #                             bm0, bn0, bk0, bn1, bk1,
@@ -2076,12 +2136,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 dtype in cls._DT_QR_TDM_SCHED_FP8
                 and (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES
             ):
-                # Merged-GQA decode instances go first; dispatch keeps this order.
+                # One-wavefront decode, then merged-GQA decode, then plain sched; dispatch keeps it.
+                if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_D1_DIMS:
+                    for mask, lse, qscale, sink in itertools.product(
+                        get_mask_map(mask_impl).keys(),
+                        cls._QR_TDM_SCHED_FP8_D1_LSE,
+                        [q for q in cls._QR_TDM_SCHED_FP8_D1_QSCALES if q != "mx"],
+                        cls._QR_TDM_SCHED_FP8_D1_SINK,
+                    ):
+                        d1_constraint = cls.qr_tdm_fp8_sched_d1_constraint(hdim, hdim_v, qscale, sink, lse)  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched_d1", "row", "t", "t", "f", "f", "f", "no", lse, "f", qscale, mask, "f", "f", sink, F_constraint=d1_constraint))  # fmt: skip
                 if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_MGQA_DIMS:
                     for mask, lse, qscale, sink in itertools.product(
                         get_mask_map(mask_impl).keys(),
                         ["f", "t"],
-                        cls._QR_TDM_SCHED_FP8_MGQA_QSCALES,
+                        [q for q in cls._QR_TDM_SCHED_FP8_MGQA_QSCALES if q != "mx"],
                         ["f", "t"],
                     ):
                         mgqa_constraint = cls.qr_tdm_fp8_sched_mgqa_constraint(hdim, hdim_v, qscale, sink, lse)  # fmt: skip
@@ -2105,7 +2174,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_MXFP8:
             # MX only on the scheduled FP8 pipeline: no bias/dropout.
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES:
-                if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_MGQA_DIMS:
+                if (
+                    hdim,
+                    hdim_v,
+                ) in cls._QR_TDM_SCHED_FP8_D1_DIMS and "mx" in cls._QR_TDM_SCHED_FP8_D1_QSCALES:
+                    for mask, lse, sink in itertools.product(
+                        get_mask_map(mask_impl).keys(),
+                        cls._QR_TDM_SCHED_FP8_D1_LSE,
+                        cls._QR_TDM_SCHED_FP8_D1_SINK,
+                    ):
+                        d1_constraint = cls.qr_tdm_fp8_sched_d1_constraint(hdim, hdim_v, "mx", sink, lse)  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched_d1", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=d1_constraint))  # fmt: skip
+                if (
+                    hdim,
+                    hdim_v,
+                ) in cls._QR_TDM_SCHED_FP8_MGQA_DIMS and "mx" in cls._QR_TDM_SCHED_FP8_MGQA_QSCALES:
                     for mask, lse, sink in itertools.product(
                         get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
                     ):

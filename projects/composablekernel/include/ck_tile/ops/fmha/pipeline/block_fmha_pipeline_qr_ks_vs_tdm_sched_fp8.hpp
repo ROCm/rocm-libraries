@@ -297,8 +297,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr index_t kMxKScalesPerPlane = Geometry::kQkStages * Geometry::kQkSuNIter;
     // Pointer and stride alignment of the Q/K scale rows read by LoadMxRowScale.
     static constexpr index_t kMxQkScaleAlign = min(kMxQkScaleBytes, kScaleBytes);
-    // V scale rows each thread copies: two at D256.
+    // V scale rows each thread copies: two at D256; K rows: kN / kBlockSize (one-wavefront: four).
     static constexpr index_t kMxVRowsPerThread = max(Geometry::kDv / kBlockSize, index_t{1});
+    static constexpr index_t kMxKRowsPerThread = Geometry::kN / kBlockSize;
 
     // Merged GQA rows: query position row % seqlen_q, head row / seqlen_q of num_groups.
     struct MergedHeads
@@ -567,12 +568,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr index_t kMxKDwords       = Geometry::kN * kMxQkScaleDwords;
     static constexpr index_t kMxLdsTileDwords = kMxKDwords + kBlockSize * kMxVRowsPerThread;
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-    // Static LDS of one workgroup (arena, O staging, MX or row scales) must fit kBlockPerCu per CU.
-    static_assert((Policy::GetLdsArenaSize() + kOLdsBytes +
-                   (kMx ? 2 * kMxLdsTileDwords * static_cast<index_t>(sizeof(int32_t)) : 0) +
-                   (kRowScale ? 2 * kBlockSize * static_cast<index_t>(sizeof(float)) : 0)) *
-                      kBlockPerCu <=
-                  get_lds_size());
+    // Static LDS of one workgroup: arena, O staging, and MX or row scales.
+    static constexpr index_t kStaticLdsBytes =
+        Policy::GetLdsArenaSize() + kOLdsBytes +
+        (kMx ? 2 * kMxLdsTileDwords * static_cast<index_t>(sizeof(int32_t)) : 0) +
+        (kRowScale ? 2 * kBlockSize * static_cast<index_t>(sizeof(float)) : 0);
+    static constexpr index_t kLdsWorkgroupsPerCu =
+        static_cast<index_t>(get_lds_size()) / kStaticLdsBytes;
+    // Four wavefronts: kBlockPerCu workgroups fit. One: LDS caps residency below the VGPR bound.
+    static_assert(Geometry::kWaves == 1
+                      ? kLdsWorkgroupsPerCu >= 1 && kLdsWorkgroupsPerCu <= 4 * kBlockPerCu
+                      : kLdsWorkgroupsPerCu >= kBlockPerCu);
 #endif
     CK_TILE_DEVICE static int32_t* MxScaleLds(index_t tile)
     {
@@ -641,7 +647,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                                   index_t kv_base,
                                                   index_t kv_last)
     {
-        static_assert(kBlockSize == Geometry::kN &&
+        static_assert(Geometry::kN == kBlockSize * kMxKRowsPerThread &&
                       Geometry::kDv <= kBlockSize * kMxVRowsPerThread);
         using gint_t  = __attribute__((address_space(1))) int32_t;
         using gchar_t = __attribute__((address_space(1))) char;
@@ -655,25 +661,27 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                         static_cast<uint32_t>(lane_off));
         };
         // A D64 K row has two scale bytes, copied bytewise; PadMxKScales fills the rest.
-        const auto copy_k = [&](const e8m0_t* src) {
+        const auto copy_k = [&](const e8m0_t* src, auto* dst) {
             if constexpr(kMxQkScaleBytes == kScaleBytes)
-                __builtin_amdgcn_global_load_async_to_lds_b32(
-                    ToGlobalPtr<gint_t>(src), k_dst, 0, 0);
+                __builtin_amdgcn_global_load_async_to_lds_b32(ToGlobalPtr<gint_t>(src), dst, 0, 0);
             else if constexpr(kMxQkScaleBytes > kScaleBytes)
                 static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
                     __builtin_amdgcn_global_load_async_to_lds_b32(
-                        ToGlobalPtr<gint_t>(src + j * kScaleBytes), k_dst + j * Geometry::kN, 0, 0);
+                        ToGlobalPtr<gint_t>(src + j * kScaleBytes), dst + j * Geometry::kN, 0, 0);
                 });
             else
                 static_for<0, kMxQkScaleBytes, 1>{}([&](auto i) {
                     __builtin_amdgcn_global_load_async_to_lds_b8(
-                        ToGlobalPtr<gchar_t>(src + i), reinterpret_cast<lchar_t*>(k_dst) + i, 0, 0);
+                        ToGlobalPtr<gchar_t>(src + i), reinterpret_cast<lchar_t*>(dst) + i, 0, 0);
                 });
         };
         const index_t k_off = lane(kv_base * mx.stride_k, off.k);
+        // K row r of this thread is tile row t + r * kBlockSize.
+        const auto k_row_off = [&](auto r) { return k_off + r * kBlockSize * mx.stride_k; };
         if(kAllFast || __builtin_expect(kv_base < off.fast_end, 1))
         {
-            copy_k(mx.k_ptr + k_off);
+            static_for<0, kMxKRowsPerThread, 1>{}(
+                [&](auto r) { copy_k(mx.k_ptr + k_row_off(r), k_dst + r * kBlockSize); });
             __builtin_amdgcn_global_load_async_to_lds_b32(
                 ToGlobalPtr<gint_t>(mx.v_ptr + lane(kv_base / kMxGranularity, off.v)), v_dst, 0, 0);
             static_for<1, kMxVRowsPerThread, 1>{}([&](auto r) {
@@ -687,7 +695,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         }
         else
         {
-            copy_k(mx.k_ptr + min(k_off, kv_last * mx.stride_k));
+            static_for<0, kMxKRowsPerThread, 1>{}([&](auto r) {
+                copy_k(mx.k_ptr + min(k_row_off(r), kv_last * mx.stride_k), k_dst + r * kBlockSize);
+            });
             static_for<0, kMxVRowsPerThread, 1>{}([&](auto r) {
                 static_for<0, kScaleBytes, 1>{}([&](auto i) {
                     const index_t blk = min(kv_base + i * kMxGranularity, kv_last) / kMxGranularity;

@@ -921,9 +921,12 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args& a,
                                            ck_tile::index_t max_rows,
                                            bool has_lse,
-                                           bool has_mx_scale)
+                                           bool has_mx_scale,
+                                           bool allow_one_group = false)
 {
-    if(a.nhead_k <= 0 || a.nhead_q <= a.nhead_k || a.nhead_q % a.nhead_k != 0)
+    if(a.nhead_k <= 0 || a.nhead_q < a.nhead_k || a.nhead_q % a.nhead_k != 0)
+        return false;
+    if(!allow_one_group && a.nhead_q == a.nhead_k)
         return false;
     if(a.cu_seqlen_q_ptr != nullptr || a.cu_seqlen_k_ptr != nullptr)
         return false;

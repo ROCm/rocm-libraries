@@ -2809,8 +2809,9 @@ struct FmhaFwdKernel
             // If SplitKV off, we don't expect Q data reused by different ThreadGroups, bypass the
             // cache
             constexpr bool PrefillCase =
-                FmhaPipeline::kM0 > 64 && (FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256 ||
-                                           kPipelineName == "qr_tdm_fp8_sched");
+                FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
+            // qr_tdm_fp8_sched takes the fixed LDS arena path, one-wavefront decode tiles included.
+            constexpr bool kPrefillLdsPath = PrefillCase || kPipelineName == "qr_tdm_fp8_sched";
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
             const index_t i_m0                                = i_tile_m * FmhaPipeline::kM0;
@@ -3678,7 +3679,7 @@ struct FmhaFwdKernel
             };
 
             auto o_acc_tile = [&]() {
-                if constexpr(PrefillCase)
+                if constexpr(kPrefillLdsPath)
                 {
                     if constexpr(kUsesFixedSegmentedLdsArena)
                     {

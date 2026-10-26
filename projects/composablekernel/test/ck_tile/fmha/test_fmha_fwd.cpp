@@ -1332,6 +1332,113 @@ TEST_P(QuantScaleShortQuery, DataTypeConfig)
     RunQuantScaleHdim(hdim, {mode_enum::batch, qscale, lse, dims});
 }
 
+// Decode without Pack-GQA in both layouts; asserts which decode kernel each shape reaches.
+using MergedDecodeDims = std::tuple<int, int, int, int, int, std::string, int, bool>;
+
+class QuantScaleMergedDecode
+    : public TestWithParam<std::tuple<int, const char*, bool, MergedDecodeDims>>
+{
+};
+
+// One-wavefront up to 32 merged rows, merged-GQA up to 128 with GQA, otherwise plain sched.
+std::string ExpectedDecodeKernel(int nhead, int nhead_k, int seqlen_q, bool perm)
+{
+    const int ratio = nhead_k < 0 ? 1 : nhead / nhead_k;
+    const int rows  = seqlen_q * ratio;
+    // b*s*h*d query heads only fold into rows for a single query.
+    if(seqlen_q > 1 && !perm)
+        return "sched";
+    if(rows <= 32)
+        return "d1";
+    if(rows <= 128 && ratio > 1)
+        return "mgqa";
+    return "sched";
+}
+
+std::string DecodeKernelOf(const std::string& kernel_name)
+{
+    if(kernel_name.find("_qr_tdm_fp8_sched_d1_") != std::string::npos)
+        return "d1";
+    if(kernel_name.find("_qr_tdm_fp8_sched_mgqa_") != std::string::npos)
+        return "mgqa";
+    if(kernel_name.find("_qr_tdm_fp8_sched_") != std::string::npos)
+        return "sched";
+    return "other";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleMergedDecode,
+    Combine(Values(64, 128, 256),
+            QScaleValues,
+            Values(false, true),                                            // lse
+            Values(MergedDecodeDims{2, 8, 2, 1, 1024, "0", 0, true},        // GQA 4, no mask
+                   MergedDecodeDims{2, 8, 2, 1, 1024, "0", 0, false},       // same, b*s*h*d
+                   MergedDecodeDims{1, 16, 2, 8, 700, "b", 0, true},        // 64 rows, causal
+                   MergedDecodeDims{1, 16, 2, 8, 700, "b", 0, false},       // b*s*h*d, s > 1
+                   MergedDecodeDims{2, 32, 2, 1, 513, "b:127,0", 1, false}, // gpt-oss, b*s*h*d
+                   MergedDecodeDims{1, 32, 4, 8, 300, "0", 1, true},        // sink logit, 64 rows
+                   MergedDecodeDims{2, 8, -1, 2, 300, "b", 0, true},        // MHA, 2 rows
+                   MergedDecodeDims{1, 8, 1, 20, 300, "b", 0, true})));     // 160 rows
+
+TEST_P(QuantScaleMergedDecode, DataTypeConfig)
+{
+    constexpr bool is_mx_fp8 =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
+    constexpr bool is_fp8 =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16, FmhaFwdFp8Fp32>::value;
+    if(!(is_mx_fp8 || is_fp8) || !ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "decode kernels are gfx125x FP8 only";
+    auto [hdim, qscale, lse, dims]                                              = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, init_sink, perm] = dims;
+    const bool is_v_rowmajor = is_mx_fp8 || def_is_v_rowmajor;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(hdim),
+        adjust_hdim(hdim),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        perm, // i_perm
+        perm, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        0,         // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    EXPECT_EQ(DecodeKernelOf(kernel_name), ExpectedDecodeKernel(nhead, nhead_k, seqlen_q, perm))
+        << kernel_name;
+}
+
 // Elementwise bias with LSE, including the early exit of empty rows next to a sink logit.
 class QuantScaleBiasLse : public QuantScale
 {

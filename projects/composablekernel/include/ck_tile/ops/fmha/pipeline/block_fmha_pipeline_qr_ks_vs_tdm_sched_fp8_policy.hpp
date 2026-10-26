@@ -95,7 +95,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     // fp32 S/O fragments are input-type independent, so the 16-bit softmax/output maps apply.
     using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
 
-    static_assert(FmhaTdmSchedFp8SupportedGeometry<Geometry>::value);
+    static_assert(kFmhaTdmSchedFp8GeometryOk<Geometry>);
     using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
@@ -1123,13 +1123,18 @@ inline constexpr index_t kFmhaTdmSchedFp8BlockPerCu = 2;
 inline constexpr index_t kFmhaTdmSchedFp8BiasBlockPerCu = 1;
 // D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
 inline constexpr index_t kFmhaTdmSchedFp8D256BlockPerCu = 1;
+// One-wavefront workgroups: LDS holds at most this many per SIMD, so the VGPR bound costs nothing.
+template <index_t HeadDim>
+inline constexpr index_t kFmhaTdmSchedFp8OneWaveBlockPerCu = HeadDim == 256 ? 1 : 2;
 
 template <typename Problem>
 using FmhaTdmSchedFp8PolicyFor = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<
     FmhaTdmSchedGeometryFor<Problem>,
     FmhaTdmSchedDerivedTuning<
         FmhaTdmSchedGeometryFor<Problem>,
-        Problem::BlockFmhaShape::kQKHeaddim == 256             ? kFmhaTdmSchedFp8D256BlockPerCu
+        Problem::BlockFmhaShape::kM0 == 32
+            ? kFmhaTdmSchedFp8OneWaveBlockPerCu<Problem::BlockFmhaShape::kQKHeaddim>
+        : Problem::BlockFmhaShape::kQKHeaddim == 256           ? kFmhaTdmSchedFp8D256BlockPerCu
         : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
                                                                : kFmhaTdmSchedFp8BiasBlockPerCu>>;
 

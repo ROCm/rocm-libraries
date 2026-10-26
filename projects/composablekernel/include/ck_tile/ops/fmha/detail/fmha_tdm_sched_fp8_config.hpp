@@ -37,11 +37,41 @@ struct FmhaTdmSchedFp8SupportedGeometry
     static constexpr bool value = true;
 };
 
+// One wavefront per workgroup with 32 query rows; the per-wavefront code is the four-wave one.
+template <typename Geometry>
+struct FmhaTdmSchedFp8OneWaveGeometry
+{
+    using Q = typename Geometry::QDataType;
+    static_assert(std::is_same_v<Q, fp8_t> && std::is_same_v<typename Geometry::KDataType, Q> &&
+                      std::is_same_v<typename Geometry::VDataType, Q> &&
+                      std::is_same_v<typename Geometry::PDataType, Q>,
+                  "qr_tdm_fp8_sched requires homogeneous FP8 Q/K/V/P");
+    static_assert(Geometry::kM == 32 && Geometry::kWaves == 1 && Geometry::kWaveSize == 32 &&
+                      Geometry::kN == 128 &&
+                      (Geometry::kHeadDimQK == 64 || Geometry::kHeadDimQK == 128 ||
+                       Geometry::kHeadDimQK == 256) &&
+                      Geometry::kDv == Geometry::kHeadDimQK,
+                  "one-wavefront qr_tdm_fp8_sched supports M32 D64/D128/D256 with N128");
+    static_assert(Geometry::kQkWmmaK == (Geometry::kHeadDimQK < 128 ? Geometry::kHeadDimQK : 128) &&
+                      Geometry::kPvWmmaK == 128 && Geometry::kQkStages == Geometry::kN / 32 &&
+                      Geometry::kPvStages == Geometry::kN / 128,
+                  "one-wavefront qr_tdm_fp8_sched keeps the four-wavefront WMMA stages");
+    static_assert(Geometry::PRepackLayout::kInThread,
+                  "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
+    static constexpr bool value = true;
+};
+
+template <typename Geometry>
+inline constexpr bool kFmhaTdmSchedFp8GeometryOk =
+    std::conditional_t<Geometry::kWaves == 1,
+                       FmhaTdmSchedFp8OneWaveGeometry<Geometry>,
+                       FmhaTdmSchedFp8SupportedGeometry<Geometry>>::value;
+
 // TDM pads each 64/128/256 B K/V row by 16 B so the 16 rows of one 8 B LDS read hit distinct banks.
 template <typename Geometry>
 struct FmhaTdmSchedFp8Layout
 {
-    static_assert(FmhaTdmSchedFp8SupportedGeometry<Geometry>::value);
+    static_assert(kFmhaTdmSchedFp8GeometryOk<Geometry>);
     static constexpr index_t kRowPadBytes     = 16;
     static constexpr index_t kKPhysicalStride = Geometry::kHeadDimQK + kRowPadBytes;
     static constexpr index_t kVPhysicalStride = Geometry::kDv + kRowPadBytes;
