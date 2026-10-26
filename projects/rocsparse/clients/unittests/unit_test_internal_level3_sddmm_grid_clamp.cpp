@@ -34,9 +34,9 @@
 // problem through the same code path. The point is that the grid is smaller than
 // the work, not that the work is large. This is the AISPARSE-699/700/702 idiom.
 //
-// The whole footprint is a 64x64 output with k = 4, a few tens of kilobytes.
-// There is no device-memory guard and no size-based skip: every case runs on
-// every GPU.
+// The whole footprint is a 64x64 output with k <= 8 and at most two batches, a
+// few tens of kilobytes. There is no device-memory guard and no size-based skip:
+// every case runs on every GPU.
 //
 // TARGET: rocsparse-unit-test-device (needs a real device, the internal handle
 // definition and the level-3 device headers).
@@ -79,39 +79,48 @@ namespace
 
     using coord_list = std::vector<std::pair<int32_t, int32_t>>;
 
-    // A is m x k column major with A(i,0) = i+1 and zero elsewhere; B is k x n
-    // column major with B(0,j) = j+1 and zero elsewhere. So (A*B)(i,j) is exactly
-    // (i+1)*(j+1): distinct for every coefficient and exactly representable in
-    // float at these sizes, so a block that samples the WRONG (i,j) is caught just
-    // as reliably as one that samples nothing.
-    std::vector<float> host_A()
+    // In batch b, A is m x k column major with A(i,0) = (b+1)*(i+1) and zero
+    // elsewhere; B is k x n column major with B(0,j) = j+1 and zero elsewhere. So
+    // batch b of A*B is exactly (b+1)*(i+1)*(j+1): distinct for every coefficient
+    // and batch and exactly representable in float at these sizes, so a block that
+    // samples the WRONG (i,j) or the wrong batch is caught just as reliably as one
+    // that samples nothing.
+    std::vector<float> host_A(int32_t k, int32_t batch_count)
     {
-        std::vector<float> a(static_cast<size_t>(test_m) * test_k, 0.0f);
-        for(int32_t i = 0; i < test_m; ++i)
+        std::vector<float> a(static_cast<size_t>(test_m) * k * batch_count, 0.0f);
+        for(int32_t b = 0; b < batch_count; ++b)
         {
-            a[static_cast<size_t>(i)] = static_cast<float>(i + 1);
+            for(int32_t i = 0; i < test_m; ++i)
+            {
+                a[static_cast<size_t>(b) * test_m * k + i] = static_cast<float>((b + 1) * (i + 1));
+            }
         }
         return a;
     }
 
-    std::vector<float> host_B()
+    std::vector<float> host_B(int32_t k, int32_t batch_count)
     {
-        std::vector<float> b(static_cast<size_t>(test_k) * test_n, 0.0f);
-        for(int32_t j = 0; j < test_n; ++j)
+        std::vector<float> bm(static_cast<size_t>(k) * test_n * batch_count, 0.0f);
+        for(int32_t b = 0; b < batch_count; ++b)
         {
-            b[static_cast<size_t>(j) * test_k] = static_cast<float>(j + 1);
+            for(int32_t j = 0; j < test_n; ++j)
+            {
+                bm[static_cast<size_t>(b) * k * test_n + static_cast<size_t>(j) * k]
+                    = static_cast<float>(j + 1);
+            }
         }
-        return b;
+        return bm;
     }
 
-    float expected_at(int32_t i, int32_t j)
+    float expected_at(int32_t i, int32_t j, int32_t batch = 0)
     {
-        return static_cast<float>(i + 1) * static_cast<float>(j + 1);
+        return static_cast<float>(batch + 1) * static_cast<float>(i + 1)
+               * static_cast<float>(j + 1);
     }
 
-    std::vector<float> sentinel_values()
+    std::vector<float> sentinel_values(int32_t batch_count = 1)
     {
-        return std::vector<float>(test_nnz, sentinel);
+        return std::vector<float>(static_cast<size_t>(test_nnz) * batch_count, sentinel);
     }
 
     // Every (i,j) of the 64x64 output is stored, so the checks cover it entirely.
@@ -148,26 +157,39 @@ namespace
     }
 
     // Run the full buffer_size -> preprocess -> compute pipeline for `matC` with
-    // grid.x capped at `max_grid_x`, then check every stored coefficient.
-    // `coords[idx]` is the (row, column) the idx-th stored value belongs to, which
-    // is what makes this checker format agnostic.
+    // grid.x capped at `max_grid_x`, then check every stored coefficient of every
+    // batch. `coords[idx]` is the (row, column) the idx-th stored value belongs to,
+    // which is what makes this checker format agnostic. With batch_count > 1 the
+    // caller has already set the strided batch on `matC`, whose values hold
+    // batch_count runs of coords.size() entries.
     void run_and_check(rocsparse_handle      handle,
                        rocsparse_spmat_descr matC,
                        float*                c_val,
                        const coord_list&     coords,
-                       int                   max_grid_x)
+                       int                   max_grid_x,
+                       int32_t               k           = test_k,
+                       int32_t               batch_count = 1)
     {
-        device_vector<float> dA{host_A()};
-        device_vector<float> dB{host_B()};
+        device_vector<float> dA{host_A(k, batch_count)};
+        device_vector<float> dB{host_B(k, batch_count)};
         ASSERT_TRUE(dA.ptr && dB.ptr);
 
         rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
         ASSERT_EQ(rocsparse_create_dnmat_descr(
-                      &mA, test_m, test_k, test_m, dA.ptr, DT, rocsparse_order_column),
+                      &mA, test_m, k, test_m, dA.ptr, DT, rocsparse_order_column),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnmat_descr(
-                      &mB, test_k, test_n, test_k, dB.ptr, DT, rocsparse_order_column),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(&mB, k, test_n, k, dB.ptr, DT, rocsparse_order_column),
+            rocsparse_status_success);
+        if(batch_count > 1)
+        {
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(
+                          mA, batch_count, static_cast<int64_t>(test_m) * k),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(
+                          mB, batch_count, static_cast<int64_t>(k) * test_n),
+                      rocsparse_status_success);
+        }
 
         const float alpha = 1.0f, beta = 0.0f;
         size_t      buffer_size = 0;
@@ -218,18 +240,22 @@ namespace
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         }
 
-        const std::vector<float> got = to_host(c_val, coords.size());
-        for(size_t idx = 0; idx < coords.size(); ++idx)
+        const std::vector<float> got = to_host(c_val, coords.size() * batch_count);
+        for(int32_t b = 0; b < batch_count; ++b)
         {
-            const int32_t i = coords[idx].first;
-            const int32_t j = coords[idx].second;
+            for(size_t idx = 0; idx < coords.size(); ++idx)
+            {
+                const int32_t i   = coords[idx].first;
+                const int32_t j   = coords[idx].second;
+                const float   val = got[b * coords.size() + idx];
 
-            ASSERT_EQ(got[idx], expected_at(i, j))
-                << "stored coefficient " << idx << " is C(" << i << "," << j
-                << "); grid.x was capped at " << max_grid_x
-                << ". A grid smaller than the work must be covered by the kernel's "
-                   "grid-stride loop"
-                << (got[idx] == sentinel ? "; this coefficient was never written." : ".");
+                ASSERT_EQ(val, expected_at(i, j, b))
+                    << "stored coefficient " << idx << " of batch " << b << " is C(" << i << ","
+                    << j << "); k = " << k << ", grid.x was capped at " << max_grid_x
+                    << ". A grid smaller than the work must be covered by the kernel's "
+                       "grid-stride loop"
+                    << (val == sentinel ? "; this coefficient was never written." : ".");
+            }
         }
 
         EXPECT_EQ(rocsparse_destroy_dnmat_descr(mA), rocsparse_status_success);
@@ -237,8 +263,9 @@ namespace
     }
 
     // With k = 4 the default-algorithm launches pick 128 nonzeros per block for
-    // COO / COO AoS / ELL (4096 nonzeros -> 32 blocks) and 8 rows/columns per
-    // block for CSR / CSC (64 -> 8 blocks). So:
+    // COO / COO AoS / ELL (4096 nonzeros -> 32 blocks); k = 1 and k = 8 pick 512
+    // and 64 (8 and 64 blocks). CSR / CSC take 8 rows/columns per block for every
+    // k (64 -> 8 blocks); k only changes the split inside the wavefront. So:
     //   - the device limit leaves the grid untouched (one sweep, the pre-existing
     //     behaviour, which must not change),
     //   - 3 blocks makes the sweep count ragged,
@@ -246,6 +273,103 @@ namespace
     std::vector<int> grid_caps(rocsparse_handle handle)
     {
         return {handle->properties.maxGridSize[0], 3, 1};
+    }
+
+    // Full 64x64 CSR pattern, repeated batch_count times back to back.
+    template <typename I, typename J>
+    void check_csr(rocsparse_handle handle, int32_t k, int32_t batch_count)
+    {
+        std::vector<I> row_ptr(static_cast<size_t>(test_m + 1) * batch_count);
+        std::vector<J> col_ind(static_cast<size_t>(test_nnz) * batch_count);
+        for(int32_t b = 0; b < batch_count; ++b)
+        {
+            for(int32_t i = 0; i <= test_m; ++i)
+            {
+                row_ptr[static_cast<size_t>(b) * (test_m + 1) + i] = static_cast<I>(i) * test_n;
+            }
+            for(int32_t i = 0; i < test_m; ++i)
+            {
+                for(int32_t j = 0; j < test_n; ++j)
+                {
+                    col_ind[static_cast<size_t>(b) * test_nnz + i * test_n + j] = j;
+                }
+            }
+        }
+
+        for(int cap : grid_caps(handle))
+        {
+            SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
+
+            device_vector<I>     d_ptr{row_ptr};
+            device_vector<J>     d_ind{col_ind};
+            device_vector<float> d_val{sentinel_values(batch_count)};
+            ASSERT_TRUE(d_ptr.ptr && d_ind.ptr && d_val.ptr);
+
+            rocsparse_spmat_descr matC = nullptr;
+            ASSERT_EQ(rocsparse_create_csr_descr(&matC,
+                                                 test_m,
+                                                 test_n,
+                                                 test_nnz,
+                                                 d_ptr,
+                                                 d_ind,
+                                                 d_val,
+                                                 it_of<I>(),
+                                                 it_of<J>(),
+                                                 BASE,
+                                                 DT),
+                      rocsparse_status_success);
+            if(batch_count > 1)
+            {
+                ASSERT_EQ(rocsparse_csr_set_strided_batch(matC, batch_count, test_m + 1, test_nnz),
+                          rocsparse_status_success);
+            }
+            ASSERT_NO_FATAL_FAILURE(
+                run_and_check(handle, matC, d_val.ptr, row_major_coords(), cap, k, batch_count));
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(matC), rocsparse_status_success);
+        }
+    }
+
+    // Full 64x64 COO pattern in row major order, repeated batch_count times back
+    // to back (COO has a single batch stride for indices and values).
+    template <typename I>
+    void check_coo(rocsparse_handle handle, int32_t k, int32_t batch_count)
+    {
+        std::vector<I> rows(static_cast<size_t>(test_nnz) * batch_count);
+        std::vector<I> cols(static_cast<size_t>(test_nnz) * batch_count);
+        for(int32_t b = 0; b < batch_count; ++b)
+        {
+            for(int32_t i = 0; i < test_m; ++i)
+            {
+                for(int32_t j = 0; j < test_n; ++j)
+                {
+                    rows[static_cast<size_t>(b) * test_nnz + i * test_n + j] = i;
+                    cols[static_cast<size_t>(b) * test_nnz + i * test_n + j] = j;
+                }
+            }
+        }
+
+        for(int cap : grid_caps(handle))
+        {
+            SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
+
+            device_vector<I>     d_row{rows}, d_col{cols};
+            device_vector<float> d_val{sentinel_values(batch_count)};
+            ASSERT_TRUE(d_row.ptr && d_col.ptr && d_val.ptr);
+
+            rocsparse_spmat_descr matC = nullptr;
+            ASSERT_EQ(
+                rocsparse_create_coo_descr(
+                    &matC, test_m, test_n, test_nnz, d_row, d_col, d_val, it_of<I>(), BASE, DT),
+                rocsparse_status_success);
+            if(batch_count > 1)
+            {
+                ASSERT_EQ(rocsparse_coo_set_strided_batch(matC, batch_count, test_nnz),
+                          rocsparse_status_success);
+            }
+            ASSERT_NO_FATAL_FAILURE(
+                run_and_check(handle, matC, d_val.ptr, row_major_coords(), cap, k, batch_count));
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(matC), rocsparse_status_success);
+        }
     }
 }
 
@@ -259,34 +383,7 @@ class SddmmGridClamp : public HandleTest
 
 TEST_F(SddmmGridClamp, csr)
 {
-    std::vector<int32_t> row_ptr(test_m + 1), col_ind(test_nnz);
-    for(int32_t i = 0; i <= test_m; ++i)
-    {
-        row_ptr[i] = i * test_n;
-    }
-    for(int32_t i = 0; i < test_m; ++i)
-    {
-        for(int32_t j = 0; j < test_n; ++j)
-        {
-            col_ind[i * test_n + j] = j;
-        }
-    }
-
-    for(int cap : grid_caps(handle))
-    {
-        SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
-
-        device_vector<int32_t> d_ptr{row_ptr}, d_ind{col_ind};
-        device_vector<float>   d_val{sentinel_values()};
-        ASSERT_TRUE(d_ptr.ptr && d_ind.ptr && d_val.ptr);
-
-        rocsparse_spmat_descr matC = nullptr;
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &matC, test_m, test_n, test_nnz, d_ptr, d_ind, d_val, IT, IT, BASE, DT),
-                  rocsparse_status_success);
-        ASSERT_NO_FATAL_FAILURE(run_and_check(handle, matC, d_val.ptr, row_major_coords(), cap));
-        EXPECT_EQ(rocsparse_destroy_spmat_descr(matC), rocsparse_status_success);
-    }
+    check_csr<int32_t, int32_t>(handle, test_k, 1);
 }
 
 TEST_F(SddmmGridClamp, csc)
@@ -323,31 +420,7 @@ TEST_F(SddmmGridClamp, csc)
 
 TEST_F(SddmmGridClamp, coo)
 {
-    std::vector<int32_t> rows(test_nnz), cols(test_nnz);
-    for(int32_t i = 0; i < test_m; ++i)
-    {
-        for(int32_t j = 0; j < test_n; ++j)
-        {
-            rows[i * test_n + j] = i;
-            cols[i * test_n + j] = j;
-        }
-    }
-
-    for(int cap : grid_caps(handle))
-    {
-        SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
-
-        device_vector<int32_t> d_row{rows}, d_col{cols};
-        device_vector<float>   d_val{sentinel_values()};
-        ASSERT_TRUE(d_row.ptr && d_col.ptr && d_val.ptr);
-
-        rocsparse_spmat_descr matC = nullptr;
-        ASSERT_EQ(rocsparse_create_coo_descr(
-                      &matC, test_m, test_n, test_nnz, d_row, d_col, d_val, IT, BASE, DT),
-                  rocsparse_status_success);
-        ASSERT_NO_FATAL_FAILURE(run_and_check(handle, matC, d_val.ptr, row_major_coords(), cap));
-        EXPECT_EQ(rocsparse_destroy_spmat_descr(matC), rocsparse_status_success);
-    }
+    check_coo<int32_t>(handle, test_k, 1);
 }
 
 TEST_F(SddmmGridClamp, coo_aos)
@@ -407,6 +480,56 @@ TEST_F(SddmmGridClamp, ell)
         ASSERT_NO_FATAL_FAILURE(run_and_check(handle, matC, d_val.ptr, column_major_coords(), cap));
         EXPECT_EQ(rocsparse_destroy_spmat_descr(matC), rocsparse_status_success);
     }
+}
+
+// ---------------------------------------------------------------------------
+// COO and CSR with 64-bit indices, other dot-product widths, and a strided
+// batch, so the grid-stride loop also runs inside the hipBlockIdx_y batch loop.
+// ---------------------------------------------------------------------------
+
+TEST_F(SddmmGridClamp, csr_i64_i32)
+{
+    check_csr<int64_t, int32_t>(handle, test_k, 1);
+}
+
+TEST_F(SddmmGridClamp, csr_i64_i64)
+{
+    check_csr<int64_t, int64_t>(handle, test_k, 1);
+}
+
+TEST_F(SddmmGridClamp, csr_k1)
+{
+    check_csr<int32_t, int32_t>(handle, 1, 1);
+}
+
+TEST_F(SddmmGridClamp, csr_k8)
+{
+    check_csr<int32_t, int32_t>(handle, 8, 1);
+}
+
+TEST_F(SddmmGridClamp, csr_batch2)
+{
+    check_csr<int32_t, int32_t>(handle, test_k, 2);
+}
+
+TEST_F(SddmmGridClamp, coo_i64)
+{
+    check_coo<int64_t>(handle, test_k, 1);
+}
+
+TEST_F(SddmmGridClamp, coo_k1)
+{
+    check_coo<int32_t>(handle, 1, 1);
+}
+
+TEST_F(SddmmGridClamp, coo_k8)
+{
+    check_coo<int32_t>(handle, 8, 1);
+}
+
+TEST_F(SddmmGridClamp, coo_batch2)
+{
+    check_coo<int32_t>(handle, test_k, 2);
 }
 
 // ---------------------------------------------------------------------------
