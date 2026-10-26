@@ -183,8 +183,9 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
 def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     """The variant's default ``Gfx950AttentionDenseSpec`` for ``req``.
 
-    Persist and wide DMA come from the variant; the tile comes from
-    :func:`_default_block_m` and every other tuning field starts at the shipped
+    Persist and wide DMA come from the variant; the tile is the sliding-window
+    tile where that applies, else :func:`_default_block_m`, and every other
+    tuning field starts at the shipped
     default; the knob space varies them. Wide DMA cannot take the ragged path,
     so where its default tile would be ragged it starts at the first registered
     tile that is not (its ``block_m`` is resolved per problem and recorded).
@@ -213,7 +214,9 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bn = int(geometry["block_n"])
     causal, right_bound, moving_bottom_right = _dense_band(req)
-    bm = _default_block_m(req, variant)
+    # The sliding-window tile keeps its own geometry; otherwise the shared tile,
+    # halved on an under-filled wide-DMA grid.
+    bm = int(geometry["block_m"]) if window_tile else _default_block_m(req, variant)
     ragged = _is_ragged(sq, sk, bm, bn)
     kv_segments = 1
     if (
