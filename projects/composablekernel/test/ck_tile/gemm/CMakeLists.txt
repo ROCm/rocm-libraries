@@ -185,6 +185,28 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
                 PROPERTIES TIMEOUT 900)
             list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma)
+            # comp_tdm_v3 (gfx1250 TDM fp8 pipeline). Labelled after the relabel loop below so it
+            # keeps SMOKE_TEST.
+            add_gtest_executable(test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
+                test_gemm_pipeline_comp_tdm_v3_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
+                PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            ck_tile_restrict_archs(test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma "^gfx125")
+            # Fails if a compiler change makes the comp_tdm_v3 kernels use scratch.
+            get_filename_component(_llvm_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+            find_program(CK_LLVM_OBJDUMP llvm-objdump HINTS "${_llvm_bin_dir}" NO_DEFAULT_PATH)
+            find_program(CK_LLVM_READELF llvm-readelf HINTS "${_llvm_bin_dir}" NO_DEFAULT_PATH)
+            if(TARGET test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma AND CK_LLVM_OBJDUMP AND CK_LLVM_READELF)
+                add_test(NAME test_ck_tile_gemm_pipeline_comp_tdm_v3_resources
+                    COMMAND ${CMAKE_COMMAND}
+                        -DTEST_BINARY=$<TARGET_FILE:test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma>
+                        -DLLVM_OBJDUMP=${CK_LLVM_OBJDUMP}
+                        -DLLVM_READELF=${CK_LLVM_READELF}
+                        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/comp_tdm_v3_resources
+                        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_comp_tdm_v3_resources.cmake)
+                set_tests_properties(test_ck_tile_gemm_pipeline_comp_tdm_v3_resources
+                    PROPERTIES LABELS "SMOKE_TEST;CK_TILE_GEMM_TESTS")
+            endif()
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
@@ -224,6 +246,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         set_property(TEST test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
             APPEND PROPERTY LABELS "CK_TILE_GEMM_TESTS")
         list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma)
+    endif()
+    # comp_tdm_v3: same reason as comp_tdm_pc above (keep the SMOKE_TEST label).
+    if(TEST test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma)
+        set_property(TEST test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
+            APPEND PROPERTY LABELS "CK_TILE_GEMM_TESTS")
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma)
     endif()
 
     # Umbrella target to build and run all ck_tile gemm tests
