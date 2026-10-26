@@ -28,7 +28,7 @@ from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SAndB64, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SSubU32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SCmpLeU32, SCSelectB32, SEndpgm,
+    SCBranchSCC1, SCmpEQU32, SCmpGeU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpLtI32, VCmpLtU32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
@@ -752,8 +752,8 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   if aTLU1 and bTLU1:
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoA))
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoB))
-    _grComputeSubtileOffsets_tlu(writer, module, tileInfoA)
-    _grComputeSubtileOffsets_tlu(writer, module, tileInfoB)
+    _grComputeSubtileOffsets_tlu(writer, module, tileInfoA, kernel)
+    _grComputeSubtileOffsets_tlu(writer, module, tileInfoB, kernel)
     return module
   # NN / TT: exactly one operand is free-dim contiguous. The two emitters share
   # no state, so run each tensor through the one matching its own layout. The
@@ -763,7 +763,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
     for ti, isTLU1 in ((tileInfoA, aTLU1), (tileInfoB, bTLU1)):
       if isTLU1:
         module.add(_graTileAssignment_tlu(writer, kernel, ti))
-        _grComputeSubtileOffsets_tlu(writer, module, ti)
+        _grComputeSubtileOffsets_tlu(writer, module, ti, kernel)
       else:
         _graTileAssignment_rowMajorSingle(writer, kernel, module, ti)
         _grComputeSubtileOffsets_legacy(writer, module, ti)
@@ -1319,6 +1319,22 @@ def _tluWaveFreeElemOffset(writer, kernel, module, tileInfo):
   return dst
 
 
+def _tluFreeEdgeBound(writer, kernel, module, tileInfo, remSgpr):
+  """Emit this workgroup's tile-relative free-dim (M/N) bound into remSgpr.
+
+  The tile start is folded into the SRD base, so the bound is what is left of
+  the operand from this tile onwards: size - WG*MT.
+  """
+  tc = tileInfo.tc
+  isA = (tc == 'A')
+  mt = int(kernel["MacroTile0" if isA else "MacroTile1"])
+  sizeIdx = kernel["ProblemType"]["Index0" if isA else "Index1"]
+  module.add(SMulI32(dst=sgpr(remSgpr), src0=sgpr("WorkGroup0" if isA else "WorkGroup1"),
+             src1=mt, comment="%s: tile start = WG*%u" % (tc, mt)))
+  module.add(SSubU32(dst=sgpr(remSgpr), src0=writer.sizeRef(sizeIdx), src1=sgpr(remSgpr),
+             comment="%s: free-dim elements left in the operand" % tc))
+
+
 def _tluFreeEdgeUsable(kernel):
   """Whether the GR offsets may carry a workgroup-specific edge mask.
 
@@ -1359,9 +1375,6 @@ class _TluFreeEdge:
     self.lanes = writer.states.laneSGPRCount
     self.stack = contextlib.ExitStack()
     self.why   = "past-M/N"
-    isA = (self.tc == 'A')
-    mt = int(kernel["MacroTile0" if isA else "MacroTile1"])
-    sizeIdx = kernel["ProblemType"]["Index0" if isA else "Index1"]
 
     self.rem = self.stack.enter_context(
         writer.allocTmpSgpr(1, tag="_tluFreeEdge_rem_%s" % self.tc)).idx
@@ -1372,10 +1385,7 @@ class _TluFreeEdge:
     self.waveFree = _tluWaveFreeElemOffset(writer, kernel, module, tileInfo)
     self.pos = writer.vgprPool.checkOut(1, tag="_tluFreeEdge_pos_%s" % self.tc) \
                if self.waveFree is not None else None
-    module.add(SMulI32(dst=sgpr(self.rem), src0=sgpr("WorkGroup0" if isA else "WorkGroup1"),
-               src1=mt, comment="%s: tile start = WG*%u" % (self.tc, mt)))
-    module.add(SSubU32(dst=sgpr(self.rem), src0=writer.sizeRef(sizeIdx), src1=sgpr(self.rem),
-               comment="%s: free-dim elements left in the operand" % self.tc))
+    _tluFreeEdgeBound(writer, kernel, module, tileInfo, self.rem)
     self.oob = writer.vgprPool.checkOut(1, tag="_tluFreeEdge_oob_%s" % self.tc)
     module.add(VMovB32(dst=vgpr(self.oob), src="BufferOOB",
                comment="%s: offset that the buffer bound rejects" % self.tc))
@@ -1519,7 +1529,7 @@ def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
   return dst
 
 
-def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
+def _grComputeSubtileOffsets_tlu(writer, module, tileInfo, kernel=None):
   """Fill per-subtile-row global-M soffset registers for TLU=1 (NT).
 
   Each subtile strip covers ``subtileM = subtileShape[0]*instM`` free-dim rows.
@@ -1527,10 +1537,25 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
   offset between adjacent strips is ``subtileM * bpe``.  Row 0 needs no soffset
   (RegList empty); row r>=1 gets r*subtileM*bpe.  These feed the ``soffset``
   field of the per-strip buffer_load in emitSingleBufferLoad.
+
+  The per-lane edge mask in the GR offsets is built for row 0 and the rows share
+  that VGPR, so rows past it keep lanes they no longer need.  Masking those
+  per lane would mean one offset VGPR per row.  A row that is wholly past the
+  real M/N needs no per-lane test though: its start is scalar, so point its
+  soffset past the buffer bound and the whole row's loads drop.
   """
   tc = tileInfo.tc
   subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
   strideBytes = int(subtileM * tileInfo.bpe)
+  # Rows start at waveFree + r*subtileM; waveFree >= 0, so testing r*subtileM
+  # alone drops a row only when it is dead for every wave.
+  rowDropSgpr = None
+  rowDropStack = contextlib.ExitStack()
+  if kernel is not None and len(tileInfo.localSubtilesRegister) > 1 \
+     and _tluFreeEdgeUsable(kernel):
+    rowDropSgpr = rowDropStack.enter_context(
+        writer.allocTmpSgpr(1, tag="_grSubtileRowDrop_%s" % tc)).idx
+    _tluFreeEdgeBound(writer, kernel, module, tileInfo, rowDropSgpr)
   for regId in range(len(tileInfo.localSubtilesRegister)):
     rl = tileInfo.localSubtilesRegister[regId]
     if len(rl) == 0:
@@ -1539,11 +1564,18 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
     if rl.is_sgpr:
       module.add(SMovB32(dst=rl.ref(0), src=hex(off),
                  comment="%s: subtile row %u soffset = %u*subtileM*bpe" % (tc, regId, regId)))
+      if rowDropSgpr is not None:
+        # subtileM*regId is this row's first free-dim element.
+        module.add(SCmpGeU32(src0=hex(subtileM * regId), src1=sgpr(rowDropSgpr),
+                   comment="%s: subtile row %u wholly past the real M/N?" % (tc, regId)))
+        module.add(SCSelectB32(dst=rl.ref(0), src0="BufferOOB", src1=rl.ref(0),
+                   comment="%s: if so, soffset past the buffer bound drops the row" % tc))
     else:
       # VGPR fallback: bake soffset into each per-load offset VGPR.
       for i, reg in enumerate(rl):
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]),
                    src1=hex(off), comment="%s: subtile row %u offset (vgpr)" % (tc, regId)))
+  rowDropStack.close()
   return module
 ##################################################
 # Subroutine to generate GR load code
