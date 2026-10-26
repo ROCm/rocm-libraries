@@ -39,11 +39,17 @@ namespace rocsparse
                             I block_dim,
                             const I* __restrict__ bsr_mask_ptr,
                             T* __restrict__ y,
-                            T                    beta,
-                            rocsparse_index_base idx_base)
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                            rocsparse_index_base idx_base,
+                            bool                 is_host_mode)
     {
-        // Compute the total number of scalar entries in 64-bit to avoid a signed
-        // 32-bit overflow of block_dim * mb (see AISPARSE-659).
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(beta == static_cast<T>(1))
+        {
+            return;
+        }
+
+        // block_dim * mb can exceed INT32_MAX.
         const int64_t nentries = (bsr_mask_ptr == nullptr)
                                      ? static_cast<int64_t>(block_dim) * mb
                                      : static_cast<int64_t>(block_dim) * size_of_mask;
@@ -64,46 +70,6 @@ namespace rocsparse
                     = (static_cast<int64_t>(bsr_mask_ptr[idx / block_dim]) - idx_base) * block_dim;
 
                 y[shift + (idx % block_dim)] *= beta;
-            }
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsrxmv_scale_array(I mb,
-                            I size_of_mask,
-                            I block_dim,
-                            const I* __restrict__ bsr_mask_ptr,
-                            T* __restrict__ y,
-                            const T*             beta,
-                            rocsparse_index_base idx_base)
-    {
-        if(*beta != static_cast<T>(1))
-        {
-            // Compute the total number of scalar entries in 64-bit to avoid a
-            // signed 32-bit overflow of block_dim * mb (see AISPARSE-659).
-            const int64_t nentries = (bsr_mask_ptr == nullptr)
-                                         ? static_cast<int64_t>(block_dim) * mb
-                                         : static_cast<int64_t>(block_dim) * size_of_mask;
-
-            // Grid-stride loop so a grid clamped by rocsparse::get_grid_size_x
-            // still covers the full range.
-            int64_t       idx    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
-            for(; idx < nentries; idx += stride)
-            {
-                if(bsr_mask_ptr == nullptr)
-                {
-                    y[idx] *= (*beta);
-                }
-                else
-                {
-                    const int64_t shift
-                        = (static_cast<int64_t>(bsr_mask_ptr[idx / block_dim]) - idx_base)
-                          * block_dim;
-
-                    y[shift + (idx % block_dim)] *= (*beta);
-                }
             }
         }
     }
