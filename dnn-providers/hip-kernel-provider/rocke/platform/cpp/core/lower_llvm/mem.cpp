@@ -1177,11 +1177,12 @@ static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(L, "  %s = bitcast <2 x half> %s to i32", bc, rocke_ll_operand(L, val));
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
-                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "cachepolicy", 0));
     }
     else
     {
@@ -1198,13 +1199,14 @@ static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
                        (long long)dwords);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
-                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        (long long)dwords,
                        (long long)dwords,
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "cachepolicy", 0));
     }
 }
 
@@ -1220,11 +1222,12 @@ static void op_tile_buffer_store_f16(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = bitcast half %s to i16", bc, rocke_ll_operand(L, val));
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.store.i16("
-                   "i16 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   "i16 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                    bc,
                    rocke_ll_operand(L, rsrc),
                    rocke_ll_operand(L, voffset),
-                   rocke_ll_operand(L, soffset));
+                   rocke_ll_operand(L, soffset),
+                   (long long)ll_attr_int(op, "cachepolicy", 0));
 }
 
 static void op_tile_buffer_load_bf16(rocke_lower_t* L, const rocke_op_t* op)
@@ -1303,11 +1306,12 @@ static void op_tile_buffer_store_bf16(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = bitcast bfloat %s to i16", bc, rocke_ll_operand(L, val));
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.store.i16("
-                   "i16 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   "i16 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                    bc,
                    rocke_ll_operand(L, rsrc),
                    rocke_ll_operand(L, voffset),
-                   rocke_ll_operand(L, soffset));
+                   rocke_ll_operand(L, soffset),
+                   (long long)ll_attr_int(op, "cachepolicy", 0));
 }
 
 static void op_tile_buffer_store_vN_bf16(rocke_lower_t* L, const rocke_op_t* op)
@@ -1326,11 +1330,12 @@ static void op_tile_buffer_store_vN_bf16(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(L, "  %s = bitcast <2 x bfloat> %s to i32", bc, rocke_ll_operand(L, val));
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
-                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "cachepolicy", 0));
     }
     else
     {
@@ -1347,13 +1352,14 @@ static void op_tile_buffer_store_vN_bf16(rocke_lower_t* L, const rocke_op_t* op)
                        (long long)dwords);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
-                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        (long long)dwords,
                        (long long)dwords,
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "cachepolicy", 0));
     }
 }
 

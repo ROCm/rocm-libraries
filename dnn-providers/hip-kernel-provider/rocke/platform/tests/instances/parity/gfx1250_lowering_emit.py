@@ -471,6 +471,36 @@ def build_tdm(b: IRBuilder) -> None:
 CONFIGS.append((build_tdm, "gfx1250"))
 
 
+def build_buffer_store_cachepolicy(b: IRBuilder) -> None:
+    """The f16/bf16 buffer stores with their optional cache-policy immediate:
+    every store form with a non-zero value (it reaches the intrinsic's aux
+    operand) and one default store (no attribute, aux 0)."""
+    src = b.param("src", PtrType(F16, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(F16, "global"), align=16)
+    nbytes = b.param("nbytes", I32)
+    rs = b.buffer_rsrc(src, nbytes)
+    rd = b.buffer_rsrc(dst, nbytes)
+    c0 = b.const_i32(0)
+    off = b.mul(b.thread_id_x(), b.const_i32(16))
+    h8 = b.buffer_load_vN(rs, off, c0, F16, 8)
+    b.buffer_store_vN_f16(rd, off, c0, h8, 4, cachepolicy=1)
+    h2 = b.buffer_load_vN(rs, off, c0, F16, 2)
+    b.buffer_store_vN_f16(rd, off, c0, h2, 1, cachepolicy=24)
+    b.buffer_store_vN_f16(rd, off, c0, h8, 4)
+    h1 = b.buffer_load_f16(rs, off, c0)
+    b.buffer_store_f16(rd, off, c0, h1, cachepolicy=3)
+    g8 = b.buffer_load_vN(rs, off, c0, BF16, 8)
+    b.buffer_store_vN_bf16(rd, off, c0, g8, 4, cachepolicy=1)
+    g4 = b.buffer_load_vN(rs, off, c0, BF16, 4)
+    b.buffer_store_vN_bf16(rd, off, c0, g4, 2, cachepolicy=17)
+    g1 = b.buffer_load_bf16(rs, off, c0)
+    b.buffer_store_bf16(rd, off, c0, g1, cachepolicy=31)
+    b.ret()
+
+
+CONFIGS.append((build_buffer_store_cachepolicy, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

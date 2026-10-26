@@ -574,6 +574,16 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
+def _with_cachepolicy(attrs: Optional[dict], op: str, cachepolicy: int):
+    """``attrs`` plus a non-zero ``cachepolicy`` (0 leaves the op unchanged)."""
+    v = _check_cachepolicy(op, cachepolicy)
+    if not v:
+        return attrs
+    out = dict(attrs or {})
+    out["cachepolicy"] = v
+    return out
+
+
 def _check_axis(op: str, axis: object) -> str:
     """Validate a grid axis name (``x``, ``y``, or ``z``)."""
     if axis not in ("x", "y", "z"):
@@ -5338,47 +5348,82 @@ class IRBuilder:
         ).result
 
     def buffer_store_vN_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised `raw_ptr_buffer_store`. dwords in {1,2,4}; each
         dword is two halves. Out-of-range voffsets are *silently
         dropped* by the AMD buffer rsrc — the runbook §6.2 lever
         ("vectorise the epilogue") for tail-safe stores.
+
+        ``cachepolicy`` is the intrinsic's aux immediate (on gfx12: bits[0:2]
+        = th, bits[3:4] = scope; 1 = ``th:TH_STORE_NT``). 0 records nothing.
         """
         if dwords not in (1, 2, 4):
             raise ValueError(f"buffer_store dwords must be 1, 2, or 4 (got {dwords})")
         self._op(
             "tile.buffer_store_vN_f16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_f16", cachepolicy
+            ),
         )
 
     def buffer_store_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Single-half buffer store, OOB-clamped. The epilogue path
         for per-lane direct stores (4 halves per accumulator slot)
         uses this when the kernel layout doesn't align to a 32-bit
-        vector boundary."""
+        vector boundary. ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_f16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_f16", cachepolicy),
         )
 
     def buffer_store_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
-        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped."""
+        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_bf16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_bf16", cachepolicy),
         )
 
     def buffer_store_vN_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
-        holds two bf16 elements. OOB voffsets are silently dropped."""
+        holds two bf16 elements. OOB voffsets are silently dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         if dwords not in (1, 2, 4):
             raise ValueError(
                 f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
@@ -5386,7 +5431,9 @@ class IRBuilder:
         self._op(
             "tile.buffer_store_vN_bf16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_bf16", cachepolicy
+            ),
         )
 
     def buffer_store_f32(

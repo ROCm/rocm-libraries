@@ -1547,6 +1547,37 @@ void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
                                   rocke_value_t* soffset,
                                   rocke_value_t* value,
                                   int dwords);
+/* The four f16/bf16 buffer stores above with the raw buffer store's aux
+ * immediate `cachepolicy` (on gfx12: bits[0:2] = th, bits[3:4] = scope; 1 is
+ * th:TH_STORE_NT). 0 records no attribute, i.e. the plain form. Port of the
+ * Python keyword `cachepolicy=` of IRBuilder.buffer_store_{f16,bf16,vN_f16,
+ * vN_bf16}. */
+void rocke_b_buffer_store_vN_f16_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int dwords,
+                                    int cachepolicy);
+void rocke_b_buffer_store_f16_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int cachepolicy);
+void rocke_b_buffer_store_bf16_ex(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int cachepolicy);
+void rocke_b_buffer_store_vN_bf16_ex(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int dwords,
+                                     int cachepolicy);
 void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* rsrc,
                               rocke_value_t* voffset,
